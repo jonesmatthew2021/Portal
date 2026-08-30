@@ -1,0 +1,154 @@
+<title>Shift Allocation — Proposed Layout</title>
+<style>
+:root{--bg:#F4F7FA;--panel:#FFF;--rule:#CFDCE6;--ink:#12293D;--mut:#5D7688;--accent:#1C5C8C;--soft:#DCEAF3;
+--red:#C0281F;--redBg:#FBE4E1;--orange:#B85C10;--orangeBg:#FCEBDC;--green:#22705A;--greenBg:#DDF0E8;--teal:#2FA5AC;
+--mono:"IBM Plex Mono","Consolas",monospace;--body:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+--disp:"Archivo Narrow","Arial Narrow",sans-serif}
+body{background:var(--bg);color:var(--ink);font:14px/1.6 var(--body);margin:0;padding:26px 18px}
+main{max-width:1060px;margin:0 auto}
+h1{font-family:var(--disp);font-size:24px;letter-spacing:.02em;margin:0 0 2px}
+.sub{font-family:var(--mono);font-size:11.5px;color:var(--mut);margin-bottom:16px}
+.eyebrow{font-family:var(--disp);font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+.verdict{background:var(--panel);border:1px solid var(--rule);border-left:4px solid var(--red);border-radius:2px;
+padding:13px 16px;margin-bottom:14px;font-size:15px;font-weight:600}
+.verdict small{display:block;font-weight:400;font-size:12.5px;color:var(--mut);margin-top:2px}
+.swingwide{background:var(--panel);border:1px solid var(--rule);border-radius:2px;padding:11px 14px;margin-bottom:14px}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+@media(max-width:860px){.cols{grid-template-columns:1fr}}
+.shift{background:var(--panel);border:1px solid var(--rule);border-radius:2px;overflow:hidden}
+.shift>header{padding:11px 14px;border-bottom:2px solid var(--rule);display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.shift.bad>header{border-bottom-color:var(--red)}
+.shift.ok>header{border-bottom-color:var(--teal)}
+.sh-name{font-family:var(--disp);font-size:15px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+.sh-meta{font-family:var(--mono);font-size:10.5px;color:var(--mut)}
+.sect{padding:9px 14px 4px;font-family:var(--disp);font-size:10px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--mut)}
+.req{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:7px 14px;border-top:1px solid var(--rule)}
+.req .name{flex:1 1 190px;min-width:0;font-size:12.5px}
+.req .name small{display:block;font-family:var(--mono);font-size:10px;color:var(--mut)}
+.dots{display:flex;gap:3px;align-items:center}
+.dot{width:11px;height:11px;border-radius:50%}
+.dot.f{background:var(--green)}
+.dot.miss{background:transparent;border:2px solid var(--red);width:8px;height:8px}
+.dot.x{background:var(--green);opacity:.45}
+.chip{font-family:var(--mono);font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:2px;white-space:nowrap}
+.met{background:var(--greenBg);color:var(--green)} .short{background:var(--redBg);color:var(--red)}
+.berth{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;padding:6px 14px;border-top:1px solid var(--rule)}
+.berth .b{font-family:var(--disp);font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;min-width:128px;color:var(--ink)}
+.berth .who{flex:1;font-size:12.5px}
+.berth.unf .b,.berth.unf .who{color:var(--red)}
+.nw{background:var(--panel);border:1px solid var(--rule);border-left:4px solid var(--orange);border-radius:2px;padding:9px 14px;margin-bottom:14px;font-size:12.5px}
+.nw b{font-family:var(--mono);font-size:10px;color:var(--orange);letter-spacing:.06em}
+.fold{background:var(--panel);border:1px solid var(--rule);border-radius:2px;padding:11px 14px;margin-bottom:10px}
+.codes{font-family:var(--mono);font-size:10.5px;color:var(--mut);line-height:1.9}
+.grid2{display:grid;grid-template-columns:170px 1fr;gap:2px 12px;font-size:12px;margin-top:6px}
+.grid2 .p{font-family:var(--disp);font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding-top:2px}
+.grid2 .c{font-family:var(--mono);font-size:10.5px;color:var(--mut)}
+.note{font-family:var(--mono);font-size:10.5px;color:var(--mut);margin-top:16px;text-align:center}
+.holders{font-family:var(--mono);font-size:9.5px;color:var(--mut);width:100%;padding-left:2px}
+</style>
+<main>
+<h1>Shift Allocation <span style="color:var(--accent)">— proposed layout</span></h1>
+<div class="sub">Shift allocation updated for engineer class 3.xlsx &middot; read for swing 08 Sept – 06 Oct &middot; Crew A &middot; mock-up, not yet wired into the portal</div>
+
+<div class="verdict">2 of 11 requirements short — both on Night Shift.
+<small>Night Shift needs one more Advanced Resuscitation holder and has no Engineer Class 3 — the rule this sheet update added. Everything else is met.</small></div>
+
+<div class="swingwide">
+  <span class="eyebrow">Whole swing — any shift counts</span>
+  <div class="req" style="border-top:none;padding-left:0;padding-right:0">
+    <span class="name">QL-16 Fast Rescue Craft (FRC)<small>any position</small></span>
+    <span class="dots"><span class="dot f"></span><span class="dot f"></span><span class="dot f"></span><span class="dot f"></span></span>
+    <span class="chip met">MET · 4 of 4</span>
+    <span class="holders">Jitender · Macknamara · Asange · Jones</span>
+  </div>
+  <div class="req" style="padding-left:0;padding-right:0">
+    <span class="name">QL-08 / QL-09 / QL-10 Certificate of Proficiency or Competency<small>every GPH must hold at least one</small></span>
+    <span class="chip met">MET · all 4 GPH hold one</span>
+  </div>
+  <div class="req" style="padding-left:0;padding-right:0">
+    <span class="name">QL-12 Certificate of Safety Training (COST)<small>required where a GPH holds a non-STCW ticket</small></span>
+    <span class="chip short">SHORT · 2 hold it</span>
+    <span class="holders">Hearfield · Macknamara — the other two GPH need COST for the tickets they hold</span>
+  </div>
+</div>
+
+<div class="cols">
+  <div class="shift ok">
+    <header><span class="sh-name">Day Shift</span><span class="sh-meta">Shift 1 · 1200 – 2400 · 9 standing</span></header>
+    <div class="sect">Must carry</div>
+    <div class="req"><span class="name">QL-19 Adv Resuscitation<small>any position · 2 required</small></span>
+      <span class="dots"><span class="dot f"></span><span class="dot f"></span><span class="dot x" title="one more than required"></span></span>
+      <span class="chip met">MET · 3 of 2</span>
+      <span class="holders">Stewart · Miller · Evans D</span></div>
+    <div class="req"><span class="name">QL-07 Engineer Class 3<small>1 per shift — new this sheet</small></span>
+      <span class="dots"><span class="dot f"></span><span class="dot x"></span></span>
+      <span class="chip met">MET · 2 of 1</span>
+      <span class="holders">Keeley · Miller</span></div>
+    <div class="req"><span class="name">HR-02 Vehicle loading crane<small>CO / 2M / AE · 2 required</small></span>
+      <span class="dots"><span class="dot f"></span><span class="dot f"></span><span class="dot x"></span></span>
+      <span class="chip met">MET · 3 of 2</span></div>
+    <div class="req"><span class="name">QL-20 Food safety<small>GPH · 1 required</small></span>
+      <span class="dots"><span class="dot f"></span><span class="dot x"></span></span>
+      <span class="chip met">MET · 2 of 1</span></div>
+    <div class="sect">Standing this shift</div>
+    <div class="berth"><span class="b">Master</span><span class="who">EVANS, Brenton</span></div>
+    <div class="berth unf"><span class="b">Chief Officer (A)</span><span class="who">Nobody standing — berth unfilled</span></div>
+    <div class="berth"><span class="b">Second Mate</span><span class="who">COOK, Jack</span></div>
+    <div class="berth unf"><span class="b">Chief Engineer</span><span class="who">Nobody standing — Ozhoga is on nights</span></div>
+    <div class="berth"><span class="b">Asst Engineer</span><span class="who">KEELEY, Finn · MILLER, Jamie</span></div>
+    <div class="berth"><span class="b">GPH</span><span class="who">EVANS, Dylan · HEARFIELD, Bradd</span></div>
+    <div class="berth"><span class="b">Also standing</span><span class="who">BUTLER, David (First Eng — matrix allocates Shift 2) · OROSZ, Tamas (Cook) · Billy</span></div>
+  </div>
+
+  <div class="shift bad">
+    <header><span class="sh-name">Night Shift</span><span class="sh-meta">Shift 2 · 2400 – 1200 · 7 standing</span></header>
+    <div class="sect">Must carry</div>
+    <div class="req"><span class="name">QL-19 Adv Resuscitation<small>any position · 2 required</small></span>
+      <span class="dots"><span class="dot f"></span><span class="dot miss"></span></span>
+      <span class="chip short">SHORT · 1 of 2</span>
+      <span class="holders">Jitender — one more holder needed on nights</span></div>
+    <div class="req"><span class="name">QL-07 Engineer Class 3<small>1 per shift — new this sheet</small></span>
+      <span class="dots"><span class="dot miss"></span></span>
+      <span class="chip short">SHORT · 0 of 1</span>
+      <span class="holders">Keeley or Miller would cover it by swapping watch</span></div>
+    <div class="req"><span class="name">HR-02 Vehicle loading crane<small>CO / 2M / AE · 2 required</small></span>
+      <span class="dots"><span class="dot f"></span><span class="dot f"></span><span class="dot x"></span><span class="dot x"></span></span>
+      <span class="chip met">MET · 4 of 2</span></div>
+    <div class="req"><span class="name">QL-20 Food safety<small>GPH · 1 required</small></span>
+      <span class="dots"><span class="dot f"></span><span class="dot x"></span></span>
+      <span class="chip met">MET · 2 of 1</span></div>
+    <div class="sect">Standing this shift</div>
+    <div class="berth"><span class="b">Master</span><span class="who">TYMOFEYEV, Arthur</span></div>
+    <div class="berth"><span class="b">Chief Officer (B)</span><span class="who">JITENDER, Rohin</span></div>
+    <div class="berth"><span class="b">Second Mate</span><span class="who">RUBOCK, Zachary</span></div>
+    <div class="berth"><span class="b">First Engineer</span><span class="who">Nobody standing — Butler is on days</span></div>
+    <div class="berth"><span class="b">Asst Engineer</span><span class="who">BATERNA, Eric · TADIAMAN, Mark Jay · CLEMONES, Leon</span></div>
+    <div class="berth unf"><span class="b">GPH</span><span class="who">Nobody standing — berth unfilled</span></div>
+    <div class="berth"><span class="b">Also standing</span><span class="who">OZHOGA, Andriy (Chief Eng — matrix allocates Shift 1)</span></div>
+  </div>
+</div>
+
+<div class="nw"><b>NO WATCH SET</b> &nbsp; KUMAR, Preetham (Master) · MACDONALD, Justin (GPH) — they count toward the swing but toward neither shift until a watch is set on the roster.</div>
+
+<div class="fold">
+  <span class="eyebrow">Every position must hold — said once, not 21 columns</span>
+  <div class="codes">QL-16 · QL-17 medical · QL-18 first aid · QL-19 · VS-01 MSIC · VS-04 Helm · PS-02 mooring · CS-01/02 · PT-01 · VI-01/02 inductions · PI-01–PI-10 MinRes modules</div>
+</div>
+
+<div class="fold">
+  <span class="eyebrow">And each berth's own tickets</span>
+  <div class="grid2">
+    <span class="p">Master</span><span class="c">QL-01 · QL-13 · QL-14 · VS-02 · VS-05 · PS-01 · MS-01–MS-07 · CS-03 · PT-02 · PT-03</span>
+    <span class="p">Chief Officer (A)</span><span class="c">QL-02 · QL-13 · QL-14 · VS-02 · VS-05 · PS-01 · MS-06 · CS-03 · CS-04 · HR-02</span>
+    <span class="p">Chief Officer (B)</span><span class="c">QL-03 · QL-12 · QL-13 · QL-14 · QL-15 · VS-02 · VS-05 · PS-01 · MS-06 · CS-03 · CS-04 · HR-02</span>
+    <span class="p">Second Mate</span><span class="c">QL-04 · QL-12 · QL-13 · QL-15 · VS-02 · VS-05 · PS-01 · CS-03 · HR-02</span>
+    <span class="p">Chief Engineer</span><span class="c">QL-05 · PT-02 · PT-03</span>
+    <span class="p">First Engineer</span><span class="c">QL-06 · PT-02 · PT-03</span>
+    <span class="p">Asst Engineer</span><span class="c">QL-07 · QL-12 · HR-01 · HR-02 · PT-03</span>
+    <span class="p">GPH</span><span class="c">QL-08/09/10 (one of) · QL-12 · QL-20 · HR-01 · HR-02 · PT-03</span>
+    <span class="p">Cook</span><span class="c">QL-11 · QL-12 — allocated to neither shift</span>
+  </div>
+</div>
+
+<div class="note">Mock-up built from the sheet itself and the stored 08 Sept comparison · numbers are live-computable in the portal</div>
+</main>

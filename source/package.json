@@ -1,0 +1,16 @@
+{
+  "name": "coolibah-portal",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Coolibah crew portal — static front end with a Netlify Functions file store",
+  "dependencies": {
+    "@netlify/blobs": "^10.7.12",
+    "@netlify/database": "^1.1.0",
+    "drizzle-orm": "beta"
+  },
+  "devDependencies": {
+    "@netlify/functions": "^5.3.0",
+    "drizzle-kit": "beta"
+  }
+}

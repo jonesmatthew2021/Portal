@@ -1,0 +1,61 @@
+<title>Running 1,400 Certificates</title>
+<style>
+:root { --bg:#f7f9fb; --card:#fff; --ink:#16324a; --mut:#5a7184; --line:#dde6ee; --accent:#1c5c8c; --warn:#8a2c0c; --amber:#8a5a00; --ok:#22705a; }
+body { background:var(--bg); color:var(--ink); font:15.5px/1.75 "Segoe UI",system-ui,sans-serif; margin:0; padding:36px 20px; }
+main { max-width:820px; margin:0 auto; }
+h1 { font-size:27px; margin:0 0 6px; }
+.sub { color:var(--mut); margin-bottom:30px; font-size:14px; }
+h2 { font-size:18px; margin:34px 0 10px; color:var(--accent); }
+h3 { font-size:15px; margin:22px 0 6px; }
+p { margin:0 0 14px; }
+.call { background:var(--card); border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:8px; padding:14px 18px; margin:18px 0; }
+.call.warn { border-left-color:var(--warn); }
+.call.ok { border-left-color:var(--ok); }
+.k { font-weight:700; }
+table { border-collapse:collapse; width:100%; font-size:13.5px; margin:12px 0 18px; }
+th,td { text-align:left; vertical-align:top; padding:8px 10px; border-bottom:1px solid var(--line); }
+th { color:var(--mut); font-size:11px; text-transform:uppercase; letter-spacing:.06em; }
+.overflow { overflow-x:auto; }
+.tag { display:inline-block; font-size:11px; font-weight:700; letter-spacing:.04em; padding:2px 9px; border-radius:99px; margin-right:6px; vertical-align:1px; background:#e3eef7; color:var(--accent); }
+</style>
+<main>
+<h1>Running 1,400 Certificates</h1>
+<div class="sub">An honest look at the Coolibah portal and how to make certificate management easy to live with &middot; based on all four spreadsheets, the full certificate archive, and the portal itself &middot; 23 Aug 2026</div>
+
+<p>You asked the right question. Managing 1,400 certificates isn't really a software problem — it's a question of <span class="k">where the truth lives</span>, and right now the truth about any one certificate can live in up to four places: the portal's crew matrix, the training workbook, the weekly OPMS export from Portways, and the scan itself. When two of them disagree, someone has to notice, work out which is right, and fix the other — and with 1,400 certificates, "someone notices" is not a system. Almost everything below follows from that one idea.</p>
+
+<h2>First, what you've already got right</h2>
+<p>Worth saying plainly, because you've never done this before and you've built something genuinely sound. Every scan lives in its owner's folder with a fingerprint that catches duplicate uploads. The portal reads certificates automatically and writes what it finds into the matrix. Colours mean the same thing everywhere. Nothing is ever destroyed — removed files can always be put back. And there's a history of who changed what. Those five things are the hard part of a certificate system, and they're done. Most people managing certs "the old way" have none of them — just a spreadsheet and hope.</p>
+
+<h2>Priority 1 — Make the numbers true (this week)</h2>
+<p>The portal can only be easy to follow if the counts on its tiles are real. Right now they aren't, quite: the audit found <span class="k">39 certificates filed in the wrong person's folder</span> (36 of them one bulk upload into Kachin Sittiyos's folder), <span class="k">12 pairs where the identical PDF was uploaded as two different qualifications</span> — meaning one of each pair was never actually uploaded — plus 46 harmless duplicates and five crew whose roster spelling doesn't match their matrix name. Until that's cleaned, every red count, every NH tag, and every report carries a quiet error in it.</p>
+<div class="call warn"><span class="k">Do:</span> work through <span class="k">cleanup-report.html</span> in your portal build folder — it lists every file and what to do with it. It's an afternoon's work through the Admin tab, and it's the highest-value afternoon available. The 12 wrong-file pairs matter most: those are qualifications the matrix says are held that have no certificate behind them.</div>
+
+<h2>Priority 2 — One screen that answers "what needs me today?"</h2>
+<p>The information you need exists, but it's spread across seven admin pages. A person managing this portal shouldn't start their day by visiting seven screens — they should land on <span class="k">one</span> that says: what's expired, what expires inside 60 days, what's marked not held, what's unconfirmed (the "?" cells), whether any file looks misfiled, when OPMS last refreshed, and when the matrix was last brought up to date. Each line with a number and a button that takes you to the fix. Everything else — the matrix, the per-person folders, the by-certificate view — becomes somewhere you go <em>from</em> that screen, not instead of it.</p>
+<div class="call"><span class="k">Build next:</span> a "Today" page as the Admin tab's first screen. Nearly all of its numbers already exist in the portal — this is assembly, not invention. Say the word and I'll build it.</div>
+
+<h2>Priority 3 — Close the loop on renewals</h2>
+<p>This is the biggest gap, and it's a process gap rather than a screen. The portal is good at telling you a certificate is going red. It has no way to record what you <em>did about it</em> — so a red item looks identical whether it's being ignored or whether the course is booked for next Tuesday. With 40 crew that difference is the whole job: at any moment a dozen things are amber or red, and what you actually need to know is which ones are already in motion.</p>
+<p>Give each expiring item a tiny status — <span class="tag">Booked</span><span class="tag">Chased</span><span class="tag">Evidence in</span> — with a date and a one-line note, set from the Certification Checker. Then "red and nothing done yet" becomes its own filter, and that list is your to-do list. Pair it with a fixed monthly rhythm: one morning a month, open the checker, book or chase everything red and amber, mark it, done. The OPMS sheet even gives you every crew member's email and mobile — chasing contact details are already in the building.</p>
+
+<h2>Priority 4 — Let OPMS check your work automatically</h2>
+<p>The weekly Portways export (TR02) is a second, independent record of the same competencies, with its own issued dates, expiry dates, and In&nbsp;Date/Outstanding status per person. That's not clutter — it's a free cross-check. The AI checker can already compare on demand; better to run the comparison automatically whenever a new TR02 lands, and put the result on the Today screen as a single number: <span class="k">"OPMS disagrees with the portal on 6 items."</span> Zero means two independent systems agree, which is the strongest "you can relax" signal a compliance record can have. A number means a short list to reconcile while it's small.</p>
+
+<h2>Priority 5 — Teach the portal three rules that only live in the spreadsheets</h2>
+<p>Reading the skills workbook closely, there are rules in it the portal doesn't know, and they'll bite as time passes:</p>
+<p><span class="k">Transition rules.</span> The Roll-Out sheet says First Aid (QL-18) drops from a 5-year to a 3-year validity for anyone joining after 29 June — existing crew keep their current expiry. Advanced Resuscitation (QL-19) similarly goes 2&nbsp;years&nbsp;&rarr;&nbsp;1. The portal knows one validity period per item, so as new starters join, its worked-out expiry dates will quietly be wrong for them. PT-03 Working at Heights also carries a hard compliance deadline (29 Dec 2026) for Assistant Engineers and GPHs that no portal screen shows. The Notes section we added to the certificates page is the natural home for these until they're properly encoded.</p>
+<p><span class="k">Equivalences.</span> The workbook has 160 rows of "if you don't hold X, Y is accepted instead" — hold a Master ticket and you needn't hold Chief Mate separately. I checked every current "not held" cell against it: <span class="k">zero false gaps</span> — whoever marks your matrix already applies these correctly by hand. That's good news with a warning in it: the correctness lives in a person's head. Encoding the map means the portal can apply it automatically when certificates change, instead of depending on the same person remembering every time.</p>
+<p><span class="k">One code list.</span> The same code doesn't always mean the same thing across documents — the roll-out sheet's "PI-01 Corporate Safety Induction" is the portal's PI-02; PI-01 is Code of Conduct. When systems match by code, drift like that eventually files something against the wrong item. Pick one canonical code list (the portal's) and correct the other sheets to it once.</p>
+
+<h2>Is there a better way entirely?</h2>
+<p>The fair question, since you've never run certs this way. Three honest observations:</p>
+<p>First — your scale suits this portal. Forty crew, ~55 tracked items, 1,400 scans is squarely the size where a purpose-built tool you control beats both a spreadsheet (too error-prone at this volume — the audit proved it) and heavyweight commercial crewing software (built for fleets, priced like it, and you'd still be uploading the same scans).</p>
+<p>Second — you're already paying for two other systems that track some of this: Helm CONNECT (your e-learnings, and the workbook's equivalence map is literally written against Helm course names) and OPMS via Portways. The long-term aim isn't more software, it's <span class="k">fewer places where the same fact lives</span>. It's worth one conversation with Portways/MRL about which system they consider the master for each category — if OPMS is authoritative for MinRes modules, the portal should display that data, not maintain its own copy of it.</p>
+<p>Third — within your own walls, make the portal the master and demote the training workbook to an export. Today the workbook is something people edit and the portal ingests; every hand-edit is a chance for the two to disagree. The portal already writes expiry dates <em>into</em> the workbook — the end state is that nobody edits the workbook at all: certificates go into the portal, and the spreadsheet becomes something the portal produces for whoever wants Excel.</p>
+
+<h2>Easy-to-read wins already in, and two more worth doing</h2>
+<p>A lot of the readability work is done as of today: names collapse to a scannable list, red names and NH tags say who needs attention before anything is opened, dates sit in columns under headings with the matrix's colour bands, e-learnings and marine tickets no longer share a page, and the summary tiles jump to what they count. Two more with outsized payoff: a <span class="k">per-position matrix view</span> (a GPH's row shows only the ~20 columns that apply to a GPH — the 54-column grid is the single hardest thing to read in the portal), and a <span class="k">one-page swing pack</span> — before each swing, one PDF per joining crew member: photo of their status, what's red, what's booked. That's the thing you hand a master or an auditor.</p>
+
+<div class="call ok"><span class="k">If you do only three things:</span> clean the data with the cleanup report (this week) &middot; add the renewal status loop so red items show what's being done (next build) &middot; put the whole job on one Today screen (right after). Those three turn the portal from a place you look things up into a system that runs the job with you.</div>
+</main>

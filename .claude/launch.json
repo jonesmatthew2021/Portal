@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "portal-preview",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "C:\\Users\\jones\\AppData\\Local\\Temp\\claude\\C--Users-jones-OneDrive-Desktop-portal-build\\9513db51-9169-4719-a2cc-697444e8ec37\\scratchpad\\serve.ps1"
+      ],
+      "port": 8787
+    }
+  ]
+}
