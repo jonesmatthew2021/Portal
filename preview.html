@@ -15156,7 +15156,6 @@ const ADMIN_PAGES = [
   { id: "today", label: "Today" },
   { id: "required-docs", label: "Required Documents For Upload" },
   { id: "checker", label: "Certification Checker" },
-  { id: "marine", label: "Crew Marine Certificates" },
   { id: "elearning", label: "E-Learning Status" },
   { id: "swing-compliance", label: "Swing Compliance" },
   { id: "opms", label: "OPMS Checker" },
@@ -15238,7 +15237,6 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
 
       {page === "today" && <TodayScreen go={(t) => setPage(t === "matrix-tab" ? "checker" : t)} />}
       {page === "required-docs" && <RequiredDocuments />}
-      {page === "marine" && <MarineCertificatesTab />}
       {page === "elearning" && <ELearningStatus />}
       {/* One page for the swing: the compliance cards first — the swing that is
           on and the three coming — then the roster, which follows whichever
