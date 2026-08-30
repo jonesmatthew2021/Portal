@@ -6627,7 +6627,8 @@ function UploadCertificates() {
                     textTransform: "uppercase", color: T.muted, width: 110, flex: "0 0 110px" }}>Validity period</span>
                   <span style={{ width: 150, flex: "0 0 150px" }} />
                 </div>
-                {f.items.map((c) => {
+                {(() => {
+                  const fileRow = (c) => {
                   const d = readOf(c);
                   const expiry = expiryOf(c);
                   const code = codeOf(c);
@@ -6737,28 +6738,75 @@ function UploadCertificates() {
                     )}
                   </React.Fragment>
                   );
-                })}
+                  };
 
-                {/* What this position requires that isn't held — off the crew
-                    matrix's own N cells, at the bottom of the person's list. */}
-                {(() => {
-                  const { position, items } = notHeldFor(f.person);
-                  if (!items.length) return null;
-                  return (
-                    <div style={{ borderTop: `1px solid ${T.rule}`, padding: "10px 0 4px" }}>
-                      <Eyebrow color={T.accent}>
-                        Required for {position || "this position"} · not held
-                      </Eyebrow>
-                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
-                        {items.map(([code, title]) => (
-                          <span key={code} style={{ fontFamily: T.body, fontSize: 12, fontWeight: 600,
-                            background: T.accent, color: "#FFFFFF", padding: "4px 9px",
-                            borderRadius: 2, lineHeight: 1.4 }}>
-                            {code} · {title}
+                  /* The template for this person's position: every certificate
+                     the crew matrix requires of them, in the matrix's own
+                     order, each wearing the scans filed against it — and a
+                     name with nothing on file still shown, saying so, rather
+                     than quietly missing. Files that answer to no required
+                     item follow at the bottom under Also on file. A person
+                     the matrix doesn't carry keeps the plain file list. */
+                  const byCode = new Map();
+                  f.items.forEach((c) => {
+                    const k = codeOf(c) || "";
+                    if (!byCode.has(k)) byCode.set(k, []);
+                    byCode.get(k).push(c);
+                  });
+                  const mrow = QUALS.rows.find(
+                    (r) => String(r[0]).trim().toUpperCase() === String(f.person).trim().toUpperCase(),
+                  );
+                  if (!mrow) return f.items.map(fileRow);
+                  const required = QUALS.cols
+                    .map((col, i) => ({ code: col[0], title: col[1],
+                      val: String((mrow[3] || [])[i] == null ? "" : (mrow[3] || [])[i]).trim() }))
+                    .filter((x) => x.val !== "");
+                  const reqCodes = new Set(required.map((x) => x.code));
+                  const extras = f.items.filter((c) => !reqCodes.has(codeOf(c)));
+                  const certName = (x, held) => {
+                    const nh = x.val.toUpperCase() === "N";
+                    return (
+                      <div key={"t-" + x.code} style={{ display: "flex", gap: 10, alignItems: "baseline",
+                        flexWrap: "wrap", padding: "9px 0 3px", borderTop: `1px solid ${T.rule}`, marginTop: 2 }}>
+                        <span style={{ fontFamily: T.mono, fontSize: 10, color: T.accent, minWidth: 46 }}>{x.code}</span>
+                        <span style={{ fontFamily: T.body, fontSize: 13, fontWeight: 600,
+                          color: nh ? T.bRed : T.text, flex: "1 1 220px", minWidth: 0 }}>
+                          {x.title}
+                        </span>
+                        {!held && (
+                          <span style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 600,
+                            background: nh ? T.bRedBg : T.raised, color: nh ? T.bRed : T.muted,
+                            padding: "3px 7px", borderRadius: 2, whiteSpace: "nowrap" }}>
+                            {nh ? "Not holding"
+                              : x.val === "?" ? "Unknown — check"
+                              : /^y$/i.test(x.val) ? "Held · no scan on file"
+                              : `No scan on file · matrix holds ${colDate(x.val)}`}
                           </span>
-                        ))}
+                        )}
                       </div>
-                    </div>
+                    );
+                  };
+                  return (
+                    <>
+                      {required.map((x) => {
+                        const have = byCode.get(x.code) || [];
+                        return (
+                          <React.Fragment key={x.code}>
+                            {certName(x, have.length > 0)}
+                            {have.map(fileRow)}
+                          </React.Fragment>
+                        );
+                      })}
+                      {extras.length > 0 && (
+                        <>
+                          <div style={{ padding: "14px 0 2px", fontFamily: T.display, fontSize: 9.5,
+                            fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: T.muted }}>
+                            Also on file · not required for this position
+                          </div>
+                          {extras.map(fileRow)}
+                        </>
+                      )}
+                    </>
                   );
                 })()}
               </div>
