@@ -6303,6 +6303,22 @@ function UploadCertificates() {
     }))
     .filter((f) => f.items.length);
 
+  /* The folders under rank headings rather than one long alphabet: the
+     bridge first, the engine room after, the GPH and the galley on the end —
+     with anyone whose position the matrix doesn't carry under Other rather
+     than dropped. Within each rank the folders keep their surname order. */
+  const CERT_RANKS = [
+    ["Masters", /master/i],
+    ["Deck Officers", /officer|mate/i],
+    ["Engineers", /engineer/i],
+    ["GPH", /\bgph\b|general purpose/i],
+    ["Chefs", /cook|chef/i],
+  ];
+  const rankOf = (person) => {
+    const hit = CERT_RANKS.find(([, re]) => re.test(positions[person] || ""));
+    return hit ? hit[0] : "Other";
+  };
+
   const ready = queue.filter((x) => x.person && x.person !== OTHER).length;
 
   // ---- the staging list, gathered back into the folders it came from ---------
@@ -6720,7 +6736,15 @@ function UploadCertificates() {
             ? "No certificates have been filed yet."
             : "Nothing matches that search."}
         </Empty>
-      ) : shownFolders.map((f) => {
+      ) : [...CERT_RANKS.map(([g]) => g), "Other"].map((g) => {
+        const inRank = shownFolders.filter((f) => rankOf(f.person) === g);
+        if (!inRank.length) return null;
+        return (
+          <div key={g}>
+            <div style={{ margin: "18px 0 8px" }}>
+              <Eyebrow>{g} · {inRank.length}</Eyebrow>
+            </div>
+            {inRank.map((f) => {
         // Searching opens whatever it matched — a hit hidden behind a closed
         // name would read as no hit at all.
         const opened = !!q || openFolders.has(f.folder);
@@ -6931,6 +6955,9 @@ function UploadCertificates() {
                 })()}
               </div>
             )}
+          </div>
+        );
+            })}
           </div>
         );
       })}
