@@ -6319,6 +6319,33 @@ function UploadCertificates() {
     return hit ? hit[0] : "Other";
   };
 
+  /* Changing somebody's rank in place. The rank is the position the crew
+     matrix holds against their name, so saving writes it there — and every
+     page that reads it (this list's headings, the swing roster's groups, the
+     shift checks) follows on its own. The choices are the positions the
+     matrix already carries, with room to type one it doesn't. */
+  const [rankEdit, setRankEdit] = useState(null); // { person, value }
+  const allPositions = useMemo(
+    () => Array.from(new Set(QUALS.rows.map((r) => String(r[1] || "").trim()).filter(Boolean))),
+    [QUALS],
+  );
+  const saveRank = (person) => {
+    const value = ((rankEdit && rankEdit.value) || "").trim();
+    if (!value) return;
+    const r = QUALS.rows.findIndex(
+      (row) => String(row[0]).trim().toUpperCase() === String(person).trim().toUpperCase(),
+    );
+    if (r < 0) { setRankEdit(null); return; }
+    const before = QUALS.rows[r][1] || "—";
+    if (before !== value) {
+      const rows = QUALS.rows.map((row) => [row[0], row[1], row[2], (row[3] || []).slice()]);
+      rows[r][1] = value;
+      setQuals({ cols: QUALS.cols, rows });
+      log("Crew Matrix", `${person}'s rank changed`, `${before} → ${value}`);
+    }
+    setRankEdit(null);
+  };
+
   const ready = queue.filter((x) => x.person && x.person !== OTHER).length;
 
   // ---- the staging list, gathered back into the folders it came from ---------
@@ -6806,6 +6833,54 @@ function UploadCertificates() {
 
             {opened && (
               <div style={{ padding: "0 13px 10px" }}>
+                {/* The person's rank, changeable in place — it moves them
+                    between the headings above the moment it is saved. */}
+                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
+                  padding: "8px 0 2px" }}>
+                  <span style={{ fontFamily: T.mono, fontSize: 11, color: T.muted }}>
+                    Rank · <span style={{ color: T.text }}>{positions[f.person] || "not on the matrix"}</span>
+                  </span>
+                  {positions[f.person] !== undefined && (
+                    <button className="um-btn"
+                      onClick={() => setRankEdit(rankEdit && rankEdit.person === f.person
+                        ? null
+                        : { person: f.person, value: positions[f.person] || "" })}
+                      style={{ background: "transparent", color: T.muted, fontSize: 10,
+                        fontWeight: 700, padding: "2px 0" }}>
+                      {rankEdit && rankEdit.person === f.person ? "Close" : "Change rank"}
+                    </button>
+                  )}
+                </div>
+                {rankEdit && rankEdit.person === f.person && (
+                  <div style={{ background: T.deep, border: `1px solid ${T.rule}`, borderRadius: 2,
+                    padding: "11px 13px", margin: "6px 0 8px" }}>
+                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                      <div style={{ flex: "1 1 260px" }}>
+                        <ChoiceField label="Rank / position">
+                          <Choices value={rankEdit.value} compact
+                            onPick={(v) => setRankEdit((ed) => ({ ...ed, value: v }))}
+                            options={allPositions.map((p) => ({ value: p, label: p }))} />
+                        </ChoiceField>
+                      </div>
+                      <div style={{ flex: "0 1 220px" }}>
+                        <Field label="Or type a new one">
+                          <input className="um-in" value={rankEdit.value}
+                            onChange={(e) => setRankEdit((ed) => ({ ...ed, value: e.target.value }))} />
+                        </Field>
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <Button onClick={() => saveRank(f.person)}
+                          disabled={!(rankEdit.value || "").trim()}>Save</Button>
+                        <Button variant="quiet" onClick={() => setRankEdit(null)}>Cancel</Button>
+                      </div>
+                    </div>
+                    <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, lineHeight: 1.6, marginTop: 8 }}>
+                      Saving writes the rank onto the crew matrix against {f.person}, so everywhere
+                      that reads it — this list's headings, the swing roster's groups, the shift
+                      checks — follows straight away.
+                    </div>
+                  </div>
+                )}
                 {/* Column headings, once per open folder; the rows below carry
                     each date under its own heading rather than in running text. */}
                 <div style={{ display: "flex", gap: 12, alignItems: "baseline",
