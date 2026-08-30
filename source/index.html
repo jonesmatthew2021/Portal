@@ -999,6 +999,9 @@ const STYLES = `
 @media (max-width: 680px) {
   .um-g2 { grid-template-columns: 1fr; }
   .um-head { flex-direction: column !important; align-items: flex-start !important; gap: 16px !important; }
+  /* On a phone the date columns wrap under their rows, so a header row of
+     column names has no columns to stand over — it comes off. */
+  .um-datehead { display: none !important; }
 }
 /* How far through a long job is. The fill is animated, so a batch of
    certificates landing reads as movement rather than a jump. */
@@ -2661,7 +2664,7 @@ function DateColsHead({ trail = 150, validity = false }) {
   const head = { fontFamily: T.display, fontSize: 9.5, fontWeight: 700, letterSpacing: "0.1em",
     textTransform: "uppercase", color: T.muted, minWidth: 78 };
   return (
-    <div style={{ display: "flex", gap: 10, alignItems: "baseline",
+    <div className="um-datehead" style={{ display: "flex", gap: 10, alignItems: "baseline",
       padding: "6px 0 4px", borderBottom: `2px solid ${T.rule}` }}>
       <span style={{ minWidth: 46 }} />
       <span style={{ flex: 1, minWidth: 180 }} />
@@ -6616,7 +6619,7 @@ function UploadCertificates() {
                 )}
                 {/* Column headings, once per open folder; the rows below carry
                     each date under its own heading rather than in running text. */}
-                <div style={{ display: "flex", gap: 12, alignItems: "baseline",
+                <div className="um-datehead" style={{ display: "flex", gap: 12, alignItems: "baseline",
                   padding: "8px 0 4px", borderTop: `1px solid ${T.rule}` }}>
                   <div style={{ flex: "1 1 220px", minWidth: 0 }} />
                   <span style={{ fontFamily: T.display, fontSize: 9.5, fontWeight: 700, letterSpacing: "0.1em",
@@ -12424,7 +12427,7 @@ function GenerateSwingCompliance({ results, here, setAt }) {
         </span>
       </div>
       <div style={{ marginTop: 6 }}>
-        <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap",
+        <div className="um-datehead" style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap",
           padding: "6px 0 4px", borderBottom: `2px solid ${T.rule}` }}>
           <span style={{ minWidth: 46 }} />
           <span style={{ flex: "1 1 160px" }} />
@@ -14498,6 +14501,72 @@ function OPMSChecker() {
                       </div>
                     );
                   })()}
+                </div>
+              );
+            };
+
+            const groups = [
+              ...[...names, ...extras].map((n) => ({ name: n })),
+              ...(crewWide.length ? [{ name: "The crew as a whole", cw: true }] : []),
+            ];
+
+            return (
+              <div style={{ marginBottom: 14 }}>
+                {!opmsRows && opmsSheet && (
+                  <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, lineHeight: 1.6, marginBottom: 8 }}>
+                    Reading the OPMS export off the spreadsheet — if this line stays, the sheet couldn't
+                    be read in this browser and the OPMS column shows only what the comparison reported.
+                  </div>
+                )}
+                {groups.map(({ name, cw }) => {
+                  const finds = cw ? crewWide : findsFor(name);
+                  const items = cw ? [] : sideBySide(name);
+                  const matched = new Set();
+                  items.forEach((it) => {
+                    const fr = finds.find(({ f }) => it.code && keyOf(f.code) === keyOf(it.code));
+                    if (fr) matched.add(fr);
+                  });
+                  const loose = cw ? finds : finds.filter((x) => !matched.has(x));
+                  const hotCount = items.filter((it) =>
+                    it.diff || finds.some(({ f }) => it.code && keyOf(f.code) === keyOf(it.code))).length + loose.length;
+                  const bad = hotCount > 0;
+                  return (
+                    <details key={name} open style={{ background: T.panel, border: `1px solid ${T.rule}`,
+                      borderLeft: `4px solid ${bad ? T.bRed : T.teal}`, borderRadius: 2,
+                      marginBottom: 6, padding: "0 15px" }}>
+                      <summary style={{ cursor: "pointer", padding: "11px 0", fontFamily: T.body }}>
+                        <span style={{ fontSize: 14, fontWeight: 600, color: bad ? T.bRed : T.text }}>{name}</span>
+                        <span style={{ fontFamily: T.mono, fontSize: 10.5, color: bad ? T.bRed : T.muted, marginLeft: 10 }}>
+                          {bad ? `${hotCount} difference${hotCount === 1 ? "" : "s"}`
+                            : items.length ? `${items.length} items · agree` : "agrees"}
+                        </span>
+                      </summary>
+                      <div style={{ paddingBottom: 11 }}>
+                        {items.length > 0 && (
+                          <>
+                            <div className="um-datehead" style={{ display: "flex", gap: 10, alignItems: "baseline",
+                              padding: "2px 0 5px", borderBottom: `2px solid ${T.rule}` }}>
+                              <span style={{ ...head, flex: "1 1 220px" }}>Certificate</span>
+                              <span style={{ ...head, flex: "1 1 130px" }}>Our expiry</span>
+                              <span style={{ ...head, flex: "1 1 130px" }}>OPMS expiry</span>
+                              <span style={{ minWidth: 130 }} />
+                            </div>
+                            {items.map((it, i) => dataRow(name, it, i, finds))}
+                          </>
+                        )}
+                        {loose.map(({ f, side }, i) => findingRow(f, i, side))}
+                        {items.length === 0 && loose.length === 0 && (
+                          <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, lineHeight: 1.6 }}>
+                            Nothing on either side for this name.
+                          </div>
+                        )}
+                      </div>
+                    </details>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
           {notes.length > 0 && (
             <details style={{ background: T.raised, border: `1px solid ${T.rule}`, borderRadius: 2,

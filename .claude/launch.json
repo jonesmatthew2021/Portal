@@ -9,7 +9,7 @@
         "-ExecutionPolicy",
         "Bypass",
         "-File",
-        "C:\\Users\\jones\\AppData\\Local\\Temp\\claude\\C--Users-jones-OneDrive-Desktop-portal-build\\9513db51-9169-4719-a2cc-697444e8ec37\\scratchpad\\serve.ps1"
+        "C:\\Users\\jones\\OneDrive\\Desktop\\portal build\\tools\\serve.ps1"
       ],
       "port": 8787
     }

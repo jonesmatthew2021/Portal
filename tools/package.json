@@ -1,0 +1,8 @@
+{
+  "name": "portal-tools",
+  "private": true,
+  "description": "Local tooling for the portal build folder - the fast-preview compiler and the localhost server.",
+  "dependencies": {
+    "@babel/standalone": "^7.24.0"
+  }
+}
