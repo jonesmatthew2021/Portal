@@ -6926,10 +6926,79 @@ const foreignIssuerOf = (d) => {
   return issuer && !AU_ISSUER.test(issuer) ? issuer : null;
 };
 
+/* The renewal loop. A red item looks the same whether it is being ignored or
+   the course is booked for Tuesday — these marks are the difference. Each
+   expired, expiring, or not-held certificate can be marked Booked, Chased, or
+   Evidence in, with the day the mark was made and a one-line note on where it
+   stands. Set from the Certification Checker or the Today screen; shared, so
+   two admins never chase the same item twice. */
+const renewalKeyOf = (person, code) =>
+  `${String(person || "").trim().toUpperCase()}::${String(code || "").trim().toUpperCase()}`;
+const renewalMarkFor = (marks, person, code) => (marks || {})[renewalKeyOf(person, code)] || null;
+const RENEWAL_STEPS = [
+  { st: "booked", label: "Booked", hint: "The course or renewal is booked" },
+  { st: "chased", label: "Chased", hint: "The provider or the crew member has been chased" },
+  { st: "evidence", label: "Evidence in", hint: "The certificate is in hand, waiting to be filed" },
+];
+const renewalStepOf = (st) => RENEWAL_STEPS.find((s) => s.st === st) || null;
+
+/* The note beside a mark. Kept as a draft while it is being typed and written
+   to the shared state when the field is left, so a save isn't sent per
+   keystroke. */
+function RenewalNote({ value, onSave }) {
+  const [draft, setDraft] = useState(value || "");
+  React.useEffect(() => { setDraft(value || ""); }, [value]);
+  return (
+    <input className="um-in" value={draft} onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => { if (draft !== (value || "")) onSave(draft); }}
+      onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+      placeholder="One line on where it stands — course date, who was emailed"
+      style={{ flex: "1 1 200px", minWidth: 150, fontSize: 11.5, padding: "3px 8px" }} />
+  );
+}
+
+/* The three mark buttons for one person-and-certificate, and, once a mark is
+   on, its note. Pressing the mark that is already on clears it. */
+function RenewalMark({ person, code }) {
+  const { renewalMarks, setRenewalMarks, role } = usePortal();
+  const k = renewalKeyOf(person, code);
+  const mk = renewalMarkFor(renewalMarks, person, code);
+  const set = (st) => {
+    const next = { ...(renewalMarks || {}) };
+    if (next[k] && next[k].status === st) delete next[k];
+    else next[k] = { status: st, on: todayISO(), by: role || "admin", note: (next[k] && next[k].note) || "" };
+    setRenewalMarks(next);
+  };
+  return (
+    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap",
+      flex: "1 1 100%", padding: "2px 0 4px 56px" }}>
+      {RENEWAL_STEPS.map(({ st, label, hint }) => {
+        const on = mk && mk.status === st;
+        return (
+          <button key={st} className="um-btn" onClick={() => set(st)}
+            title={on ? `${label} ${fmtDate(mk.on)}${mk.by ? ` by ${mk.by}` : ""} — press to clear` : hint}
+            style={{ background: on ? T.accentSoft : "transparent", color: on ? T.accent : T.muted,
+              border: `1px solid ${on ? T.accent : T.rule}`, borderRadius: 2,
+              padding: "2px 8px", fontSize: 9.5, fontWeight: 700 }}>
+            {label}{on ? ` · ${fmtDate(mk.on)}` : ""}
+          </button>
+        );
+      })}
+      {mk && (
+        <RenewalNote value={mk.note}
+          onSave={(note) => setRenewalMarks({ ...(renewalMarks || {}), [k]: { ...mk, note } })} />
+      )}
+    </div>
+  );
+}
+
 function CertChecker() {
-  const { quals: QUALS, certSheet, certDates, certificates } = usePortal();
+  const { quals: QUALS, certSheet, certDates, certificates, renewalMarks } = usePortal();
   const validityFor = useValidityLookup();
   const [q, setQ] = useState("");
+  // Hiding what is already in motion leaves the true to-do list: red items
+  // nothing has been done about yet.
+  const [onlyUntouched, setOnlyUntouched] = useState(false);
 
   // A gap is anything held but not valid: expired, marked N, or unknown.
   const gapsFor = (row) =>
@@ -6962,13 +7031,21 @@ function CertChecker() {
   const listWith = (keep) => all
     .map((x) => ({
       row: x.row,
-      gaps: x.gaps.filter(keep),
+      gaps: x.gaps.filter((g) => keep(g, x.row)),
     }))
     .filter((x) => x.gaps.length)
     .filter((x) => !q || (x.row[0] + " " + x.row[1]).toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => b.gaps.length - a.gaps.length);
 
-  const listFor = (key) => listWith(sectionFor(key).keep);
+  // The unconfirmed section keeps its lines either way — marks are about
+  // renewals, and a question mark isn't a renewal.
+  const listFor = (key) => listWith((g, row) => sectionFor(key).keep(g)
+    && (!onlyUntouched || kindOf(g) === "unknown" || !renewalMarkFor(renewalMarks, row[0], g.code)));
+
+  // How many red items already have a mark against them — what the
+  // nothing-done-yet filter would hide.
+  const inMotion = all.reduce((n, x) => n + x.gaps.filter((g) =>
+    kindOf(g) !== "unknown" && renewalMarkFor(renewalMarks, x.row[0], g.code)).length, 0);
 
   // Every section is written out in full below the tiles, so the PDF simply
   // carries the whole list.
@@ -7014,13 +7091,24 @@ function CertChecker() {
     title: "Certification gaps",
     subtitle: `${VESSEL.name} ${VESSEL.nameAccent} · as at ${fmtDate(TODAY)} · ${printed.length} crew · `
       + `${count("expired")} expired · ${count("missing")} not held · ${count("unknown")} unconfirmed`
+      + (inMotion ? ` · ${inMotion} in motion` : "")
       + (q ? ` · matching "${q}"` : ""),
     filename: `certification-gaps-${TODAY}.pdf`,
     empty: "No gaps - everything on the matrix is valid.",
     groups: printed.map(({ row, gaps }) => ({
       heading: row[0],
       meta: `${row[1]} · ${gaps.length} ${gaps.length === 1 ? "item" : "items"}`,
-      items: gaps.map(pdfLineIn({ person: row[0], dates: certDates, validityFor })),
+      // Each line carries its renewal mark, so the printed list says not just
+      // what is red but what is already being done about it.
+      items: gaps.map((g) => {
+        const line = pdfLineIn({ person: row[0], dates: certDates, validityFor })(g);
+        const mk = kindOf(g) !== "unknown" && renewalMarkFor(renewalMarks, row[0], g.code);
+        if (mk) line.notes = [{
+          text: `${(renewalStepOf(mk.status) || { label: mk.status }).label} ${fmtDate(mk.on)}${mk.note ? ` — ${mk.note}` : ""}`,
+          fg: T.accent,
+        }];
+        return line;
+      }),
     })),
   });
 
@@ -7052,11 +7140,18 @@ function CertChecker() {
         Certificates issued by a non-Australian authority are flagged in violet, going off the
         issuer printed on each scan.{!issuersKnown &&
           " No issuing authorities are on record yet - press Update table on the live portal and the flags fill in."}
+        {" "}Against each item, mark what has been done — Booked, Chased, or Evidence in — with a
+        line on where it stands. The mark shows here and on Today until the renewal is filed.
       </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
         <input className="um-in" style={{ flex: 1, minWidth: 170 }} value={q}
           onChange={(e) => setQ(e.target.value)} placeholder="Search crew or position" />
+        <Button variant={onlyUntouched ? "solid" : "quiet"}
+          title="Hide items already marked Booked, Chased, or Evidence in — what's left is the to-do list"
+          onClick={() => setOnlyUntouched(!onlyUntouched)}>
+          Nothing done yet{inMotion ? ` · hides ${inMotion}` : ""}
+        </Button>
         <DownloadPDF build={asPDF} variant="quiet" />
       </div>
 
@@ -7125,6 +7220,7 @@ function CertChecker() {
                     <span style={{ minWidth: 110, display: "flex", justifyContent: "flex-end" }}>
                       <BandTag band={x.band} />
                     </span>
+                    {kindOf(x) !== "unknown" && <RenewalMark person={row[0]} code={x.code} />}
                   </div>
                   );
                 })}
@@ -14730,7 +14826,7 @@ function RequiredDocuments() {
    gathers them, worst first, each with the button that goes to the fix. */
 function TodayScreen({ go }) {
   const { quals: QUALS, certificates, certSheet, opmsSheet, matrixUpdated,
-    opmsAnalysis, opmsMarks } = usePortal();
+    opmsAnalysis, opmsMarks, renewalMarks } = usePortal();
 
   // Everything urgent, as a single worklist: expired, inside 30 days, or
   // required-but-not-held — each with what has been done about it so far.
@@ -14756,7 +14852,14 @@ function TodayScreen({ go }) {
   }, [QUALS]);
 
   const [showAll, setShowAll] = useState(false);
-  const shown = showAll ? work : work.slice(0, 6);
+  // The renewal loop read against the list: which urgent items already have
+  // something being done about them. Hiding those leaves the true to-do list.
+  const markedCount = work.filter((x) => renewalMarkFor(renewalMarks, x.person, x.code)).length;
+  const [hideInMotion, setHideInMotion] = useState(false);
+  const listed = hideInMotion
+    ? work.filter((x) => !renewalMarkFor(renewalMarks, x.person, x.code))
+    : work;
+  const shown = showAll ? listed : listed.slice(0, 6);
 
   // Quiet numbers for everything that is not urgent, one line each only when
   // it actually needs an admin; good news is one green sentence, not nine tiles.
@@ -14817,10 +14920,23 @@ function TodayScreen({ go }) {
         </div>
         <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, marginTop: 4, lineHeight: 1.6 }}>
           Expired, running out inside 30 days, or required and never held — worst first.
+          {markedCount > 0 && ` ${markedCount} of them already ${markedCount === 1 ? "has" : "have"} something in motion — booked, chased, or evidence waiting to be filed.`}
         </div>
       </div>
 
-      {/* The worklist itself: act from here, no other page needed. */}
+      {/* When some items are marked, the list can be narrowed to the ones
+          nothing has been done about — that shorter list is the day's work. */}
+      {markedCount > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <Button variant={hideInMotion ? "solid" : "quiet"} onClick={() => setHideInMotion(!hideInMotion)}>
+            {hideInMotion ? `Showing the ${listed.length} with nothing done yet · show all` : `Hide the ${markedCount} in motion`}
+          </Button>
+        </div>
+      )}
+
+      {/* The worklist itself: act from here, no other page needed. Each line
+          carries its renewal marks, so booking or chasing is recorded on the
+          spot rather than on another page. */}
       {shown.map((x) => {
         const k = stKind[x.kind];
         return (
@@ -14833,13 +14949,14 @@ function TodayScreen({ go }) {
               <span style={{ fontFamily: T.body, fontSize: 14, fontWeight: 600, color: T.text }}>{x.person}</span>
               <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted }}> · {x.code} {x.title}</span>
             </span>
+            <RenewalMark person={x.person} code={x.code} />
           </div>
         );
       })}
-      {work.length > 6 && (
+      {listed.length > 6 && (
         <div style={{ marginBottom: 6 }}>
           <Button variant="quiet" onClick={() => setShowAll(!showAll)}>
-            {showAll ? "Show just the first six" : `Show all ${work.length}`}
+            {showAll ? "Show just the first six" : `Show all ${listed.length}`}
           </Button>
         </div>
       )}
@@ -15538,6 +15655,14 @@ function CoolibahPortal({ role, onSignOut }) {
   // next week's run remembers what was already dealt with.
   const opmsMarks = store.opmsMarks || {};
   const setOpmsMarks = put("opmsMarks");
+  // What is being done about each certificate that has gone red — booked,
+  // chased, or evidence in hand — keyed "PERSON::CODE". Each mark carries the
+  // day it was made, who made it, and a one-line note. Shared, so every admin
+  // sees what is already in motion and nothing is chased twice. Marks need no
+  // tidying up: once the renewal is filed and the item leaves the red lists,
+  // the mark has nowhere left to show.
+  const renewalMarks = store.renewalMarks || {};
+  const setRenewalMarks = put("renewalMarks");
   const validityPeriods = store.validityPeriods || null;
   const setValidityPeriods = put("validityPeriods");
   const refreshCertDates = async () => {
@@ -16074,7 +16199,7 @@ function CoolibahPortal({ role, onSignOut }) {
       onRestoreTab={restoreTab} onRestoreAllTabs={restoreAllTabs} />,
   };
 
-  const ctx = { role, admin, session: SESSION, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, setValidityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
+  const ctx = { role, admin, session: SESSION, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, setValidityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
 
   return (
     <Ctx.Provider value={ctx}>
