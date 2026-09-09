@@ -14984,6 +14984,151 @@ function MarineCertificatesTab() {
   );
 }
 
+/* The Portways Crew List & Shift Allocation form, opened from the portal.
+
+   The form itself is the office's own page, kept byte-for-byte at
+   crew-list-form.html — same layout, same checks, same Print and Save
+   editable copy buttons; the portal never redraws it. The one thing the
+   portal does is bring the form's own editable data lines up to date on the
+   way out the door: the crew name lists are rebuilt from the swing lists the
+   Swing Compliance page holds, and the crew-change dates take in the fly-out
+   dates the portal knows. A person already on the form's own list keeps
+   their SAMS number and Portways position wording; someone the swings added
+   comes in new, with the position read off their rank. */
+const RANK_TO_PORTWAYS = {
+  "Master": "Master", "Chief Mate": "Chief Officer", "2nd Mate": "Second Mate",
+  "Second Mate": "Second Mate", "Chief Engineer": "Chief Engineer",
+  "1st Engineer": "First Engineer", "Junior Engineer": "Assistant Engineer",
+  "GPH": "General Purpose Hand", "Cook": "Cook",
+};
+
+function CrewListFormPage() {
+  const { swingLists, swingDates } = usePortal();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [opened, setOpened] = useState(null);
+
+  // Everyone on any swing list, one entry per person — the same names the
+  // Swing Compliance page shows.
+  const swingCrew = useMemo(() => {
+    const seen = new Set(); const out = [];
+    Object.keys(swingLists || {}).sort().forEach((k) => {
+      (((swingLists || {})[k] || {}).entries || []).forEach((e) => {
+        const name = String(e.name || "").trim();
+        if (!name || seen.has(name.toLowerCase())) return;
+        seen.add(name.toLowerCase());
+        out.push({ name, rank: e.rank || "" });
+      });
+    });
+    return out;
+  }, [swingLists]);
+
+  // First name + surname, lowercased — how a portal name ("Cornelius Keogh")
+  // finds its form entry ("Cornelius James KEOGH") whatever the middle names.
+  const keyOf = (n) => {
+    const w = String(n || "").toLowerCase().replace(/[^a-z\s'-]/g, " ").trim().split(/\s+/);
+    return w.length ? w[0] + " " + w[w.length - 1] : "";
+  };
+
+  const open = async () => {
+    setBusy(true); setErr(""); setOpened(null);
+    // The tab is opened in the same breath as the click — a browser only
+    // allows a new tab from the click itself, and the fetch below would
+    // spend that permission. A browser that refuses a new tab altogether
+    // gets the form in this tab instead, with Back returning to the portal.
+    const win = window.open("", "_blank");
+    try {
+      // Beside the portal on the live site; under source/ on the local server.
+      let res = await fetch("crew-list-form.html");
+      if (!res.ok) res = await fetch("source/crew-list-form.html");
+      if (!res.ok) throw new Error("The form template (crew-list-form.html) isn't on the server.");
+      let html = await res.text();
+
+      const readList = (re) => {
+        const m = re.exec(html);
+        try { return m ? JSON.parse(m[1]) : []; } catch (e) { return []; }
+      };
+
+      // The form's own crew list, kept for SAMS numbers and position wording.
+      const held = {};
+      readList(/const CREW=(\[.*?\]);/).forEach((c) => {
+        const k = keyOf(c.n); if (k && !held[k]) held[k] = c;
+      });
+
+      const crew = swingCrew.map(({ name, rank }) => {
+        const was = held[keyOf(name)];
+        return was ? { s: was.s, n: was.n, p: was.p }
+          : { s: "", n: name, p: RANK_TO_PORTWAYS[rank] || rank || "" };
+      }).sort((a, b) => a.n.localeCompare(b.n));
+      if (!crew.length) throw new Error("The swing lists are empty — there is nobody to put on the form.");
+      html = html.replace(/const CREW=\[.*?\];/, "const CREW=" + JSON.stringify(crew) + ";");
+
+      // The designated crew-change days: the form's own list plus every
+      // fly-out date the portal holds, oldest first.
+      const dates = readList(/const CREW_CHANGE_DATES=(\[.*?\]);/);
+      Object.values(swingDates || {}).forEach((s) => {
+        const d = s && s.flyOut;
+        if (d && /^\d{4}-\d{2}-\d{2}$/.test(d) && dates.indexOf(d) < 0) dates.push(d);
+      });
+      dates.sort();
+      html = html.replace(/const CREW_CHANGE_DATES=\[.*?\];/, "const CREW_CHANGE_DATES=" + JSON.stringify(dates) + ";");
+
+      const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+      if (win) {
+        win.location = url;
+        setTimeout(() => URL.revokeObjectURL(url), 120000);
+        setOpened({ crew: crew.length, sams: crew.filter((c) => c.s).length });
+      } else {
+        window.location.assign(url);
+        return;
+      }
+    } catch (e) {
+      try { if (win) win.close(); } catch (x) {}
+      setErr(String((e && e.message) || e));
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div style={{ maxWidth: 680 }}>
+      <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderLeft: `4px solid ${T.accent}`,
+        borderRadius: 2, padding: "16px 18px", marginBottom: 14 }}>
+        <Eyebrow color={T.accent}>Portways form</Eyebrow>
+        <div style={{ fontFamily: T.body, fontSize: 15, fontWeight: 700, color: T.text, marginTop: 8 }}>
+          Crew List &amp; Shift Allocation
+        </div>
+        <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.muted, lineHeight: 1.7, marginTop: 6 }}>
+          Portways' own form, exactly as they issue it — it opens in its own tab with its layout,
+          checks, Print and Save editable copy buttons untouched. The portal only fills its name
+          lists from the swing lists on Swing Compliance ({swingCrew.length} crew
+          across the swings right now) and adds the fly-out dates it knows to the crew-change days.
+          Fill it in there, then use the form's own <b>Save editable copy</b> to keep your work.
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <Button onClick={open} disabled={busy || !swingCrew.length}>
+            {busy ? "Preparing..." : "Open the form with today's crew"}
+          </Button>
+        </div>
+        {opened && (
+          <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.bGreen, marginTop: 8 }}>
+            Opened with {opened.crew} crew in the name lists — {opened.sams} carried their SAMS
+            number over from the form's own list{opened.sams < opened.crew ? "; the rest are new and show without one" : ""}.
+          </div>
+        )}
+        {err && (
+          <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.bRed, marginTop: 8 }}>{err}</div>
+        )}
+        {!swingCrew.length && (
+          <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, marginTop: 8 }}>
+            The swing lists are empty, so there is nobody to put on the form yet — fill them in on
+            Swing Compliance first.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* The Admin tab's own pages. Kept as a list so the strip that switches between
    them and the page that is rendered can't disagree about what exists. */
 const ADMIN_PAGES = [
@@ -14992,6 +15137,7 @@ const ADMIN_PAGES = [
   { id: "checker", label: "Certification Checker" },
   { id: "elearning", label: "E-Learning Status" },
   { id: "swing-compliance", label: "Swing Compliance" },
+  { id: "crew-list", label: "Crew List Form" },
   { id: "opms", label: "OPMS Checker" },
   { id: "portways-docs", label: "Portways Documentation" },
   { id: "ai-checker", label: "AI Checker" },
@@ -15081,6 +15227,7 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
         <SwingCompliancePage currentUser={currentUser} people={people} setPeople={setPeople}
           overrides={overrides} swingBoard={swingBoard} setSwingBoard={setSwingBoard} log={log} />
       )}
+      {page === "crew-list" && <CrewListFormPage />}
       {page === "opms" && <OPMSChecker />}
       {/* The papers around Portways and OPMS, kept where the OPMS work is
           done. Same library as the Documentation tab's sections, with its

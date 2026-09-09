@@ -1,0 +1,1672 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crew List & Shift Allocation | Portways</title>
+<style>
+
+  :root{
+    --navy:#16324a;
+    --steel:#2e6a8e;
+    --steel-soft:#e8f0f5;
+    --ink:#1f2933;
+    --muted:#5b6b7a;
+    --line:#d4dbe2;
+    --line-soft:#e6ebf0;
+    --panel:#f5f7f9;
+    --bg:#eef2f5;
+    --ok:#2f7d4f;
+    --warn:#b03a2e;
+    --white:#ffffff;
+    --focus:#2e6a8e;
+  }
+  *{box-sizing:border-box;}
+  html{-webkit-text-size-adjust:100%;scroll-behavior:smooth;}
+  body{
+    margin:0;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink);background:var(--bg);line-height:1.45;font-size:15px;
+  }
+  .wrap{max-width:min(1600px,96vw);margin:0 auto;padding:0 16px 64px;}
+
+  /* Masthead */
+  header.mast{background:var(--navy);color:#fff;padding:22px 0 20px;border-bottom:4px solid var(--steel);}
+  .mast-inner{max-width:min(1600px,96vw);margin:0 auto;padding:0 16px;display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;}
+  .brand{display:flex;align-items:center;gap:12px;}
+  .brand .mark{width:48px;height:48px;border-radius:50%;flex:none;background:#fff;overflow:hidden;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px rgba(255,255,255,.25);}
+  .brand .mark img{width:100%;height:100%;object-fit:contain;display:block;}
+  .brand h1{font-size:15px;margin:0;font-weight:600;letter-spacing:.3px;text-transform:uppercase;}
+  .brand .sub{font-size:12px;color:#b9cad7;margin-top:2px;}
+  .mast-meta{font-size:12px;color:#b9cad7;text-align:right;}
+  .mast-meta strong{color:#fff;font-weight:600;}
+
+  .titleblock{background:#fff;border:1px solid var(--line);border-top:none;padding:18px 20px;}
+  .titleblock h2{margin:0 0 6px;font-size:20px;color:var(--navy);font-weight:700;}
+  .titleblock p{margin:0;color:var(--muted);font-size:13.5px;max-width:70ch;}
+
+  /* Sticky nav + progress */
+  .navbar{position:sticky;top:0;z-index:30;background:#fff;border:1px solid var(--line);border-top:none;box-shadow:0 1px 0 rgba(0,0,0,.03);}
+  .navrow{display:flex;gap:8px;align-items:center;padding:9px 14px;flex-wrap:wrap;}
+  .jumps{display:flex;gap:4px;flex-wrap:wrap;}
+  .jumps a{font-size:12px;color:var(--muted);text-decoration:none;border:1px solid var(--line-soft);border-radius:5px;padding:4px 9px;background:var(--panel);white-space:nowrap;}
+  .jumps a:hover{background:var(--steel-soft);color:var(--navy);border-color:#c2d6e2;}
+  .navrow .spacer{flex:1;}
+  .progress-wrap{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--muted);min-width:190px;}
+  .progress-track{flex:1;height:7px;background:var(--line-soft);border-radius:99px;overflow:hidden;min-width:90px;}
+  .progress-fill{height:100%;width:0;background:var(--steel);border-radius:99px;transition:width .25s ease;}
+  .progress-fill.done{background:var(--ok);}
+  .actions{display:flex;gap:8px;padding:0 14px 10px;flex-wrap:wrap;}
+
+  .btn{font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;border:1px solid var(--steel);background:var(--steel);color:#fff;padding:8px 16px;border-radius:6px;transition:background .15s;}
+  .btn:hover{background:#26597a;}
+  .btn.secondary{background:#fff;color:var(--steel);}
+  .btn.secondary:hover{background:var(--steel-soft);}
+  .btn.ghost{background:#fff;color:var(--muted);border-color:var(--line);}
+  .btn.ghost:hover{background:var(--panel);color:var(--ink);}
+  .btn:focus-visible{outline:3px solid #9cc4dc;outline-offset:2px;}
+  .save-note{font-size:11.5px;color:var(--muted);align-self:center;margin-left:2px;}
+
+  form{background:#fff;border:1px solid var(--line);border-top:none;}
+  section.block{border-top:1px solid var(--line-soft);padding:22px 20px;scroll-margin-top:120px;}
+  section.block:first-of-type{border-top:none;}
+  .sec-head{display:flex;align-items:baseline;gap:12px;margin:0 0 16px;}
+  .sec-num{flex:none;font-size:12px;font-weight:700;color:#fff;background:var(--navy);padding:3px 9px;border-radius:4px;letter-spacing:.5px;}
+  .sec-head h3{margin:0;font-size:16px;color:var(--navy);font-weight:700;}
+  .sec-head .hint{margin-left:auto;font-size:12px;color:var(--muted);font-style:italic;}
+
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 20px;}
+  .grid.one{grid-template-columns:1fr;}
+  .field{display:flex;flex-direction:column;gap:5px;min-width:0;}
+  .field.span2{grid-column:1 / -1;}
+  label{font-size:12.5px;font-weight:600;color:var(--ink);}
+  .req{color:var(--warn);font-weight:700;}
+  .opt{color:var(--muted);font-weight:500;font-style:italic;}
+  input[type=text],input[type=email],input[type=tel],input[type=date],select,textarea{
+    font:inherit;font-size:14px;color:var(--ink);border:1px solid var(--line);border-radius:6px;background:#fff;padding:9px 10px;width:100%;transition:border-color .15s,box-shadow .15s;}
+  select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' fill='none' stroke='%235b6b7a' stroke-width='1.6'/></svg>");background-repeat:no-repeat;background-position:right 10px center;padding-right:30px;cursor:pointer;}
+  textarea{resize:vertical;min-height:70px;}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--focus);box-shadow:0 0 0 3px rgba(46,106,142,.18);}
+  .missing{border-color:var(--warn) !important;box-shadow:0 0 0 3px rgba(176,58,46,.14) !important;}
+  .help{font-size:11.5px;color:var(--muted);}
+  .inline-check{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:500;color:var(--muted);margin-top:3px;cursor:pointer;}
+  .inline-check input{width:15px;height:15px;flex:none;accent-color:var(--steel);cursor:pointer;}
+
+  .note{background:var(--steel-soft);border:1px solid #c2d6e2;border-radius:6px;color:#27506b;font-size:12.5px;padding:9px 12px;margin:0 0 16px;display:flex;gap:8px;align-items:flex-start;}
+  .note b{color:#1d3e54;}
+
+  /* Repeatable COC blocks */
+  .coc-block{border:1px solid var(--line);border-radius:8px;padding:14px 14px 16px;margin-bottom:12px;background:var(--panel);}
+  .coc-block .coc-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+  .coc-block .coc-bar h4{margin:0;font-size:13px;color:var(--navy);font-weight:700;letter-spacing:.3px;}
+  .coc-block .del-block{border:1px solid var(--line);background:#fff;color:var(--warn);border-radius:6px;cursor:pointer;font-size:12.5px;font-weight:600;padding:5px 11px;}
+  .coc-block .del-block:hover{background:#fbecea;}
+
+  /* Repeatable booking rows */
+  .rows{display:flex;flex-direction:column;gap:8px;}
+  .row-head,.row-line{display:grid;grid-template-columns:1.3fr 1.3fr 1fr 1fr 34px;gap:10px;align-items:center;}
+  .row-head{font-size:11.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;padding:0 2px;}
+  .row-line .del{border:1px solid var(--line);background:#fff;color:var(--warn);border-radius:6px;cursor:pointer;font-size:16px;line-height:1;padding:7px 0;font-weight:700;}
+  .row-line .del:hover{background:#fbecea;}
+  .add-row{margin-top:4px;align-self:flex-start;}
+
+  /* Travel date pairs */
+  .travel-pair{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:8px;background:#fff;}
+  .tp-grid{display:grid;grid-template-columns:1fr 1fr 1fr 34px;gap:10px;align-items:end;}
+  .tp-del{border:1px solid var(--line);background:#fff;color:var(--warn);border-radius:6px;cursor:pointer;font-size:16px;line-height:1;padding:7px 0;font-weight:700;height:38px;}
+  .tp-del:hover{background:#fbecea;}
+
+  /* Signature pad */
+  .sig-pad-wrap{position:relative;}
+  .sig-pad{width:100%;height:130px;border:1px solid var(--line);border-radius:6px;background:#fff;touch-action:none;cursor:crosshair;display:block;}
+  .sig-clear{position:absolute;top:8px;right:8px;border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:5px;font-size:12px;padding:3px 9px;cursor:pointer;}
+  .sig-clear:hover{background:var(--panel);color:var(--ink);}
+
+  .signoff{display:grid;grid-template-columns:1fr 1fr;gap:14px 20px;}
+  .conditional{display:none;}
+  .conditional.show{display:flex;}
+
+  footer.formfoot{background:var(--panel);border:1px solid var(--line);border-top:none;padding:14px 20px;font-size:12px;color:var(--muted);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;}
+
+  @media (max-width:680px){
+    .grid,.checklist,.signoff{grid-template-columns:1fr;}
+    .tp-grid{grid-template-columns:1fr;}
+    .tp-del{justify-self:end;width:40px;}
+    .row-head{display:none;}
+    .row-line{grid-template-columns:1fr;gap:6px;border:1px solid var(--line-soft);border-radius:6px;padding:10px;}
+    .row-line .del{justify-self:end;width:40px;}
+    .mast-meta{text-align:left;}
+    .jumps{display:none;}
+  }
+
+  @page{ size:A4 landscape; margin:8mm; }
+  @media print{
+    *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
+    .navbar,.actions,.add-row,.row-line .del,.coc-block .del-block,.save-note,.note,.tp-del,.sig-clear{display:none !important;}
+    body{background:#fff;font-size:8.5px;}
+    input.r-pos,.r-pos{ color:#16324a !important; -webkit-text-fill-color:#16324a !important; opacity:1 !important; font-weight:600 !important; background:transparent !important; }
+    .roster-row .r-posref{ background:#16324a !important; color:#fff !important; -webkit-text-fill-color:#fff !important; }
+    section.block{ padding:8px 10px !important; margin-bottom:8px !important; }
+    .roster-row{ padding:1px 0 !important; }
+    .sec-head{ margin-bottom:6px !important; }
+    .roster.planned .roster-head,.roster.planned .roster-row{grid-template-columns:1.0fr 46px 1.6fr 70px 0.95fr !important;gap:5px !important;}
+    .roster.actual .roster-head,.roster.actual .roster-row{grid-template-columns:1.0fr 46px 1.6fr 70px 0.95fr 40px !important;gap:5px !important;}
+    .roster-row select,.roster-row input,.roster-row .r-pos-cell{min-width:0 !important;}
+    .roster-row .r-pos-cell{gap:4px !important;}
+    .roster-head{font-size:7.5px !important;}
+    input,select,textarea{padding:2px 4px !important;font-size:8.5px !important;}
+    .roster-head,.ex-block-lbl,.ex-appr-lbl,.sec-num{font-size:8px !important;}
+    .ex-tile,.rsf-tile{padding:6px 8px !important;}
+    h3{font-size:12px !important;}
+    header.mast{background:#16324a !important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    section.block{padding:12px 14px;}
+    .coc-block,.travel-pair,.row-line,.signoff,.sig-pad-wrap{break-inside:avoid;}
+    .roster-row,.ex-block,.ex-appr,.ratio-sum tr,.shiftsum-group,.shiftsum-tbl tr{break-inside:avoid;}
+    #secRatioShort,#secShiftSummary,#secNotesSummary,#sec3,#secPortwaysComments,.titleblock{break-inside:avoid;}
+    .roster-head{break-after:avoid;}
+    #sec2{break-before:page;page-break-before:always;}
+    .sec-head{break-after:avoid;}
+    input,select,textarea{border-color:#999 !important;}
+    .wrap{padding-bottom:0;}
+    #secApproval .note{display:flex !important;}
+    #secApproval input::placeholder,#secApproval textarea::placeholder{color:transparent !important;}
+  }
+  /* PortWays approval band */
+  .portways-band{border-top:3px solid var(--steel);}
+  .portways-band .band-head{display:flex;align-items:center;gap:12px;margin:0 0 4px;flex-wrap:wrap;}
+  .band-label{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#fff;background:var(--steel);padding:3px 10px;border-radius:4px;}
+  .portways-band h3{margin:0;font-size:16px;color:var(--navy);font-weight:700;}
+  .band-note{margin:0 0 16px;color:var(--muted);font-size:12.5px;}
+  h4.sub{margin:20px 0 12px;font-size:13px;color:var(--navy);font-weight:700;border-bottom:1px solid var(--line-soft);padding-bottom:6px;}
+  h4.sub:first-of-type{margin-top:6px;}
+  .steps-block{background:var(--panel);border:1px solid var(--line-soft);border-radius:6px;padding:12px 16px;margin:14px 0 4px;}
+  .steps-intro{margin:0 0 8px;font-size:13px;font-weight:600;color:var(--navy);}
+  .steps-list{margin:0;padding-left:22px;}
+  .steps-list li{font-size:12.5px;color:var(--ink);margin:6px 0;line-height:1.5;}
+  .exempt-list{max-height:230px;overflow-y:auto;border:1px solid var(--line-soft);border-radius:6px;padding:8px 10px;background:var(--panel);display:flex;flex-direction:column;gap:4px;}
+  .exempt-item{display:flex;align-items:flex-start;gap:8px;font-size:12.5px;font-weight:500;color:var(--ink);padding:3px 2px;cursor:pointer;line-height:1.35;}
+  .exempt-item input{width:15px;height:15px;flex:none;margin-top:1px;accent-color:var(--steel);cursor:pointer;}
+  @media print{.exempt-list{max-height:none;overflow:visible;border:none;padding:0;background:none;}.exempt-item:not(:has(input:checked)){display:none;}}
+  .print-note{background:#fbf6e9;border-color:#e6d3a3;color:#6b5418;border-left:3px solid #c79a3a;}
+  @media print{.print-note{display:flex !important;}}
+  .booking-block{border:1px solid var(--line-soft);border-radius:8px;padding:12px 14px;margin-bottom:10px;background:#fff;}
+  .bk-line2{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-top:6px;}
+  .bk-line2 .field{flex:1 1 150px;margin:0;}
+  .bk-line2 .del{flex:0 0 auto;border:1px solid var(--line);background:#fff;color:var(--warn);border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;padding:0 14px;height:38px;align-self:flex-end;}
+  .bk-line2 .del:hover{background:#fbecea;}
+  .bk-prov[readonly]{background:#f3f5f7;color:var(--muted);cursor:not-allowed;}
+  @media print{.booking-block .del{display:none !important;}}
+  .actions-help{font-size:12.5px;color:var(--muted);margin:8px 2px 2px;line-height:1.45;max-width:700px;}
+  @media print{.actions-help{display:none !important;}}
+
+  .titleblock p{max-width:none;}
+  .conditional.show{display:block;}
+  .note.conditional.show{display:flex;}
+  .stage-wrap{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--ink);}
+  .stage-wrap select{font:inherit;font-size:13px;border:1px solid var(--steel);border-radius:6px;padding:7px 26px 7px 10px;color:var(--navy);font-weight:600;background:#fff;appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' fill='none' stroke='%232e6a8e' stroke-width='1.6'/></svg>");background-repeat:no-repeat;background-position:right 9px center;cursor:pointer;}
+  .subhead{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:18px 0 6px;font-size:13px;font-weight:700;color:var(--navy);letter-spacing:.3px;text-transform:uppercase;}
+  .roster{border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-top:8px;}
+  .roster-head,.roster-row{display:grid;gap:8px;align-items:center;padding:8px 10px;}
+  .roster.planned .roster-head,.roster.planned .roster-row{grid-template-columns:0.85fr 66px 1.4fr 100px 0.85fr;}
+  .roster.actual .roster-head,.roster.actual .roster-row{grid-template-columns:0.85fr 66px 1.4fr 100px 0.85fr 54px;}
+  .roster-head{background:var(--steel-soft);font-size:11px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.3px;}
+  .roster-row{border-top:1px solid var(--line);}
+  .roster-row input,.roster-row select{width:100%;font-size:12.5px;padding:6px 8px;}
+  .roster-row input[readonly]{background:var(--steel-soft);font-weight:600;color:var(--navy);border-color:transparent;}
+  .roster-row .r-coc[data-fixed="1"]{background:var(--steel-soft);font-weight:600;color:var(--navy);}
+  .roster-row .r-changed-cell{display:flex;justify-content:center;}
+  .roster-row .r-changed-cell input{width:16px;height:16px;accent-color:var(--steel);}
+  .roster-row .r-shift-other-wrap{grid-column:1 / -1;}
+  /* Matrix met? cell */
+  .roster-row .r-matrix-cell{display:flex;flex-direction:column;gap:3px;justify-content:center;}
+  .roster-row .r-matrix-cell .r-mlabel{display:none;}
+  .roster-row select.r-matrix[data-state="No"]{border-color:#c79a3a;background-color:#fbf6e9;color:#6b5418;font-weight:600;}
+  /* Exemption request sub-panel (shown when Matrix met? = No) */
+  .roster-row .r-exempt-wrap{grid-column:1 / -1;}
+  .r-exempt{margin:6px 0 2px;background:#fbf6e9;border:1px solid #e6d3a3;border-left:4px solid #c79a3a;border-radius:6px;padding:12px 14px;}
+  .r-exempt-head{font-size:11.5px;font-weight:700;color:#6b5418;text-transform:uppercase;letter-spacing:.4px;margin-bottom:10px;display:flex;gap:7px;align-items:center;}
+  .r-exempt-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;}
+  .ex-tile .rx{display:flex;flex-direction:column;gap:4px;font-size:11.5px;font-weight:600;color:#6b5418;}
+  .ex-tile .rx.span2{grid-column:1 / -1;}
+  .ex-tile input,.ex-tile textarea{width:100%;font:inherit;font-size:12.5px;color:var(--ink);border:1px solid #ddca9c;border-radius:5px;background:#fff;padding:7px 9px;}
+  .ex-tile input[type=checkbox],.ex-tile input[type=radio]{width:16px;height:16px;min-width:16px;padding:0;border:0;border-radius:0;background:none;accent-color:var(--steel);cursor:pointer;vertical-align:-2px;box-shadow:none;}
+  .ex-tile textarea{min-height:56px;resize:vertical;}
+  .ex-tile select{width:100%;font:inherit;font-size:12.5px;color:var(--ink);border:1px solid #ddca9c;border-radius:5px;background-color:#fff;padding:7px 9px;}
+  .ex-fields{display:contents;}
+  .rx-note{grid-column:1/-1;background:#eef4fa;border-left:3px solid var(--steel);border-radius:5px;padding:7px 10px;font-size:12px;color:var(--navy);}
+  .rx-ne-note{grid-column:1/-1;background:#fbf6e9;border:1px solid #e6d3a3;border-radius:5px;padding:6px 9px;font-size:12px;color:#6b5418;}
+  .rx-multi{grid-column:1/-1;border:1px solid var(--line);border-radius:6px;padding:5px 10px;}
+  .rx-multi-lbl{font-weight:600;font-size:11px;color:var(--navy);margin:1px 0 3px;}
+  .rx-chk{display:flex;align-items:center;justify-content:space-between;gap:14px;font-size:12px;font-weight:400;margin:0;padding:1px 2px;white-space:nowrap;line-height:1.5;}
+  .rx-chk span{flex:1 1 auto;overflow:visible;text-overflow:clip;white-space:nowrap;}
+  .rx-chk input{flex:0 0 auto;margin:0;}
+  .rx-na{font-size:11.5px;color:var(--muted);font-style:italic;}
+  .rx-6mo{grid-column:1/-1;font-size:12px;font-weight:600;color:var(--navy);background:#eef4fa;border-radius:5px;padding:6px 9px;}
+  .roster-row .r-shiftex-wrap{grid-column:1 / -1;margin-top:4px;}
+  .roster-row .r-shiftex-alt{background:#eaf1f8;border:1px solid #b9d0e6;border-left:4px solid var(--steel);border-radius:8px;padding:9px 12px;display:flex;align-items:center;gap:10px;}
+  .roster-row .r-shiftex-lbl{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--steel);flex:0 0 auto;}
+  .roster-row .r-shiftex-comment{flex:1 1 auto;font:inherit;font-size:12.5px;padding:6px 9px;border:1px solid var(--line);border-radius:5px;}
+  .roster-row .r-shiftex-day{background:#fbe9df;border:1px solid #e6b89f;border-left:4px solid #c2571f;border-radius:8px;padding:9px 12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+  .roster-row .r-shiftex-amsa-lbl{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:#8a3c12;white-space:nowrap;}
+  .roster-row .r-shiftex-amsa-lbl input{width:15px;height:15px;flex:0 0 auto;}
+  .roster-row .r-shiftex-daycomment{flex:1 1 200px;font:inherit;font-size:12.5px;padding:6px 9px;border:1px solid var(--line);border-radius:5px;}
+  .ex-list{display:flex;flex-direction:column;gap:10px;margin-bottom:8px;}
+  .ex-block{border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:#fff;}
+  .ex-block-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;}
+  .ex-block-lbl{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);}
+  .ex-appr{margin-top:12px;border-top:1px dashed #d8c9a6;padding-top:10px;background:#f4f7fa;border-radius:8px;padding:10px 12px;}
+  .ex-appr-lbl{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#8a6d1e;margin-bottom:8px;}
+  .ex-appr-grid{display:grid;grid-template-columns:1fr 1fr 1.1fr;gap:8px 14px;}
+  .ex-appr-grid label{display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:var(--navy);}
+  .ex-appr-grid input,.ex-appr-grid select{font:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--line);border-radius:5px;background:#fff;}
+  .ex-remove{background:none;border:1px solid #e6a89f;color:#b03a2e;border-radius:6px;padding:3px 9px;font-size:11px;cursor:pointer;font-weight:600;}
+  .btn.ghost.ex-add{font-size:12px;padding:5px 12px;}
+  .ex-summary{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  .ex-sum-col{border:1px solid var(--line);border-radius:8px;padding:10px 14px;}
+  .ex-sum-h{font-weight:700;font-size:12.5px;color:var(--navy);margin-bottom:6px;}
+  .ex-sum-note{font-weight:400;font-size:11px;color:var(--muted);}
+  .ex-summary ul{margin:0;padding-left:18px;font-size:12.5px;}
+  .ex-summary li{margin:2px 0;}
+  .ex-summary li.ex-none{list-style:none;margin-left:-18px;color:var(--muted);font-style:italic;}
+  @media(max-width:680px){.ex-summary{grid-template-columns:1fr;}}
+  .rx-mtbl{width:100%;table-layout:fixed;border-collapse:collapse;margin-top:2px;}
+  .rx-mtbl td{vertical-align:top;padding:3px 12px 3px 0;width:50%;}
+  .rx-mck{display:block;font-size:12px;font-weight:400;line-height:1.35;cursor:pointer;color:var(--navy);}
+  .rx-mck input{margin:0 8px 0 0;vertical-align:-1px;}
+  .rx-mtbl2{width:100%;border-collapse:collapse;margin-top:2px;}
+  .rx-mtbl2 td{padding:4px 10px 4px 0;vertical-align:middle;}
+  .rx-mtbl2 .rx-al{font-size:12px;font-weight:400;color:var(--navy);}
+  .rx-mtbl2 .rx-ar{width:74px;text-align:left;white-space:nowrap;}
+  .rx-mtbl2 .rx-ar input[type=number]{width:52px;padding:3px 6px;}
+  .rx-mtbl2 .rx-ar select{width:auto;}
+  .rx-notyet{font-weight:400;}
+  .rx-exreq{grid-column:1/-1;background:#fbe9df;border:1px solid #e6b89f;border-left:4px solid #c2571f;border-radius:5px;padding:7px 10px;}
+  .rx-exreq .rx-chk{white-space:nowrap;gap:12px;}
+  .rx-exreq .rx-chk span{flex:1 1 auto;overflow:visible;text-overflow:clip;white-space:nowrap;font-weight:600;color:#8a3c12;}
+  .r-exempt-grid .span2{grid-column:1 / -1;}
+  .ex-summary-grouped{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
+  .ex-summary-grouped .ex-sum-col{border:1px solid var(--line);border-radius:8px;padding:10px 12px;}
+  .ex-sum-appr{border-top:3px solid #2e8b57;}.ex-sum-na{border-top:3px solid #b03a2e;}.ex-sum-info{border-top:3px solid #c9a227;}.ex-sum-pend{border-top:3px solid #6b7c88;}.ex-sum-shift{border-top:3px solid #2e6a8e;}
+  @media(max-width:900px){.ex-summary-grouped{grid-template-columns:1fr;}}
+  .relief-auto{border:1px solid var(--line);border-radius:8px;padding:10px 14px;}
+  .relief-auto-who{font-size:13px;color:var(--navy);margin-bottom:8px;}
+  .relief-auto-sams{color:var(--muted);font-weight:600;font-size:12px;margin-left:4px;}
+  .relief-eng{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px 16px;}
+  .relief-eng .rlf-f{display:flex;flex-direction:column;gap:4px;font-size:11.5px;font-weight:600;color:var(--navy);}
+  .relief-empty{color:var(--muted);font-style:italic;font-size:12.5px;padding:4px 2px;}
+  @media(max-width:680px){.relief-eng{grid-template-columns:1fr;}}
+  .roster-row .r-shift:disabled{background:#f1eee6;color:var(--muted);cursor:default;opacity:1;-webkit-text-fill-color:var(--ink);}
+  .ex-stack{display:flex;flex-direction:column;gap:12px;margin-top:12px;}
+  .ex-stack-h{font-weight:700;color:var(--navy);font-size:12.5px;text-transform:uppercase;letter-spacing:.4px;margin:16px 0 2px;padding-bottom:4px;border-bottom:1px solid var(--line);}
+  .ex-tile{background:#faf6ec;border:1px solid #e6d9b8;border-left:5px solid #caa23c;border-radius:10px;padding:14px 16px;}
+  .ex-tile-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:10px;flex-wrap:wrap;}
+  .ex-tile-warn{font-weight:700;text-transform:uppercase;letter-spacing:.4px;font-size:11.5px;color:#8a6d1e;display:flex;gap:6px;align-items:center;}
+  .ex-tile-who{font-weight:700;font-size:13px;color:var(--navy);}
+  .rsf-chk{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:var(--navy);}
+  .rsf-tp{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin-top:8px;font-size:12.5px;}
+  .rsf-tp-lbl{font-weight:600;color:var(--navy);}
+  .rsf-book-lbl{display:flex;align-items:center;gap:6px;color:var(--navy);}
+  .rsf-book-lbl input{width:auto;}
+  .rsf-outcome{font-weight:700;font-size:12px;}
+  .rsf-ex-out{color:#b0561f;}
+  .rsf-tp-out{color:#2e6a8e;}
+  .rsf-cmt-lbl{display:flex;flex-direction:column;gap:3px;margin-top:8px;font-size:11px;text-transform:uppercase;letter-spacing:.3px;color:var(--muted);font-weight:700;}
+  .appr-row{display:grid;grid-template-columns:1.2fr 1fr 1.3fr 1fr 0.95fr 0.95fr 34px;gap:8px;align-items:center;margin-bottom:6px;}
+  .appr-head{font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:700;}
+  .appr-row input{font:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:#fff;width:100%;}
+  .ap-del{border:1px solid var(--line);background:#fff;border-radius:6px;width:30px;height:30px;cursor:pointer;color:var(--muted);font-size:15px;line-height:1;}
+  .appr-empty{color:var(--muted);font-style:italic;font-size:12.5px;padding:4px 2px;}
+  #actualStatusBody{margin-top:6px;}
+  .as-empty{color:var(--muted);font-style:italic;font-size:12.5px;padding:4px 2px;}
+  .as-line{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:8px 10px;border:1px solid var(--line);border-left:4px solid var(--steel);border-radius:8px;margin-bottom:6px;}
+  .as-line.as-ex{border-left-color:#c2571f;}
+  .as-who{font-weight:600;color:var(--navy);font-size:12.5px;flex:1 1 170px;min-width:150px;}
+  .as-item{font-size:12.5px;color:var(--ink);flex:1 1 200px;min-width:160px;}
+  .as-type-lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:700;flex:0 0 auto;}
+  .as-line select,.as-line input[type=text]{font:inherit;font-size:12px;padding:5px 7px;border:1px solid var(--line);border-radius:5px;background:#fff;}
+  .as-line .as-status{flex:0 0 auto;}
+  .as-line .as-who-in,.as-line .as-item-in{flex:1 1 160px;}
+  .as-line .as-comment{flex:1 1 100%;}
+  .as-del{flex:0 0 auto;border:1px solid var(--line);background:#fff;border-radius:5px;width:26px;height:26px;cursor:pointer;color:var(--muted);font-size:15px;line-height:1;}
+  .rx-block-notice{display:flex;gap:7px;align-items:center;background:#fbe4e0;border:1px solid #e6a89f;border-left:4px solid #b03a2e;border-radius:5px;color:#8a2c22;font-size:12.5px;font-weight:600;padding:9px 11px;}
+  .ex-tile input:focus,.ex-tile textarea:focus{outline:none;border-color:var(--focus);box-shadow:0 0 0 3px rgba(46,106,142,.18);}
+  .roster-row .r-pos-cell{display:flex;align-items:center;gap:7px;}
+  #secActual,#secExSummary,#secPortways,#secExtras,#actualExStack{display:none !important;}
+  .r-exempt-note{margin-top:6px;font-size:11px;font-weight:700;color:#b03a2e;}
+  .ratio-sum{width:100%;border-collapse:collapse;font-size:12.5px;}
+  .ratio-sum th,.ratio-sum td{border:1px solid var(--line);padding:6px 8px;text-align:center;}
+  .ratio-sum th:first-child,.ratio-sum td:first-child{text-align:left;}
+  .ratio-sum thead th{background:var(--sand);color:var(--navy);font-weight:700;font-size:11px;}
+  .ratio-sum th span{font-weight:400;color:var(--muted);font-size:10px;}
+  .ratio-sum .ratio-short{background:#fdecea;}
+  .ratio-sum .ratio-short td:last-child{color:#b03a2e;font-weight:700;}
+  .ratio-sum .ratio-ok td:last-child{color:#2e8b57;}
+  .ratio-note{font-size:12px;margin-top:8px;color:var(--muted);}
+  .shiftsum-group{margin-bottom:14px;}
+  .shiftsum-h{font-weight:700;color:var(--navy);font-size:13px;background:var(--sand);border-left:3px solid var(--steel);padding:6px 10px;border-radius:5px;margin-bottom:6px;}
+  .shiftsum-tbl{width:100%;border-collapse:collapse;font-size:12.5px;}
+  .shiftsum-tbl td{border:1px solid var(--line);padding:5px 9px;}
+  .shiftsum-tbl td:nth-child(1){width:34%;font-weight:600;color:var(--navy);}
+  .shiftsum-tbl td:nth-child(3){width:22%;color:var(--muted);}
+  .shiftsum-none{color:var(--muted);font-style:italic;font-size:12.5px;padding:2px 4px;}
+  .shiftsum-tbl .notes-hdr td{background:var(--sand);font-weight:700;color:var(--navy);font-size:11px;text-transform:uppercase;letter-spacing:.3px;}
+  #secPortwaysComments textarea{width:100%;font:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;resize:vertical;box-sizing:border-box;}
+  .r-adhoc-dates{display:flex;gap:10px;margin-top:6px;padding-top:6px;border-top:1px dashed var(--line);}
+  .r-adh-lbl{display:flex;flex-direction:column;gap:2px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;color:var(--muted);}
+  .r-adhoc-dates input{font:inherit;font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:5px;}
+  .roster-row .r-posref{flex:0 0 auto;min-width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;background:var(--navy);color:#fff;border-radius:50%;font-size:10.5px;font-weight:700;}
+  .roster-row .r-pos-cell .r-pos{min-width:0;}
+  .roster-row .r-name-cell,.roster-row .r-sams-cell{display:flex;flex-direction:column;gap:3px;justify-content:center;}
+  .roster-row .r-slabel,.roster-row .r-rlabel{display:none;}
+  .roster-row .r-ratio-cell{display:flex;flex-wrap:wrap;gap:3px 6px;align-content:center;}
+  .roster-row .r-ratio{display:flex;align-items:center;gap:3px;font-size:9px;color:var(--muted);white-space:nowrap;}
+  .roster-row .r-ratio input{width:13px;height:13px;flex:0 0 auto;margin:0;accent-color:var(--steel);}
+  .roster-row .r-flags-cell{display:flex;flex-direction:row;flex-wrap:wrap;gap:3px 10px;align-items:center;justify-content:flex-start;}
+  .cl-panel{margin-bottom:14px;}
+  .cl-panel + .cl-panel{border-top:2px solid var(--line);padding-top:12px;}
+  .cl-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:4px 0 8px;}
+  .cl-title{font-weight:700;color:var(--navy);font-size:13px;text-transform:uppercase;letter-spacing:.4px;}
+  .cl-date-note{font-size:12px;color:var(--muted);}
+  .cl-head .cl-date{font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:4px;}
+  .cl-head .cl-lbl{font-size:12px;color:var(--muted);}
+  .cl-del{margin-left:auto;padding:3px 8px !important;font-size:12px;color:#b03a2e;}
+  .cl-sum-h{font-weight:700;color:var(--navy);font-size:12px;text-transform:uppercase;letter-spacing:.4px;margin:10px 0 5px;padding-bottom:3px;border-bottom:1px solid var(--line);}
+  .roster-row .r-subline{grid-column:1 / -1;display:flex;flex-wrap:wrap;align-items:center;gap:5px 16px;padding:5px 4px 1px;margin-top:4px;border-top:1px dashed var(--line);}
+  .roster-row .r-subline-lbl{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--navy);}
+  .roster-row .r-flag{display:flex;align-items:center;gap:5px;font-size:9.5px;color:var(--muted);white-space:nowrap;}
+  .roster-row .r-flag input{width:14px;height:14px;flex:0 0 auto;accent-color:var(--steel);margin:0;}
+  .roster-row .r-flaglbl{font-size:9.5px;}
+  .roster-row .r-adhoc-wrap{grid-column:1 / -1;}
+  .roster-row .r-adhoc{background:#fbf6e9;border:1px solid #e6d3a3;border-left:4px solid #c79a3a;border-radius:8px;padding:10px 14px;margin-top:4px;}
+  .roster-row .r-adhoc-head{font-weight:700;text-transform:uppercase;letter-spacing:.4px;font-size:11px;color:#6b5418;margin-bottom:8px;}
+  .roster-row .r-adhoc-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px 16px;}
+  .roster-row .r-adhoc-grid label{display:flex;flex-direction:column;gap:4px;font-size:11.5px;font-weight:600;color:var(--navy);}
+  .roster-row .r-adhoc-grid input,.roster-row .r-adhoc-grid select{font:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--line);border-radius:5px;}
+  .roster-row .r-name-other{margin-top:4px;}
+  .roster-row .r-other-extra{margin-top:6px;display:flex;flex-direction:column;gap:6px;padding:8px 9px;background:#f4f7fa;border:1px solid var(--line);border-radius:6px;}
+  .roster-row .r-oth-lbl{display:flex;flex-direction:column;gap:3px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--muted);}
+  .roster-row .r-oth-lbl select,.roster-row .r-oth-lbl input{font:inherit;font-size:12.5px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--ink);padding:6px 8px;border:1px solid var(--line);border-radius:5px;background:#fff;width:100%;}
+  /* Relief crew section */
+  .relief-card{border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:10px 0;background:#fafcfe;}
+  .relief-top{display:grid;grid-template-columns:1.6fr 1fr auto;gap:12px;align-items:end;}
+  .relief-top .rlf-f{display:flex;flex-direction:column;gap:4px;font-size:11.5px;font-weight:600;color:var(--navy);}
+  .relief-top .rlf-remove{align-self:end;background:none;border:1px solid #e6a89f;color:#b03a2e;border-radius:6px;padding:7px 12px;font-size:12px;cursor:pointer;font-weight:600;}
+  .rlf-positions{margin:10px 0 4px;display:flex;flex-direction:column;gap:8px;}
+  .rlf-pos{display:grid;grid-template-columns:1fr 1.8fr 34px;gap:10px;align-items:center;}
+  .rlf-pos .rlf-x{background:none;border:1px solid var(--line);border-radius:6px;color:var(--muted);font-size:15px;line-height:1;cursor:pointer;padding:5px 0;}
+  .btn.ghost.rlf-addpos{font-size:12px;padding:5px 10px;}
+  /* Ad Hoc box */
+  .adhoc-box{margin:14px 0 2px;background:#fbf6e9;border:1px solid #e6d3a3;border-left:4px solid #c79a3a;border-radius:8px;padding:12px 15px;color:#6b5418;}
+  .adhoc-head{font-weight:700;text-transform:uppercase;letter-spacing:.4px;font-size:12.5px;display:flex;gap:8px;align-items:center;margin-bottom:4px;}
+  .adhoc-box p{margin:4px 0 10px;font-size:12.5px;line-height:1.45;}
+  .adhoc-box .field label{color:#6b5418;}
+  @media (max-width:680px){.roster-head{display:none;}.roster.planned .roster-row,.roster.actual .roster-row{grid-template-columns:1fr 1fr;}
+    .roster-row .r-matrix-cell .r-mlabel,.roster-row .r-slabel,.roster-row .r-rlabel{display:block;font-size:11px;font-weight:600;color:var(--muted);}
+    .relief-top{grid-template-columns:1fr;}.rlf-pos{grid-template-columns:1fr;}.roster-row .r-adhoc-grid{grid-template-columns:1fr;}
+    .r-exempt-grid{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+
+<header class="mast">
+  <div class="mast-inner">
+    <div class="brand">
+      <div class="mark"><img src="data:image/jpeg;base64,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" alt="PortWays Ashburton logo"></div>
+      <div>
+        <h1>Portways</h1>
+        <div class="sub">Crew List &amp; Shift Allocation</div>
+      </div>
+    </div>
+    <div class="mast-meta">
+      <div><strong>Crew list &amp; shift allocation</strong></div>
+      <div>Revision 2 &middot; <span id="mastTeamName">United Marine</span></div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="titleblock">
+    <h2>Crew list and shift allocation</h2>
+    <p>Complete the <strong>Planned</strong> Crew list and submit it not later than two weeks before the crew change. Resubmit a new list any time the crew complement changes. For each CC period, select <strong>Planned</strong> or <strong>Actual</strong> and the version being submitted. The initial crew list is <strong>Planned 1</strong>, submitted at least 2 weeks before crew change; any subsequent changes before CC day are <strong>Planned 2</strong>, and so on. On crew-change day, submit an <strong>Actual</strong> crew list &amp; shift allocation, and a new crew list for any changes within the crew-change period.</p>
+    <div style="margin-top:12px;display:flex;gap:10px;align-items:flex-start;background:#fbf6e9;border:1px solid #e6d3a3;border-left:4px solid #c79a3a;border-radius:6px;color:#6b5418;font-size:13px;line-height:1.45;padding:11px 14px;">
+      <span style="font-size:15px;line-height:1;flex:none;margin-top:1px">&#9888;</span>
+      <span><strong>Less than two weeks&rsquo; notice?</strong> If you will be changing one or more crew members with less than two weeks&rsquo; notice, contact <strong>Marina Cooley</strong> or <strong>Toni Austin</strong> directly, as well as completing the required <strong>Ad Hoc travel requests</strong> and <strong>this form</strong>.</span>
+    </div>
+  </div>
+
+  <!-- Sticky navigation + progress -->
+  <div class="navbar">
+    <div class="navrow">
+      <nav class="jumps" aria-label="Jump to section">
+        <a href="#sec1">1 &middot; Details</a>
+        <a href="#sec2">2 &middot; Crew lists</a>
+        <a href="#sec3">3 &middot; Sign-off</a>
+        <a href="#secPortwaysComments">Portways comments</a>
+      </nav>
+      <div class="spacer"></div>
+      <div class="progress-wrap">
+        <span id="progressLabel">0 of 0 required</span>
+        <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+      </div>
+    </div>
+    <div class="actions">
+      <label class="stage-wrap">Submitting as
+        <select id="stage">
+          <option>Planned 1</option><option>Planned 2</option><option>Planned 3</option><option>Planned 4</option>
+          <option>Actual 1</option><option>Actual 2</option><option>Actual 3</option><option>Other</option>
+        </select>
+      </label>
+      <button type="button" class="btn" id="printBtn">Print / Save as PDF</button>
+      <button type="button" class="btn secondary" id="printSummaryBtn" title="Prints only the Crew-by-shift, Ratio, Submitted-by and Portways-comments sections">Print summary only</button>
+      <button type="button" class="btn secondary" id="copyBtn">Copy summary</button>
+      <button type="button" class="btn secondary" id="saveHtmlBtn">Save editable copy</button>
+      <button type="button" class="btn ghost" id="resetBtn">Clear form</button>
+      <span class="save-note" id="saveNote"></span>
+    </div>
+    <p class="actions-help">Set <strong>Submitting as</strong> to the current version, then <strong>Print / Save as PDF</strong>. Save an editable copy for your records, then email the saved PDF to <a id="mailLink" href="mailto:MarinaCooley@portways.au,coordinator@portways.au?cc=operations@portways.au">Marina Cooley</a> and coordinator@portways.au, cc operations@portways.au &mdash; tapping <a id="mailLink2" href="mailto:MarinaCooley@portways.au,coordinator@portways.au?cc=operations@portways.au">email this form</a> opens a message with the subject filled in.</p>
+  </div>
+
+  <form id="clsForm" autocomplete="off">
+
+    <!-- 1. Details -->
+    <section class="block" id="sec1">
+      <div class="sec-head"><span class="sec-num">1</span><h3>Details</h3></div>
+      <div class="grid">
+        <div class="field">
+          <label for="partnership">Partnership <span class="req">*</span></label>
+          <select id="partnership" data-req></select>
+        </div>
+        <div class="field">
+          <label for="vessel">Vessel <span class="req">*</span></label>
+          <select id="vessel" data-req></select>
+        </div>
+        <div class="field">
+          <label for="changedate">Crew change date <span class="req">*</span></label>
+          <input type="date" id="changedate" data-req>
+          <span class="help" id="ccHelp"></span>
+        </div>
+        <div class="field">
+          <label for="ccNumber">CC number</label>
+          <input type="text" id="ccNumber" readonly placeholder="Auto from crew-change date">
+        </div>
+        <div class="field">
+          <label for="swingoff">Swing off date</label>
+          <input type="date" id="swingoff">
+        </div>
+        <div class="field">
+          <label for="preparedby">Prepared by <span class="req">*</span></label>
+          <input type="text" id="preparedby" data-req placeholder="Full name">
+        </div>
+        <div class="field">
+          <label for="preparedrole">Position / role <span class="req">*</span></label>
+          <select id="preparedrole" data-req data-conditional="roleOtherWrap" data-show-value="Other">
+            <option value="">— Select —</option>
+            <option>Master</option>
+            <option>Managing Partner</option>
+            <option value="Other">Other (specify)</option>
+          </select>
+          <span class="help">Normally completed by the Master or Managing Partner.</span>
+        </div>
+        <div class="field conditional" id="roleOtherWrap">
+          <label for="preparedroleother">Position / role &mdash; please specify <span class="req">*</span></label>
+          <input type="text" id="preparedroleother" placeholder="Nominate position">
+        </div>
+        <div class="field">
+          <label for="email">Contact email <span class="opt">(optional)</span></label>
+          <input type="email" id="email" placeholder="name@example.com">
+          <span class="help">Best contact for follow-up.</span>
+        </div>
+      </div>
+      <div class="adhoc-box" id="adhocBox" style="display:none">
+        <div class="adhoc-head"><span>&#9888;</span> Ad Hoc crew change</div>
+        <p>The crew change date selected is <b>not a designated crew-change day</b>, so this submission will be flagged as <b>Ad Hoc</b> (added to the submission label and email subject).</p>
+        <div class="field"><label for="adhocReason">Reason / notes</label><input type="text" id="adhocReason" placeholder="Reason for the ad hoc crew change"></div>
+      </div>
+    </section>
+
+    <!-- 2. Crew lists -->
+    <section class="block" id="sec2">
+      <div class="sec-head"><span class="sec-num">2</span><h3 id="sec2h3">Crew List &amp; Shift Allocation</h3></div>
+
+      <div class="note"><span>&#8505;</span><span><b>Standard Shifts:</b> 0000&ndash;1200 &amp; 1200&ndash;2400, Cook = N/A. Anyone working outside those hours &mdash; check the AMSA crewing determination is met, then note the non-standard shift on the form.<br><b>Chief Mate Unlimited</b> (in position 3) must hold Chief Mate Unlimited or equivalent COC. Change the remaining position shifts to match.<br>Tick <b>Relief</b> against any crew member who is <b>not part of this team permanently</b>.<br>Tick <b>Ad Hoc</b> if a crew member's swing does <b>not</b> run from one designated crew-change day to the next &mdash; Joining and Leaving date fields then appear under their name.<br>Swings longer than <b>28 days</b> require an <b>Extended Swing approval</b>.<br>This form can be <b>saved as an editable copy</b> (button below) so it can be reused if further changes are needed.</span></div>
+      <div id="crewLists">
+        <div class="cl-panel" data-idx="0">
+          <div class="cl-head"><span class="cl-title">Crew list 1 &mdash; crew change day</span><span class="cl-date-note" id="cl0date"></span></div>
+          <div class="roster planned">
+            <div class="roster-head"><div>Position</div><div>Compliant / Exempt</div><div>Name</div><div>SAMS #</div><div>Shift</div></div>
+            <div id="plannedBody"></div>
+          </div>
+          <div id="plannedExStack" class="ex-stack"></div>
+        </div>
+      </div>
+      <div class="note" style="margin-top:10px"><span>&#8505;</span><span>If you already know of a <b>change within this crew-change period</b>, add a <span id="clNoteOrd">second</span> crew list &mdash; it copies the list above, then edit the rows that change and set the date it takes effect. Ratio requirements and the crew-by-shift summary are worked out separately for each list.</span></div>
+      <button type="button" class="btn secondary" id="addCrewList">+ Add another crew list</button>
+
+      <div id="secExtras" style="display:none">
+      <div class="subhead"><span>Relief crew</span></div>
+      <div class="note"><span>&#8505;</span><span>Auto-populated from planned rows with <b>Relief</b> ticked &mdash; answer the <b>Form of Engagement</b> for each.</span></div>
+      <div class="note"><span>&#8505;</span><span>Record any relief crew supporting this crew change. Add each person once, then use <b>+ Add position</b> to list more than one position they can cover.</span></div>
+      <div id="reliefBody"></div>
+
+      <div class="subhead"><span>Travel</span></div>
+      <div class="field"><label for="flightConfirm">Flight manifest check complete and all flights confirmed?</label>
+        <select id="flightConfirm"><option value="">— Select —</option><option>Yes</option><option>No</option></select></div>
+      <div id="travelBox" style="display:none">
+        <div class="note"><span>&#8505;</span><span>List any crew whose flights are <b>not yet confirmed</b>, and their travel direction.</span></div>
+        <div id="travelBody"></div>
+        <button type="button" class="btn secondary" id="addTravel">+ Add crew member</button>
+      </div>
+      </div>
+    </section>
+
+    <!-- Ratio requirement shortfalls -->
+    <section class="block" id="secRatioShort" style="display:none">
+      <div class="sec-head"><span class="sec-num">&#9888;</span><h3>Ratio requirements &mdash; crew per shift</h3><span class="hint">auto-generated</span></div>
+      <div id="ratioShortfallStack" class="ex-stack"></div>
+    </section>
+
+    <!-- Crew by shift -->
+    <section class="block" id="secShiftSummary" style="display:none">
+      <div class="sec-head"><span class="sec-num">&#9776;</span><h3>Crew by shift</h3><span class="hint">auto-generated</span></div>
+      <div id="shiftSummaryStack"></div>
+    </section>
+
+    <!-- Ad hoc dates & shift notes -->
+    <section class="block" id="secNotesSummary" style="display:none">
+      <div class="sec-head"><span class="sec-num">&#9998;</span><h3>Ad hoc dates &amp; shift notes</h3><span class="hint">auto-generated</span></div>
+      <div id="notesSummaryStack"></div>
+    </section>
+
+    <!-- Exemption summary -->
+    <section class="block" id="secExSummary">
+      <div class="sec-head"><span class="sec-num">&#9888;</span><h3>Exemption summary</h3><span class="hint">auto-generated</span></div>
+      <div class="ex-summary ex-summary-grouped">
+        <div class="ex-sum-col ex-sum-appr"><div class="ex-sum-h">Approved</div><ul id="exApproved"><li class="ex-none">None</li></ul></div>
+        <div class="ex-sum-col ex-sum-na"><div class="ex-sum-h">Not Approved</div><ul id="exNotApproved"><li class="ex-none">None</li></ul></div>
+        <div class="ex-sum-col ex-sum-info"><div class="ex-sum-h">Info Required</div><ul id="exInfoReq"><li class="ex-none">None</li></ul></div>
+        <div class="ex-sum-col ex-sum-pend"><div class="ex-sum-h">Pending approval</div><ul id="exPending"><li class="ex-none">None</li></ul></div>
+        <div class="ex-sum-col ex-sum-shift"><div class="ex-sum-h">Shift exemptions</div><ul id="exShift"><li class="ex-none">None</li></ul></div>
+        <div class="ex-sum-col"><div class="ex-sum-h">Training Plan <span class="ex-sum-note">(no exemption &ndash; complete per timeframe)</span></div><ul id="exCloseList"><li class="ex-none">None</li></ul></div>
+      </div>
+    </section>
+
+    <!-- 3. Sign-off (Partnership) -->
+    <section class="block" id="sec3">
+      <div class="sec-head"><span class="sec-num">3</span><h3>Submitted by</h3><span class="hint">Partnership</span></div>
+      <div class="field"><label for="teamComments">NOR comments</label><textarea id="teamComments" rows="3" placeholder="Any comments from NOR"></textarea></div>
+      <div class="signoff">
+        <div class="field"><label for="signname">Name</label><input type="text" id="signname" placeholder="Full name"></div>
+        <div class="field"><label for="signdate">Date</label><input type="date" id="signdate"></div>
+        <div class="field span2">
+          <label>Signature</label>
+          <div class="sig-pad-wrap">
+            <canvas id="sigCanvas" class="sig-pad"></canvas>
+            <button type="button" class="sig-clear" id="sigClear">Clear</button>
+          </div>
+          <span class="help">Draw above using a mouse or finger &mdash; or type your name below instead.</span>
+          <input type="text" id="signtype" placeholder="Or type full name as signature">
+        </div>
+      </div>
+    </section>
+
+    <!-- PortWays use — received -->
+    <section class="block portways-band" id="secPortways">
+      <div class="band-head">
+        <span class="band-label">PortWays use</span>
+        <h3>Received</h3>
+      </div>
+      <p class="band-note">Completed by Portways on receipt.</p>
+      <div class="grid">
+        <div class="field">
+          <label for="pw_stage">Version received</label>
+          <select id="pw_stage"><option value="">— Select —</option><option>Planned 1</option><option>Planned 2</option><option>Planned 3</option><option>Planned 4</option><option>Actual 1</option><option>Actual 2</option><option>Actual 3</option><option>Other</option></select>
+        </div>
+        <div class="field">
+          <label for="pw_received">Date received</label>
+          <input type="date" id="pw_received">
+        </div>
+        <div class="field">
+          <label for="pw_name">Received by</label>
+          <input type="text" id="pw_name" placeholder="Portways">
+        </div>
+        <div class="field span2">
+          <label for="pw_comments">Portways notes</label>
+          <textarea id="pw_comments" placeholder=""></textarea>
+        </div>
+      </div>
+    </section>
+
+  </form>
+
+    <!-- Actual crew list (crew-change day) -->
+    <section class="block" id="secActual">
+      <div class="sec-head"><span class="sec-num">A</span><h3>Actual crew list &amp; shift allocation</h3><button type="button" class="btn secondary" id="copyPlanned">Copy planned list to actual</button></div>
+      <div class="note"><span>&#8505;</span><span>Complete this on crew-change day. Use <b>Copy planned list to actual</b> to carry the planned list down, then update any changes and tick <b>Changed</b> for any position that differs.</span></div>
+      <div class="roster actual">
+        <div class="roster-head"><div>Position</div><div>Compliant / Exempt</div><div>Name</div><div>SAMS #</div><div>Shift</div><div>Changed</div></div>
+        <div id="actualBody"></div>
+      </div>
+      <div id="actualExStack" class="ex-stack"></div>
+    </section>
+
+    <!-- Portways comments -->
+    <section class="block" id="secPortwaysComments">
+      <div class="sec-head"><span class="sec-num">&#9998;</span><h3>Portways comments</h3></div>
+      <div class="field"><textarea id="portwaysComments" rows="4" placeholder="Portways comments"></textarea></div>
+    </section>
+
+  <footer class="formfoot">
+    <span>Portways &middot; Crew List &amp; Shift Allocation, Rev 2 &middot; <span id="footerDate"></span></span>
+    <span>Planned (2 weeks prior) &rarr; Actual (crew-change day)</span>
+  </footer>
+
+</div>
+
+<script>
+/* =========================================================================
+   EDIT YOUR LISTS HERE — keep the quotes and commas.
+   ========================================================================= */
+const PARTNERSHIPS = ["NOR","UNI","SIN","OPT","SMG","SM2","VAL"];
+const VESSELS = ["Airlie","Coolibah","Montebello","Rosily","Peak","Lily","Karri"];
+/* Watch shift options */
+const ROSTER_SHIFTS = ["2400-1200","1200-2400","0600-1800"];
+
+/* Acceptable Primary COC/COR/COP per position */
+const COC_MASTER  = ["Master"];
+const COC_CO1     = ["Master","Chief Mate"];
+const COC_CO2     = ["Master (Unlimited)","Chief Mate","Chief Mate with Master <500 GT unlimited and <3000 GT endorsement","Chief Mate <3000 GT with Master <500 GT unlimited and <3000 GT NC endorsement","Master <3000 GT","Master <500 GT","Master <100m NC"];
+const COC_2NDMATE = ["Master <45m NC","Master (Unlimited)","Chief Mate","Master <100m NC","Chief Mate with Master <500 GT unlimited and <3000 GT endorsement","Chief Mate <3000 GT with Master <500 GT unlimited and <3000 GT NC endorsement","Master <3000 GT","Master <500 GT","Mate <500 GT","Mate <500 GT with Chief Mate <3000 GT NC endorsement","Watchkeeper Deck"];
+const COC_CE      = ["Engineer Class 1 (Motor)","Engineer Class 1 (Steam and Motor)"];
+const COC_1E      = ["Engineer Class 2 (Motor)","Engineer Class 1 (Steam and Motor)","Engineer Class 1 (Motor)","Engineer Class 2 (Steam and Motor)"];
+const COC_AE      = ["Engineer Class 3 NC","Engineer Class 1 (Steam and Motor)","Engineer Class 1 (Motor)","Engineer Class 2 (Steam and Motor)","Engineer Class 2 (Motor)","Engineer Watchkeeper (Motor)","Engineer Watchkeeper (Steam and Motor)","Engineer Watchkeeper (Motor) endorsed Second Engineer <3000 kW","Engineer Watchkeeper (Steam and Motor) endorsed Second Engineer <3000 kW","Engineer Watchkeeper (Motor) endorsed Chief Engineer <3000 kW NC","Engineer Watchkeeper (Steam and Motor) endorsed Chief Engineer <3000 kW NC"];
+const COC_GPH     = ["Master <24m NC","Master <45m NC","Master (Unlimited)","Chief Mate","Master <100m NC","Chief Mate with Master <500 GT unlimited and <3000 GT endorsement","Chief Mate <3000 GT with Master <500 GT unlimited and <3000 GT NC endorsement","Master <3000 GT","Master <500 GT","Mate <500 GT","Mate <500 GT with Chief Mate <3000 GT NC endorsement","Watchkeeper Deck","Watchkeeper Deck <500 GT with <3000 GT NC endorsement","Watchkeeper Deck <500 GT","Chief Mate <3000 GT","Marine Engine Driver Grade 2 NC","Integrated Rating","ETO"];
+const COC_ETO     = ["Electro-Technical Officer","ETO"];
+const COC_COOK    = ["Marine Cook"];
+
+/* Fixed crew roster.
+   pos = fixed label  |  sel = position dropdown choices
+   watch = AM / PM / DAY (Master 1 cascades its shift to all AM rows)
+   shift = pre-filled watch
+   coc.fixed  = auto-filled, locked to the one acceptable ticket
+   coc.list   = limited dropdown
+   coc.dynamic = flex row; options follow the chosen position */
+const ROSTER = [
+  {pos:"Master 1",        posref:1,  watch:"AM",  shift:"2400-1200", reqkey:"Master", shiftFixed:true},
+  {pos:"Master 2",        posref:2,  watch:"PM",  shift:"1200-2400", reqkey:"Master", shiftFixed:true},
+  {pos:"Chief Mate Unlimited", posref:3,  watch:"AM",  shift:"2400-1200", reqkey:"CO1"},
+  {pos:"Chief Officer 2", posref:4,  watch:"PM",  shift:"1200-2400", reqkey:"CO2"},
+  {pos:"2nd Mate 1",      posref:5,  watch:"AM",  shift:"2400-1200", reqkey:"2ndMate", shiftFixed:true},
+  {pos:"2nd Mate 2",      posref:6,  watch:"PM",  shift:"1200-2400", reqkey:"2ndMate", shiftFixed:true},
+  {pos:"Chief Engineer",  posref:7,  watch:"AM",  shift:"2400-1200", reqkey:"ChiefEng"},
+  {pos:"1st Engineer",    posref:8,  watch:"PM",  shift:"1200-2400", reqkey:"FirstEng"},
+  {pos:"Assistant Engineer", posref:9,  watch:"AM", shift:"2400-1200", reqkey:"AsstEng", shiftFixed:true},
+  {pos:"Assistant Engineer", posref:10, watch:"PM", shift:"1200-2400", reqkey:"AsstEng", shiftFixed:true},
+  {pos:"GPH",             posref:11, watch:"AM",  shift:"2400-1200", reqkey:"GPH", shiftFixed:true},
+  {pos:"GPH",             posref:12, watch:"PM",  shift:"1200-2400", reqkey:"GPH", shiftFixed:true},
+  {pos:"GPH",             posref:13, watch:"AM",  shift:"2400-1200", reqkey:"GPH", shiftFixed:true},
+  {pos:"GPH",             posref:14, watch:"PM",  shift:"1200-2400", reqkey:"GPH", shiftFixed:true},
+  {sel:["GPH","GPH/ETO","Assistant Engineer"], posref:15, watch:"AM", shift:"2400-1200"},
+  {sel:["GPH","GPH/ETO","Assistant Engineer"], posref:16, watch:"PM", shift:"1200-2400"},
+  {pos:"Cook",            posref:17, watch:"DAY", shift:"", reqkey:"Cook", shiftFixed:true}
+];
+/* ===== MATRIX QUALIFICATIONS (source: ATB Skills Matrix 29/06/26) =====
+   Edit codes/names here. The dropdown + optgroups rebuild automatically. */
+const QUALS = [
+  {c:"QL-01", g:"1. Qualification", n:"Master"},
+  {c:"QL-02", g:"1. Qualification", n:"Chief Mate"},
+  {c:"QL-03", g:"1. Qualification", n:"Master <100m NC"},
+  {c:"QL-04", g:"1. Qualification", n:"Master <45m NC"},
+  {c:"QL-05", g:"1. Qualification", n:"Engineer Class 1, Chief Engineer (Motor)"},
+  {c:"QL-06", g:"1. Qualification", n:"Engineer Class 2, Second Engineer, Chief Engineer <3000 kW (Motor)"},
+  {c:"QL-07", g:"1. Qualification", n:"Engineer Class 3 NC"},
+  {c:"QL-08", g:"1. Qualification", n:"Master <24m NC"},
+  {c:"QL-09", g:"1. Qualification", n:"Marine Engine Driver Grade 2 NC"},
+  {c:"QL-10", g:"1. Qualification", n:"Integrated Rating, Able Seafarer - Deck, Able Seafarer - Engineer (STCW Reg II/5 & III/5)"},
+  {c:"QL-11", g:"1. Qualification", n:"Marine Cook"},
+  {c:"QL-12", g:"1. Qualification", n:"Certificate of Safety Training (COST)"},
+  {c:"QL-13", g:"1. Qualification", n:"ECDIS - STCW Reg II/1 & II/2"},
+  {c:"QL-14", g:"1. Qualification", n:"GMDSS - STCW Reg IV/2"},
+  {c:"QL-15", g:"1. Qualification", n:"Long Range Operator Certificate of Proficiency (LROCP)"},
+  {c:"QL-16", g:"1. Qualification", n:"Fast Rescue Craft (FRC)"},
+  {c:"QL-17", g:"1. Qualification", n:"AMSA Certificate of Medical Fitness - Form 303"},
+  {c:"QL-18", g:"1. Qualification", n:"Provide First Aid - HLTAID011"},
+  {c:"QL-19", g:"1. Qualification", n:"Adv Resuscitation and Oxygen Therapy - HLTIAD015"},
+  {c:"QL-20", g:"1. Qualification", n:"Use hygienic practices for food safety - SITXFSA005"},
+  {c:"VS-01", g:"2. Vessel Specific", n:"Maritime Security Identification Card"},
+  {c:"VS-02", g:"2. Vessel Specific", n:"ECDIS Type Specific - Furuno ECDIS, FMD series"},
+  {c:"VS-04", g:"2. Vessel Specific", n:"Helm CONNECT - Crew Basic + Jobs"},
+  {c:"VS-05", g:"2. Vessel Specific", n:"MRN - Connecting Tug to Barge Articouple System"},
+  {c:"MS-01", g:"4. Master Specific", n:"Phase 1 - ASD and ATB Theory & Assessment"},
+  {c:"MS-02", g:"4. Master Specific", n:"Phase 2 - Simulator Training & Practical Assessment ASD"},
+  {c:"MS-03", g:"4. Master Specific", n:"Phase 3 - Simulator Training & Practical Assessment ATB"},
+  {c:"MS-04", g:"4. Master Specific", n:"Phase 4a - On-Water Training & Practical Assessment ASD"},
+  {c:"MS-05", g:"4. Master Specific", n:"Phase 4b - On-Water Training & Practical Assessment ATB"},
+  {c:"MS-06", g:"4. Master Specific", n:"Phase 5 - On-Water Passing in the LNG Swing Basin"},
+  {c:"MS-07", g:"4. Master Specific", n:"Pilbara Ports Port of Ashburton Pilotage Exemption Certificate"},
+  {c:"CS-01", g:"5. Cargo System", n:"MRN - EMS Tech Material Handling Systems - Single Point Loading System"},
+  {c:"CS-02", g:"5. Cargo System", n:"MRN - EMS Tech Material Handling Systems - Self-Unloading System"},
+  {c:"CS-03", g:"5. Cargo System", n:"Cargo System - Operator - Practical"},
+  {c:"CS-04", g:"5. Cargo System", n:"Cargo System - Trainer - Practical"},
+  {c:"HR-01", g:"6. High Risk Work Licence (HRWL)", n:"HRWL - Dogging - Dogging (DG)"},
+  {c:"HR-02", g:"6. High Risk Work Licence (HRWL)", n:"HRWL - Vehicle loading crane (CV)"},
+  {c:"PS-01", g:"3. Project Specific", n:"MRN - Marine Fauna Observer"},
+  {c:"PS-02", g:"3. Project Specific", n:"MinRes - Mooring Operations Awareness - Onslow"},
+  {c:"PT-01", g:"7. Permit to Work", n:"MinRes - Lock Holder, Isolation and Tagging"},
+  {c:"PT-02", g:"7. Permit to Work", n:"Enter and Work in Confined Spaces - RIIWHS202E"},
+  {c:"PT-03", g:"7. Permit to Work", n:"Work Safely at Heights - RIIWHS204E"},
+  {c:"VI-01", g:"8. Vessel Induction", n:"Onboard induction, familiarisation and training - Tug and Barge"},
+  {c:"VI-02", g:"8. Vessel Induction", n:"MRN - Tug and Barge Induction"},
+  {c:"PI-01", g:"9. Project Induction", n:"MinRes - Code of Conduct & Business Integrity"},
+  {c:"PI-02", g:"9. Project Induction", n:"MinRes - Corporate Safety Induction"},
+  {c:"PI-03", g:"9. Project Induction", n:"MinRes - Hazard Report Card, Take Time & JHA"},
+  {c:"PI-04", g:"9. Project Induction", n:"MinRes - Manual Handling"},
+  {c:"PI-05", g:"9. Project Induction", n:"MinRes - Operational Health and Safety Induction"},
+  {c:"PI-06", g:"9. Project Induction", n:"MinRes - Safe and Respectful Behaviours"},
+  {c:"PI-07", g:"9. Project Induction", n:"MinRes - Welcome to MinRes"},
+  {c:"PI-08", g:"9. Project Induction", n:"MinRes - Cybersecurity Awareness Training"},
+  {c:"PI-09", g:"9. Project Induction", n:"MinRes - Critical Risk Management (CRM) Awareness"},
+  {c:"PI-10", g:"9. Project Induction", n:"MinRes - Airborne Contaminant Awareness Training"},
+];
+
+/* Exemption behaviour by qualification code.
+   block       = no exemption; popup "must be provided before joining", no date field
+   application = show an "Application date" picker
+   training    = show an "Estimated completion date (training plan)" picker
+   anything not listed below defaults to a "Booking date" picker */
+const MATRIX_RULES = {
+  block:       ["QL-01","QL-02","QL-03","QL-04","QL-05","QL-06","QL-07","QL-08","QL-09","QL-10","QL-11","QL-12"],
+  application: ["QL-13","QL-17","QL-18","VS-01","HR-01","HR-02"],
+  training:    ["CS-01","CS-02","CS-03","CS-04"]
+};
+
+/* Per-position requirements (M/Mˣ, incl. conditional) and HELM-name COC lists — source: ATB Skills Matrix + Equivalence Helm Mapping */
+const POS_REQS = {"Master": ["QL-01", "QL-13", "QL-14", "QL-16", "QL-17", "QL-18", "QL-19", "VS-01", "VS-02", "VS-04", "VS-05", "PS-01", "PS-02", "MS-01", "MS-02", "MS-03", "MS-04", "MS-05", "MS-06", "MS-07", "CS-01", "CS-02", "CS-03", "PT-01", "PT-02", "PT-03", "VI-01", "VI-02", "PI-01", "PI-02", "PI-03", "PI-04", "PI-05", "PI-06", "PI-07", "PI-08", "PI-09", "PI-10"], "CO1": ["QL-02", "QL-13", "QL-14", "QL-16", "QL-17", "QL-18", "QL-19", "VS-01", "VS-02", "VS-04", "VS-05", "PS-01", "PS-02", "MS-06", "CS-01", "CS-02", "CS-03", "CS-04", "HR-02", "PT-01", "VI-01", "VI-02", "PI-01", "PI-02", "PI-03", "PI-04", "PI-05", "PI-06", "PI-07", "PI-08", "PI-09", "PI-10"], "CO2": ["QL-03", "QL-12", "QL-13", "QL-14", "QL-15", "QL-16", "QL-17", "QL-18", "QL-19", "VS-01", "VS-02", "VS-04", "VS-05", "PS-01", "PS-02", "MS-06", "CS-01", "CS-02", "CS-03", "CS-04", "HR-02", "PT-01", "VI-01", "VI-02", "PI-01", "PI-02", "PI-03", "PI-04", "PI-05", "PI-06", "PI-07", "PI-08", "PI-09", "PI-10"], "2ndMate": ["QL-04", "QL-12", "QL-13", "QL-15", "QL-16", "QL-17", "QL-18", "QL-19", "VS-01", "VS-02", "VS-04", "VS-05", "PS-01", "PS-02", "CS-01", "CS-02", "CS-03", "HR-02", "PT-01", "VI-01", "VI-02", "PI-01", "PI-02", "PI-03", "PI-04", "PI-05", "PI-06", "PI-07", "PI-08", "PI-09", "PI-10"], "ChiefEng": ["QL-05", "QL-16", "QL-17", "QL-18", "QL-19", "VS-01", "VS-04", "PS-02", "CS-01", "CS-02", "PT-01", "PT-02", "PT-03", "VI-01", "VI-02", "PI-01", "PI-02", "PI-03", "PI-04", "PI-05", "PI-06", "PI-07", "PI-08", "PI-09", "PI-10"], "FirstEng": ["QL-06", "QL-16", "QL-17", "QL-18", "QL-19", "VS-01", "VS-04", "PS-02", "CS-01", "CS-02", "PT-01", "PT-02", "PT-03", "VI-01", "VI-02", "PI-01", "PI-02", "PI-03", "PI-04", "PI-05", "PI-06", "PI-07", "PI-08", "PI-09", "PI-10"], "AsstEng": ["QL-07", "QL-12", "QL-16", "QL-17", "QL-18", "QL-19", "VS-01", "VS-04", "PS-02", "CS-01", "CS-02", "HR-01", "HR-02", "PT-01", "PT-03", "VI-01", "VI-02", "PI-01", "PI-02", "PI-03", "PI-04", "PI-05", "PI-06", "PI-07", "PI-08", "PI-09", "PI-10"], "GPH": ["QL-08", "QL-09", "QL-10", "QL-12", "QL-16", "QL-17", "QL-18", "QL-19", "QL-20", "VS-01", "VS-04", "PS-02", "CS-01", "CS-02", "HR-01", "HR-02", "PT-01", "PT-03", "VI-01", "VI-02", "PI-01", "PI-02", "PI-03", "PI-04", "PI-05", "PI-06", "PI-07", "PI-08", "PI-09", "PI-10"], "Cook": ["QL-11", "QL-12", "QL-16", "QL-17", "QL-18", "QL-19", "VS-01", "PT-01", "VI-01", "VI-02", "PI-01", "PI-02", "PI-03", "PI-04", "PI-05", "PI-06", "PI-07", "PI-08", "PI-09", "PI-10"]};
+const POS_COC = {"Master": ["QL-01 Master"], "CO1": ["QL-02 Chief Mate", "QL-01 Master", "QLE-02 Chief Mate, Master <500GT, Master <3000GT (Near Coastal)"], "CO2": ["QL-03 Master <100m NC", "QL-01 Master", "QL-02 Chief Mate", "QLE-01 Master <3000GT", "QLE-02 Chief Mate, Master <500GT, Master <3000GT (Near Coastal)", "QLE-03 Master <500GT", "QLE-04 Chief Mate <3000GT, Master <500GT, Master <3000GT (Near Coastal)"], "2ndMate": ["QL-04 Master <45m NC", "QL-01 Master", "QL-02 Chief Mate", "QL-03 Master <100m NC", "QLE-01 Master <3000GT", "QLE-02 Chief Mate, Master <500GT, Master <3000GT (Near Coastal)", "QLE-03 Master <500GT", "QLE-04 Chief Mate <3000GT, Master <500GT, Master <3000GT (Near Coastal)", "QLE-06 Watchkeeper Deck", "QLE-07 Mate <500GT, Chief Mate <3000GT (Near Coastal)", "QLE-08 Mate <500GT"], "ChiefEng": ["QL-05 Engineer Class 1, Chief Engineer (Motor)", "QLE-12 Engineer Class 1, Chief Engineer (Steam and Motor)"], "FirstEng": ["QL-06 Engineer Class 2, Second Engineer, Chief Engineer <3000 kW (Motor)", "QL-05 Engineer Class 1, Chief Engineer (Motor)", "QLE-12 Engineer Class 1, Chief Engineer (Steam and Motor)", "QLE-13 Engineer Class 2, Second Engineer, Chief Engineer <3000 kW (Steam and Motor)"], "AsstEng": ["QL-07 Engineer Class 3 NC", "QL-05 Engineer Class 1, Chief Engineer (Motor)", "QL-06 Engineer Class 2, Second Engineer, Chief Engineer <3000 kW (Motor)", "QLE-12 Engineer Class 1, Chief Engineer (Steam and Motor)", "QLE-13 Engineer Class 2, Second Engineer, Chief Engineer <3000 kW (Steam and Motor)", "QLE-14 Engineer Watchkeeper, Chief Engineer <3000 kW (Near Coastal), Second Engineer <3000 kW (Steam and Motor)", "QLE-15 Engineer Watchkeeper, Chief Engineer <3000 kW (Near Coastal), Second Engineer <3000 kW (Motor)", "QLE-16 Engineer Watchkeeper, Chief Engineer <3000 kW (Near Coastal) (Steam and Motor)", "QLE-17 Engineer Watchkeeper, Chief Engineer <3000 kW (Near Coastal) (Motor)", "QLE-18 Engineer Watchkeeper, Second Engineer <3000 kW (Steam and Motor)", "QLE-19 Engineer Watchkeeper, Second Engineer <3000 kW (Motor)", "QLE-20 Engineer Watchkeeper (Steam and Motor)", "QLE-21 Engineer Watchkeeper (Motor)"], "GPH": ["QL-08 Master <24m NC", "QL-09 Marine Engine Driver Grade 2 NC", "QL-10 Integrated Rating, Able Seafarer - Deck, Able Seafarer - Engineer (STCW Reg II/5 & III/5)", "QL-01 Master", "QL-02 Chief Mate", "QL-03 Master <100m NC", "QL-04 Master <45m NC", "QL-05 Engineer Class 1, Chief Engineer (Motor)", "QL-06 Engineer Class 2, Second Engineer, Chief Engineer <3000 kW (Motor)", "QL-07 Engineer Class 3 NC", "QLE-01 Master <3000GT", "QLE-02 Chief Mate, Master <500GT, Master <3000GT (Near Coastal)", "QLE-03 Master <500GT", "QLE-04 Chief Mate <3000GT, Master <500GT, Master <3000GT (Near Coastal)", "QLE-05 Chief Mate <3000GT", "QLE-06 Watchkeeper Deck", "QLE-07 Mate <500GT, Chief Mate <3000GT (Near Coastal)", "QLE-08 Mate <500GT", "QLE-09 Watchkeeper Deck <500GT, Watchkeeper Deck <3000GT (Near Coastal)", "QLE-10 Watchkeeper Deck <500GT", "QLE-12 Engineer Class 1, Chief Engineer (Steam and Motor)", "QLE-13 Engineer Class 2, Second Engineer, Chief Engineer <3000 kW (Steam and Motor)", "QLE-16 Engineer Watchkeeper, Chief Engineer <3000 kW (Near Coastal) (Steam and Motor)", "QLE-17 Engineer Watchkeeper, Chief Engineer <3000 kW (Near Coastal) (Motor)", "QLE-18 Engineer Watchkeeper, Second Engineer <3000 kW (Steam and Motor)", "QLE-19 Engineer Watchkeeper, Second Engineer <3000 kW (Motor)", "QLE-20 Engineer Watchkeeper (Steam and Motor)", "QLE-21 Engineer Watchkeeper (Motor)", "QLE-22 Electro-Technical Officer", "QLE-11 Chief Integrated Rating, Able Seafarer - Deck, Able Seafarer - Engine"], "Cook": ["QL-11 Marine Cook"]};
+const FLEX_KEY={"GPH":"GPH","GPH/ETO":"GPH","Assistant Engineer":"AsstEng"};
+const SHIFT_PAIRS={CO1:"CO2",CO2:"CO1",ChiefEng:"FirstEng",FirstEng:"ChiefEng"};
+const RATIO_QUALS=[
+  {code:"QL-16", short:"FRC", name:"Fast Rescue Craft (FRC)", elig:"any", total:4},
+  {code:"QL-19", short:"Resus", name:"Adv Resuscitation & Oxygen Therapy", elig:"any", perShift:2},
+  {code:"QL-20", short:"Food", name:"Food safety", elig:["GPH"], perShift:1},
+  {code:"HR-02", short:"Crane", name:"HRWL Vehicle loading crane", elig:["CO1","CO2","2ndMate","AsstEng","GPH"], perShift:2},
+  {code:"PT-03", short:"Heights", name:"Work Safely at Heights", elig:["GPH"], perShift:1, trainingPlan:true}
+];
+function ratioElig(q,reqkey){ return q.elig==="any" || (q.elig.indexOf(reqkey)>=0); }
+function ratioCellHTML(reqkey){ const items=RATIO_QUALS.filter(q=>ratioElig(q,reqkey)); return '<div class="r-ratio-cell">'+items.map(q=>'<label class="r-ratio" title="'+escH(q.code+' '+q.name)+'"><input type="checkbox" class="r-ratio-ck" data-ratio="'+q.code+'"><span>'+escH(q.short)+'</span></label>').join('')+'</div>'; }
+function ratioHeld(r,code){ const ck=r.querySelector('.r-ratio-ck[data-ratio="'+code+'"]'); return !!(ck && ck.checked); }
+/* ===== TEAM DATA (auto-generated per team) ===== */
+const TEAM_CODE="UNI";
+const TEAM_NAME="United Marine";
+{const _mtn=document.getElementById("mastTeamName"); if(_mtn)_mtn.textContent=TEAM_NAME;}
+/* Active crew for this team: {s:SAMS#, n:name, p:position} */
+const CREW=[{"s": "w90518W", "n": "Andrew WRIGHT", "p": "Assistant Engineer"}, {"s": "p85920P", "n": "Anton PEJIC", "p": "Assistant Engineer"}, {"s": "k97556K", "n": "Cornelius James KEOGH", "p": "Assistant Engineer"}, {"s": "b93089B", "n": "Eric BATERNA", "p": "Assistant Engineer"}, {"s": "k88211K", "n": "Finn KEELEY", "p": "Assistant Engineer"}, {"s": "m84414M", "n": "Jamie MILLER", "p": "Assistant Engineer"}, {"s": "m90534M", "n": "Karthik MURUGESAN", "p": "Assistant Engineer"}, {"s": "c91093C", "n": "Leon CLEMONES", "p": "Assistant Engineer"}, {"s": "t84295T", "n": "Mark Jay TADIAMAN", "p": "Assistant Engineer"}, {"s": "m62159M", "n": "Marlou MATA", "p": "Assistant Engineer"}, {"s": "p84418P", "n": "Anand PATWARDHAN", "p": "Chief Engineer"}, {"s": "o84344O", "n": "Andriy OZHOGA", "p": "Chief Engineer"}, {"s": "b92561B", "n": "David Robert BUTLER", "p": "Chief Engineer"}, {"s": "r83383R", "n": "Michael ROGERS", "p": "Chief Mate Unlimited"}, {"s": "k99183K", "n": "Ranaweera Yasas KALUARACHCHI", "p": "Chief Mate Unlimited"}, {"s": "j84281J", "n": "Rohin JITENDER", "p": "Chief Mate Unlimited"}, {"s": "w83384W", "n": "Ruwan WITHARANA", "p": "Chief Mate Unlimited"}, {"s": "r83383R", "n": "Michael ROGERS", "p": "Chief Officer"}, {"s": "k99183K", "n": "Ranaweera Yasas KALUARACHCHI", "p": "Chief Officer"}, {"s": "j84281J", "n": "Rohin JITENDER", "p": "Chief Officer"}, {"s": "w83384W", "n": "Ruwan WITHARANA", "p": "Chief Officer"}, {"s": "s84589S", "n": "Ryan STEWART", "p": "Chief Officer"}, {"s": "s84419S", "n": "Kachin SITTIYOS", "p": "Cook"}, {"s": "o97557O", "n": "Tamas OROSZ", "p": "Cook"}, {"s": "a84346A", "n": "Savio ATHIHE", "p": "First Engineer"}, {"s": "h84290H", "n": "Bradd HEARFIELD", "p": "General Purpose Hand"}, {"s": "e84287E", "n": "Dylan EVANS", "p": "General Purpose Hand"}, {"s": "e84431E", "n": "Jake ENGLISH", "p": "General Purpose Hand"}, {"s": "m99351M", "n": "Justin MACDONALD", "p": "General Purpose Hand"}, {"s": "a84343A", "n": "Kyle ASANGE", "p": "General Purpose Hand"}, {"s": "m84293M", "n": "Luke MACKNAMARA", "p": "General Purpose Hand"}, {"s": "d84488D", "n": "Matthew DWYER", "p": "General Purpose Hand"}, {"s": "d84356D", "n": "Michael DOUGLAS", "p": "General Purpose Hand"}, {"s": "m94475M", "n": "Travis MICHALZIC", "p": "General Purpose Hand"}, {"s": "e84357E", "n": "Zane ENGLISH", "p": "General Purpose Hand"}, {"s": "t83382T", "n": "Arthur TYMOFEYEV", "p": "Master"}, {"s": "e91754E", "n": "Brenton EVANS", "p": "Master"}, {"s": "f86373F", "n": "Evan FARMER", "p": "Master"}, {"s": "j83385J", "n": "Matthew James JONES", "p": "Master"}, {"s": "k83381K", "n": "Preetham KUMAR", "p": "Master"}, {"s": "a90100A", "n": "Christopher James AYERS", "p": "Second Mate"}, {"s": "c84297C", "n": "Jack COOK", "p": "Second Mate"}, {"s": "b91092B", "n": "John Leo BAUTISTA", "p": "Second Mate"}, {"s": "k84420K", "n": "Matthew KINGDON", "p": "Second Mate"}, {"s": "r84283R", "n": "Zachary RUBOCK", "p": "Second Mate"}];
+const CREW_BY_SAM={}; CREW.forEach(c=>{CREW_BY_SAM[c.s]=c;});
+const POS_MAP={ "Master":"Master","Chief Officer":"Chief Officer","2nd Mate":"Second Mate","Chief Engineer":"Chief Engineer","1st Engineer":"First Engineer","Assistant Engineer":"Assistant Engineer","GPH":"General Purpose Hand","GPH/ETO":"General Purpose Hand","ETO":"ETO","Cook":"Cook" };
+const RELIEF_POS=["Master","Chief Officer","2nd Mate","Chief Engineer","1st Engineer","Assistant Engineer","GPH","ETO","Cook"];
+const RELIEF_POS_COC={ "Master":COC_MASTER,"Chief Officer":COC_CO2,"2nd Mate":COC_2NDMATE,"Chief Engineer":COC_CE,"1st Engineer":COC_1E,"Assistant Engineer":COC_AE,"GPH":COC_GPH,"ETO":COC_ETO,"Cook":COC_COOK };
+/* Designated crew-change days (YYYY-MM-DD). Empty = Ad Hoc detection dormant. */
+const CREW_CHANGE_DATES=["2026-06-17", "2026-07-15", "2026-08-12", "2026-09-09", "2026-10-07", "2026-11-04", "2026-12-02", "2026-12-30", "2027-01-27", "2027-02-24", "2027-03-24", "2027-04-21", "2027-05-19", "2027-06-16", "2027-07-14", "2027-08-11", "2027-09-08", "2027-10-06", "2027-11-03", "2027-12-01", "2027-12-29", "2028-01-26", "2028-02-23", "2028-03-22", "2028-04-19", "2028-05-17", "2028-06-14", "2028-07-12", "2028-08-09", "2028-09-06", "2028-10-04", "2028-11-01", "2028-11-29", "2028-12-27", "2029-01-24", "2029-02-21", "2029-03-21", "2029-04-18", "2029-05-16", "2029-06-13", "2029-07-11", "2029-08-08", "2029-09-05", "2029-10-03", "2029-10-31", "2029-11-28", "2029-12-26", "2030-01-23", "2030-02-20", "2030-03-20", "2030-04-17", "2030-05-15", "2030-06-12", "2030-07-10", "2030-08-07", "2030-09-04", "2030-10-02", "2030-10-30", "2030-11-27", "2030-12-25"];
+/* ===================== end of editable lists ============================ */
+
+const escH=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+function basePos(label){ return String(label||'').replace(/\s+\d+$/,''); }
+const POS_ELIGIBLE={ "Assistant Engineer":["Assistant Engineer","First Engineer","Chief Engineer"], "2nd Mate":["Second Mate","Chief Officer"] };
+/* Per-person slot overrides (SAM #s) — crew who can fill a slot beyond their SAM rank. Fleet-wide; only this team's crew match. */
+const POS_EXTRA={ "Master":new Set(["c84275C"]), "Chief Officer":new Set(["p90891P"]), "2nd Mate":new Set(["s101903S"]) };
+/* Chief Mate Unlimited override — SAM #s from the authoritative CMU list (SAM cannot distinguish Unlimited from regular Chief Mate). */
+const CMU_SET=new Set(["b85435B", "d85431D", "t98063T", "d92679D", "w92687W", "m91046M", "w84024W", "b92648B", "j84281J", "w83384W", "p89831P", "r90621R", "s90622S", "d99956D", "m99910M", "c99945C", "m85428M", "c84275C", "k99183K", "m101689M", "p90891P"]);
+function eligibleCrewFor(bp){
+  const dp=POS_MAP[bp]||bp;
+  let list;
+  if(bp==='Chief Mate Unlimited') list=CREW.filter(c=>CMU_SET.has(c.s));
+  else if(bp==='GPH'||bp==='GPH/ETO') list=CREW.filter(c=>c.p!=='Cook');
+  else if(POS_ELIGIBLE[bp]) list=CREW.filter(c=>POS_ELIGIBLE[bp].indexOf(c.p)>=0);
+  else list=CREW.filter(c=>c.p===dp);
+  const ex=POS_EXTRA[bp];
+  if(ex){ CREW.forEach(c=>{ if(ex.has(c.s) && list.indexOf(c)<0) list.push(c); }); }
+  const seen={}, out=[];
+  list.forEach(c=>{ if(seen[c.s]) return; seen[c.s]=1; out.push(c); });
+  out.sort((a,b)=>a.n.localeCompare(b.n));
+  return out;
+}
+function nameOptionsFor(posLabel){ const bp=basePos(posLabel);
+  let out='<option value="">\u2014 Select name \u2014</option>';
+  eligibleCrewFor(bp).forEach(c=>{ out+='<option value="'+escH(c.s)+'">'+escH(c.n)+'</option>'; });
+  out+='<option value="__other__">Other (not listed)</option>'; return out; }
+function allNameOptions(){ let out='<option value="">\u2014 Select name \u2014</option>';
+  CREW.forEach(c=>{ out+='<option value="'+escH(c.s)+'">'+escH(c.n+' \u2014 '+c.p)+'</option>'; });
+  out+='<option value="__other__">Other (not listed)</option>'; return out; }
+function nameDisplay(val,other){ if(val==='__other__') return other||'\u2014'; if(val && CREW_BY_SAM[val]) return CREW_BY_SAM[val].n; return val||''; }
+function selName(sel, otherVal){ if(!sel) return ''; if(sel.value==='__other__') return otherVal||'\u2014'; if(sel.value && sel.selectedOptions && sel.selectedOptions[0]) return sel.selectedOptions[0].textContent; return sel.value||''; }
+function qualKind(code){ if(!code) return ''; if(code==='Other') return 'booking';
+  if(MATRIX_RULES.block.indexOf(code)>=0) return 'block';
+  if(MATRIX_RULES.application.indexOf(code)>=0) return 'application';
+  if(MATRIX_RULES.training.indexOf(code)>=0) return 'training';
+  return 'booking'; }
+function qualFullName(code){ if(code==='Other') return 'Other'; const q=QUALS.find(x=>x.c===code); return q? q.c+' '+q.n : (code||'\u2014'); }
+function dateLabelFor(kind){ return kind==='application'?'Application date':kind==='training'?'Estimated completion date (training plan)':'Booking date'; }
+function buildQualOptions(reqkey){ const allowed = reqkey ? (POS_REQS[reqkey]||[]) : null; let g='',out='<option value="">\u2014 Select qualification \u2014</option>';
+  QUALS.forEach(q=>{ if(allowed && allowed.indexOf(q.c)<0) return; if(q.g!==g){ if(g) out+='</optgroup>'; out+='<optgroup label="'+escH(q.g)+'">'; g=q.g; } out+='<option value="'+q.c+'">'+escH(q.c+' '+q.n)+'</option>'; });
+  if(g) out+='</optgroup>'; out+='<option value="Other">Other (specify)</option>'; return out; }
+const QUAL_OPTIONS=buildQualOptions();
+const QUAL_CONFIG = {"QL-01": {"block": true}, "QL-02": {"block": true}, "QL-03": {"block": true}, "QL-04": {"block": true}, "QL-05": {"block": true}, "QL-06": {"block": true}, "QL-07": {"block": true}, "QL-08": {"block": true}, "QL-09": {"block": true}, "QL-10": {"block": true}, "QL-11": {"block": true}, "QL-12": {"block": true}, "QL-13": {"variants": {"2ndMate": {"note": "No exemption required within 6 months of first day on board as 2nd Mate", "dates": [{"label": "Course booking date", "cls": "courseBooking", "notYet": "Not yet booked"}, {"label": "AMSA application date", "cls": "amsaApp", "notYet": "Not yet applied"}], "helper": "", "cc": null, "firstDay2M": true}, "*": {"dates": [{"label": "Booking date", "cls": "booking"}, {"label": "Application date", "cls": "application"}], "helper": "contingency", "cc": "booking"}}}, "QL-14": {"dates": [{"label": "Booking date", "cls": "booking"}], "helper": "", "cc": "booking"}, "QL-15": {"dates": [{"label": "Application date", "cls": "application"}], "helper": "", "cc": "application"}, "QL-16": {"dates": [{"label": "Booking date", "cls": "booking"}], "helper": "Reason for shortage of this qualification", "cc": "booking"}, "QL-17": {"dates": [{"label": "Booking date", "cls": "booking"}], "yesno": [{"label": "Holds Form 1850 Medical", "cls": "f1850"}], "helper": "", "cc": "booking"}, "QL-18": {"newExisting": {"existing": "3-yr expiry applies, must be compliant no later than 29/12/26 – provide booking date", "new": "Must comply with 3-yr expiry from commencement"}, "dates": [{"label": "Booking date", "cls": "booking"}], "helper": "", "cc": "booking"}, "QL-19": {"newExisting": {"existing": "1-yr expiry applies, must be compliant no later than 29/12/26 – provide booking date", "new": "Must comply with 1-yr expiry from commencement"}, "dates": [{"label": "Booking date", "cls": "booking"}], "helper": "", "cc": "booking"}, "QL-20": {"dates": [{"label": "Expected completion date", "cls": "expComp"}], "helper": "", "cc": "expComp"}, "VS-01": {"note": "Must apply no later than 60 days prior to the beginning of the expiry month. Exemption for MSIC is not available except in exceptional circumstances.", "dates": [{"label": "Application date", "cls": "application"}], "helper": "", "cc": null, "manualExreq": true}, "VS-02": {"variants": {"2ndMate": {"note": "No exemption required within 6 months of first day on board as 2nd Mate", "dates": [{"label": "AMSA application date", "cls": "amsaApp"}], "helper": "", "cc": null, "firstDay2M": true}, "*": {"dates": [{"label": "Booking date", "cls": "booking"}, {"label": "Application date", "cls": "application"}], "helper": "contingency", "cc": "booking"}}}, "VS-04": {"note": "New crew – Onboard by completion of 1st swing", "dates": [], "helper": "", "cc": null, "firstSwingItem": true}, "VS-05": {"note": "New crew – Onboard by completion of 1st swing", "dates": [], "helper": "", "cc": null, "firstSwingItem": true}, "MS-01": {"dates": [{"label": "SIM completion date", "cls": "simComp"}], "helper": "", "cc": "simComp"}, "MS-02": {"dates": [{"label": "SIM completion date", "cls": "simComp"}], "helper": "", "cc": "simComp"}, "MS-03": {"dates": [{"label": "SIM completion date", "cls": "simComp"}], "helper": "", "cc": "simComp"}, "MS-04": {"note": "Requirements to be confirmed", "dates": [{"label": "Expected completion date", "cls": "expComp"}], "helper": "", "cc": "expComp"}, "MS-05": {"note": "Requirements to be confirmed", "dates": [{"label": "Expected completion date", "cls": "expComp"}], "helper": "", "cc": "expComp"}, "MS-06": {"note": "Requirements to be confirmed", "dates": [{"label": "Expected completion date", "cls": "expComp"}], "helper": "", "cc": "expComp"}, "MS-07": {"note": "No exemption required within 6 months of commencement", "dates": [{"label": "Expected completion date (if longer than 6 months)", "cls": "expComp"}], "helper": "", "cc": "expComp"}, "CS-01": {"note": "Required prior to joining", "dates": [{"label": "Estimated completion date (training plan)", "cls": "estComp"}], "helper": "", "cc": "estComp"}, "CS-02": {"note": "Required prior to joining", "dates": [{"label": "Estimated completion date (training plan)", "cls": "estComp"}], "helper": "", "cc": "estComp"}, "CS-03": {"noteByPos": {"Master": "Onboard within first 84 days onboard. If more than 84 days onboard, provide record of progress per form MRM-ATB-OCS-ASS-0001 and request exemption", "2ndMate": "Onboard within first 84 days onboard. If more than 84 days onboard, provide record of progress per form MRM-ATB-OCS-ASS-0001 and request exemption", "CO1": "Onboard within first 56 days onboard. If more than 56 days onboard, provide record of progress per form MRM-ATB-OCS-ASS-0001 and request exemption", "CO2": "Onboard within first 56 days onboard. If more than 56 days onboard, provide record of progress per form MRM-ATB-OCS-ASS-0001 and request exemption"}, "multi": [{"label": "Form MRM-ATB-OCS-ASS-0001 – completed", "options": ["Section 1 – Knowledge Assessment - Prerequisite", "Section 2 – Familiarisation", "Section 3 – Observation", "Section 4 – Practical Loading Assessment", "Section 5 – Practical Discharge Assessment"]}, {"label": "Form MRM-ATB-OCS-ASS-0001 – planned this swing", "options": ["Section 1 – Knowledge Assessment - Prerequisite", "Section 2 – Familiarisation", "Section 3 – Observation", "Section 4 – Practical Loading Assessment", "Section 5 – Practical Discharge Assessment"]}], "helper": "", "cc": null, "manualExreq": true, "manualExreqText": "Request exemption"}, "CS-04": {"note": "Onboard within first 112 days onboard. If more than 112 days onboard, provide record of progress per form MRM-ATB-OCS-ASS-0002 and request exemption", "assess": {"groups": ["Completed", "Planned this swing"], "sections": [{"label": "Section 1 – Knowledge Assessment - Prerequisite", "type": "yesno"}, {"label": "Section 2 – Practical Loading Assessment (as operator)", "type": "num30"}, {"label": "Section 3 – Practical Discharge Assessment (as operator)", "type": "num30"}]}, "helper": "", "cc": null, "manualExreq": true, "manualExreqText": "Request exemption"}, "HR-01": {"note": "Must apply at least 2 months prior to expiry. If new crew member, provide Notice of assessment (60-day validity) and evidence of application for HRWL within 1 week of course completion to OPMS and provide dates below.", "dates": [{"label": "Date of training completion / NOA", "cls": "noa"}, {"label": "Date of application", "cls": "hrApp"}], "helper": "", "cc": "noa"}, "HR-02": {"note": "Must apply at least 2 months prior to expiry. If new crew member, provide Notice of assessment (60-day validity) and evidence of application for HRWL within 1 week of course completion to OPMS and provide dates below.", "dates": [{"label": "Date of training completion / NOA", "cls": "noa"}, {"label": "Date of application", "cls": "hrApp"}], "helper": "", "cc": "noa"}, "PS-01": {"note": "Onboard by completion of 1st swing", "dates": [], "helper": "", "cc": null, "firstSwingItem": true}, "PS-02": {"note": "Prior to 1st Swing", "dates": [], "helper": "", "cc": null}, "PT-01": {"note": "Prior to 1st Swing", "dates": [], "helper": "", "cc": null}, "PT-02": {"note": "Prior to 1st Swing", "dates": [], "helper": "", "cc": null}, "PT-03": {"newExisting": {"existing": "Must comply by 29/12/2026", "new": "Must comply from commencement"}, "dates": [{"label": "Booking date", "cls": "booking"}], "helper": "", "cc": "booking"}, "VI-01": {"note": "Onboard on first arrival to vessel, before commencing any activities — exemption not required, complete onboard and upload form to OPMS", "dates": [], "helper": "", "cc": null, "firstSwingItem": true}, "VI-02": {"note": "Prior to 1st Swing", "dates": [], "helper": "", "cc": null}, "PI-01": {"note": "NO exemption available", "dates": [], "helper": "", "cc": null}, "PI-02": {"note": "NO exemption available", "dates": [], "helper": "", "cc": null}, "PI-03": {"note": "NO exemption available", "dates": [], "helper": "", "cc": null}, "PI-04": {"note": "NO exemption available", "dates": [], "helper": "", "cc": null}, "PI-05": {"note": "NO exemption available", "dates": [], "helper": "", "cc": null}, "PI-06": {"note": "NO exemption available", "dates": [], "helper": "", "cc": null}, "PI-07": {"note": "NO exemption available", "dates": [], "helper": "", "cc": null}, "PI-08": {"note": "No exemption needed first swing, complete on board", "dates": [], "helper": "", "cc": null, "firstSwingItem": true}, "PI-09": {"note": "No exemption needed first swing, complete on board", "dates": [], "helper": "", "cc": null, "firstSwingItem": true}, "PI-10": {"note": "No exemption needed first swing, complete on board", "dates": [], "helper": "", "cc": null, "firstSwingItem": true}};
+
+function effConfig(code, reqkey){ const c=QUAL_CONFIG[code]; if(!c) return null;
+  if(c.variants){ return (reqkey==='2ndMate' && c.variants['2ndMate']) ? c.variants['2ndMate'] : c.variants['*']; }
+  return c; }
+function renderExemptFields(el, code, reqkey){
+  if(!el) return;
+  if(!code || code==='Other'){ el.innerHTML=''; return; }
+  const c=effConfig(code, reqkey); if(!c){ el.innerHTML=''; return; }
+  const _tile=el.closest('.ex-tile'); const firstSwing = !!(_tile && _tile._row && _tile._row.querySelector('.r-firstswing') && _tile._row.querySelector('.r-firstswing').checked);
+  let h='';
+  if(c.block){
+    h+='<div class="rx-block-notice span2"><span>\u26d4</span> This qualification must be provided before joining \u2014 no exemption permitted.</div>';
+    h+='<label class="rx">Course completion date<input type="date" class="ex-in" data-cls="courseComp"></label>';
+    h+='<label class="rx">AMSA application date<input type="date" class="ex-in" data-cls="amsaApp"></label>';
+  } else {
+    let note = c.note || (c.noteByPos && c.noteByPos[reqkey]) || '';
+    if(c.firstSwingItem && !firstSwing) note='NO exemption available';
+    if(note) h+='<div class="rx-note span2">'+escH(note)+'</div>';
+    if(c.firstDay2M){ h+='<label class="rx span2">First day on board as 2nd Mate<input type="date" class="ex-in" data-cls="firstDay2M"></label>'; h+='<div class="rx-6mo span2" data-role="calc6mo" style="display:none"></div>'; }
+    if(c.newExisting){
+      h+='<label class="rx span2">New or existing crew?<select class="ex-in ex-ne" data-cls="ne"><option value="">\u2014 Select \u2014</option><option>Existing</option><option>New</option></select></label>';
+      h+='<div class="rx-ne-note span2" data-role="nenote" style="display:none"></div>';
+    }
+    (c.dates||[]).forEach(d=>{
+      h+='<label class="rx">'+escH(d.label)+'<input type="date" class="ex-in" data-cls="'+d.cls+'"></label>';
+      if(d.notYet){ h+='<label class="rx-chk rx-notyet span2"><span>'+escH(d.notYet)+'</span><input type="checkbox" class="ex-notyet" data-notyet="'+d.cls+'"></label>'; }
+    });
+    (c.yesno||[]).forEach(y=>{ h+='<label class="rx">'+escH(y.label)+'<select class="ex-in" data-cls="'+y.cls+'"><option value="">\u2014</option><option>Yes</option><option>No</option></select></label>'; });
+    (c.multi||[]).forEach((m,mi)=>{ const opts=m.options, half=Math.floor(opts.length/2); const left=opts.slice(0,half), right=opts.slice(half); const rows=Math.max(left.length,right.length); const cell=o=> o? '<label class="rx-mck"><input type="checkbox" class="ex-multi" data-multi="'+mi+'" data-opt="'+escH(o)+'"> '+escH(o)+'</label>' : ''; let tb=''; for(let i=0;i<rows;i++){ tb+='<tr><td>'+cell(left[i])+'</td><td>'+cell(right[i])+'</td></tr>'; } h+='<div class="rx-multi span2"><div class="rx-multi-lbl">'+escH(m.label)+'</div><table class="rx-mtbl">'+tb+'</table></div>'; });
+    if(c.assess){ c.assess.groups.forEach((g,gi)=>{ let rws=''; c.assess.sections.forEach((sec,si)=>{ const key=gi+'-'+si; let ctrl,lab; if(sec.type==='yesno'){ ctrl='<select class="ex-assess" data-assess="'+key+'"><option value="">\u2014</option><option>Yes</option><option>No</option></select>'; lab=escH(sec.label); } else { ctrl='<input type="number" min="0" max="30" class="ex-assess" data-assess="'+key+'">'; lab=escH(sec.label)+' / 30'; } rws+='<tr><td class="rx-al">'+lab+'</td><td class="rx-ar">'+ctrl+'</td></tr>'; }); h+='<div class="rx-multi span2"><div class="rx-multi-lbl">'+escH(g)+'</div><table class="rx-mtbl2">'+rws+'</table></div>'; }); }
+  }
+  const helper = c.helper==='contingency' ? 'Contingency if not received prior to joining' : (c.helper||'');
+  if(!/^PI-/.test(code)){ h+='<label class="rx span2">Comments<input type="text" class="ex-in" data-cls="comment" placeholder="'+escH(helper)+'"></label>'; }
+  if(!c.block){ let exreqText; if(c.manualExreq){ exreqText=c.manualExreqText||'Request exemption \u2014 exceptional circumstances only'; } else if(c.firstDay2M){ exreqText='Exemption request \u2014 more than 6 months as 2nd Mate at crew change'; } else { const dlab=c.cc?((c.dates||[]).find(d=>d.cls===c.cc)||{}).label:''; exreqText='Exemption request \u2014 '+(dlab||'date')+' is after crew change'; }
+    h+='<div class="rx-exreq span2" data-role="exreqwrap" style="display:none"><label class="rx-chk"><span>'+escH(exreqText)+'</span><input type="checkbox" class="ex-req" data-cls="exreq"></label></div>'; }
+  el.innerHTML=h;
+  const ne=el.querySelector('.ex-ne'); if(ne && c.newExisting){ const nn=el.querySelector('[data-role=nenote]'); const upd=()=>{ const t=ne.value==='Existing'?c.newExisting.existing:ne.value==='New'?c.newExisting.new:''; nn.textContent=t; nn.style.display=t?'':'none'; }; ne.addEventListener('change',upd); upd(); }
+  el.querySelectorAll('.ex-notyet').forEach(chk=>{ const di=el.querySelector('[data-cls="'+chk.dataset.notyet+'"]'); if(!di) return; const upd=()=>{ di.disabled=chk.checked; di.style.opacity=chk.checked?0.45:1; if(chk.checked) di.value=''; }; chk.addEventListener('change',upd); upd(); });
+  el.querySelectorAll('.ex-multi[data-multi="0"]').forEach(c0=>{ const plan=[...el.querySelectorAll('.ex-multi[data-multi="1"]')].find(p=>p.dataset.opt===c0.dataset.opt); if(!plan) return; const pl=plan.closest('label'); const upd=()=>{ if(c0.checked){ plan.checked=false; pl.style.display='none'; } else { pl.style.display=''; } }; c0.addEventListener('change',upd); upd(); });
+  el.querySelectorAll('.ex-assess[data-assess^="0-"]').forEach(comp=>{ const si=comp.dataset.assess.split('-')[1]; const plan=el.querySelector('.ex-assess[data-assess="1-'+si+'"]'); if(!plan) return; const row=plan.closest('td'); let na=row.querySelector('.rx-na'); if(!na){ na=document.createElement('span'); na.className='rx-na'; na.textContent='N/A \u2013 completed'; na.style.display='none'; row.appendChild(na); } const upd=()=>{ const done=comp.value!==''&&comp.value!=null; plan.style.display=done?'none':''; na.style.display=done?'':'none'; if(done) plan.value=''; }; comp.addEventListener('input',upd); comp.addEventListener('change',upd); upd(); });
+}
+function recomputeExReq(b){
+  const el=b.querySelector('.ex-fields'); if(!el) return;
+  const code=b.querySelector('.rx-qual').value; const c=effConfig(code, b.closest('.ex-tile').dataset.reqkey);
+  const lbl=b.querySelector('.ex-block-lbl'); const wrap=el.querySelector('[data-role=exreqwrap]');
+  let show=false; const cv=document.getElementById('changedate').value;
+  if(wrap){
+    if(c && c.manualExreq){ show=true; }
+    else if(c && c.firstDay2M){ const fdEl=el.querySelector('[data-cls="firstDay2M"]'); const calc=el.querySelector('[data-role=calc6mo]'); const fd=fdEl?fdEl.value:''; if(fd && cv){ const d1=new Date(fd); const six=new Date(d1); six.setMonth(six.getMonth()+6); const beyond=new Date(cv)>=six; if(calc){ calc.style.display=''; calc.textContent=beyond?'More than 6 months as 2nd Mate by crew change \u2014 exemption required':'Within 6 months of first day as 2nd Mate \u2014 no exemption required'; } show=beyond; } else { if(calc) calc.style.display='none'; } }
+    else if(c && c.cc){ const di=el.querySelector('[data-cls="'+c.cc+'"]'); if(di && di.value && cv && di.value>cv) show=true; }
+    const was = wrap.style.display!=='none';
+    if(show && !was && !(c&&c.manualExreq)){ wrap.querySelector('.ex-req').checked=true; }
+    wrap.style.display = show?'':'none';
+  }
+  const isExemption = !!(wrap && show && wrap.querySelector('.ex-req').checked);
+  if(lbl){ lbl.textContent = isExemption?'Exemption Request':'Training Plan'; }
+  const appr=b.querySelector('.ex-appr'); if(appr) appr.style.display=isExemption?'':'none';
+}
+function collectExemption(b){ const el=b.querySelector('.ex-fields'); const o={code:b.querySelector('.rx-qual')?b.querySelector('.rx-qual').value:'', codeOther:b.querySelector('.rx-qual-other')?b.querySelector('.rx-qual-other').value:'', vals:{}, notyet:{}, multi:{}, assess:{}, exreq:false};
+  if(!el) return o;
+  el.querySelectorAll('[data-cls]').forEach(i=>{ if(i.dataset.cls==='exreq'){ o.exreq=i.checked; } else { o.vals[i.dataset.cls]=i.value; } });
+  el.querySelectorAll('[data-notyet]').forEach(i=>o.notyet[i.dataset.notyet]=i.checked);
+  el.querySelectorAll('.ex-multi').forEach(i=>{ if(i.checked){ (o.multi[i.dataset.multi]=o.multi[i.dataset.multi]||[]).push(i.dataset.opt); } });
+  el.querySelectorAll('.ex-assess').forEach(i=>o.assess[i.dataset.assess]=i.value);
+  o.apprFrom=b.querySelector('.ex-appr-from')?b.querySelector('.ex-appr-from').value:''; o.apprTo=b.querySelector('.ex-appr-to')?b.querySelector('.ex-appr-to').value:''; o.apprStatus=b.querySelector('.ex-appr-status')?b.querySelector('.ex-appr-status').value:'';
+  return o; }
+function restoreExemption(b,o){ if(!o) return; const q=b.querySelector('.rx-qual'); q.value=o.code||''; b.querySelector('.rx-qual-other').value=o.codeOther||''; b.querySelector('.rx-other-wrap').style.display=(o.code==='Other')?'':'none';
+  renderExemptFields(b.querySelector('.ex-fields'), o.code, b.closest('.ex-tile').dataset.reqkey); const el=b.querySelector('.ex-fields');
+  Object.keys(o.vals||{}).forEach(k=>{ const i=el.querySelector('[data-cls="'+k+'"]'); if(i){ i.value=o.vals[k]; if(i.classList.contains('ex-ne')) i.dispatchEvent(new Event('change')); } });
+  Object.keys(o.notyet||{}).forEach(k=>{ const i=el.querySelector('[data-notyet="'+k+'"]'); if(i){ i.checked=o.notyet[k]; i.dispatchEvent(new Event('change')); } });
+  Object.keys(o.multi||{}).forEach(mi=>{ const opts=o.multi[mi]; el.querySelectorAll('.ex-multi[data-multi="'+mi+'"]').forEach(i=>{ if(opts.indexOf(i.dataset.opt)>=0) i.checked=true; }); });
+  Object.keys(o.assess||{}).forEach(k=>{ const i=el.querySelector('.ex-assess[data-assess="'+k+'"]'); if(i) i.value=o.assess[k]; });
+  el.querySelectorAll('.ex-multi[data-multi="0"]').forEach(c0=>c0.dispatchEvent(new Event('change')));
+  el.querySelectorAll('.ex-assess[data-assess^="0-"]').forEach(c0=>c0.dispatchEvent(new Event('change')));
+  recomputeExReq(b); const rq=el.querySelector('[data-cls=exreq]'); if(rq) rq.checked=!!o.exreq;
+  if(b.querySelector('.ex-appr-from')) b.querySelector('.ex-appr-from').value=o.apprFrom||''; if(b.querySelector('.ex-appr-to')) b.querySelector('.ex-appr-to').value=o.apprTo||''; if(b.querySelector('.ex-appr-status')) b.querySelector('.ex-appr-status').value=o.apprStatus||'';
+}
+function exBlockHTML(reqkey){ return '<div class="ex-block">'+
+  '<div class="ex-block-top"><span class="ex-block-lbl">Training Plan</span><button type="button" class="ex-remove" title="Remove exemption">\u00d7 Remove</button></div>'+
+  '<div class="r-exempt-grid">'+
+    '<label class="rx span2">Missing qualification / requirement<select class="rx-qual">'+buildQualOptions(reqkey)+'</select></label>'+
+    '<label class="rx span2 rx-other-wrap" style="display:none">Specify qualification / requirement<input type="text" class="rx-qual-other" placeholder="Describe the missing item"></label>'+
+    '<div class="ex-fields span2"></div>'+
+  '</div>'+
+  '<div class="ex-appr"><div class="ex-appr-lbl">Portways use only</div><div class="ex-appr-grid"><label>Effective from<input type="date" class="ex-appr-from"></label><label>Effective to<input type="date" class="ex-appr-to"></label><label>Status<select class="ex-appr-status"><option value="">\u2014 Select \u2014</option><option>Approved</option><option>Not Approved</option><option>Info Required</option></select></label></div></div>'+
+  '</div>'; }
+function buildExemptBlock(host, data){ const list=host.querySelector('.ex-list'); const d=document.createElement('div'); d.innerHTML=exBlockHTML(host.dataset.reqkey); const block=d.firstChild; list.appendChild(block);
+  const qsel=block.querySelector('.rx-qual');
+  qsel.addEventListener('change',()=>{ applyExempt(block); const c=effConfig(qsel.value,host.dataset.reqkey); if(c&&c.block){ alert('This qualification must be provided before joining \u2014 no exemption is permitted.'); } updateExSummaries(); queueSave(); });
+  const exf=block.querySelector('.ex-fields');
+  exf.addEventListener('input',()=>{ recomputeExReq(block); updateExSummaries(); queueSave(); });
+  exf.addEventListener('change',()=>{ recomputeExReq(block); updateExSummaries(); });
+  block.querySelectorAll('.ex-appr-from,.ex-appr-to,.ex-appr-status').forEach(el=>el.addEventListener('input',()=>{ updateExSummaries(); renderRatioShortfalls(); queueSave(); }));
+  block.querySelector('.ex-remove').addEventListener('click',()=>{ block.remove(); updateExSummaries(); renderRatioShortfalls(); queueSave(); });
+  if(data) restoreExemption(block, data);
+  return block; }
+function collectExemptions(r){ return [...r.querySelectorAll('.ex-block')].map(collectExemption).filter(x=>x.code||x.codeOther); }
+function restoreExemptions(r, arr){ const list=r.querySelector('.ex-list'); if(!list) return; list.innerHTML=''; (arr||[]).forEach(d=>buildExemptBlock(r,d)); }
+function hasApprovedExemption(code){ return [...allPlannedRows(), ...actualBody.children].some(r=> r._exTile && [...r._exTile.querySelectorAll('.ex-block')].some(b=>{ const ex=collectExemption(b); return ex.code===code && ex.apprStatus==='Approved'; })); }
+function exSummaryRows(){ const approved=[], notApproved=[], infoReq=[], pending=[], shift=[], close=[];
+  [...allPlannedRows(), ...actualBody.children].forEach(r=>{ if(r.querySelector('.r-matrix').value!=='No') return;
+    const pos=(r.querySelector('.r-pos')&&r.querySelector('.r-pos').value)||''; const nm=selName(r.querySelector('.r-name'), r.querySelector('.r-name-other').value);
+    [...(r._exTile?r._exTile.querySelectorAll('.ex-block'):[])].forEach(b=>{ const ex=collectExemption(b); if(!ex.code) return; const c=effConfig(ex.code,r.dataset.reqkey);
+      const ql=ex.code==='Other'?('Other: '+(ex.codeOther||'\u2014')):qualFullName(ex.code);
+      if(ex.exreq){
+        const ef=fmtDMY(ex.apprFrom)||'\u2014', et=fmtDMY(ex.apprTo)||'\u2014';
+        const line=(pos||'\u2014')+(nm?' \u2013 '+nm:'')+': '+ql+' | '+ef+' \u2192 '+et;
+        const stt=ex.apprStatus;
+        if(stt==='Approved') approved.push(line); else if(stt==='Not Approved') notApproved.push(line); else if(stt==='Info Required') infoReq.push(line); else pending.push(line);
+      } else {
+        const dvals=Object.keys(ex.vals||{}).filter(k=>k!=='comment'&&k!=='ne'&&ex.vals[k]).map(k=>fmtDMY(ex.vals[k])||ex.vals[k]);
+        let note = c ? (c.note || (c.noteByPos && c.noteByPos[r.dataset.reqkey]) || '') : '';
+        const fsw = r.querySelector('.r-firstswing') && r.querySelector('.r-firstswing').checked;
+        if(c && c.block) note='Must be provided before joining'; else if(c && c.firstSwingItem && !fsw) note='NO exemption available';
+        close.push((pos||'\u2014')+(nm?' \u2013 '+nm:'')+': '+ql+(dvals.length?' ('+dvals.join(', ')+')':'')+(note?' \u2013 '+note:''));
+      }
+    }); });
+  [...plannedBody.children, ...actualBody.children].forEach(r=>{ const altEl=r.querySelector('.r-shiftex-alt'); if(!altEl || altEl.style.display==='none') return; const pos=(r.querySelector('.r-pos')&&r.querySelector('.r-pos').value)||''; const posref=r.querySelector('.r-posref')?r.querySelector('.r-posref').textContent:''; const nm=selName(r.querySelector('.r-name'), (r.querySelector('.r-name-other')||{}).value); const who=(posref?posref+'. ':'')+(pos||'\u2014')+(nm?' \u2013 '+nm:''); const std=shiftLabel(r.dataset.defshift), req=shiftLabel(rowShiftVal(r)); if(r.dataset.nonstd==='1' && std!==req){ shift.push(who+' | standard: '+std+', requested: '+req); } else { const cmt=r.querySelector('.r-shiftex-comment').value; shift.push(who+' | '+(cmt||'Shift exemption')); } });
+  return {approved, notApproved, infoReq, pending, shift, close}; }
+function ratioShortfalls(body){ const rows=[...body.children]; const out=[];
+  RATIO_QUALS.forEach(q=>{
+    if(q.total){ const held=rows.filter(r=>ratioHeld(r,q.code)).length; if(held<q.total) out.push({q, where:'any position/shift', need:q.total, have:held}); }
+    else { [['2400-1200','Shift 1'],['1200-2400','Shift 2']].forEach(sp=>{ const held=rows.filter(r=>ratioHeld(r,q.code)&&rowShiftVal(r)===sp[0]).length; if(held<q.perShift) out.push({q, where:sp[1], need:q.perShift, have:held}); }); }
+  });
+  return out; }
+let actualStatus=[];
+const AS_OPTS={ exemption:['Exemption requested','Exemption approved','Exemption not approved'], trainingplan:['Training Plan Provided','Training Plan completed and evidence uploaded','Other'] };
+function asStatusOpts(type,cur){ return ['<option value="">\u2014 Status \u2014</option>'].concat((AS_OPTS[type]||[]).map(o=>'<option'+(cur===o?' selected':'')+'>'+escH(o)+'</option>')).join(''); }
+function buildActualStatusFromPlanned(){ const items=[];
+  allPlannedRows().forEach(r=>{ if(r.querySelector('.r-matrix').value!=='No') return;
+    const posref=r.querySelector('.r-posref')?r.querySelector('.r-posref').textContent:''; const pos=r.querySelector('.r-pos')?r.querySelector('.r-pos').value:''; const nm=selName(r.querySelector('.r-name'),(r.querySelector('.r-name-other')||{}).value); const sams=r.querySelector('.r-sams').value;
+    const who=(posref?posref+'. ':'')+(pos||'')+(nm?' \u2013 '+nm:'')+(sams?' ['+sams+']':'');
+    [...(r._exTile?r._exTile.querySelectorAll('.ex-block'):[])].forEach(b=>{ const ex=collectExemption(b); if(!ex.code) return; const q=QUALS[ex.code]; items.push({ who, item:ex.code+(q?' '+q.name:''), type: ex.exreq?'exemption':'trainingplan', status:'', comment:'', manual:false }); });
+  });
+  return items; }
+function renderActualStatus(){ const box=document.getElementById('actualStatusBody'); if(!box) return; box.innerHTML='';
+  if(!actualStatus.length){ box.innerHTML='<div class="as-empty">No items yet. Copy the planned list, or use \u201c+ Add line\u201d.</div>'; return; }
+  actualStatus.forEach((it,idx)=>{ const line=document.createElement('div'); line.className='as-line '+(it.type==='exemption'?'as-ex':'as-tp'); line.dataset.idx=idx; let html='';
+    if(it.manual){ html+='<input type="text" class="as-who-in" placeholder="Position / name"><input type="text" class="as-item-in" placeholder="Matrix item"><select class="as-type"><option value="exemption"'+(it.type==='exemption'?' selected':'')+'>Exemption request</option><option value="trainingplan"'+(it.type==='trainingplan'?' selected':'')+'>Training plan</option></select>'; }
+    else { html+='<div class="as-who">'+escH(it.who)+'</div><div class="as-item">'+escH(it.item)+'</div><div class="as-type-lbl">'+(it.type==='exemption'?'Exemption':'Training plan')+'</div>'; }
+    html+='<select class="as-status">'+asStatusOpts(it.type,it.status)+'</select><input type="text" class="as-comment" placeholder="Comment" style="display:'+(it.status==='Other'?'':'none')+'"><button type="button" class="as-del" title="Remove">\u00d7</button>';
+    line.innerHTML=html; box.appendChild(line);
+    if(it.manual){ line.querySelector('.as-who-in').value=it.who||''; line.querySelector('.as-item-in').value=it.item||''; }
+    line.querySelector('.as-comment').value=it.comment||'';
+    if(it.manual){ line.querySelector('.as-who-in').addEventListener('input',e=>{ it.who=e.target.value; queueSave(); }); line.querySelector('.as-item-in').addEventListener('input',e=>{ it.item=e.target.value; queueSave(); }); line.querySelector('.as-type').addEventListener('change',e=>{ it.type=e.target.value; it.status=''; renderActualStatus(); queueSave(); }); }
+    line.querySelector('.as-status').addEventListener('change',e=>{ it.status=e.target.value; line.querySelector('.as-comment').style.display=(it.status==='Other')?'':'none'; queueSave(); });
+    line.querySelector('.as-comment').addEventListener('input',e=>{ it.comment=e.target.value; queueSave(); });
+    line.querySelector('.as-del').addEventListener('click',()=>{ actualStatus.splice(idx,1); renderActualStatus(); queueSave(); });
+  });
+}
+function computeRatioShort(body){ const rows=[...body.children]; const out=[];
+  RATIO_QUALS.forEach(q=>{
+    if(hasApprovedExemption(q.code)) return;
+    if(q.total){ const held=rows.filter(r=>ratioHeld(r,q.code)).length; if(held<q.total){ out.push({q, code:q.code, mode:'total', held, need:q.total, shifts:[], reallocatable:false}); } }
+    else { const h1=rows.filter(r=>ratioHeld(r,q.code)&&rowShiftVal(r)==='2400-1200').length; const h2=rows.filter(r=>ratioHeld(r,q.code)&&rowShiftVal(r)==='1200-2400').length; const total=rows.filter(r=>ratioHeld(r,q.code)).length; const shifts=[]; if(h1<q.perShift) shifts.push('Shift 1'); if(h2<q.perShift) shifts.push('Shift 2'); if(shifts.length){ const reallocatable = total>=q.perShift*2 && !q.trainingPlan; out.push({q, code:q.code, mode:'shift', h1, h2, total, need:q.perShift, shifts, reallocatable}); } }
+  });
+  return out; }
+function nameOptionsEligible(q){ const seen={}, opts=[]; [...plannedBody.children].forEach(r=>{ if(!ratioElig(q,r.dataset.reqkey)) return; const nm=selName(r.querySelector('.r-name'), (r.querySelector('.r-name-other')||{}).value); if(nm && !seen[nm]){ seen[nm]=1; opts.push(nm); } }); return opts; }
+let ratioShortfallState={};
+function rsfDetail(sf){ return sf.mode==='total' ? (sf.held+' of '+sf.need+' held (any position/shift)') : sf.shifts.map(sh=>sh+': '+(sh==='Shift 1'?sf.h1:sf.h2)+' of '+sf.need+' held').join(', '); }
+function renderNotesSummary(){
+  const stack=document.getElementById('notesSummaryStack'), sec=document.getElementById('secNotesSummary'); if(!stack) return;
+  const adhoc=[], notes=[];
+  [...plannedBody.children].forEach(r=>{
+    const name=selName(r.querySelector('.r-name'),(r.querySelector('.r-name-other')||{}).value); if(!name||name==='\u2014') return;
+    const pos=(r.querySelector('.r-pos')&&r.querySelector('.r-pos').value)||'';
+    const adh=r.querySelector('.r-adhoc');
+    if(adh && adh.checked){ adhoc.push({pos,name,j:fmtDMY((r.querySelector('.r-joining')||{}).value)||'\u2014',l:fmtDMY((r.querySelector('.r-leaving')||{}).value)||'\u2014'}); }
+    const alt=r.querySelector('.r-shiftex-alt');
+    if(alt && alt.style.display!=='none'){ notes.push({pos,name,shift:shiftLabel(rowShiftVal(r)),c:((r.querySelector('.r-shiftex-comment')||{}).value)||'\u2014'}); }
+  });
+  let html='';
+  html+='<div class="shiftsum-group"><div class="shiftsum-h">Ad Hoc swing dates</div>';
+  html+= adhoc.length ? '<table class="shiftsum-tbl"><tbody><tr class="notes-hdr"><td>Position</td><td>Name</td><td>Joining</td><td>Leaving</td></tr>'+adhoc.map(o=>'<tr><td>'+escH(o.pos)+'</td><td>'+escH(o.name)+'</td><td>'+escH(o.j)+'</td><td>'+escH(o.l)+'</td></tr>').join('')+'</tbody></table>' : '<div class="shiftsum-none">None</div>';
+  html+='</div>';
+  html+='<div class="shiftsum-group"><div class="shiftsum-h">Non-standard shift \u2013 how AMSA manning maintained</div>';
+  html+= notes.length ? '<table class="shiftsum-tbl"><tbody><tr class="notes-hdr"><td>Position</td><td>Name</td><td>Shift</td><td>AMSA manning</td></tr>'+notes.map(o=>'<tr><td>'+escH(o.pos)+'</td><td>'+escH(o.name)+'</td><td>'+escH(o.shift)+'</td><td>'+escH(o.c)+'</td></tr>').join('')+'</tbody></table>' : '<div class="shiftsum-none">None</div>';
+  html+='</div>';
+  stack.innerHTML=html;
+  if(sec) sec.style.display = (adhoc.length||notes.length) ? '' : 'none';
+}
+function renderShiftSummary(){
+  const stack=document.getElementById('shiftSummaryStack'), sec=document.getElementById('secShiftSummary'); if(!stack) return;
+  const rows=[...plannedBody.children].map(r=>({ posref:parseInt(((r.querySelector('.r-posref')||{}).textContent||'99'),10)||99, pos:(r.querySelector('.r-pos')&&r.querySelector('.r-pos').value)||'', name:selName(r.querySelector('.r-name'),(r.querySelector('.r-name-other')||{}).value), sams:(r.querySelector('.r-sams')&&r.querySelector('.r-sams').value)||'', shift:rowShiftVal(r) })).filter(o=>o.name && o.name!=='\u2014');
+  if(sec) sec.style.display = rows.length ? '' : 'none';
+  const groups=[{key:'2400-1200',label:'2400-1200'},{key:'1200-2400',label:'1200-2400'},{key:'other',label:'Other Shift'}];
+  let html='';
+  groups.forEach(g=>{
+    const list=rows.filter(o=> g.key==='other' ? (o.shift!=='2400-1200'&&o.shift!=='1200-2400') : o.shift===g.key).sort((a,b)=>a.posref-b.posref);
+    html+='<div class="shiftsum-group"><div class="shiftsum-h">'+escH(g.label)+'</div>';
+    html+= list.length ? '<table class="shiftsum-tbl"><tbody>'+list.map(o=>'<tr><td>'+escH(o.pos)+'</td><td>'+escH(o.name)+'</td><td>'+escH(o.sams||'\u2014')+'</td></tr>').join('')+'</tbody></table>' : '<div class="shiftsum-none">None on this shift</div>';
+    html+='</div>';
+  });
+  stack.innerHTML=html;
+}
+function renderRatioShortfalls_one(){
+  renderShiftSummary(); renderNotesSummary();
+  const stack=document.getElementById('ratioShortfallStack'), sec=document.getElementById('secRatioShort'); if(!stack) return;
+  const rows=[...plannedBody.children];
+  const anyName=rows.some(r=>{ const v=r.querySelector('.r-name').value; return v&&v!=='__other__'; });
+  if(!anyName){ stack.innerHTML=''; if(sec) sec.style.display='none'; return; }
+  if(sec) sec.style.display='';
+  let anyShort=false;
+  let html='<table class="ratio-sum"><thead><tr><th>Qualification</th><th>2400-1200</th><th>1200-2400</th><th>Total</th><th>Required</th><th>Status</th></tr></thead><tbody>';
+  RATIO_QUALS.forEach(q=>{
+    const h1=rows.filter(r=>ratioHeld(r,q.code)&&rowShiftVal(r)==='2400-1200').length;
+    const h2=rows.filter(r=>ratioHeld(r,q.code)&&rowShiftVal(r)==='1200-2400').length;
+    const total=rows.filter(r=>ratioHeld(r,q.code)).length;
+    let req, ok;
+    if(q.total){ req=q.total+' total'; ok=total>=q.total; }
+    else { req=q.perShift+' / shift'; ok=(h1>=q.perShift && h2>=q.perShift); }
+    let status = ok?'Met':'Shortfall';
+    if(q.code==='PT-03' && !ok){ status='Compliance required by 29 Dec 2026'; }
+    if(!ok) anyShort=true;
+    html+='<tr class="'+(ok?'ratio-ok':'ratio-short')+'"><td>'+escH(q.short+' \u2013 '+q.name)+'</td><td>'+h1+'</td><td>'+h2+'</td><td>'+total+'</td><td>'+escH(req)+'</td><td>'+escH(status)+'</td></tr>';
+  });
+  html+='</tbody></table>';
+  html+='<p class="ratio-note">'+(anyShort?'\u26a0 One or more ratio requirements are not met on the shifts as allocated.':'\u2713 All ratio requirements are met across the shifts.')+'</p>';
+  stack.innerHTML=html;
+}
+function updateExStackHeader(stack){ if(!stack) return;
+  let hdr=stack.previousElementSibling;
+  if(!(hdr && hdr.classList && hdr.classList.contains('ex-stack-h'))){ hdr=document.createElement('div'); hdr.className='ex-stack-h'; hdr.textContent='Exemption requests'; stack.parentNode.insertBefore(hdr,stack); }
+  const anyVisible=[...stack.querySelectorAll('.ex-tile')].some(t=>t.style.display!=='none');
+  hdr.style.display=anyVisible?'':'none';
+  stack.style.display=anyVisible?'flex':'none';
+}
+function toggleExTile(row){ const t=row&&row._exTile; const on=row.querySelector('.r-matrix').value==='No';
+  const note=row.querySelector('.r-exempt-note'); if(note){ note.textContent=on?'\u26a0 Exemption required \u2014 record it on the Exemption Request form':''; note.style.display=on?'':'none'; }
+  if(t){ t.style.display='none'; if(t.parentNode) updateExStackHeader(t.parentNode); }
+}
+function updateExSummaries(){ const o=exSummaryRows();
+  const fill=(id,arr)=>{ const el=document.getElementById(id); if(el) el.innerHTML=arr.length?arr.map(x=>'<li>'+escH(x)+'</li>').join(''):'<li class="ex-none">None</li>'; };
+  fill('exApproved',o.approved); fill('exNotApproved',o.notApproved); fill('exInfoReq',o.infoReq); fill('exPending',o.pending); fill('exShift',o.shift); fill('exCloseList',o.close); }
+function updateTileWho(tile){ const r=tile._row; if(!r) return; const who=tile.querySelector('.ex-tile-who'); const posEl=r.querySelector('.r-pos'); const pos=posEl?posEl.value:''; const posref=r.querySelector('.r-posref')?r.querySelector('.r-posref').textContent:''; const nm=selName(r.querySelector('.r-name'), r.querySelector('.r-name-other').value); who.textContent=(posref?posref+'. ':'')+(pos||'')+(nm?'  \u2013  '+nm:''); }
+const CO_HIGHER=['QL-01','QL-02','QLE-02'];
+function cocCode(v){ return (v||'').split(' ')[0]; }
+function coHasHigher(r){ const c=r.querySelector('.r-coc'); return c?CO_HIGHER.indexOf(cocCode(c.value))>=0:false; }
+function rowShiftVal(r){ const x=r.querySelector('.r-shift'); return x?x.value:''; }
+function shiftLabel(v){ return v==='2400-1200'?'Shift 1 (0000-1200)':v==='1200-2400'?'Shift 2 (1200-2400)':v==='0600-1800'?'Day (0600-1800)':v==='Other'?'Other':(v||'\u2014'); }
+function setAltShift(r, on){ const wrap=r.querySelector('.r-shiftex-wrap'); if(!wrap) return; const alt=r.querySelector('.r-shiftex-alt');
+  if(on){ alt.style.display=''; wrap.style.display=''; }
+  else { alt.style.display='none'; wrap.style.display='none'; } }
+function setDayShift(r, on){ const wrap=r.querySelector('.r-shiftex-wrap'); if(!wrap) return; const day=r.querySelector('.r-shiftex-day'), alt=r.querySelector('.r-shiftex-alt');
+  if(on){ day.style.display=''; wrap.style.display=''; } else { day.style.display='none'; if(alt.style.display==='none') wrap.style.display='none'; } }
+function recomputeShiftExemptions(body){ const rows=[...body.children];
+  rows.forEach(r=>{ if(r.dataset.reqkey==='Cook'){ r.dataset.nonstd=''; setAltShift(r,false); return; }
+    const sv=rowShiftVal(r);
+    const nonStandard = !!sv && sv!=='1200-2400' && sv!=='2400-1200';
+    r.dataset.nonstd = nonStandard?'1':'';
+    setAltShift(r, nonStandard);
+  });
+}
+
+function applyExempt(b){ const q=b.querySelector('.rx-qual').value; b.querySelector('.rx-other-wrap').style.display=(q==='Other')?'':'none'; renderExemptFields(b.querySelector('.ex-fields'), q, b.closest('.ex-tile').dataset.reqkey); recomputeExReq(b); }
+function fillSelect(id, items){
+  const sel=document.getElementById(id); if(!sel) return;
+  sel.innerHTML='<option value="">— Select —</option>'+items.map(v=>'<option>'+escH(v)+'</option>').join('');
+}
+fillSelect('partnership', PARTNERSHIPS);
+fillSelect('vessel', VESSELS);
+const ROSTER_SHIFT_OPTS='<option value="">— Select —</option>'+ROSTER_SHIFTS.map(s=>'<option>'+escH(s)+'</option>').join('')+'<option value="Other">Other (specify)</option>';
+function dynamicCocList(posVal){ return POS_COC[FLEX_KEY[posVal]]||[]; }
+function cocOptions(arr,withBlank){ return (withBlank?'<option value="">— Select —</option>':'')+arr.map(c=>'<option>'+escH(c)+'</option>').join(''); }
+
+/* ---- Signature pad ---- */
+function makeSigPad(canvasId, clearId){
+  const canvas=document.getElementById(canvasId); const ctx=canvas.getContext('2d');
+  let drawing=false, hasInk=false;
+  function size(){
+    const data=hasInk?canvas.toDataURL():null;
+    const rect=canvas.getBoundingClientRect(); const ratio=window.devicePixelRatio||1;
+    canvas.width=Math.max(1,rect.width*ratio); canvas.height=Math.max(1,rect.height*ratio);
+    ctx.setTransform(ratio,0,0,ratio,0,0);
+    ctx.lineWidth=2; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#16324a';
+    if(data){ const img=new Image(); img.onload=()=>ctx.drawImage(img,0,0,rect.width,rect.height); img.src=data; }
+  }
+  function pos(e){const r=canvas.getBoundingClientRect();return {x:e.clientX-r.left,y:e.clientY-r.top};}
+  canvas.addEventListener('pointerdown',e=>{drawing=true;const p=pos(e);ctx.beginPath();ctx.moveTo(p.x,p.y);try{canvas.setPointerCapture(e.pointerId);}catch(_){}; });
+  canvas.addEventListener('pointermove',e=>{if(!drawing)return;const p=pos(e);ctx.lineTo(p.x,p.y);ctx.stroke();hasInk=true;});
+  canvas.addEventListener('pointerup',()=>{if(drawing){drawing=false;queueSave();}});
+  canvas.addEventListener('pointerleave',()=>{if(drawing){drawing=false;queueSave();}});
+  document.getElementById(clearId).addEventListener('click',()=>{ctx.clearRect(0,0,canvas.width,canvas.height);hasInk=false;queueSave();});
+  let t=null; window.addEventListener('resize',()=>{clearTimeout(t);t=setTimeout(size,200);});
+  return { size, clear(){ctx.clearRect(0,0,canvas.width,canvas.height);hasInk=false;}, get hasInk(){return hasInk;},
+    data(){return hasInk?canvas.toDataURL('image/png'):'';},
+    restore(d){if(!d)return;const img=new Image();img.onload=()=>{ctx.drawImage(img,0,0,canvas.getBoundingClientRect().width,canvas.getBoundingClientRect().height);hasInk=true;};img.src=d;} };
+}
+const sigA=makeSigPad('sigCanvas','sigClear');
+
+/* ---- Generic conditional show/hide ---- */
+document.querySelectorAll('[data-conditional]').forEach(sel=>{
+  const target=document.getElementById(sel.getAttribute('data-conditional'));
+  const vals=(sel.getAttribute('data-show-value')||'Other').split('|');
+  const update=()=>{ target.classList.toggle('show', vals.indexOf(sel.value)>=0); updateProgress(); };
+  sel.addEventListener('change',update); sel._applyConditional=update;
+});
+
+/* ---- Crew rosters (Planned + Actual) ---- */
+let plannedBody=document.getElementById('plannedBody');
+const CL_BODIES=[plannedBody];
+function allPlannedRows(){ return CL_BODIES.reduce((a,b)=>a.concat([...b.children]),[]); }
+function clDate(i){ return i===0 ? (document.getElementById('changedate')||{}).value||'' : ((CL_BODIES[i].closest('.cl-panel').querySelector('.cl-date')||{}).value||''); }
+function clLabel(i){ const d=fmtDMY(clDate(i)); return 'Crew list '+(i+1)+(i===0?' \u2014 crew change day':'')+(d?' \u2014 '+d:''); }
+const actualBody=document.getElementById('actualBody');
+function cocCellHTML(item){
+  const arr = item.sel ? (POS_COC[FLEX_KEY[item.sel[0]]]||[]) : (POS_COC[item.reqkey]||[]);
+  const fixed = !item.sel && arr.length===1;
+  return '<select class="r-coc"'+(fixed?' data-fixed="1"':'')+'>'+cocOptions(arr, !fixed)+'</select>';
+}
+function rosterRowHTML(item, withChanged){
+  const posInner = item.sel
+    ? '<select class="r-pos">'+item.sel.map(o=>'<option>'+escH(o)+'</option>').join('')+'</select>'
+    : '<input class="r-pos" value="'+escH(item.pos)+'" readonly>';
+  const posCell = '<div class="r-pos-cell"><span class="r-posref" title="Position reference">'+item.posref+'</span>'+posInner+'</div>';
+  const changedCell = withChanged ? '<div class="r-changed-cell"><input type="checkbox" class="r-changed" title="Changed from planned"></div>' : '';
+  const isPlanned=!withChanged;
+  const namePos=item.pos||(item.sel?item.sel[0]:'');
+  const reliefCell = isPlanned ? '<div class="r-flags-cell"><label class="r-flag"><input type="checkbox" class="r-relief" title="Relief \u2013 not part of this team permanently"><span class="r-flaglbl">Relief</span></label><label class="r-flag"><input type="checkbox" class="r-adhoc" title="Ad Hoc \u2013 swing not aligned to designated crew-change dates"><span class="r-flaglbl">Ad Hoc</span></label><label class="r-flag"><input type="checkbox" class="r-firstswing" title="First swing \u2013 new crew completing inductions on board"><span class="r-flaglbl">1st Swing</span></label></div>' : '';
+  const shiftexWrap = '<div class="r-shiftex-wrap" style="display:none">'+
+    '<div class="r-shiftex-alt" style="display:none"><span class="r-shiftex-lbl">Detail how you will maintain AMSA manning</span><input type="text" class="r-shiftex-comment" placeholder="How AMSA manning will be maintained"></div>'+
+    '<div class="r-shiftex-day" style="display:none"><label class="r-shiftex-amsa-lbl"><span>Confirm AMSA manning maintained</span><input type="checkbox" class="r-shiftex-amsa"></label><input type="text" class="r-shiftex-daycomment" placeholder="Comment"></div>'+
+    '</div>';
+  const adhocCell = '';
+  return posCell+
+    '<div class="r-matrix-cell"><span class="r-mlabel">Compliant / Exempt</span><select class="r-matrix" title="Compliant or exempt? Yes = meets all requirements or holds exemptions covering any gaps"><option value="">\u2014</option><option>Yes</option><option>No</option></select></div>'+
+    '<div class="r-name-cell"><span class="r-slabel">Name</span><select class="r-name">'+nameOptionsFor(namePos)+'</select><input class="r-name-other" placeholder="Type name" style="display:none"><div class="r-other-extra" style="display:none"><label class="r-oth-lbl">Crew team<select class="r-other-team"><option value="">\u2014 Select team \u2014</option><option value="NOR">NOR</option><option value="OPT">OPT</option><option value="SMG">SMG</option><option value="SM2">SM2</option><option value="SIN">SIN</option><option value="UNI">UNI</option></select></label><label class="r-oth-lbl r-other-part-wrap" style="display:none">Partnership<select class="r-other-partnership"><option value="">\u2014 Select \u2014</option><option>Permanent</option><option>Temporary</option><option>Relief</option></select></label><label class="r-oth-lbl r-other-eng-wrap" style="display:none">Engagement \u2014 provide details<input type="text" class="r-other-engagement" placeholder="Provide details of engagement"></label></div><div class="r-adhoc-dates" style="display:none"><label class="r-adh-lbl">Joining<input type="date" class="r-joining"></label><label class="r-adh-lbl">Leaving<input type="date" class="r-leaving"></label></div><div class="r-exempt-note" style="display:none"></div></div>'+
+    '<div class="r-sams-cell"><span class="r-slabel">SAMS #</span><input class="r-sams" placeholder="SAMS #"></div>'+
+    '<div><select class="r-shift">'+ROSTER_SHIFT_OPTS+'</select></div>'+
+    changedCell+
+    '<div class="r-subline"><span class="r-subline-lbl">Ratio quals held</span>'+ratioCellHTML(item.sel?FLEX_KEY[item.sel[0]]:item.reqkey)+(reliefCell?'<span class="r-subline-lbl">Flags</span>'+reliefCell:'')+'</div>'+adhocCell+
+    '<div class="r-shift-other-wrap" style="display:none"><input class="r-shift-other" placeholder="Specify shift"></div>'+
+    shiftexWrap;
+}
+function propagateMaster1(body){
+  const m1=body.children[0]; if(!m1) return;
+  const val=m1.querySelector('.r-shift').value, oth=m1.querySelector('.r-shift-other').value;
+  [...body.children].forEach((r,i)=>{ if(i===0) return; if(r.dataset.watch!=='AM') return;
+    const sh=r.querySelector('.r-shift'); sh.value=val;
+    const ow=r.querySelector('.r-shift-other-wrap');
+    if(val==='Other'){ ow.style.display=''; r.querySelector('.r-shift-other').value=oth; }
+    else { ow.style.display='none'; r.querySelector('.r-shift-other').value=''; }
+  });
+}
+function buildRosterInto(body, withChanged){
+  body.innerHTML='';
+  const _pnl = body.closest ? body.closest('.cl-panel') : null;
+  const stack = body.id==='actualBody' ? document.getElementById('actualExStack') : (_pnl ? _pnl.querySelector('.ex-stack') : document.getElementById('plannedExStack'));
+  stack.innerHTML='';
+  ROSTER.forEach((item,idx)=>{
+    const row=document.createElement('div'); row.className='roster-row'; row.dataset.watch=item.watch; row.dataset.reqkey=item.sel?FLEX_KEY[item.sel[0]]:item.reqkey; if(item.sel) row.dataset.flex='1'; row.dataset.defshift=item.shift||'';
+    row.innerHTML=rosterRowHTML(item, withChanged);
+    const tile=document.createElement('div'); tile.className='ex-tile'; tile.style.display='none'; tile.dataset.reqkey=row.dataset.reqkey;
+    tile.innerHTML='<div class="ex-tile-head"><span class="ex-tile-warn">\u26a0 Matrix requirement not met</span><span class="ex-tile-who"></span></div><div class="ex-list"></div><button type="button" class="btn ghost ex-add">+ Add exemption</button>';
+    stack.appendChild(tile); row._exTile=tile; tile._row=row;
+    tile.querySelector('.ex-add').addEventListener('click',()=>{ buildExemptBlock(tile); updateExSummaries(); queueSave(); });
+    const sh=row.querySelector('.r-shift'); sh.value=item.shift;
+    const ow=row.querySelector('.r-shift-other-wrap');
+    sh.addEventListener('change',()=>{ ow.style.display=sh.value==='Other'?'':'none';
+      const pk=SHIFT_PAIRS[row.dataset.reqkey];
+      if(pk && (sh.value==='2400-1200'||sh.value==='1200-2400')){ const partner=[...body.children].find(r=>r.dataset.reqkey===pk); if(partner){ const opp=sh.value==='2400-1200'?'1200-2400':'2400-1200'; const psh=partner.querySelector('.r-shift'); if(psh.value!==opp){ psh.value=opp; } } }
+      recomputeShiftExemptions(body); renderRatioShortfalls(); updateExSummaries(); if(body===actualBody) checkActualDivergence(row); queueSave(); });
+    { const adh=row.querySelector('.r-adhoc'); if(adh) adh.addEventListener('change',()=>{ const dd=row.querySelector('.r-adhoc-dates'); if(dd) dd.style.display=adh.checked?'':'none'; queueSave(); }); }
+    if(item.sel){
+      const ps=row.querySelector('.r-pos');
+      ps.addEventListener('change',()=>{ row.dataset.reqkey=FLEX_KEY[ps.value]; tile.dataset.reqkey=FLEX_KEY[ps.value]; tile.querySelectorAll('.ex-block').forEach(b=>{ const rq=b.querySelector('.rx-qual'); rq.innerHTML=buildQualOptions(FLEX_KEY[ps.value]); rq.value=''; applyExempt(b); }); const rc=row.querySelector('.r-ratio-cell'); if(rc){ const nc=document.createElement('div'); nc.innerHTML=ratioCellHTML(FLEX_KEY[ps.value]); rc.replaceWith(nc.firstChild); } updateTileWho(tile); renderRatioShortfalls(); updateExSummaries(); queueSave(); });
+    }
+    const nameSel=row.querySelector('.r-name'), nameOther=row.querySelector('.r-name-other'), samsF=row.querySelector('.r-sams');
+    nameSel.addEventListener('change',()=>{ const isOther=nameSel.value==='__other__'; nameOther.style.display=isOther?'':'none'; const _oe=row.querySelector('.r-other-extra'); if(_oe) _oe.style.display=isOther?'':'none'; if(nameSel.value && !isOther && CREW_BY_SAM[nameSel.value]){ samsF.value=CREW_BY_SAM[nameSel.value].s; } else { samsF.value=''; } updateTileWho(tile); if(body!==actualBody){ rebuildReliefList(); renderRatioShortfalls(); } updateExSummaries(); queueSave(); });
+    { const _ot=row.querySelector('.r-other-team'); if(_ot){ _ot.addEventListener('change',()=>{ const own=_ot.value===TEAM_CODE; row.querySelector('.r-other-part-wrap').style.display=(_ot.value&&own)?'':'none'; row.querySelector('.r-other-eng-wrap').style.display=(_ot.value&&!own)?'':'none'; queueSave(); }); } }
+    if(item.sel){ const psn=row.querySelector('.r-pos'); psn.addEventListener('change',()=>{ nameSel.innerHTML=nameOptionsFor(psn.value); nameSel.value=''; nameOther.style.display='none'; nameOther.value=''; samsF.value=''; updateTileWho(tile); queueSave(); }); }
+    const mx=row.querySelector('.r-matrix');
+    mx.addEventListener('change',()=>{ mx.setAttribute('data-state',mx.value); toggleExTile(row); recomputeShiftExemptions(body); renderRatioShortfalls(); updateExSummaries(); queueSave(); });
+    const fsw=row.querySelector('.r-firstswing');
+    if(fsw){ fsw.addEventListener('change',()=>{ tile.querySelectorAll('.ex-block').forEach(applyExempt); updateExSummaries(); queueSave(); }); }
+    const relck=row.querySelector('.r-relief');
+    if(relck && body!==actualBody){ relck.addEventListener('change',()=>{ rebuildReliefList(); queueSave(); }); }
+    row.querySelectorAll('input,select').forEach(el=>el.addEventListener('input',queueSave));
+    body.appendChild(row);
+  });
+  recomputeShiftExemptions(body);
+}
+function checkActualDivergence(row){ if(row.dataset.copiedShift===undefined) return; const curShift=rowShiftVal(row); const curRatio=[...row.querySelectorAll('.r-ratio-ck')].filter(c=>c.checked).map(c=>c.dataset.ratio).sort().join(','); if(curShift!==row.dataset.copiedShift || curRatio!==(row.dataset.copiedRatio||'')){ if(!row._exTile.querySelector('.ex-block')) buildExemptBlock(row._exTile); row._exTile.style.display=''; updateTileWho(row._exTile); } }
+function copyPlannedToActual(){
+  [...plannedBody.children].forEach((pr,i)=>{
+    const ar=actualBody.children[i]; if(!ar) return;
+    if(ar.querySelector('.r-pos').tagName==='SELECT'){
+      ar.querySelector('.r-pos').value=pr.querySelector('.r-pos').value;
+      ar.querySelector('.r-name').innerHTML=nameOptionsFor(ar.querySelector('.r-pos').value);
+      ar.dataset.reqkey=FLEX_KEY[ar.querySelector('.r-pos').value];
+    }
+    ar.querySelector('.r-name').value=pr.querySelector('.r-name').value;
+    ar.querySelector('.r-name-other').value=pr.querySelector('.r-name-other').value;
+    ar.querySelector('.r-name-other').style.display=(pr.querySelector('.r-name').value==='__other__')?'':'none';
+    ar.querySelector('.r-sams').value=pr.querySelector('.r-sams').value;
+    ar.querySelector('.r-shift').value=pr.querySelector('.r-shift').value;
+    ar.querySelector('.r-shift-other').value=pr.querySelector('.r-shift-other').value;
+    ar.querySelector('.r-shift-other-wrap').style.display=(pr.querySelector('.r-shift').value==='Other')?'':'none';
+    ar.querySelector('.r-joining').value=pr.querySelector('.r-joining').value; ar.querySelector('.r-leaving').value=pr.querySelector('.r-leaving').value;
+    const pmx=pr.querySelector('.r-matrix').value, amx=ar.querySelector('.r-matrix');
+    amx.value=pmx; if(pmx) amx.setAttribute('data-state',pmx); else amx.removeAttribute('data-state');
+    ar._exTile.dataset.reqkey=ar.dataset.reqkey; ar._exTile.querySelector('.ex-list').innerHTML=''; ar._exTile.style.display='none';
+    [...pr.querySelectorAll('.r-ratio-ck')].forEach(pck=>{ const ack=ar.querySelector('.r-ratio-ck[data-ratio="'+pck.dataset.ratio+'"]'); if(ack) ack.checked=pck.checked; });
+    ar.dataset.copiedShift=pr.querySelector('.r-shift').value; ar.dataset.copiedRatio=[...pr.querySelectorAll('.r-ratio-ck')].filter(c=>c.checked).map(c=>c.dataset.ratio).sort().join(',');
+    const psc=pr.querySelector('.r-shiftex-comment'); if(psc && ar.querySelector('.r-shiftex-comment')){ ar.querySelector('.r-shiftex-comment').value=psc.value; ar.querySelector('.r-shiftex-amsa').checked=pr.querySelector('.r-shiftex-amsa').checked; ar.querySelector('.r-shiftex-daycomment').value=pr.querySelector('.r-shiftex-daycomment').value; }
+  });
+  recomputeShiftExemptions(actualBody);
+  actualStatus=buildActualStatusFromPlanned(); renderActualStatus();
+  queueSave();
+  const n=document.getElementById('saveNote'); if(n) n.textContent='Planned copied to actual \u2713';
+}
+document.getElementById('copyPlanned').addEventListener('click',copyPlannedToActual);
+
+/* ---- Relief crew ---- */
+const reliefBody=document.getElementById('reliefBody');
+let reliefEng={};
+function rebuildReliefList(){
+  reliefBody.innerHTML='';
+  [...plannedBody.children].forEach(row=>{
+    const rel=row.querySelector('.r-relief'); if(!rel || !rel.checked) return;
+    const posref=row.querySelector('.r-posref')?row.querySelector('.r-posref').textContent:'';
+    const posEl=row.querySelector('.r-pos'); const pos=posEl?posEl.value:'';
+    const nm=selName(row.querySelector('.r-name'), (row.querySelector('.r-name-other')||{}).value);
+    const sams=row.querySelector('.r-sams').value;
+    const eng=reliefEng[posref]||{};
+    const card=document.createElement('div'); card.className='relief-card relief-auto'; card.dataset.posref=posref;
+    card.innerHTML='<div class="relief-auto-who"><b>'+escH(posref)+'. '+escH(pos)+'</b>'+(nm?' \u2013 '+escH(nm):'')+(sams?' <span class="relief-auto-sams">'+escH(sams)+'</span>':'')+'</div>'+
+      '<div class="relief-eng">'+
+        '<label class="rlf-f">Form of Engagement<select class="reng-form"><option value="">\u2014 Select \u2014</option><option>From another team</option><option>Relief partnership</option><option>Other</option></select></label>'+
+        '<label class="rlf-f reng-team-wrap" style="display:none">Which team<input type="text" class="reng-team" placeholder="Specify team"></label>'+
+        '<label class="rlf-f reng-details-wrap" style="display:none">Details of engagement<input type="text" class="reng-details" placeholder="Provide details"></label>'+
+      '</div>';
+    reliefBody.appendChild(card);
+    const form=card.querySelector('.reng-form'), teamW=card.querySelector('.reng-team-wrap'), detW=card.querySelector('.reng-details-wrap');
+    form.value=eng.form||''; card.querySelector('.reng-team').value=eng.team||''; card.querySelector('.reng-details').value=eng.details||'';
+    const upd=()=>{ teamW.style.display=form.value==='From another team'?'':'none'; detW.style.display=form.value==='Other'?'':'none'; };
+    const save=()=>{ reliefEng[posref]={form:form.value,team:card.querySelector('.reng-team').value,details:card.querySelector('.reng-details').value}; };
+    upd();
+    form.addEventListener('change',()=>{ upd(); save(); queueSave(); });
+    card.querySelector('.reng-team').addEventListener('input',()=>{ save(); queueSave(); });
+    card.querySelector('.reng-details').addEventListener('input',()=>{ save(); queueSave(); });
+  });
+  if(!reliefBody.children.length){ reliefBody.innerHTML='<div class="relief-empty">No crew marked as Relief. Tick <b>Relief</b> on a planned row to add them here.</div>'; }
+}
+function collectRelief(){ const m={}; [...reliefBody.querySelectorAll('.relief-auto')].forEach(card=>{ m[card.dataset.posref]={form:card.querySelector('.reng-form').value,team:card.querySelector('.reng-team').value,details:card.querySelector('.reng-details').value}; }); return m; }
+function restoreRelief(data){ reliefEng=data||{}; rebuildReliefList(); }
+function reliefLines(){ return [...reliefBody.querySelectorAll('.relief-auto')].map(card=>{ const who=card.querySelector('.relief-auto-who').textContent.trim().replace(/\s+/g,' '); const form=card.querySelector('.reng-form').value; const team=card.querySelector('.reng-team').value; const det=card.querySelector('.reng-details').value; let eng=form; if(form==='From another team'&&team) eng+=': '+team; if(form==='Other'&&det) eng+=': '+det; return ' - '+who+(eng?' | Engagement: '+eng:''); }); }
+/* ---- Travel ---- */
+const travelBody=document.getElementById('travelBody');
+function buildTravelRow(data){ const row=document.createElement('div'); row.className='relief-card travel-row';
+  row.innerHTML='<div class="relief-top">'+
+    '<label class="rlf-f">Name<select class="tv-name">'+allNameOptions()+'</select><input class="tv-name-other" placeholder="Type name" style="display:none"></label>'+
+    '<label class="rlf-f">SAMS #<input class="tv-sams" placeholder="SAMS #"></label>'+
+    '<label class="rlf-f">Mode<select class="tv-mode"><option value="">\u2014 Select \u2014</option><option>Flight</option><option>DIDO</option></select></label>'+
+    '<label class="rlf-f">Direction<select class="tv-dir"><option value="">\u2014 Select \u2014</option><option>PER-ONS</option><option>ONS-PER</option></select></label>'+
+    '<button type="button" class="rlf-remove tv-remove">Remove</button></div>';
+  travelBody.appendChild(row);
+  const nameSel=row.querySelector('.tv-name'), nameOther=row.querySelector('.tv-name-other'), sams=row.querySelector('.tv-sams');
+  nameSel.addEventListener('change',()=>{ nameOther.style.display=nameSel.value==='__other__'?'':'none'; if(nameSel.value&&nameSel.value!=='__other__'&&CREW_BY_SAM[nameSel.value]){ sams.value=nameSel.value; } queueSave(); });
+  row.querySelector('.tv-remove').addEventListener('click',()=>{ row.remove(); queueSave(); });
+  row.querySelectorAll('input,select').forEach(el=>el.addEventListener('input',queueSave));
+  if(data){ nameSel.value=data.name||''; nameOther.style.display=(data.name==='__other__')?'':'none'; nameOther.value=data.nameOther||''; sams.value=data.sams||''; row.querySelector('.tv-mode').value=data.mode||''; row.querySelector('.tv-dir').value=data.dir||''; }
+  return row; }
+document.getElementById('addTravel').addEventListener('click',()=>{ buildTravelRow(null); queueSave(); });
+document.getElementById('flightConfirm').addEventListener('change',()=>{ const on=document.getElementById('flightConfirm').value==='No'; document.getElementById('travelBox').style.display=on?'':'none'; if(on && !travelBody.children.length) buildTravelRow(null); queueSave(); });
+function collectTravel(){ return [...travelBody.children].map(r=>({name:r.querySelector('.tv-name').value,nameOther:r.querySelector('.tv-name-other').value,sams:r.querySelector('.tv-sams').value,mode:r.querySelector('.tv-mode').value,dir:r.querySelector('.tv-dir').value})); }
+function restoreTravel(arr){ travelBody.innerHTML=''; (arr||[]).forEach(buildTravelRow); }
+function travelLines(){ return [...travelBody.children].map(r=>{ const nm=selName(r.querySelector('.tv-name'), r.querySelector('.tv-name-other').value); const sams=r.querySelector('.tv-sams').value; const mode=r.querySelector('.tv-mode').value; const dir=r.querySelector('.tv-dir').value; if(!nm&&!dir&&!mode) return null; return ' - '+(nm||'\u2014')+(sams?' ['+sams+']':'')+(mode?' | '+mode:'')+(dir?' | '+dir:''); }).filter(Boolean); }
+
+/* ---- Ad Hoc detection ---- */
+function isAdHoc(){ const v=document.getElementById('changedate').value; if(!v||!CREW_CHANGE_DATES.length) return false; return CREW_CHANGE_DATES.indexOf(v)<0; }
+function updateAdHoc(){ const box=document.getElementById('adhocBox'); if(box) box.style.display=isAdHoc()?'':'none'; }
+document.getElementById('changedate').addEventListener('change',updateAdHoc);
+function updateSec2Heading(){ const st=document.getElementById('stage'), h=document.getElementById('sec2h3'); if(!st||!h) return; const v=st.value||''; const pfx = v.indexOf('Planned')===0?'Planned ':(v.indexOf('Actual')===0?'Actual ':''); h.innerHTML=pfx+'Crew List &amp; Shift Allocation'; }
+function ccNumber(){ const v=document.getElementById('changedate').value; if(!v||!CREW_CHANGE_DATES.length) return ''; const i=CREW_CHANGE_DATES.indexOf(v); return i>=0 ? 'CC'+String(i+23).padStart(2,'0') : ''; }
+function updateCcNumber(){ const f=document.getElementById('ccNumber'); if(f) f.value=ccNumber(); }
+function swingOffDate(){ const v=document.getElementById('changedate').value; if(!v) return ''; const i=CREW_CHANGE_DATES.indexOf(v); if(i>=0 && i+1<CREW_CHANGE_DATES.length) return CREW_CHANGE_DATES[i+1]; const dt=new Date(v+'T00:00:00'); if(isNaN(dt)) return ''; dt.setDate(dt.getDate()+28); return dt.toISOString().slice(0,10); }
+function updateSwingOff(){ const f=document.getElementById('swingoff'); if(f) f.value=swingOffDate(); }
+(function(){ const st=document.getElementById('stage'); if(st) st.addEventListener('change',updateSec2Heading); const cd=document.getElementById('changedate'); if(cd){ cd.addEventListener('change',updateCcNumber); cd.addEventListener('change',updateSwingOff); } updateSec2Heading(); updateCcNumber(); updateSwingOff(); })();
+let _lastCC='', _lastSO='';
+function syncRowDates(){ /* joining/leaving now ad-hoc only \u2013 no auto-fill */ }
+document.getElementById('changedate').addEventListener('change',syncRowDates);
+var _so=document.getElementById('swingoff'); if(_so) _so.addEventListener('change',syncRowDates);
+
+/* ---- Requirements / progress ---- */
+function requirements(){
+  const list=[];
+  document.querySelectorAll('[data-req]').forEach(el=>{ list.push({el, ok:()=> !el.disabled && el.value.trim()!==''}); });
+  if(document.getElementById('preparedrole').value==='Other'){ const o=document.getElementById('preparedroleother'); list.push({el:o, ok:()=> o.value.trim()!==''}); }
+  return list;
+}
+function updateProgress(){
+  const r=requirements(); const done=r.filter(x=>x.ok()).length;
+  const pct=r.length? Math.round(done/r.length*100):0;
+  const fill=document.getElementById('progressFill'); fill.style.width=pct+'%';
+  fill.classList.toggle('done',done===r.length&&r.length>0);
+  document.getElementById('progressLabel').textContent=done+' of '+r.length+' required';
+}
+function checkRequired(){
+  document.querySelectorAll('.missing').forEach(el=>el.classList.remove('missing'));
+  const missing=requirements().filter(x=>!x.ok());
+  if(missing.length){
+    missing.forEach(x=>{ if(x.el) x.el.classList.add('missing'); });
+    if(missing[0].el) missing[0].el.scrollIntoView({behavior:'smooth',block:'center'});
+    alert(missing.length+' required field(s) still need completing before you can print or copy. They are highlighted in red.');
+    return false;
+  }
+  return true;
+}
+
+/* ---- Save / collect / restore ---- */
+function collectRoster(body, withChanged){
+  return [...body.children].map(r=>{ const o={
+    pos:r.querySelector('.r-pos').value, name:r.querySelector('.r-name').value,
+    nameOther:r.querySelector('.r-name-other').value, sams:r.querySelector('.r-sams').value,
+    otherTeam:(r.querySelector('.r-other-team')||{}).value||'', otherPartnership:(r.querySelector('.r-other-partnership')||{}).value||'', otherEngagement:(r.querySelector('.r-other-engagement')||{}).value||'',
+    shift:r.querySelector('.r-shift').value, shiftOther:r.querySelector('.r-shift-other').value,
+    joining:r.querySelector('.r-joining').value, leaving:r.querySelector('.r-leaving').value, adhoc:(r.querySelector('.r-adhoc')?r.querySelector('.r-adhoc').checked:false),
+    matrix:r.querySelector('.r-matrix').value,
+    ex:collectExemptions(r._exTile) };
+    if(withChanged) o.changed=r.querySelector('.r-changed').checked;
+    const rel=r.querySelector('.r-relief'); if(rel) o.relief=rel.checked;
+    const fsw=r.querySelector('.r-firstswing'); if(fsw) o.firstSwing=fsw.checked;
+    o.ratio={}; r.querySelectorAll('.r-ratio-ck').forEach(ck=>{ if(ck.checked) o.ratio[ck.dataset.ratio]=1; });
+    const sc=r.querySelector('.r-shiftex-comment'); if(sc){ o.shiftexComment=sc.value; o.shiftexAmsa=r.querySelector('.r-shiftex-amsa').checked; o.shiftexDayComment=r.querySelector('.r-shiftex-daycomment').value; }
+    return o; });
+}
+let approvals=[];
+function renderApprovals(){ const box=document.getElementById('approvalsBody'); if(!box) return; box.innerHTML='';
+  if(!approvals.length){ box.innerHTML='<div class="appr-empty">No approvals recorded yet. Use \u201c+ Add approval\u201d.</div>'; return; }
+  approvals.forEach((it,idx)=>{ const row=document.createElement('div'); row.className='appr-row';
+    row.innerHTML='<input type="text" class="ap-name" placeholder="Name"><input type="text" class="ap-pos" placeholder="Position"><input type="text" class="ap-qual" placeholder="Qualification"><input type="text" class="ap-cc" placeholder="CC Reference"><input type="date" class="ap-from"><input type="date" class="ap-to"><button type="button" class="ap-del" title="Remove">\u00d7</button>';
+    box.appendChild(row);
+    const bind=(k,sel)=>{ const el=row.querySelector(sel); el.value=it[k]||''; el.addEventListener('input',e=>{ it[k]=e.target.value; queueSave(); }); };
+    bind('name','.ap-name'); bind('pos','.ap-pos'); bind('qual','.ap-qual'); bind('cc','.ap-cc'); bind('from','.ap-from'); bind('to','.ap-to');
+    row.querySelector('.ap-del').addEventListener('click',()=>{ approvals.splice(idx,1); renderApprovals(); queueSave(); });
+  });
+}
+function collect(){
+  const data={fields:{}};
+  document.querySelectorAll('input[id],select[id],textarea[id]').forEach(el=>{ data.fields[el.id]= el.type==='checkbox' ? el.checked : el.value; });
+  data.planned=collectRoster(CL_BODIES[0],false);
+  data.crewLists=CL_BODIES.slice(1).map(b=>({ date:((b.closest('.cl-panel').querySelector('.cl-date'))||{}).value||'', rows:collectRoster(b,false) }));
+  data.actual=collectRoster(actualBody,true);
+  data.relief=collectRelief();
+  data.ratioShort=ratioShortfallState;
+  data.actualStatus=actualStatus;
+  data.approvals=approvals;
+  data.travel=collectTravel();
+  data.sigA=sigA.data();
+  return data;
+}
+function queueSave(){ updateProgress(); }
+function restoreRoster(body, arr, withChanged){
+  (arr||[]).forEach((s,i)=>{ const r=body.children[i]; if(!r) return;
+    if(r.querySelector('.r-pos').tagName==='SELECT'){
+      r.querySelector('.r-pos').value=s.pos||'';
+      r.querySelector('.r-name').innerHTML=nameOptionsFor(s.pos||'');
+      r.dataset.reqkey=FLEX_KEY[s.pos||'']||r.dataset.reqkey;
+      { const rc=r.querySelector('.r-ratio-cell'); if(rc){ const nc=document.createElement('div'); nc.innerHTML=ratioCellHTML(FLEX_KEY[s.pos||'']); rc.replaceWith(nc.firstChild); } }
+    }
+    const nmSel=r.querySelector('.r-name'); nmSel.value=s.name||''; r.querySelector('.r-name-other').value=s.nameOther||''; r.querySelector('.r-name-other').style.display=(s.name==='__other__')?'':'none'; r.querySelector('.r-sams').value=s.sams||''; r.querySelector('.r-shift').value=s.shift||'';
+    { const _oe=r.querySelector('.r-other-extra'); if(_oe){ _oe.style.display=(s.name==='__other__')?'':'none'; const _ot=r.querySelector('.r-other-team'); _ot.value=s.otherTeam||''; r.querySelector('.r-other-partnership').value=s.otherPartnership||''; r.querySelector('.r-other-engagement').value=s.otherEngagement||''; const own=_ot.value===TEAM_CODE; r.querySelector('.r-other-part-wrap').style.display=(_ot.value&&own)?'':'none'; r.querySelector('.r-other-eng-wrap').style.display=(_ot.value&&!own)?'':'none'; } }
+    r.querySelector('.r-shift-other').value=s.shiftOther||''; r.querySelector('.r-shift-other-wrap').style.display=(s.shift==='Other')?'':'none';
+    r.querySelector('.r-joining').value=s.joining||''; r.querySelector('.r-leaving').value=s.leaving||''; const _adh=r.querySelector('.r-adhoc'); if(_adh){ _adh.checked=!!s.adhoc; } const _add=r.querySelector('.r-adhoc-dates'); if(_add) _add.style.display=s.adhoc?'':'none';
+    const mx=r.querySelector('.r-matrix'); mx.value=s.matrix||''; if(s.matrix) mx.setAttribute('data-state',s.matrix); else mx.removeAttribute('data-state');
+    r._exTile.dataset.reqkey=r.dataset.reqkey; restoreExemptions(r._exTile, s.ex);
+    toggleExTile(r); updateTileWho(r._exTile);
+    if(withChanged && r.querySelector('.r-changed')) r.querySelector('.r-changed').checked=!!s.changed;
+    const rel=r.querySelector('.r-relief'); if(rel) rel.checked=!!s.relief;
+    const sc=r.querySelector('.r-shiftex-comment'); if(sc){ sc.value=s.shiftexComment||''; r.querySelector('.r-shiftex-amsa').checked=!!s.shiftexAmsa; r.querySelector('.r-shiftex-daycomment').value=s.shiftexDayComment||''; }
+    const fsw=r.querySelector('.r-firstswing'); if(fsw) fsw.checked=!!s.firstSwing;
+    if(s.ratio){ Object.keys(s.ratio).forEach(code=>{ const ck=r.querySelector('.r-ratio-ck[data-ratio="'+code+'"]'); if(ck) ck.checked=true; }); }
+  });
+  recomputeShiftExemptions(body);
+}
+function restoreFromData(data){
+  if(!data) return;
+  [...document.querySelectorAll('#crewLists .cl-panel')].slice(1).forEach(p=>p.remove()); CL_BODIES.length=1; plannedBody=CL_BODIES[0];
+  restoreRoster(plannedBody, data.planned, false);
+  (data.crewLists||[]).forEach(cl=>{ const b=addCrewList(true,null); const p=b.closest('.cl-panel'); const d=p.querySelector('.cl-date'); if(d) d.value=cl.date||''; restoreRoster(b, cl.rows, false); });
+  restoreRoster(actualBody, data.actual, true);
+  Object.entries(data.fields||{}).forEach(([id,v])=>{ const el=document.getElementById(id); if(!el)return; if(el.type==='checkbox') el.checked=!!v; else el.value=v; });
+  document.querySelectorAll('[data-conditional]').forEach(s=>s._applyConditional&&s._applyConditional());
+  ratioShortfallState=data.ratioShort||{};
+  actualStatus=data.actualStatus||[];
+  approvals=data.approvals||[];
+  restoreRelief(data.relief); renderRatioShortfalls(); renderActualStatus(); renderApprovals(); syncRowDates();
+  if(typeof updateCcNumber==="function") updateCcNumber(); if(typeof updateSec2Heading==="function") updateSec2Heading(); if(typeof updateSwingOff==="function") updateSwingOff();
+  restoreTravel(data.travel);
+  document.getElementById('travelBox').style.display=(document.getElementById('flightConfirm').value==='No')?'':'none';
+  updateExSummaries();
+  if(data.sigA) sigA.restore(data.sigA);
+  updateAdHoc();
+  updateProgress();
+}
+function saveEditable(){
+  const data=collect();
+  const old=document.getElementById('pwSavedState'); if(old) old.remove();
+  let html='<!DOCTYPE html>\n'+document.documentElement.outerHTML;
+  const json=JSON.stringify(data).replace(/</g,'\\u003c').replace(/\u2028/g,'').replace(/\u2029/g,'');
+  const tag='<scr'+'ipt id="pwSavedState" type="application/json">'+json+'<\/scr'+'ipt>';
+  const bc='<\/bo'+'dy>';
+  html = html.indexOf(bc)>=0 ? html.replace(bc, tag+'\n'+bc) : (html+tag);
+  const blob=new Blob([html],{type:'text/html'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=fileName(false)+'.html';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1500);
+  const note=document.getElementById('saveNote'); if(note){ note.textContent='Editable copy downloaded \u2713'; }
+}
+document.getElementById('clsForm').addEventListener('input',queueSave);
+
+/* ---- Defaults / clear ---- */
+document.getElementById('resetBtn').addEventListener('click',()=>{
+  if(!confirm('Clear all entered data on this device?')) return;
+  document.getElementById('clsForm').reset();
+  document.querySelectorAll('input[id],textarea[id]').forEach(el=>{if(el.type!=='button'&&el.type!=='checkbox')el.value='';});
+  document.querySelectorAll('input[type="checkbox"]').forEach(el=>el.checked=false);
+  document.querySelectorAll('select[id]').forEach(el=>el.value='');
+  [...document.querySelectorAll('#crewLists .cl-panel')].slice(1).forEach(p=>p.remove()); CL_BODIES.length=1; plannedBody=CL_BODIES[0];
+  buildRosterInto(plannedBody,false); buildRosterInto(actualBody,true); sigA.clear();
+  document.getElementById('stage').value='Planned 1';
+  document.getElementById('partnership').value=TEAM_CODE;
+  reliefEng={}; rebuildReliefList(); ratioShortfallState={}; renderRatioShortfalls(); actualStatus=[]; renderActualStatus(); approvals=[]; renderApprovals();
+  travelBody.innerHTML=''; var _tb=document.getElementById('travelBox'); if(_tb) _tb.style.display='none';
+  var _ab=document.getElementById('adhocBox'); if(_ab) _ab.style.display='none';
+  document.querySelectorAll('.conditional').forEach(c=>c.classList.remove('show'));
+  document.querySelectorAll('.missing').forEach(el=>el.classList.remove('missing'));
+  updateExSummaries();
+  updateProgress(); document.getElementById('saveNote').textContent='';
+});
+
+/* ---- Reference / filename / subject ---- */
+function fmtDMY(v){ if(!v) return ''; const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(v); return m ? m[3]+'.'+m[2]+'.'+m[1].slice(2) : v; }
+function fmtDDMMYY(v){ if(!v) return ''; const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(v); return m ? m[3]+m[2]+m[1].slice(2) : ''; }
+function buildRef(){
+  return [ fmtDDMMYY(document.getElementById('changedate').value),
+    document.getElementById('partnership').value, document.getElementById('vessel').value,
+    'Crew List & Shift Allocation' ].map(x=>(x||'').trim()).filter(Boolean).join(' - ');
+}
+function fullRef(){ const cc=ccNumber(); const stage=document.getElementById('stage').value||'Planned 1'; return [cc, TEAM_CODE, 'Crew List and Shift Allocation', stage].map(x=>(x||'').trim()).filter(Boolean).join(' '); }
+function fileName(summary){ const cc=ccNumber(); const stage=(document.getElementById('stage').value||'Planned 1').trim(); return ((cc||'')+TEAM_CODE+' Crew List '+stage+(summary?' SUM':'')).trim(); }
+function applyMail(a){ if(!a) return; a.addEventListener('click',function(){ this.href='mailto:MarinaCooley@portways.au,coordinator@portways.au?cc=operations@portways.au&subject='+encodeURIComponent(fullRef()); }); }
+applyMail(document.getElementById('mailLink'));
+applyMail(document.getElementById('mailLink2'));
+(function(){ var fd=document.getElementById('footerDate'); if(fd) fd.textContent=new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'long',year:'numeric'}); })();
+
+document.getElementById('printBtn').addEventListener('click',()=>{
+  if(!checkRequired()) return;
+  const fn=fileName(false); const orig=document.title; if(fn) document.title=fn;
+  window.addEventListener('afterprint',function r(){ document.title=orig; window.removeEventListener('afterprint',r); });
+  window.print();
+});
+document.getElementById('printSummaryBtn').addEventListener('click',()=>{
+  const fn=fileName(true); const orig=document.title; if(fn) document.title=fn;
+  const ids=['sec1','sec2']; const prev={};
+  ids.forEach(id=>{ const el=document.getElementById(id); if(el){ prev[id]=el.style.display; el.style.display='none'; } });
+  const restore=()=>{ document.title=orig; ids.forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display=(prev[id]||''); }); };
+  window.addEventListener('afterprint',function r(){ restore(); window.removeEventListener('afterprint',r); });
+  setTimeout(()=>{ window.print(); }, 80);
+});
+document.getElementById('crewLists').addEventListener('input',renderRatioShortfalls); document.getElementById('crewLists').addEventListener('change',renderRatioShortfalls);
+document.getElementById('saveHtmlBtn').addEventListener('click',saveEditable);
+
+/* ---- Copy summary ---- */
+function rosterLines(body, withChanged){
+  return [...body.children].map(r=>{ const nsel=r.querySelector('.r-name'); const nm=selName(nsel, r.querySelector('.r-name-other').value); const sams=r.querySelector('.r-sams').value; const ch=withChanged&&r.querySelector('.r-changed').checked;
+    const rel=r.querySelector('.r-relief'); const relief=rel&&rel.checked;
+    const mx=r.querySelector('.r-matrix').value;
+    if(!nm && !ch && !mx && !relief) return null;
+    const sh=r.querySelector('.r-shift').value==='Other'?(r.querySelector('.r-shift-other').value||'—'):(r.querySelector('.r-shift').value||'—');
+    let line=' - '+r.querySelector('.r-pos').value+': '+(nm||'\u2014')+(sams?' ['+sams+']':'')+' | Shift '+sh+(ch?' | CHANGED':'')+(relief?' | RELIEF':'');
+    if(mx) line+=' | Compliant/Exempt: '+mx;
+    if(mx==='No'){
+      [...(r._exTile?r._exTile.querySelectorAll('.ex-block'):[])].forEach(b=>{ const ex=collectExemption(b); if(!ex.code) return; const c=effConfig(ex.code,r.dataset.reqkey);
+        const qLabel=ex.code==='Other'?('Other: '+(ex.codeOther||'—')):qualFullName(ex.code);
+        const lead=(c&&c.block)?'Must be provided before joining':(ex.exreq?'EXEMPTION REQUEST':'Matrix item');
+        line+='\n     '+lead+' — '+qLabel;
+        const ds=Object.keys(ex.vals||{}).filter(k=>k!=='comment'&&k!=='ne'&&ex.vals[k]).map(k=>k+': '+(fmtDMY(ex.vals[k])||ex.vals[k]));
+        if(ds.length) line+=' | '+ds.join(' | ');
+        if(ex.vals&&ex.vals.comment) line+=' | Comments: '+ex.vals.comment; });
+    }
+    const scEl=r.querySelector('.r-shiftex-comment');
+    if(scEl){ if(r.querySelector('.r-shiftex-alt').style.display!=='none' && scEl.value) line+='\n     '+scEl.value;
+      if(r.querySelector('.r-shiftex-day').style.display!=='none'){ line+='\n     Day/Other shift \u2013 AMSA manning '+(r.querySelector('.r-shiftex-amsa').checked?'confirmed':'NOT confirmed'); const dc=r.querySelector('.r-shiftex-daycomment').value; if(dc) line+=' | '+dc; } }
+    return line; }).filter(Boolean);
+}
+document.getElementById('copyBtn').addEventListener('click',()=>{
+  if(!checkRequired()) return;
+  const v=id=>{const e=document.getElementById(id);return e&&e.value?e.value:'—';};
+  const role = document.getElementById('preparedrole').value==='Other' ? v('preparedroleother') : v('preparedrole');
+  const planned=rosterLines(plannedBody,false), actual=rosterLines(actualBody,true);
+  const sigText = v('signtype')!=='—' ? v('signtype') : (sigA.hasInk ? '[signed on form]' : '—');
+  const txt=
+`PORTWAYS — CREW LIST & SHIFT ALLOCATION
+Submitting as: ${v('stage')}${isAdHoc()?' (AD HOC)':''}
+Reference: ${buildRef()}
+
+DETAILS
+Partnership:         ${v('partnership')}
+Vessel:              ${v('vessel')}
+Crew change date:    ${fmtDMY(v('changedate'))}${isAdHoc()?'  [AD HOC: '+v('adhocReason')+']':''}
+Prepared by:         ${v('preparedby')} (${role})
+Contact email:       ${v('email')}
+
+PLANNED CREW LIST & SHIFTS
+${planned.length?planned.join('\n'):' - none entered'}
+
+ACTUAL CREW LIST & SHIFTS
+${actual.length?actual.join('\n'):' - none entered'}
+
+RELIEF CREW
+${reliefLines().length?reliefLines().join('\n'):' - none entered'}
+
+TRAVEL
+Flight manifest check complete & all flights confirmed: ${v('flightConfirm')}${v('flightConfirm')==='No'?'\n'+(travelLines().length?travelLines().join('\n'):' - none listed'):''}
+
+${(()=>{ const o=exSummaryRows(); const grp=(t,a)=>t+'\n'+(a.length?a.map(x=>' - '+x).join('\n'):' - none'); return grp('EXEMPTIONS \u2014 APPROVED',o.approved)+'\n\n'+grp('NOT APPROVED',o.notApproved)+'\n\n'+grp('INFO REQUIRED',o.infoReq)+'\n\n'+grp('PENDING APPROVAL',o.pending)+'\n\n'+grp('SHIFT EXEMPTIONS',o.shift)+'\n\n'+grp('TRAINING PLAN',o.close); })()}
+
+SUBMITTED BY (PARTNERSHIP)
+Name:                ${v('signname')}
+Signature:           ${sigText}
+Date:                ${fmtDMY(v('signdate'))}
+
+============================================================
+PORTWAYS USE — RECEIVED
+Version received:    ${v('pw_stage')}
+Date received:       ${fmtDMY(v('pw_received'))}
+Received by:         ${v('pw_name')}
+Notes:               ${v('pw_comments')}`;
+  navigator.clipboard.writeText(txt).then(()=>{
+    const b=document.getElementById('copyBtn');const old=b.textContent;b.textContent='Copied \u2713'; setTimeout(()=>b.textContent=old,1600);
+  }).catch(()=>alert('Copy failed — your browser may block clipboard access here. Use Print instead.'));
+});
+
+/* ---- init ---- */
+function renderRatioShortfalls(){
+  const rS=document.getElementById('ratioShortfallStack'), sS=document.getElementById('shiftSummaryStack'), nS=document.getElementById('notesSummaryStack');
+  const rSec=document.getElementById('secRatioShort'), sSec=document.getElementById('secShiftSummary'), nSec=document.getElementById('secNotesSummary');
+  if(!rS||!sS||!nS) return;
+  const orig=plannedBody; let rH='',sH='',nH='';
+  CL_BODIES.forEach((b,i)=>{
+    plannedBody=b;
+    renderRatioShortfalls_one();
+    const lbl = CL_BODIES.length>1 ? '<div class="cl-sum-h">'+escH(clLabel(i))+'</div>' : '';
+    if(rS.innerHTML.trim()) rH+=lbl+rS.innerHTML;
+    if(sS.innerHTML.trim()) sH+=lbl+sS.innerHTML;
+    if(nSec.style.display!=='none' && nS.innerHTML.trim()) nH+=lbl+nS.innerHTML;
+  });
+  plannedBody=orig;
+  rS.innerHTML=rH; sS.innerHTML=sH; nS.innerHTML=nH;
+  rSec.style.display=rH?'':'none'; sSec.style.display=sH?'':'none'; nSec.style.display=nH?'':'none';
+  const d0=document.getElementById('cl0date'); if(d0){ const dd=fmtDMY((document.getElementById('changedate')||{}).value||''); d0.textContent=dd?('\u2014 '+dd):''; }
+}
+function copyRows(src,dst){
+  const EV=n=>new Event(n,{bubbles:true});
+  [...src.children].forEach((sr,i)=>{
+    const dr=dst.children[i]; if(!dr) return;
+    const sp=sr.querySelector('.r-pos'), dp=dr.querySelector('.r-pos');
+    if(sp&&dp&&dp.tagName==='SELECT'&&sp.tagName==='SELECT'&&dp.value!==sp.value){ dp.value=sp.value; dp.dispatchEvent(EV('change')); }
+    ['.r-matrix','.r-name','.r-name-other','.r-other-team','.r-other-partnership','.r-other-engagement','.r-sams','.r-shift','.r-shift-other','.r-coc','.r-relief','.r-adhoc','.r-firstswing','.r-joining','.r-leaving','.r-shiftex-comment'].forEach(sel=>{
+      const a=sr.querySelector(sel), b=dr.querySelector(sel); if(!a||!b) return;
+      if(b.type==='checkbox') b.checked=a.checked; else b.value=a.value;
+      b.dispatchEvent(EV('change')); b.dispatchEvent(EV('input'));
+    });
+    const sc=[...sr.querySelectorAll('.r-ratio-ck')], dc=[...dr.querySelectorAll('.r-ratio-ck')];
+    sc.forEach((c,j)=>{ if(dc[j]){ dc[j].checked=c.checked; dc[j].dispatchEvent(EV('change')); } });
+    if(sr._exTile && dr._exTile){ restoreExemptions(dr._exTile, collectExemptions(sr._exTile)); toggleExTile(dr); }
+  });
+}
+function updateClNote(){ const el=document.getElementById('clNoteOrd'); if(!el) return;
+  const w=['second','third','fourth','fifth','sixth','seventh','eighth','ninth'];
+  el.textContent = w[Math.min(CL_BODIES.length-1, w.length-1)] || 'another'; }
+function renumberLists(){ [...document.querySelectorAll('#crewLists .cl-panel')].forEach((p,i)=>{ const t=p.querySelector('.cl-title'); if(t&&i>0) t.textContent='Crew list '+(i+1); p.dataset.idx=i; }); updateClNote(); }
+function addCrewList(silent, copyFrom){
+  const cont=document.getElementById('crewLists'); const idx=CL_BODIES.length; const bid='plannedBody'+(idx+1);
+  const panel=document.createElement('div'); panel.className='cl-panel'; panel.dataset.idx=idx;
+  panel.innerHTML='<div class="cl-head"><span class="cl-title">Crew list '+(idx+1)+'</span>'
+    +'<span class="cl-lbl">Change takes effect</span><input type="date" class="cl-date">'
+    +'<button type="button" class="btn secondary cl-copy">\u29c9 Copy from list above</button>'
+    +'<button type="button" class="btn ghost cl-del">\u2715 Remove this list</button></div>'
+    +'<div class="roster planned"><div class="roster-head"><div>Position</div><div>Compliant / Exempt</div><div>Name</div><div>SAMS #</div><div>Shift</div></div>'
+    +'<div id="'+bid+'"></div></div><div class="ex-stack"></div>';
+  cont.appendChild(panel);
+  const body=panel.querySelector('#'+bid);
+  CL_BODIES.push(body);
+  buildRosterInto(body,false);
+  updateExStackHeader(panel.querySelector('.ex-stack'));
+  const src = (copyFrom===undefined) ? CL_BODIES[idx-1] : copyFrom;
+  if(src) copyRows(src, body);
+  panel.querySelector('.cl-date').addEventListener('change',()=>{ renderRatioShortfalls(); queueSave(); });
+  panel.querySelector('.cl-copy').addEventListener('click',()=>{
+    const i=CL_BODIES.indexOf(body); if(i<1) return;
+    copyRows(CL_BODIES[i-1], body); renderRatioShortfalls(); updateExSummaries(); queueSave();
+  });
+  panel.querySelector('.cl-del').addEventListener('click',()=>{
+    const i=CL_BODIES.indexOf(body); if(i>0) CL_BODIES.splice(i,1);
+    panel.remove(); renumberLists(); renderRatioShortfalls(); updateExSummaries(); queueSave();
+  });
+  renumberLists();
+  if(!silent){ renderRatioShortfalls(); updateExSummaries(); queueSave(); }
+  return body;
+}
+document.getElementById('addCrewList').addEventListener('click',()=>addCrewList(false));
+updateClNote();
+buildRosterInto(plannedBody,false);
+buildRosterInto(actualBody,true);
+updateExStackHeader(document.getElementById('plannedExStack'));
+document.getElementById('changedate').addEventListener('change',()=>{ [...allPlannedRows(),...actualBody.children].forEach(r=>r.querySelectorAll('.ex-block').forEach(recomputeExReq)); renderRatioShortfalls(); updateExSummaries(); });
+updateExSummaries(); rebuildReliefList(); renderRatioShortfalls(); renderActualStatus(); renderApprovals(); syncRowDates();
+[document.getElementById('crewLists'),actualBody].forEach(b=>b.addEventListener('change',e=>{ if(e.target && e.target.classList && e.target.classList.contains('r-ratio-ck')){ renderRatioShortfalls(); updateExSummaries(); if(b===actualBody){ const rw=e.target.closest('.roster-row'); if(rw) checkActualDivergence(rw); } queueSave(); } }));
+document.getElementById('partnership').value=TEAM_CODE;
+updateAdHoc();
+sigA.size();
+updateProgress();
+(function(){ function go(){ var el=document.getElementById('pwSavedState'); if(el){ try{ restoreFromData(JSON.parse(el.textContent)); }catch(e){ console.error('restore failed',e); } } } if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded',go); } else { go(); } })();
+</script>
+</body>
+</html>
