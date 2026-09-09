@@ -33,15 +33,24 @@ function Get-VersionToken {
   return '0'
 }
 
+# Whether portal.html was compiled from the preview.html on disk right now.
+# Decided by the build stamp the compiler writes — the hash of the bytes it
+# actually read — never by file times: an edit can land mid-build and leave a
+# stale portal.html with a newer time than its source.
+function Test-FastPageCurrent {
+  $fast = Join-Path $root 'portal.html'
+  $stamp = Join-Path $root 'portal.html.src.md5'
+  if (-not ((Test-Path $fast) -and (Test-Path $stamp))) { return $false }
+  try { return ((Get-Content $stamp -Raw).Trim() -eq (Get-VersionToken)) } catch { return $false }
+}
+
 # Bring portal.html up to preview.html. Called from the poll, so the rebuild
 # has happened by the time the page reloads and the reload is the fast page.
 # A failed build is not fatal: "/" then falls back to preview.html, which is
 # always current, only slower to open.
 function Update-FastPage {
-  $fast = Join-Path $root 'portal.html'
-  $slow = Join-Path $root 'preview.html'
-  if (-not (Test-Path $slow)) { return }
-  if ((Test-Path $fast) -and ((Get-Item $fast).LastWriteTime -ge (Get-Item $slow).LastWriteTime)) { return }
+  if (-not (Test-Path (Join-Path $root 'preview.html'))) { return }
+  if (Test-FastPageCurrent) { return }
   try { & $node $builder 2>&1 | Out-Null } catch {}
 }
 
@@ -82,10 +91,7 @@ while ($listener.IsListening) {
 
     $isFront = ($rel -eq '')
     if ($isFront) {
-      $fast = Join-Path $root 'portal.html'
-      $slow = Join-Path $root 'preview.html'
-      if ((Test-Path $fast) -and (Test-Path $slow) -and
-          ((Get-Item $fast).LastWriteTime -ge (Get-Item $slow).LastWriteTime)) {
+      if (Test-FastPageCurrent) {
         $rel = 'portal.html'
       } else {
         $rel = 'preview.html'

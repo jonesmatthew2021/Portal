@@ -13,17 +13,20 @@
 
        node tools/build-fast-preview.mjs
 
-   The local server (tools/serve.ps1) serves portal.html at "/" only while it
-   is at least as new as preview.html, so forgetting to re-run this shows the
-   slower current page rather than a fast stale one. */
+   The local server (tools/serve.ps1) serves portal.html at "/" only while
+   the build stamp written beside it matches the preview.html on disk, so
+   forgetting to re-run this (the server usually re-runs it by itself) shows
+   the slower current page rather than a fast stale one. */
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import babel from "@babel/standalone";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const src = readFileSync(join(ROOT, "preview.html"), "utf8");
+const srcBytes = readFileSync(join(ROOT, "preview.html"));
+const src = srcBytes.toString("utf8");
 
 const open = src.indexOf('<script type="text/babel"');
 if (open === -1) throw new Error("preview.html has no text/babel script to compile");
@@ -47,6 +50,14 @@ let out =
 out = out.replace(/[ \t]*<script[^>]*babel\.min\.js[^>]*><\/script>\r?\n/, "");
 
 writeFileSync(join(ROOT, "portal.html"), out);
+// A stamp saying exactly which preview.html this build came from — the hash of
+// the bytes actually read, not a file time. The server compares it to the
+// current preview.html before trusting portal.html, which closes the race
+// where an edit lands mid-build and the output looks newer than it is.
+writeFileSync(
+  join(ROOT, "portal.html.src.md5"),
+  createHash("md5").update(srcBytes).digest("hex").toUpperCase(),
+);
 console.log(
   `portal.html written — ${(out.length / 1024 / 1024).toFixed(1)} MB, compiled in ${((Date.now() - t0) / 1000).toFixed(1)}s`,
 );

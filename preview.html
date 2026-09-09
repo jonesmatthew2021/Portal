@@ -15271,7 +15271,8 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
   // here so switching between them doesn't reset the screen underneath.
   // Uploads come first — a portal with nothing filed can do nothing else on
   // this tab.
-  const [page, setPage] = useState("today");
+  const [page, setPage] = useRemembered("admin-page", "today",
+    (v) => ADMIN_PAGES.some((p) => p.id === v));
 
   if (!isAdmin(currentUser)) {
     return (
@@ -15746,8 +15747,28 @@ class Boundary extends React.Component {
   }
 }
 
+/* A piece of screen state that survives the page reloading itself — which
+   main tab is open, which Admin page — so a refresh (or the live preview
+   putting an edit up) lands back where the reader was, not on the front page.
+   Kept per-tab in sessionStorage, the same as the sign-in; `ok` guards
+   against a stored value that no longer names a real page. */
+function useRemembered(key, initial, ok) {
+  const [v, setV] = useState(() => {
+    try {
+      const held = sessionStorage.getItem("um-ui-" + key);
+      if (held && (!ok || ok(held))) return held;
+    } catch (e) {}
+    return initial;
+  });
+  const set = (next) => {
+    try { sessionStorage.setItem("um-ui-" + key, next); } catch (e) {}
+    setV(next);
+  };
+  return [v, set];
+}
+
 function CoolibahPortal({ role, onSignOut }) {
-  const [tab, setTab] = useState("correspondence");
+  const [tab, setTab] = useRemembered("tab", "correspondence");
   const currentUser = role;
   const [notifyOn, setNotifyOn] = useState(false);
 
