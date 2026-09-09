@@ -15269,8 +15269,8 @@ const RANK_TO_PORTWAYS = {
   "GPH": "General Purpose Hand", "Cook": "Cook"
 };
 
-function CrewListFormPage() {
-  const { swingLists, swingDates } = usePortal();
+function CrewListFormPage({ people }) {
+  const { swingLists, swingDates, swingBoards } = usePortal();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [opened, setOpened] = useState(null);
@@ -15340,11 +15340,126 @@ function CrewListFormPage() {
       dates.sort();
       html = html.replace(/const CREW_CHANGE_DATES=\[.*?\];/, "const CREW_CHANGE_DATES=" + JSON.stringify(dates) + ";");
 
+      // -- the planned crew list: who flies out at the next crew change ------
+      // The swing after the one onboard now. Its crew letter names the joining
+      // swing list, its fly-out day is the crew-change date, and its board —
+      // where one has been worked on the roster — says who stands which watch.
+      const k1 = currentSwingIndex() + 1;
+      const sw = swingWithDates(k1, swingDates);
+      const joining = (((swingLists || {})[sw.crew] || {}).entries || []).
+      map((e) => ({ name: String(e.name || "").trim(), rank: String(e.rank || "") })).
+      filter((e) => e.name);
+      const board = (swingBoards || {})[k1] || null;
+      const watchFor = (name) => {
+        const person = (people || []).find((p) => p && keyOf(p.name) === keyOf(name));
+        const w = person && board && board.shift ? board.shift[person.id] : "";
+        // The form's AM watch is the 2400-1200 shift — the portal's night.
+        return w === "night" ? "AM" : w === "day" ? "PM" : "";
+      };
+      const samsFor = (name) => {const c = crew.find((x) => keyOf(x.n) === keyOf(name));return c ? c.s : "";};
+
+      // The form's fixed rows, in the order it draws them. `take` is matched
+      // against the swing list's rank wording, loosely on purpose. Someone
+      // whose watch the board knows goes to that watch's row; otherwise the
+      // pair fills in order and the watches are swapped on the form if wrong.
+      const SLOTS = [
+      { i: 0, take: ["master"], watch: "AM" }, { i: 1, take: ["master"], watch: "PM" },
+      { i: 2, take: ["chief mate", "chief officer"], watch: "AM" }, { i: 3, take: ["chief mate", "chief officer"], watch: "PM" },
+      { i: 4, take: ["2nd mate", "second mate"], watch: "AM" }, { i: 5, take: ["2nd mate", "second mate"], watch: "PM" },
+      { i: 6, take: ["chief engineer"] }, { i: 7, take: ["1st engineer", "first engineer"] },
+      { i: 8, take: ["assistant engineer", "junior engineer"], watch: "AM" },
+      { i: 9, take: ["assistant engineer", "junior engineer"], watch: "PM" },
+      { i: 10, take: ["gph"], watch: "AM" }, { i: 11, take: ["gph"], watch: "PM" },
+      { i: 12, take: ["gph"], watch: "AM" }, { i: 13, take: ["gph"], watch: "PM" },
+      { i: 16, take: ["cook"] }];
+
+      // The form's own eligibility, read off the copy itself, so nobody is
+      // pressed into a row the form would refuse — its Chief Mate Unlimited
+      // slot takes only the SAMS numbers on Portways' CMU list, and the rest
+      // go by the Portways position wording each person carries.
+      const cmuSet = (() => {
+        const m2 = /const CMU_SET=new Set\((\[.*?\])\)/.exec(html);
+        try {return new Set(m2 ? JSON.parse(m2[1]) : []);} catch (e) {return new Set();}
+      })();
+      const mayFill = (c, sl) => {
+        if (!c) return false;
+        if (sl.i <= 1) return c.p === "Master";
+        if (sl.i === 2) return cmuSet.has(c.s);
+        if (sl.i === 3) return c.p === "Chief Officer";
+        if (sl.i <= 5) return c.p === "Second Mate" || c.p === "Chief Officer";
+        if (sl.i === 6) return c.p === "Chief Engineer";
+        if (sl.i === 7) return c.p === "First Engineer";
+        if (sl.i <= 9) return ["Assistant Engineer", "First Engineer", "Chief Engineer"].indexOf(c.p) >= 0;
+        if (sl.i <= 13) return c.p !== "Cook";
+        return c.p === "Cook";
+      };
+
+      const fill = {};
+      const unplaced = [];
+      joining.forEach((e) => {
+        const r = e.rank.toLowerCase();
+        const c = crew.find((x) => keyOf(x.n) === keyOf(e.name)) || null;
+        // Someone without a SAMS number goes in through the form's own
+        // "Other (not listed)" route, which every row accepts.
+        const entry = c && c.s ? { s: c.s } : { other: e.name };
+        const cand = SLOTS.filter((sl) => !fill[sl.i] &&
+        sl.take.some((t) => r === t || r.includes(t) || t.includes(r)) && (
+        entry.other ? true : mayFill(c, sl)));
+        const w = watchFor(e.name);
+        const slot = w && cand.find((sl) => sl.watch === w) || cand[0];
+        if (slot) {fill[slot.i] = entry();return;}
+        // The two flexible rows take the overflow — extra GPHs and engineers.
+        if (r.includes("gph") || r.includes("engineer") || r.includes("eto")) {
+          const fi = [14, 15].find((i) => !fill[i]);
+          if (fi != null) {fill[fi] = Object.assign({ pos: r.includes("gph") ? "GPH" : "Assistant Engineer" }, entry);return;}
+        }
+        unplaced.push(e.name);
+      });
+
+      // Pressed into the page by a script that runs once and takes itself out
+      // of the document — the form's own Save editable copy keeps the choices,
+      // never the script. A copy already carrying saved work is left alone.
+      const boot = {
+        fields: { partnership: "UNI", vessel: "Coolibah", changedate: sw.flyOut },
+        fill
+      };
+      const bootScript = "\n<scr" + "ipt>\n" +
+      "/* Written by the crew portal as this copy was opened: it presses the\n" +
+      "   same dropdowns a person would, once, then removes itself - a saved\n" +
+      "   copy carries the choices, not this script. */\n" +
+      "(function(){\n" +
+      "  var el = document.currentScript; if (el) el.remove();\n" +
+      "  if (document.getElementById('pwSavedState')) return;\n" +
+      "  var BOOT = " + JSON.stringify(boot).replace(/</g, "\\u003c") + ";\n" +
+      "  function setVal(input, v){ if(!input||!v) return; input.value=v;\n" +
+      "    input.dispatchEvent(new Event('input',{bubbles:true}));\n" +
+      "    input.dispatchEvent(new Event('change',{bubbles:true})); }\n" +
+      "  function go(){ try{\n" +
+      "    setVal(document.getElementById('partnership'), BOOT.fields.partnership);\n" +
+      "    setVal(document.getElementById('vessel'), BOOT.fields.vessel);\n" +
+      "    setVal(document.getElementById('changedate'), BOOT.fields.changedate);\n" +
+      "    var body = document.getElementById('plannedBody'); if(!body) return;\n" +
+      "    Object.keys(BOOT.fill).forEach(function(i){\n" +
+      "      var row = body.children[Number(i)]; if(!row) return;\n" +
+      "      var f = BOOT.fill[i];\n" +
+      "      if (f.pos){ var ps = row.querySelector('select.r-pos'); if (ps) setVal(ps, f.pos); }\n" +
+      "      var nm = row.querySelector('.r-name'); if (!nm) return;\n" +
+      "      if (f.s){ setVal(nm, f.s); }\n" +
+      "      else if (f.other){ setVal(nm, '__other__'); var ot = row.querySelector('.r-name-other'); if (ot) setVal(ot, f.other); }\n" +
+      "    });\n" +
+      "  }catch(e){} }\n" +
+      "  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go); else go();\n" +
+      "})();\n" +
+      "</scr" + "ipt>\n";
+      html = html.indexOf("</body>") >= 0 ? html.replace("</body>", bootScript + "</body>") : html + bootScript;
+
       const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
       if (win) {
         win.location = url;
         setTimeout(() => URL.revokeObjectURL(url), 120000);
-        setOpened({ crew: crew.length, sams: crew.filter((c) => c.s).length });
+        setOpened({ crew: crew.length, sams: crew.filter((c) => c.s).length,
+          swing: `${sw.crew} · flying out ${fmtDate(sw.flyOut)}`,
+          placed: Object.keys(fill).length, joining: joining.length, unplaced });
       } else {
         window.location.assign(url);
         return;
@@ -15364,12 +15479,15 @@ function CrewListFormPage() {
     React.createElement("div", { style: { fontFamily: T.body, fontSize: 15, fontWeight: 700, color: T.text, marginTop: 8 } }, "Crew List & Shift Allocation"
 
     ), /*#__PURE__*/
-    React.createElement("div", { style: { fontFamily: T.body, fontSize: 13.5, color: T.muted, lineHeight: 1.7, marginTop: 6 } }, "Portways' own form, exactly as they issue it \u2014 it opens in its own tab with its layout, checks, Print and Save editable copy buttons untouched. The portal only fills its name lists from the swing lists on Swing Compliance (",
+    React.createElement("div", { style: { fontFamily: T.body, fontSize: 13.5, color: T.muted, lineHeight: 1.7, marginTop: 6 } }, "Portways' own form, exactly as they issue it \u2014 it opens in its own tab with its layout, checks, Print and Save editable copy buttons untouched. The portal fills its name lists from the swing lists on Swing Compliance (",
 
 
-    swingCrew.length, " crew across the swings right now) and adds the fly-out dates it knows to the crew-change days. Fill it in there, then use the form's own ", /*#__PURE__*/
+    swingCrew.length, " crew across the swings right now), adds the fly-out dates it knows to the crew-change days, and starts the planned crew list with the swing flying out at the next change \u2014 each person in their position's row, watches following the swing's board where one has been set on the roster. Check it over, finish it there, then use the form's own",
 
-    React.createElement("b", null, "Save editable copy"), " to keep your work."
+
+
+
+    " ", /*#__PURE__*/React.createElement("b", null, "Save editable copy"), " to keep your work."
     ), /*#__PURE__*/
     React.createElement("div", { style: { marginTop: 12 } }, /*#__PURE__*/
     React.createElement(Button, { onClick: open, disabled: busy || !swingCrew.length },
@@ -15378,8 +15496,10 @@ function CrewListFormPage() {
     ),
     opened && /*#__PURE__*/
     React.createElement("div", { style: { fontFamily: T.body, fontSize: 12.5, color: T.bGreen, marginTop: 8 } }, "Opened with ",
-    opened.crew, " crew in the name lists \u2014 ", opened.sams, " carried their SAMS number over from the form's own list",
-    opened.sams < opened.crew ? "; the rest are new and show without one" : "", "."
+    opened.crew, " crew in the name lists (", opened.sams, " with their SAMS number) and the planned crew list filled with swing ",
+    opened.swing, " \u2014 ", opened.placed, " of",
+    " ", opened.joining, " placed in their position rows.",
+    opened.unplaced.length > 0 && ` No row could be picked for ${opened.unplaced.join(", ")} — add them on the form by hand.`
     ),
 
     err && /*#__PURE__*/
@@ -15404,7 +15524,6 @@ const ADMIN_PAGES = [
 { id: "checker", label: "Certification Checker" },
 { id: "elearning", label: "E-Learning Status" },
 { id: "swing-compliance", label: "Swing Compliance" },
-{ id: "crew-list", label: "Crew List Form" },
 { id: "opms", label: "OPMS Checker" },
 { id: "portways-docs", label: "Portways Documentation" },
 { id: "ai-checker", label: "AI Checker" }];
@@ -15494,17 +15613,20 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
     React.createElement(SwingCompliancePage, { currentUser: currentUser, people: people, setPeople: setPeople,
       overrides: overrides, swingBoard: swingBoard, setSwingBoard: setSwingBoard, log: log }),
 
-    page === "crew-list" && /*#__PURE__*/React.createElement(CrewListFormPage, null),
     page === "opms" && /*#__PURE__*/React.createElement(OPMSChecker, null),
 
 
 
+
     page === "portways-docs" && /*#__PURE__*/
+    React.createElement(React.Fragment, null, /*#__PURE__*/
+    React.createElement(CrewListFormPage, { people: people }), /*#__PURE__*/
     React.createElement(DocLibrary, { title: "Portways Documentation", docs: docs.portways || [], currentUser: currentUser,
       tagHint: "Portways", bucket: "portways",
       onAdd: (d) => addDoc("portways", d, "Portways Documentation"),
       onRemove: (d) => removeDoc("portways", d, "Portways Documentation"),
-      note: "Everything from Portways that has to be kept - OPMS guides and procedures, notices, and the paperwork around the weekly export." }),
+      note: "Everything from Portways that has to be kept - OPMS guides and procedures, notices, and the paperwork around the weekly export." })
+    ),
 
     page === "ai-checker" && /*#__PURE__*/React.createElement(AiChecker, { log: log }),
 
