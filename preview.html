@@ -15260,10 +15260,11 @@ const ADMIN_PAGES = [
   { id: "elearning", label: "E-Learning Status" },
   { id: "swing-compliance", label: "Swing Compliance" },
   { id: "opms", label: "OPMS Checker" },
+  { id: "portways-docs", label: "Portways Documentation" },
   { id: "ai-checker", label: "AI Checker" },
 ];
 
-function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingBoard, setSwingBoard, notes, corrCount, history, allTabs, hiddenTabs, onHideTab, onRestoreTab, onRestoreAllTabs, files, sync, log }) {
+function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingBoard, setSwingBoard, notes, corrCount, history, allTabs, hiddenTabs, onHideTab, onRestoreTab, onRestoreAllTabs, files, sync, log, docs, addDoc, removeDoc }) {
   // The Admin tab is seven pages now, not one: the documents the portal has to
   // be given, the certification work it started as, the pages that were being
   // asked for around them, and the AI Checker — moved here from the crew tab
@@ -15348,6 +15349,16 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
           overrides={overrides} swingBoard={swingBoard} setSwingBoard={setSwingBoard} log={log} />
       )}
       {page === "opms" && <OPMSChecker />}
+      {/* The papers around Portways and OPMS, kept where the OPMS work is
+          done. Same library as the Documentation tab's sections, with its
+          own shelf in the file store. */}
+      {page === "portways-docs" && (
+        <DocLibrary title="Portways Documentation" docs={docs.portways || []} currentUser={currentUser}
+          tagHint="Portways" bucket="portways"
+          onAdd={(d) => addDoc("portways", d, "Portways Documentation")}
+          onRemove={(d) => removeDoc("portways", d, "Portways Documentation")}
+          note="Everything from Portways that has to be kept - OPMS guides and procedures, notices, and the paperwork around the weekly export." />
+      )}
       {page === "ai-checker" && <AiChecker log={log} />}
 
       {page === "checker" && (
@@ -16173,13 +16184,15 @@ function CoolibahPortal({ role, onSignOut }) {
   }, [loaded, admin]);
 
   const removeDoc = (key, doc, label) => {
-    setDocs((d) => ({ ...d, [key]: d[key].filter((x) => x.id !== doc.id) }));
+    // A section added after the state was first saved has no list yet, so an
+    // absent one reads as empty rather than breaking the page.
+    setDocs((d) => ({ ...d, [key]: (d[key] || []).filter((x) => x.id !== doc.id) }));
     deleteStoredFile(doc, currentUser);
     log(label, `Removed "${doc.title}"`, `${doc.from} · restore it from the Admin tab`);
   };
 
   const addDoc = (key, doc, label) => {
-    setDocs((d) => ({ ...d, [key]: [doc, ...d[key]] }));
+    setDocs((d) => ({ ...d, [key]: [doc, ...(d[key] || [])] }));
     log(label, "Posted a document", `${doc.title} · ${doc.from}`);
   };
 
@@ -16464,6 +16477,7 @@ function CoolibahPortal({ role, onSignOut }) {
       placeholder="What would you change about this portal?" />,
     history: <History entries={history} />,
     admin: <Admin currentUser={currentUser} people={people} notes={notes} files={files} sync={sync}
+      docs={docs} addDoc={addDoc} removeDoc={removeDoc}
       setPeople={setPeople} overrides={overrides} setOverrides={setOverrides} log={log}
       swingBoard={swingBoard} setSwingBoard={setSwingBoard}
       corrCount={correspondence.length} history={history}
