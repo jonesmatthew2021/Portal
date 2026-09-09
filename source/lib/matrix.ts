@@ -43,14 +43,15 @@ import {
 } from "./analysis.js";
 
 // Which document each part of the work is about, and how it is spoken about on
-// the way back out. The validity periods matrix is the one of the three the
-// portal will run without: with none filed the check is the two matrices as it
-// always was, and with one filed the periods it gives are what "due" is measured
-// against instead of a flat ninety days.
+// the way back out. The validity periods are read off the skills matrix itself:
+// the office folded the old separate validity spreadsheet into it, so the
+// "validity" reading is a second, different question put to the same document —
+// the latest skills matrix is always the source. With the periods read, they
+// are what "due" is measured against instead of a flat ninety days.
 export const MATRIX_DOCS: Record<string, { category: string; label: string }> = {
   training: { category: "training-matrix", label: "training matrix" },
   skills: { category: "skills-matrix", label: "skills matrix" },
-  validity: { category: "validity-matrix", label: "validity periods matrix" },
+  validity: { category: "skills-matrix", label: "validity periods" },
 };
 
 /** Raised where a document required at all times isn't on the portal. */
@@ -81,10 +82,9 @@ export const bothRequiredMessage = (missing: string[]) =>
 
 /** The documents as they stand on the portal, and which of the required two are missing. */
 export async function matrixDocuments() {
-  const [training, skills, validity] = await Promise.all([
+  const [training, skills] = await Promise.all([
     liveSingleFileRow("training-matrix"),
     liveSingleFileRow("skills-matrix"),
-    liveSingleFileRow("validity-matrix"),
   ]);
 
   const missing = [
@@ -92,7 +92,10 @@ export async function matrixDocuments() {
     skills ? null : singleFileCategory("skills-matrix")!.label,
   ].filter((x): x is string => !!x);
 
-  return { training, skills, validity, missing };
+  // The validity periods live in the skills matrix, so the same file answers
+  // twice — once for what is required, once for how long each item lasts. The
+  // readings stay separate because they are different questions.
+  return { training, skills, validity: skills, missing };
 }
 
 const MATRIX_SYSTEM = `You read a vessel's crew training and skills matrices and return JSON only.
@@ -365,7 +368,7 @@ export async function checkMatricesOnce(force: boolean) {
   const unread = [
     trainingRead ? null : "training matrix",
     skillsRead ? null : "skills matrix",
-    !validity || validityRead ? null : "validity periods matrix",
+    !validity || validityRead ? null : "validity periods (off the skills matrix)",
   ].filter((x): x is string => !!x);
   if (unread.length) {
     throw new MatrixUnread(`The ${unread.join(" and the ")} hasn't been read yet.`, unread);

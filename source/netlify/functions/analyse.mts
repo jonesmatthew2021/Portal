@@ -467,7 +467,10 @@ type Period = { months: number | null; neverExpires: boolean };
  * dates printed on the certificates alone.
  */
 async function validityPeriods() {
-  const row = await liveSingleFileRow("validity-matrix");
+  // The validity periods are read off the skills matrix — the office folded
+  // the old separate validity spreadsheet into it, so the latest skills
+  // matrix is always the source.
+  const row = await liveSingleFileRow("skills-matrix");
   if (!row) return null;
 
   const held = (await matrixStore().get(matrixReadingKey("validity", row.id), {
@@ -505,7 +508,9 @@ async function validityPeriods() {
  * hasn't been read yet, so the page can say so rather than showing blanks.
  */
 async function validityPeriodList() {
-  const row = await liveSingleFileRow("validity-matrix");
+  // Same source as validityPeriods() above: the skills matrix carries the
+  // validity periods, so its latest upload is what this list is read from.
+  const row = await liveSingleFileRow("skills-matrix");
   if (!row) return Response.json({ filename: null, read: false, periods: [] });
 
   const held = (await matrixStore().get(matrixReadingKey("validity", row.id), {
@@ -1443,7 +1448,7 @@ export default async (req: Request) => {
       const unread = [
         trainingRead ? null : "training matrix",
         skillsRead ? null : "skills matrix",
-        !validity || validityRead ? null : "validity periods matrix",
+        !validity || validityRead ? null : "validity periods (off the skills matrix)",
       ].filter(Boolean);
       if (unread.length) {
         return Response.json(

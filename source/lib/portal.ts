@@ -199,12 +199,14 @@ async function readingKeys() {
 
 /** Which of the analyses the portal has already made and is still holding. */
 async function heldAnalyses() {
-  const [training, skills, validity, shiftSheet] = await Promise.all([
+  const [training, skills, shiftSheet] = await Promise.all([
     liveSingleFileRow("training-matrix"),
     liveSingleFileRow("skills-matrix"),
-    liveSingleFileRow("validity-matrix"),
     shiftSheetRow(),
   ]);
+  // The validity periods are read off the skills matrix itself, so the skills
+  // file stands in wherever the old separate validity spreadsheet was looked up.
+  const validity = skills;
 
   const [matrixCheck, shift, opms] = await Promise.all([
     training && skills
@@ -911,11 +913,12 @@ async function toolAnalysisAnswers(input: Record<string, unknown>): Promise<Tool
   }
 
   if (which === "matrices") {
-    const [training, skills, validity] = await Promise.all([
+    const [training, skills] = await Promise.all([
       liveSingleFileRow("training-matrix"),
       liveSingleFileRow("skills-matrix"),
-      liveSingleFileRow("validity-matrix"),
     ]);
+    // The validity periods are read off the skills matrix itself.
+    const validity = skills;
     if (!training || !skills) {
       const missing = [training ? null : "training matrix", skills ? null : "skills matrix"].filter(Boolean);
       return {
@@ -937,8 +940,8 @@ async function toolAnalysisAnswers(input: Record<string, unknown>): Promise<Tool
       `training matrix: ${training.filename}${readTraining ? `, read ${day(readTraining.at)}` : ", not read yet"}`,
       `skills matrix: ${skills.filename}${readSkills ? `, read ${day(readSkills.at)}` : ", not read yet"}`,
       validity
-        ? `validity periods matrix: ${validity.filename}${readValidity ? `, read ${day(readValidity.at)}` : ", not read yet"}`
-        : "validity periods matrix: none on the portal, so how long items last is not known from a document",
+        ? `validity periods (off the skills matrix): ${validity.filename}${readValidity ? `, read ${day(readValidity.at)}` : ", not read yet"}`
+        : "validity periods: no skills matrix on the portal, so how long items last is not known from a document",
     ];
 
     if (!check) {

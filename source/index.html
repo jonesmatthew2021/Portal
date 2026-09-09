@@ -2545,7 +2545,7 @@ const noExpiryPeriod = (code) =>
     ? { code, neverExpires: true }
     : null;
 
-/* How long an item stays valid, off the validity periods matrix — matched by
+/* How long an item stays valid, off the skills matrix — matched by
    matrix code where the sheet gives one, and by the item's name where it
    doesn't. Items on the no-expiry list above answer first, without a sheet.
    Null where the sheet doesn't list the item, and null throughout where no
@@ -2703,7 +2703,7 @@ function ItemLine({ x, person, dates, validity }) {
   // read off that person's certificate, and the expiry the matrix holds (or,
   // where the matrix has none, the one the certificate itself carries) — and a
   // way to open the certificate those dates were read from. `validity` — how
-  // long the item stays valid, off the validity periods matrix — is a column
+  // long the item stays valid, off the skills matrix — is a column
   // only on the screens that pass it.
   if (person !== undefined) {
     const d = certDateFor(dates, person, x.code);
@@ -5610,7 +5610,7 @@ function UploadCertificates() {
   } = usePortal();
   // The same three columns the certification screens carry, against each filed
   // scan: the issue date read off the certificate, the expiry, and how long the
-  // item stays valid off the validity periods matrix.
+  // item stays valid off the skills matrix.
   const validityFor = useValidityLookup();
   // A scan filed before codes were recorded still names its code in the file
   // name — "DWYER_ Matthew - QL-18 Provide First Aid" — so where the record
@@ -6472,7 +6472,7 @@ function UploadCertificates() {
                   ? `Reading the certificates — ${auto.read} of ${auto.total} done.`
                   : "Looking for certificates to read...")}
                 {auto.phase === "filing" && "Putting each certificate in the folder of the person named on it..."}
-                {auto.phase === "validity" && "Reading the validity periods matrix — how long each item stays valid..."}
+                {auto.phase === "validity" && "Reading the validity periods off the skills matrix — how long each item stays valid..."}
                 {auto.phase === "comparing" && "Holding what was read against the crew matrix and the spreadsheet on file..."}
                 {auto.phase === "writing" && "Updating the crew matrix..."}
               </div>
@@ -8655,7 +8655,7 @@ async function readEverything({ quals, certSheet, validityMatrix = null, fresh, 
       if (problem) validityProblem = problem;
       await analyse({ action: "matrix-read", which: "validity", text });
     } catch (e) {
-      validityProblem = `The validity periods matrix couldn't be read, so expiry dates were taken from the certificates alone. ${e.message || e}`;
+      validityProblem = `The validity periods could not be read off the skills matrix, so expiry dates were taken from the certificates alone. ${e.message || e}`;
     }
   }
 
@@ -8795,7 +8795,7 @@ function GenerateLatestMatrix({ variant = "solid", label = "Generate latest trai
         ? `Reading the certificates — ${run.read} of ${run.total}.`
         : "Looking at what is on file."
     : run.phase === "filing" ? "Filing each certificate under the person named on it."
-    : run.phase === "validity" ? "Reading the validity periods matrix."
+    : run.phase === "validity" ? "Reading the validity periods off the skills matrix."
     : run.phase === "comparing" ? "Holding the certificates against the matrix."
     : run.phase === "building" ? "Building the spreadsheet."
     : "Working…";
@@ -8907,7 +8907,7 @@ function GenerateLatestMatrix({ variant = "solid", label = "Generate latest trai
               ? `${run.read} of ${run.total} certificates read. Only the ones not read before are read now.`
               : "Looking at what is on file.")}
             {run.phase === "filing" && `All ${run.total} certificates read. Putting each one in the folder of the person named on it.`}
-            {run.phase === "validity" && "Reading the validity periods matrix — how long each item stays valid."}
+            {run.phase === "validity" && "Reading the validity periods off the skills matrix — how long each item stays valid."}
             {run.phase === "comparing" && "Holding what the certificates say against the matrix."}
             {run.phase === "building" && "Building the spreadsheet and filing it on the portal."}
             {run.phase === "clearing" && "Clearing what was read before."}
@@ -9029,7 +9029,7 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
         ? `Reading the certificates — ${run.read} of ${run.total}.`
         : "Looking at what is on file."
     : run.phase === "filing" ? "Filing each certificate under the person named on it."
-    : run.phase === "validity" ? "Reading the validity periods matrix."
+    : run.phase === "validity" ? "Reading the validity periods off the skills matrix."
     : run.phase === "comparing" ? "Working out each expiry date."
     : run.phase === "writing" ? "Writing the dates into the training matrix workbook."
     : "Working…";
@@ -9083,7 +9083,7 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
           if (problem) validityProblem = problem;
           await analyse({ action: "matrix-read", which: "validity", text });
         } catch (e) {
-          validityProblem = `The validity periods matrix couldn't be read, so expiry dates were taken from the certificates alone. ${e.message || e}`;
+          validityProblem = `The validity periods could not be read off the skills matrix, so expiry dates were taken from the certificates alone. ${e.message || e}`;
         }
       }
 
@@ -9188,7 +9188,7 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
               ? `${run.read} of ${run.total} certificates read. Only the ones not read before are read now.`
               : "Looking at what is on file.")}
             {run.phase === "filing" && `All ${run.total} certificates read. Putting each one in the folder of the person named on it.`}
-            {run.phase === "validity" && "Reading the validity periods matrix — how long each item stays valid once it has been done."}
+            {run.phase === "validity" && "Reading the validity periods off the skills matrix — how long each item stays valid once it has been done."}
             {run.phase === "comparing" && "Taking the expiry date each certificate prints, and working one out from the issue date and the validity period where it doesn't."}
             {run.phase === "writing" && "Writing the dates into the training matrix workbook, in place. Everything else in it stays as it is."}
           </>}
@@ -9716,7 +9716,7 @@ function MatrixAutoWindow() {
             ? `Reading the certificates — ${auto.read} of ${auto.total} done.`
             : "Looking for certificates to read...")}
           {auto.phase === "filing" && "Putting each certificate in the folder of the person named on it..."}
-          {auto.phase === "validity" && "Reading the validity periods matrix — how long each item stays valid..."}
+          {auto.phase === "validity" && "Reading the validity periods off the skills matrix — how long each item stays valid..."}
           {auto.phase === "comparing" && "Holding what was read against the crew matrix and the spreadsheet on file..."}
           {auto.phase === "writing" && "Updating the crew matrix..."}
         </>}
@@ -10103,7 +10103,7 @@ function CertAnalysis() {
               ? `Reading the certificates - ${run.read} of ${run.total} done. This takes a few minutes; leave this page open.`
               : "Looking for certificates to read...")}
             {run.phase === "filing" && "Filing each certificate under the person named on it..."}
-            {run.phase === "validity" && "Reading the validity periods matrix..."}
+            {run.phase === "validity" && "Reading the validity periods off the skills matrix..."}
             {run.phase === "comparing" && "Comparing what was read against the spreadsheets..."}
           </div>
         )}
@@ -10358,7 +10358,7 @@ function CertAnalysis() {
               ? `${run.read} of ${run.total} certificates read.`
               : "Looking for certificates to read.")}
             {run.phase === "filing" && `All ${run.total} certificates read. Putting each one in the folder of the person named on it.`}
-            {run.phase === "validity" && "Reading the validity periods matrix — how long each item stays valid."}
+            {run.phase === "validity" && "Reading the validity periods off the skills matrix — how long each item stays valid."}
             {run.phase === "comparing" && `All ${run.total} certificates read. Holding them against the crew matrix and the spreadsheet on file.`}
           </>}
           note="This takes a few minutes. Leave the page open — each certificate is kept as it is read, so a lost connection costs the batch it was in rather than the whole run."
@@ -10384,9 +10384,12 @@ function CertAnalysis() {
  *
  * The training matrix and the skills matrix are required at all times, so the
  * portal will not run this against one of them: with either missing, the screen
- * asks for it and the server refuses the analysis. The validity periods matrix is
- * read alongside them wherever one has been filed and skipped where it hasn't, so
- * a portal that has always run on the two matrices goes on working as it did.
+ * asks for it and the server refuses the analysis. The validity periods — how
+ * long each item stays valid once it has been done — are read off the skills
+ * matrix itself, which carries them; there used to be a third card for a
+ * separate validity periods spreadsheet, but the office folded it into the
+ * skills matrix, so the latest skills matrix is always the source and there is
+ * nothing extra to keep up to date.
  */
 const MATRIX_CARDS = [
   {
@@ -10407,15 +10410,6 @@ const MATRIX_CARDS = [
     logAction: "Skills matrix uploaded",
     required: true,
   },
-  {
-    key: "validity",
-    category: "validity-matrix",
-    noun: "validity periods matrix",
-    title: "Validity periods matrix",
-    blurb: "The other half of the skills matrix: how long each item stays valid once it has been done, and when it has to be done again.",
-    logAction: "Validity periods matrix uploaded",
-    required: false,
-  },
 ];
 
 // The record on file for each card, and where a newly filed one goes. Kept in one
@@ -10424,13 +10418,11 @@ const MATRIX_CARDS = [
 const matrixRecords = (portal) => ({
   training: portal.trainingMatrix,
   skills: portal.skillsMatrix,
-  validity: portal.validityMatrix,
 });
 
 const matrixSetters = (portal) => ({
   training: portal.setTrainingMatrix,
   skills: portal.setSkillsMatrix,
-  validity: portal.setValidityMatrix,
 });
 
 // Where the bar in the progress window stands at each step of a matrix run. A
@@ -10637,20 +10629,9 @@ function CrewMatrices() {
         {MATRIX_CARDS.map(card)}
       </div>
 
-      {/* The validity periods matrix is the one of the three that can be absent
-          without stopping the run, so what its absence costs is said rather than
-          left to be inferred from a card with nothing in it. */}
-      {both && !validityMatrix && (
-        <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.7, marginBottom: 16 }}>
-          No validity periods matrix is on file, so how long each item stays valid is taken from
-          whatever the skills matrix says, and anything expiring within 90 days is counted as due.
-          Filing one gives the periods themselves and they are used instead.
-        </div>
-      )}
-
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
         <Button onClick={() => runAnalysis(false)} disabled={busy || !both}>
-          {running ? "Working..." : matrixAnalysis ? "Analyse again" : validityMatrix ? "Analyse all three documents" : "Analyse both documents"}
+          {running ? "Working..." : matrixAnalysis ? "Analyse again" : "Analyse both documents"}
         </Button>
         {both && matrixAnalysis && (
           <Button variant="quiet" onClick={() => runAnalysis(true)} disabled={busy}
@@ -10680,7 +10661,7 @@ function CrewMatrices() {
             {run.phase === "clearing" && "Forgetting what was read before, so every document is read again from the file itself."}
             {run.phase === "training" && "Reading the training matrix."}
             {run.phase === "skills" && "Reading the skills matrix."}
-            {run.phase === "validity" && "Reading the validity periods matrix."}
+            {run.phase === "validity" && "Reading the validity periods off the skills matrix."}
             {run.phase === "checking" && "Holding the crew's training against what is required of them."}
           </div>
           <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.6, marginTop: 7 }}>
@@ -10705,7 +10686,7 @@ function CrewMatrices() {
             {run.phase === "clearing" && "Forgetting what was read before, so every document is read again from the file itself."}
             {run.phase === "training" && "Reading the training matrix — where the crew's training stands now."}
             {run.phase === "skills" && "Reading the skills matrix — what the crew are required to hold."}
-            {run.phase === "validity" && "Reading the validity periods matrix — how long each item stays valid."}
+            {run.phase === "validity" && "Reading the validity periods off the skills matrix — how long each item stays valid."}
             {run.phase === "checking" && "The documents are read. Holding the crew's training against what is required of them."}
           </>}
           note="This takes a minute or two. Leave the page open — each document's reading is kept as it is made, so a run that stops picks up where it left off rather than starting over."
@@ -11250,7 +11231,7 @@ function CrewMarineCertificates() {
         Every marine ticket the matrix holds for each person — competency, safety training, medical and
         the cards they carry — next to the scans filed in their certification folder. Every crew member
         is written out in full below, one after the other; the filters and the search only narrow the
-        list. Module validity is how long each item stays valid, off the validity periods matrix, or
+        list. Module validity is how long each item stays valid, off the skills matrix, or
         "Doesn't expire" for the items that carry no expiry at all. Download PDF writes out everyone
         left on screen by the filters.
       </div>
@@ -11474,7 +11455,7 @@ function CertificatesRequired() {
         // the screen the report came off.
         heading: `${c.code} · ${c.title.length > 64 ? c.title.slice(0, 63) + "…" : c.title}`,
         meta: `${c.holds} of ${c.required} hold it`,
-        blurb: `${c.group} · Validity period: ${validity || "not on the validity periods matrix"}`
+        blurb: `${c.group} · Validity period: ${validity || "not on the skills matrix"}`
           + (c.holders.length === 0
             ? " · Nobody on the matrix holds this certificate - the positions required to hold it are listed below."
             : ""),
@@ -11594,7 +11575,7 @@ function CertificatesRequired() {
 
                 <div style={{ padding: "10px 13px 12px" }}>
                   <div style={{ fontFamily: T.mono, fontSize: 11, color: T.muted, margin: "0 0 8px" }}>
-                    Validity period: {validity || "not on the validity periods matrix"}
+                    Validity period: {validity || "not on the skills matrix"}
                     {" · "}{c.holds} of {c.required} required hold it
                   </div>
 
@@ -11701,7 +11682,7 @@ function ELearningStatus() {
   // Which module's line is dropped open on the By module view, by code.
   const [openModule, setOpenModule] = useState(null);
 
-  // Each module's validity period, off the validity periods matrix — the same
+  // Each module's validity period, off the skills matrix — the same
   // lookup the rest of the certification screens and their PDFs read from.
   const validityFor = useValidityLookup();
 
@@ -11835,11 +11816,11 @@ function ELearningStatus() {
         inductions and the project modules. A module counts as done when it is marked as held or carries
         a date still to run; one marked open or not held counts as not done; a module nobody has asked
         of that person is left out of their count. Module validity is how long each module stays valid,
-        read off the validity periods matrix
+        read off the skills matrix
         {validityPeriods && validityPeriods.filename ? ` (${validityPeriods.filename})` : ""}; Open at the
         end of a line shows the certificate the dates were read from.
-        {!validityMatrix && " No validity periods matrix is on file yet, so that column is blank — upload one on the Certification Checker tab."}
-        {validityMatrix && validityPeriods && !validityPeriods.read && " The validity periods matrix on file hasn't been read yet — press Update table and the column fills itself in."}
+        {!validityMatrix && " No skills matrix is on file yet, so that column is blank — upload one under Required Documents For Upload."}
+        {validityMatrix && validityPeriods && !validityPeriods.read && " The validity periods haven't been read off the skills matrix yet — press Update table and the column fills itself in."}
       </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14, alignItems: "center" }}>
@@ -11952,7 +11933,7 @@ function ELearningStatus() {
                     <span style={{ fontFamily: T.mono, fontSize: 10.5, color: T.muted, marginLeft: 8 }}>{m.group}</span>
                   </span>
                   <span style={{ fontFamily: T.mono, fontSize: 10.5, color: validity ? T.text : T.muted, minWidth: 92 }}
-                    title="How long the module stays valid, off the validity periods matrix">
+                    title="How long the module stays valid, off the skills matrix">
                     {validity || "—"}
                   </span>
                   {m.open > 0 && <Chip fg={T.bRed} bg={T.bRedBg}>{m.open} outstanding</Chip>}
@@ -12505,7 +12486,7 @@ function GenerateSwingCompliance({ results, here, setAt }) {
 
   // The headings the three date columns sit under on each card — the issue
   // date read off the certificate, the expiry the check was made against, and
-  // how long the item stays valid off the validity periods matrix.
+  // how long the item stays valid off the skills matrix.
   const colHead = { fontFamily: T.display, fontSize: 9.5, fontWeight: 700, letterSpacing: "0.1em",
     textTransform: "uppercase", color: T.muted, minWidth: 78 };
 
@@ -12878,7 +12859,7 @@ function ShiftMeter({ required, have }) {
 function SwingShiftAllocation({ here }) {
   const { shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis,
     quals: QUALS, certificates, certDates, swingBoard, swingBoards, log, role } = usePortal();
-  // How long each item stays valid, off the validity periods matrix — the same
+  // How long each item stays valid, off the skills matrix — the same
   // lookup the certification screens carry, so the column reads alike here.
   const validityFor = useValidityLookup();
   const [busy, setBusy] = useState(false);
@@ -14682,9 +14663,9 @@ function OPMSChecker() {
 /**
  * Everything the portal has to be given, on one page.
  *
- * There are five of them: the four documents it keeps exactly one of apiece — the
- * training matrix, the skills matrix, the validity periods matrix that goes with
- * it, the crew certificates spreadsheet — and the crew's certificates themselves.
+ * There are four of them: the three documents it keeps exactly one of apiece — the
+ * training matrix, the skills matrix (which also carries the validity periods),
+ * the crew certificates spreadsheet — and the crew's certificates themselves.
  * They used to sit on three different screens of the Certification Checker, which
  * meant an admin setting up a fresh portal had to find each one somewhere else and
  * could not see, from any one of them, what was still outstanding. They are filed
@@ -14716,13 +14697,13 @@ function RequiredDocuments() {
           current={record}
           onFiled={(rec) => {
             setters[c.key](rec);
-            // The validity periods matrix feeds the crew matrix — it is what
-            // turns a certificate's issue date into the expiry the matrix
-            // carries — so replacing it holds the certificates against the new
-            // periods and brings the matrix up to what they now say. The
-            // training and skills matrices are read by the compliance check
-            // instead, which is asked afresh on its own screen.
-            if (c.key === "validity") portal.runMatrixAuto({ validityMatrix: rec, origin: "spreadsheet" });
+            // The skills matrix carries the validity periods, which feed the
+            // crew matrix — they are what turns a certificate's issue date
+            // into the expiry the matrix carries — so replacing it holds the
+            // certificates against the new periods and brings the matrix up to
+            // what they now say. The compliance check reads it afresh on its
+            // own screen.
+            if (c.key === "skills") portal.runMatrixAuto({ validityMatrix: rec, origin: "spreadsheet" });
           }}
           logAction={c.logAction}
           label={record ? `Replace the ${c.noun}` : `Upload the ${c.noun}`}
@@ -14762,7 +14743,7 @@ function RequiredDocuments() {
           </Chip>
         </div>
         <div style={{ fontFamily: T.body, fontSize: 14, color: T.text, lineHeight: 1.7, marginTop: 10 }}>
-          Four spreadsheets and the crew's certificates. The portal keeps one of each spreadsheet —
+          Three spreadsheets and the crew's certificates. The portal keeps one of each spreadsheet —
           the latest — and every certification screen on the tab reads from what is filed here, so
           anything missing is missing from all of them.
           {missing.length > 0 && <> Still to come: {missing.map((m) => `the ${m.noun}`).join(", ")}.</>}
@@ -15699,7 +15680,11 @@ function CoolibahPortal({ role, onSignOut }) {
   // and the last answer the AI gave on them.
   const trainingMatrix = store.trainingMatrix || null;
   const skillsMatrix = store.skillsMatrix || null;
-  const validityMatrix = store.validityMatrix || null;
+  // The validity periods ride on the skills matrix — the office folded the old
+  // separate validity spreadsheet into it — so whatever skills matrix is on
+  // file is also the validity periods document. The newest upload is always
+  // the source; there is no second file to keep in step.
+  const validityMatrix = store.skillsMatrix || null;
   const matrixAnalysis = store.matrixAnalysis || null;
   const setMatrixAnalysis = put("matrixAnalysis");
   // The latest spreadsheet out of OPMS, which the OPMS Checker reads from, and the
@@ -15959,7 +15944,6 @@ function CoolibahPortal({ role, onSignOut }) {
   // the server already holds them, and the next file poll would say the same.
   const setTrainingMatrix = (record) => setStore((s) => ({ ...s, trainingMatrix: record }));
   const setSkillsMatrix = (record) => setStore((s) => ({ ...s, skillsMatrix: record }));
-  const setValidityMatrix = (record) => setStore((s) => ({ ...s, validityMatrix: record }));
   const setOpmsSheet = (record) => setStore((s) => ({ ...s, opmsSheet: record }));
   const setShiftAllocation = (record) => setStore((s) => ({ ...s, shiftAllocation: record }));
 
@@ -16199,7 +16183,7 @@ function CoolibahPortal({ role, onSignOut }) {
       onRestoreTab={restoreTab} onRestoreAllTabs={restoreAllTabs} />,
   };
 
-  const ctx = { role, admin, session: SESSION, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, setValidityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
+  const ctx = { role, admin, session: SESSION, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
 
   return (
     <Ctx.Provider value={ctx}>
@@ -16279,19 +16263,28 @@ function CoolibahPortal({ role, onSignOut }) {
 }
 
 function App() {
-  const [role, setRole] = useState(null);
+  // The signed-in name survives a refresh of the same tab — it is kept in the
+  // tab's own sessionStorage, so closing the tab still signs out and another
+  // tab is its own sign-in. This is also what lets the local preview reload
+  // itself after an edit without dropping whoever is looking at it back to
+  // the sign-in screen.
+  const [role, setRole] = useState(() => {
+    try { return sessionStorage.getItem("um-signed-in") || null; } catch (e) { return null; }
+  });
+  const signIn = (r) => { try { sessionStorage.setItem("um-signed-in", r); } catch (e) {} setRole(r); };
+  const signOut = () => { try { sessionStorage.removeItem("um-signed-in"); } catch (e) {} setRole(null); };
 
   if (!role) {
     return (
       <Boundary>
-        <SignIn onSignIn={setRole} />
+        <SignIn onSignIn={signIn} />
       </Boundary>
     );
   }
 
   return (
     <Boundary>
-      <CoolibahPortal role={role} onSignOut={() => setRole(null)} />
+      <CoolibahPortal role={role} onSignOut={signOut} />
     </Boundary>
   );
 }
