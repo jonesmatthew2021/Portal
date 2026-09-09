@@ -15262,7 +15262,7 @@ const ADMIN_PAGES = [
   { id: "ai-checker", label: "AI Checker" },
 ];
 
-function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingBoard, setSwingBoard, notes, corrCount, history, allTabs, hiddenTabs, onHideTab, onRestoreTab, onRestoreAllTabs, files, sync, log, docs, addDoc, removeDoc }) {
+function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingBoard, setSwingBoard, notes, corrCount, history, allTabs, hiddenTabs, onHideTab, onRestoreTab, onRestoreAllTabs, files, sync, log }) {
   // The Admin tab is seven pages now, not one: the documents the portal has to
   // be given, the certification work it started as, the pages that were being
   // asked for around them, and the AI Checker — moved here from the crew tab
@@ -15347,20 +15347,10 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
           overrides={overrides} swingBoard={swingBoard} setSwingBoard={setSwingBoard} log={log} />
       )}
       {page === "opms" && <OPMSChecker />}
-      {/* The papers around Portways and OPMS, kept where the OPMS work is
-          done: their Crew List & Shift Allocation form first, then the
-          document library — the same library as the Documentation tab's
-          sections, with its own shelf in the file store. */}
-      {page === "portways-docs" && (
-        <>
-          <CrewListFormPage people={people} />
-          <DocLibrary title="Portways Documentation" docs={docs.portways || []} currentUser={currentUser}
-            tagHint="Portways" bucket="portways"
-            onAdd={(d) => addDoc("portways", d, "Portways Documentation")}
-            onRemove={(d) => removeDoc("portways", d, "Portways Documentation")}
-            note="Everything from Portways that has to be kept - OPMS guides and procedures, notices, and the paperwork around the weekly export." />
-        </>
-      )}
+      {/* Portways' Crew List & Shift Allocation form, kept where the OPMS
+          work is done. The page once carried a document library under it;
+          it came off — the form is what this page is for. */}
+      {page === "portways-docs" && <CrewListFormPage people={people} />}
       {page === "ai-checker" && <AiChecker log={log} />}
 
       {page === "checker" && (
@@ -16479,7 +16469,6 @@ function CoolibahPortal({ role, onSignOut }) {
       placeholder="What would you change about this portal?" />,
     history: <History entries={history} />,
     admin: <Admin currentUser={currentUser} people={people} notes={notes} files={files} sync={sync}
-      docs={docs} addDoc={addDoc} removeDoc={removeDoc}
       setPeople={setPeople} overrides={overrides} setOverrides={setOverrides} log={log}
       swingBoard={swingBoard} setSwingBoard={setSwingBoard}
       corrCount={correspondence.length} history={history}

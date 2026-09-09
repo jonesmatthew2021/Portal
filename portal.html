@@ -15529,7 +15529,7 @@ const ADMIN_PAGES = [
 { id: "ai-checker", label: "AI Checker" }];
 
 
-function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingBoard, setSwingBoard, notes, corrCount, history, allTabs, hiddenTabs, onHideTab, onRestoreTab, onRestoreAllTabs, files, sync, log, docs, addDoc, removeDoc }) {
+function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingBoard, setSwingBoard, notes, corrCount, history, allTabs, hiddenTabs, onHideTab, onRestoreTab, onRestoreAllTabs, files, sync, log }) {
   // The Admin tab is seven pages now, not one: the documents the portal has to
   // be given, the certification work it started as, the pages that were being
   // asked for around them, and the AI Checker — moved here from the crew tab
@@ -15617,17 +15617,7 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
 
 
 
-
-    page === "portways-docs" && /*#__PURE__*/
-    React.createElement(React.Fragment, null, /*#__PURE__*/
-    React.createElement(CrewListFormPage, { people: people }), /*#__PURE__*/
-    React.createElement(DocLibrary, { title: "Portways Documentation", docs: docs.portways || [], currentUser: currentUser,
-      tagHint: "Portways", bucket: "portways",
-      onAdd: (d) => addDoc("portways", d, "Portways Documentation"),
-      onRemove: (d) => removeDoc("portways", d, "Portways Documentation"),
-      note: "Everything from Portways that has to be kept - OPMS guides and procedures, notices, and the paperwork around the weekly export." })
-    ),
-
+    page === "portways-docs" && /*#__PURE__*/React.createElement(CrewListFormPage, { people: people }),
     page === "ai-checker" && /*#__PURE__*/React.createElement(AiChecker, { log: log }),
 
     page === "checker" && /*#__PURE__*/
@@ -16746,7 +16736,6 @@ function CoolibahPortal({ role, onSignOut }) {
       placeholder: "What would you change about this portal?" }),
     history: /*#__PURE__*/React.createElement(History, { entries: history }),
     admin: /*#__PURE__*/React.createElement(Admin, { currentUser: currentUser, people: people, notes: notes, files: files, sync: sync,
-      docs: docs, addDoc: addDoc, removeDoc: removeDoc,
       setPeople: setPeople, overrides: overrides, setOverrides: setOverrides, log: log,
       swingBoard: swingBoard, setSwingBoard: setSwingBoard,
       corrCount: correspondence.length, history: history,
