@@ -1,0 +1,48 @@
+# The Coolibah crew portal on Cloudflare Workers.
+#
+# One worker carries the whole thing: the page itself (served from ./assets),
+# every /api route the page calls, and the engine behind them. The stores it
+# leans on are all on Cloudflare's free tier:
+#
+#   DB     (D1)  — the file index, the portal's shared state, and the AI
+#                  readings / job records (in one strongly consistent place)
+#   FILES  (R2)  — the file bytes, until SharePoint takes over (see FILE_STORE)
+#
+# Secrets are set with `wrangler secret put <NAME>`, never written here:
+#   ANTHROPIC_API_KEY  — the AI account the readings run on
+#   MS_CLIENT_SECRET   — the SharePoint app's secret, once IT provides it
+#
+# The ids below are placeholders until the real Cloudflare account exists:
+# create the resources with `wrangler d1 create portal` and
+# `wrangler r2 bucket create portal-files`, then paste the D1 id in.
+name = "coolibah-portal"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./assets"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "portal"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "portal-files"
+
+[vars]
+# Where the model lives. The key itself is a secret (above).
+ANTHROPIC_BASE_URL = "https://api.anthropic.com"
+# Which file store holds the bytes: "r2" until the SharePoint app registration
+# arrives from IT, then "sharepoint" — nothing else changes.
+FILE_STORE = "r2"
+# SharePoint, for when FILE_STORE flips: the tenant, the app registration's
+# client id, the site, and the document library the portal files into.
+MS_TENANT_ID = ""
+MS_CLIENT_ID = ""
+SHAREPOINT_HOSTNAME = "unitedmarineau.sharepoint.com"
+SHAREPOINT_SITE_PATH = "/coolibah"
+SHAREPOINT_LIBRARY = "Documents"

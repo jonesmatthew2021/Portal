@@ -9505,18 +9505,27 @@ async function analyseOPMS({ quals, opmsSheet, fresh = false, onPhase = () => {}
  * after until it gave up minutes later.
  */
 async function startAnalysisWorker(path, jobId, what = "comparison") {
-  let r;
-  try {
-    r = await fetch(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jobId }),
-    });
-  } catch {
+  // On the old host this returned in a breath — the background function took
+  // the job and answered straight away. On Cloudflare the same request IS the
+  // run and stays open until the work is done, so waiting for it here would
+  // hold the polling up for the whole run. Give it a moment to fail fast (a
+  // bad path, the server unreachable), then let it carry on in the background
+  // — the polls read the job record while this request is still open.
+  const attempt = fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jobId }),
+  });
+  attempt.catch(() => {});
+  const soon = await Promise.race([
+    attempt.then((r) => r, () => "failed"),
+    new Promise((res) => setTimeout(() => res("running"), 1500)),
+  ]);
+  if (soon === "failed") {
     throw new Error(`The ${what} couldn't be started — the server couldn't be reached. Try again in a moment.`);
   }
-  if (!r.ok) {
-    throw new Error(`The ${what} couldn't be started (${r.status}). Try again in a moment.`);
+  if (soon !== "running" && !soon.ok) {
+    throw new Error(`The ${what} couldn't be started (${soon.status}). Try again in a moment.`);
   }
 }
 

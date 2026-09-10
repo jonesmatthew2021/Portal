@@ -1,0 +1,27 @@
+{
+  "name": "coolibah-portal-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Coolibah crew portal on Cloudflare Workers — page, engine, and stores. Files live in SharePoint (or R2 until the Graph credentials arrive).",
+  "scripts": {
+    "assets": "node scripts/build-assets.mjs",
+    "dev": "npm run assets && wrangler dev --port 8788",
+    "deploy": "npm run assets && wrangler deploy",
+    "db:local": "wrangler d1 execute portal --local --file=./schema.sql",
+    "db:remote": "wrangler d1 execute portal --remote --file=./schema.sql",
+    "seed": "node scripts/seed-local.mjs"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.44.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "wrangler": "^4.14.0"
+  },
+  "allowScripts": {
+    "workerd@1.20260908.1": true,
+    "esbuild@0.28.1": true,
+    "sharp@0.35.2": true
+  }
+}

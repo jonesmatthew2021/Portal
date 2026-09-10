@@ -1,0 +1,47 @@
+/* Builds the worker's assets directory from the portal's source.
+ *
+ * source/index.html carries the portal as readable JSX and asks the browser to
+ * translate it with Babel on every load. The deployed page shouldn't pay that
+ * wait, so the JSX is compiled here once — the same translation the local
+ * fast-preview build does — and the compiled page becomes assets/index.html.
+ * The Portways crew list form rides along unchanged.
+ *
+ * Run automatically by `npm run dev` and `npm run deploy`.
+ */
+
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const WORKER = join(HERE, "..");
+const REPO = join(WORKER, "..");
+const ASSETS = join(WORKER, "assets");
+
+// Babel lives in tools/ already (the fast-preview build uses it); borrow it
+// rather than installing a second copy.
+const require = createRequire(join(REPO, "tools", "package.json"));
+const babel = require("@babel/standalone");
+
+mkdirSync(ASSETS, { recursive: true });
+
+const src = readFileSync(join(REPO, "source", "index.html"), "utf8");
+const open = src.indexOf('<script type="text/babel"');
+if (open === -1) throw new Error("source/index.html has no text/babel script to compile");
+const openEnd = src.indexOf(">", open) + 1;
+const close = src.indexOf("</script>", openEnd);
+const jsx = src.slice(openEnd, close);
+
+const t0 = Date.now();
+const { code } = babel.transform(jsx, { presets: ["react"], compact: false, retainLines: true });
+
+let out = src.slice(0, open) + '<script type="module">\n' + code + "\n" + src.slice(close);
+out = out.replace(/[ \t]*<script[^>]*babel\.min\.js[^>]*><\/script>\r?\n/, "");
+
+writeFileSync(join(ASSETS, "index.html"), out);
+copyFileSync(join(REPO, "source", "crew-list-form.html"), join(ASSETS, "crew-list-form.html"));
+
+console.log(
+  `assets built — index.html ${(out.length / 1024 / 1024).toFixed(1)} MB (compiled in ${((Date.now() - t0) / 1000).toFixed(1)}s), crew-list-form.html copied`,
+);
