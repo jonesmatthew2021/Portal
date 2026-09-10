@@ -11,11 +11,15 @@ machine once they're done.
 - **Anthropic API key** — for the AI readings (certificate reading, checkers):
   https://console.anthropic.com → API keys. This is the one running cost, and
   it's per-use, the same bill Netlify's AI gateway was passing through.
-- **SharePoint app registration** — from the IT provider (already requested):
-  Application (client) ID, Directory (tenant) ID, client secret, with
-  Sites.Selected write access granted on the Coolibah site. Not needed for
-  go-live — the portal starts on Cloudflare's own file storage (R2) and flips
-  to SharePoint when these arrive.
+- **SharePoint app registration** — from the IT provider: Application
+  (client) ID, Directory (tenant) ID, client secret, with Sites.Selected
+  write access granted on the **United Operations Team's site**
+  (unitedmarineau.sharepoint.com/sites/UnitedOperationsTeam — verify the
+  exact address via Teams > Shared files > "..." > Open in SharePoint). The
+  portal files everything under its own "Crew Portal" folder in that
+  library, beside the folders the team already uses. Not needed for go-live
+  — the portal starts on Cloudflare's own file storage (R2) and flips to
+  SharePoint when these arrive.
 
 ## 2. Sign wrangler in
 

@@ -44,12 +44,13 @@ FILE_STORE = "r2"
 MS_TENANT_ID = ""
 MS_CLIENT_ID = ""
 SHAREPOINT_HOSTNAME = "unitedmarineau.sharepoint.com"
-# The site the files live in. A Teams team is a SharePoint site underneath —
-# for the United Operations Team's Shared files this is its /sites/... path
-# (find it via the Teams file view: "..." menu, Open in SharePoint, copy the
-# address). The /coolibah path below is the earlier standalone site; replace
-# it with the Team's site path if the Team library is the home.
-SHAREPOINT_SITE_PATH = "/coolibah"
+# The site the files live in: the United Operations Team's own SharePoint
+# site — a Teams team is a SharePoint site underneath, and its Shared files
+# are the "Documents" library. The path below follows the standard Teams
+# naming; VERIFY it before the flip by opening the Teams file view, "..."
+# menu, Open in SharePoint, and comparing the address bar. The app
+# registration from IT must grant Sites.Selected on this same site.
+SHAREPOINT_SITE_PATH = "/sites/UnitedOperationsTeam"
 SHAREPOINT_LIBRARY = "Documents"
 # The portal files everything under its own folder in that library, so the
 # folders people use by hand stay theirs and nobody reorganises the portal's
