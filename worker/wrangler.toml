@@ -52,8 +52,23 @@ SHAREPOINT_HOSTNAME = "unitedmarineau.sharepoint.com"
 # registration from IT must grant Sites.Selected on this same site.
 SHAREPOINT_SITE_PATH = "/sites/UnitedOperationsTeam"
 SHAREPOINT_LIBRARY = "Documents"
-# The portal files everything under its own folder in that library, so the
-# folders people use by hand stay theirs and nobody reorganises the portal's
-# filing by accident. Browsing and opening is fine; moving or renaming inside
-# this folder breaks the portal's index.
+# Where the portal's filing lands in the library. SHAREPOINT_MAP marries the
+# portal's own filing families to the folders the team already uses — so a
+# certificate filed through the portal appears in Crew Certificate
+# Verifications, the matrices in Matrix, and so on, and /api/sync can take
+# onto the portal's books whatever people drop into those folders straight
+# from Teams. Anything not mapped (removed copies, working uploads) sits
+# under the portal's own SHAREPOINT_ROOT folder. Moving or renaming a file
+# the portal has on its books still breaks its link — run /api/sync after a
+# tidy-up rather than doing nothing.
 SHAREPOINT_ROOT = "Crew Portal"
+SHAREPOINT_MAP = """
+{
+  "certification/spreadsheet/": "OPMS Documents/Crew Certificates Spreadsheet/",
+  "certification/": "Crew Certificate Verifications/",
+  "matrices/": "Matrix/",
+  "opms/": "OPMS Documents/",
+  "roster/": "Crew Roster/",
+  "notes/": "Handover Notes/"
+}
+"""

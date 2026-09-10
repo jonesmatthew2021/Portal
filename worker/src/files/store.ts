@@ -27,7 +27,7 @@ export type FileStore = {
   set(key: string, value: ArrayBuffer): Promise<void>;
   delete(key: string): Promise<void>;
   getMetadata(key: string): Promise<{ key: string; size?: number } | null>;
-  list(opts?: { prefix?: string }): Promise<{ blobs: { key: string }[] }>;
+  list(opts?: { prefix?: string }): Promise<{ blobs: { key: string; size?: number }[] }>;
 };
 
 /* ---------------------------------------------------------------- R2 ---- */
@@ -51,11 +51,11 @@ function r2Store(): FileStore {
       return head ? { key, size: head.size } : null;
     },
     async list(opts) {
-      const out: { key: string }[] = [];
+      const out: { key: string; size?: number }[] = [];
       let cursor: string | undefined;
       do {
         const page = await bucket().list({ prefix: opts?.prefix || "", cursor, limit: 1000 });
-        page.objects.forEach((o) => out.push({ key: o.key }));
+        page.objects.forEach((o) => out.push({ key: o.key, size: o.size }));
         cursor = page.truncated ? page.cursor : undefined;
       } while (cursor);
       return { blobs: out };
@@ -127,12 +127,44 @@ async function driveId(): Promise<string> {
 
 const encodePath = (key: string) => key.split("/").map(encodeURIComponent).join("/");
 
-// Everything the portal files sits under its own folder in the library —
-// "Crew Portal" unless configured otherwise — so the humans' folders around
-// it stay theirs, and nobody reorganises the portal's filing by accident.
+// Where the portal's keys live in the library. SHAREPOINT_MAP marries the
+// portal's filing families to the folders the team already uses in Teams —
+// certification/ to Crew Certificate Verifications/, matrices/ to Matrix/,
+// and so on — longest prefix first, so a more specific family can point
+// somewhere of its own. Anything unmapped (removed copies, working uploads)
+// sits under the portal's own SHAREPOINT_ROOT folder. The rest of the portal
+// only ever speaks its own keys; the translation lives here and nowhere else.
 const rooted = (key: string) => {
   const root = (getEnv().SHAREPOINT_ROOT ?? "Crew Portal").replace(/^\/+|\/+$/g, "");
   return root ? `${root}/${key}` : key;
+};
+
+function mappings(): [string, string][] {
+  let raw: Record<string, string> = {};
+  try {
+    raw = getEnv().SHAREPOINT_MAP ? JSON.parse(getEnv().SHAREPOINT_MAP!) : {};
+  } catch {
+    raw = {};
+  }
+  const trim = (s: string) => s.replace(/^\/+|\/+$/g, "") + "/";
+  return Object.entries(raw)
+    .map(([from, to]) => [trim(from), trim(to)] as [string, string])
+    .sort((a, b) => b[0].length - a[0].length);
+}
+
+const toReal = (key: string) => {
+  for (const [from, to] of mappings()) {
+    if (key.startsWith(from)) return to + key.slice(from.length);
+  }
+  return rooted(key);
+};
+
+const fromReal = (path: string) => {
+  for (const [from, to] of mappings()) {
+    if (path.startsWith(to)) return from + path.slice(to.length);
+  }
+  const root = rooted("");
+  return root && path.startsWith(root) ? path.slice(root.length) : path;
 };
 
 /** Graph's simple upload needs the parent folders to exist; make them, one level at a time. */
@@ -157,15 +189,15 @@ async function ensureFolders(drive: string, key: string) {
 function sharepointStore(): FileStore {
   return {
     async get(key: string, opts?: { type?: string }): Promise<any> {
-      const res = await graph(`/drives/${await driveId()}/root:/${encodePath(rooted(key))}:/content`);
+      const res = await graph(`/drives/${await driveId()}/root:/${encodePath(toReal(key))}:/content`);
       if (res.status === 404) return null;
       if (!res.ok) throw new Error(`SharePoint read failed (${res.status}) for ${key}`);
       return opts?.type === "stream" ? res.body : await res.arrayBuffer();
     },
     async set(key, value) {
       const drive = await driveId();
-      await ensureFolders(drive, rooted(key));
-      const res = await graph(`/drives/${drive}/root:/${encodePath(rooted(key))}:/content`, {
+      await ensureFolders(drive, toReal(key));
+      const res = await graph(`/drives/${drive}/root:/${encodePath(toReal(key))}:/content`, {
         method: "PUT",
         headers: { "Content-Type": "application/octet-stream" },
         body: value,
@@ -173,11 +205,11 @@ function sharepointStore(): FileStore {
       if (!res.ok) throw new Error(`SharePoint write failed (${res.status}) for ${key}: ${await res.text()}`);
     },
     async delete(key) {
-      const res = await graph(`/drives/${await driveId()}/root:/${encodePath(rooted(key))}`, { method: "DELETE" });
+      const res = await graph(`/drives/${await driveId()}/root:/${encodePath(toReal(key))}`, { method: "DELETE" });
       if (!res.ok && res.status !== 404) throw new Error(`SharePoint delete failed (${res.status}) for ${key}`);
     },
     async getMetadata(key) {
-      const res = await graph(`/drives/${await driveId()}/root:/${encodePath(rooted(key))}`);
+      const res = await graph(`/drives/${await driveId()}/root:/${encodePath(toReal(key))}`);
       if (res.status === 404) return null;
       if (!res.ok) throw new Error(`SharePoint check failed (${res.status}) for ${key}`);
       const item = (await res.json()) as { size?: number };
@@ -185,13 +217,12 @@ function sharepointStore(): FileStore {
     },
     async list(opts) {
       // Prefixes here are always folder paths ("certification/evans-brenton/").
-      // One folder's children, walked page by page; folders inside it are
-      // walked too so a nested listing reads like the flat store did. Keys
-      // come back portal-relative — the root folder is plumbing, not naming.
+      // The walk speaks the library's real paths; what goes back out is the
+      // portal's own keys, so callers never see the mapping.
       const drive = await driveId();
-      const rootPrefix = rooted("");
-      const prefix = rooted((opts?.prefix || "").replace(/\/$/, ""));
-      const out: { key: string }[] = [];
+      const asked = (opts?.prefix || "").replace(/\/+$/, "");
+      const prefix = asked ? toReal(asked + "/").replace(/\/+$/, "") : "";
+      const out: { key: string; size?: number }[] = [];
       const walk = async (folder: string) => {
         let url: string | null = folder
           ? `/drives/${drive}/root:/${encodePath(folder)}:/children?$top=200`
@@ -201,13 +232,13 @@ function sharepointStore(): FileStore {
           if (res.status === 404) return;
           if (!res.ok) throw new Error(`SharePoint listing failed (${res.status}) under ${folder || "/"}`);
           const page = (await res.json()) as {
-            value: { name: string; folder?: unknown }[];
+            value: { name: string; folder?: unknown; size?: number }[];
             "@odata.nextLink"?: string;
           };
           for (const item of page.value) {
             const path = folder ? `${folder}/${item.name}` : item.name;
             if (item.folder) await walk(path);
-            else out.push({ key: path.startsWith(rootPrefix) ? path.slice(rootPrefix.length) : path });
+            else out.push({ key: fromReal(path), size: item.size });
           }
           url = page["@odata.nextLink"]
             ? page["@odata.nextLink"].replace("https://graph.microsoft.com/v1.0", "")

@@ -67,10 +67,27 @@ it.
 ## 7. Flip files to SharePoint (when IT delivers)
 
 Set in wrangler.toml [vars]: MS_TENANT_ID, MS_CLIENT_ID, FILE_STORE =
-"sharepoint", and make sure SHAREPOINT_LIBRARY names the document library the
-certificates live in. Put the secret in (step 4), `npm run deploy`, and the
-portal reads and files everything in the Coolibah site from then on. The R2
-copy stays as it was — a free spare.
+"sharepoint", and check SHAREPOINT_SITE_PATH against the Team's real address
+(Teams > Shared files > "..." > Open in SharePoint). Put the secret in
+(step 4), `npm run deploy`, and the portal reads and files everything in the
+Team's own folders from then on. The R2 copy stays as it was — a free spare.
+
+The portal lives in the folders the team already uses — SHAREPOINT_MAP in
+wrangler.toml marries its filing to them: certificates in Crew Certificate
+Verifications (one folder per crew member), the matrices in Matrix, the OPMS
+sheets in OPMS Documents, the shift sheet in Crew Roster. Anything unmapped
+(removed copies, working uploads) sits under the portal's own Crew Portal
+folder.
+
+**Taking the folders' contents onto the books:** GET /api/sync surveys those
+folders — what's there that the portal doesn't know (files people dropped in
+from Teams), and what the portal knows whose bytes have gone (something
+moved or renamed by hand). POST /api/sync applies it: new certificates are
+registered under the folder they sit in (the AI reading pass later confirms
+whose they are and refiles any strays), and a matrix or sheet is adopted
+only when the portal holds none and there is exactly one candidate. Run it
+after the flip to take on everything already sitting in the folders, and
+again after any hand tidy-up.
 
 ## Day-to-day dev
 
