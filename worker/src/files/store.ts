@@ -127,6 +127,14 @@ async function driveId(): Promise<string> {
 
 const encodePath = (key: string) => key.split("/").map(encodeURIComponent).join("/");
 
+// Everything the portal files sits under its own folder in the library —
+// "Crew Portal" unless configured otherwise — so the humans' folders around
+// it stay theirs, and nobody reorganises the portal's filing by accident.
+const rooted = (key: string) => {
+  const root = (getEnv().SHAREPOINT_ROOT ?? "Crew Portal").replace(/^\/+|\/+$/g, "");
+  return root ? `${root}/${key}` : key;
+};
+
 /** Graph's simple upload needs the parent folders to exist; make them, one level at a time. */
 async function ensureFolders(drive: string, key: string) {
   const parts = key.split("/").slice(0, -1);
@@ -149,15 +157,15 @@ async function ensureFolders(drive: string, key: string) {
 function sharepointStore(): FileStore {
   return {
     async get(key: string, opts?: { type?: string }): Promise<any> {
-      const res = await graph(`/drives/${await driveId()}/root:/${encodePath(key)}:/content`);
+      const res = await graph(`/drives/${await driveId()}/root:/${encodePath(rooted(key))}:/content`);
       if (res.status === 404) return null;
       if (!res.ok) throw new Error(`SharePoint read failed (${res.status}) for ${key}`);
       return opts?.type === "stream" ? res.body : await res.arrayBuffer();
     },
     async set(key, value) {
       const drive = await driveId();
-      await ensureFolders(drive, key);
-      const res = await graph(`/drives/${drive}/root:/${encodePath(key)}:/content`, {
+      await ensureFolders(drive, rooted(key));
+      const res = await graph(`/drives/${drive}/root:/${encodePath(rooted(key))}:/content`, {
         method: "PUT",
         headers: { "Content-Type": "application/octet-stream" },
         body: value,
@@ -165,11 +173,11 @@ function sharepointStore(): FileStore {
       if (!res.ok) throw new Error(`SharePoint write failed (${res.status}) for ${key}: ${await res.text()}`);
     },
     async delete(key) {
-      const res = await graph(`/drives/${await driveId()}/root:/${encodePath(key)}`, { method: "DELETE" });
+      const res = await graph(`/drives/${await driveId()}/root:/${encodePath(rooted(key))}`, { method: "DELETE" });
       if (!res.ok && res.status !== 404) throw new Error(`SharePoint delete failed (${res.status}) for ${key}`);
     },
     async getMetadata(key) {
-      const res = await graph(`/drives/${await driveId()}/root:/${encodePath(key)}`);
+      const res = await graph(`/drives/${await driveId()}/root:/${encodePath(rooted(key))}`);
       if (res.status === 404) return null;
       if (!res.ok) throw new Error(`SharePoint check failed (${res.status}) for ${key}`);
       const item = (await res.json()) as { size?: number };
@@ -178,9 +186,11 @@ function sharepointStore(): FileStore {
     async list(opts) {
       // Prefixes here are always folder paths ("certification/evans-brenton/").
       // One folder's children, walked page by page; folders inside it are
-      // walked too so a nested listing reads like the flat store did.
+      // walked too so a nested listing reads like the flat store did. Keys
+      // come back portal-relative — the root folder is plumbing, not naming.
       const drive = await driveId();
-      const prefix = (opts?.prefix || "").replace(/\/$/, "");
+      const rootPrefix = rooted("");
+      const prefix = rooted((opts?.prefix || "").replace(/\/$/, ""));
       const out: { key: string }[] = [];
       const walk = async (folder: string) => {
         let url: string | null = folder
@@ -197,7 +207,7 @@ function sharepointStore(): FileStore {
           for (const item of page.value) {
             const path = folder ? `${folder}/${item.name}` : item.name;
             if (item.folder) await walk(path);
-            else out.push({ key: path });
+            else out.push({ key: path.startsWith(rootPrefix) ? path.slice(rootPrefix.length) : path });
           }
           url = page["@odata.nextLink"]
             ? page["@odata.nextLink"].replace("https://graph.microsoft.com/v1.0", "")

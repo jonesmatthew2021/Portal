@@ -44,5 +44,15 @@ FILE_STORE = "r2"
 MS_TENANT_ID = ""
 MS_CLIENT_ID = ""
 SHAREPOINT_HOSTNAME = "unitedmarineau.sharepoint.com"
+# The site the files live in. A Teams team is a SharePoint site underneath —
+# for the United Operations Team's Shared files this is its /sites/... path
+# (find it via the Teams file view: "..." menu, Open in SharePoint, copy the
+# address). The /coolibah path below is the earlier standalone site; replace
+# it with the Team's site path if the Team library is the home.
 SHAREPOINT_SITE_PATH = "/coolibah"
 SHAREPOINT_LIBRARY = "Documents"
+# The portal files everything under its own folder in that library, so the
+# folders people use by hand stay theirs and nobody reorganises the portal's
+# filing by accident. Browsing and opening is fine; moving or renaming inside
+# this folder breaks the portal's index.
+SHAREPOINT_ROOT = "Crew Portal"

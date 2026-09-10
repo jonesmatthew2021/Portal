@@ -21,6 +21,7 @@ export type PortalEnv = {
   SHAREPOINT_HOSTNAME?: string;
   SHAREPOINT_SITE_PATH?: string;
   SHAREPOINT_LIBRARY?: string;
+  SHAREPOINT_ROOT?: string;
 };
 
 let current: PortalEnv | null = null;
