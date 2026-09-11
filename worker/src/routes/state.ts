@@ -1,6 +1,5 @@
-import { and, eq, sql } from "drizzle-orm";
-import { db } from "../db/index.js";
-import { PORTAL_ROW_ID, portalState } from "../db/schema.js";
+import { PORTAL_ROW_ID } from "../db/schema.js";
+import { getEnv } from "../env.js";
 
 /**
  * The portal's one shared row — ported from the Netlify build unchanged in
@@ -18,18 +17,26 @@ function humanSize(bytes: number) {
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
-async function current() {
-  const [row] = await db.select().from(portalState).where(eq(portalState.id, ROW_ID));
-  return row ?? null;
+// Raw D1 and raw strings throughout this route on purpose: the state is a
+// ~600 KB JSON document, every open portal polls this endpoint every few
+// seconds, and parsing-and-restringifying it per poll (which the ORM's
+// json-mode column does) was enough CPU to trip the free plan's limit. The
+// stored value is already the JSON to serve, so it is passed through
+// byte-for-byte and never parsed here.
+async function currentRaw() {
+  return await getEnv()
+    .DB.prepare("SELECT data, rev FROM portal_state WHERE id = ?1")
+    .bind(ROW_ID)
+    .first<{ data: string; rev: number }>();
 }
 
 export default async (req: Request) => {
   if (req.method === "GET") {
-    const row = await current();
-    return Response.json(
-      row ? { rev: row.rev, data: row.data } : { rev: 0, data: null },
-      { headers: NO_STORE },
-    );
+    const row = await currentRaw();
+    const body = row ? `{"rev":${row.rev},"data":${row.data}}` : '{"rev":0,"data":null}';
+    return new Response(body, {
+      headers: { ...NO_STORE, "Content-Type": "application/json" },
+    });
   }
 
   if (req.method !== "PUT") {
@@ -51,35 +58,46 @@ export default async (req: Request) => {
     return Response.json({ error: "The change didn't contain anything to save." }, { status: 400 });
   }
 
-  const dataSize = new TextEncoder().encode(JSON.stringify(body.data)).length;
+  // One stringify of the incoming data — the string both measures the size
+  // and is what gets stored, so it is never re-parsed on the way in or out.
+  const dataText = JSON.stringify(body.data);
+  const dataSize = new TextEncoder().encode(dataText).length;
   if (dataSize > MAX_BYTES) {
     return Response.json(
       { error: `That change is ${humanSize(dataSize)}. The limit is ${humanSize(MAX_BYTES)}.` },
       { status: 413 },
     );
   }
+  const conflict = async () => {
+    const row = await currentRaw();
+    const payload = row
+      ? `{"conflict":true,"rev":${row.rev},"data":${row.data}}`
+      : '{"conflict":true,"rev":0,"data":null}';
+    return new Response(payload, {
+      status: 409,
+      headers: { ...NO_STORE, "Content-Type": "application/json" },
+    });
+  };
 
   if (base === 0) {
-    const [seeded] = await db
-      .insert(portalState)
-      .values({ id: ROW_ID, data: body.data, rev: 1 })
-      .onConflictDoNothing()
-      .returning();
-
-    if (seeded) return Response.json({ rev: seeded.rev });
-
-    const row = await current();
-    return Response.json({ conflict: true, rev: row?.rev ?? 0, data: row?.data ?? null }, { status: 409 });
+    const seeded = await getEnv()
+      .DB.prepare(
+        "INSERT INTO portal_state (id, data, rev, updated_at) VALUES (?1, ?2, 1, ?3) " +
+          "ON CONFLICT (id) DO NOTHING",
+      )
+      .bind(ROW_ID, dataText, Math.floor(Date.now() / 1000))
+      .run();
+    if ((seeded.meta?.changes ?? 0) > 0) return Response.json({ rev: 1 });
+    return await conflict();
   }
 
-  const [saved] = await db
-    .update(portalState)
-    .set({ data: body.data, rev: sql`${portalState.rev} + 1`, updatedAt: new Date() })
-    .where(and(eq(portalState.id, ROW_ID), eq(portalState.rev, base)))
-    .returning();
-
-  if (saved) return Response.json({ rev: saved.rev });
-
-  const row = await current();
-  return Response.json({ conflict: true, rev: row?.rev ?? 0, data: row?.data ?? null }, { status: 409 });
+  const saved = await getEnv()
+    .DB.prepare(
+      "UPDATE portal_state SET data = ?2, rev = rev + 1, updated_at = ?3 " +
+        "WHERE id = ?1 AND rev = ?4",
+    )
+    .bind(ROW_ID, dataText, Math.floor(Date.now() / 1000), base)
+    .run();
+  if ((saved.meta?.changes ?? 0) > 0) return Response.json({ rev: base + 1 });
+  return await conflict();
 };
