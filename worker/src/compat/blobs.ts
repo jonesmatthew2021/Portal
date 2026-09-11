@@ -20,9 +20,17 @@ type GetOpts = { type?: "json" | "text" | "arrayBuffer" };
 export type BlobStore = {
   get(key: string, opts?: GetOpts): Promise<unknown>;
   set(key: string, value: string | ArrayBuffer): Promise<void>;
-  setJSON(key: string, value: unknown): Promise<void>;
+  setJSON(
+    key: string,
+    value: unknown,
+    opts?: { onlyIfMatch?: string },
+  ): Promise<{ modified: boolean; etag: string | null }>;
   delete(key: string): Promise<void>;
   getMetadata(key: string): Promise<{ key: string } | null>;
+  getWithMetadata(
+    key: string,
+    opts?: GetOpts,
+  ): Promise<{ data: unknown; etag: string } | null>;
   list(opts?: { prefix?: string }): Promise<{ blobs: { key: string }[] }>;
 };
 
@@ -38,14 +46,35 @@ export function getStore(opts: { name: string; consistency?: string } | string):
     return row ? row.value : null;
   };
 
+  // Every write stamps a fresh etag — the version mark the conditional write
+  // below compares against, which is what makes two racing job claims settle
+  // to exactly one winner.
   const write = async (key: string, value: string) => {
+    const etag = crypto.randomUUID();
     await d1()
       .prepare(
-        "INSERT INTO blobs (store, key, value, updated_at) VALUES (?1, ?2, ?3, ?4) " +
-          "ON CONFLICT (store, key) DO UPDATE SET value = ?3, updated_at = ?4",
+        "INSERT INTO blobs (store, key, value, updated_at, etag) VALUES (?1, ?2, ?3, ?4, ?5) " +
+          "ON CONFLICT (store, key) DO UPDATE SET value = ?3, updated_at = ?4, etag = ?5",
       )
-      .bind(store, key, value, Date.now())
+      .bind(store, key, value, Date.now(), etag)
       .run();
+    return etag;
+  };
+
+  // The compare-and-swap the Netlify store offered: the row only moves if it
+  // still carries the etag the caller read. D1 runs the statement atomically,
+  // so of two racers only one can find the etag standing.
+  const writeIfMatch = async (key: string, value: string, onlyIfMatch: string) => {
+    const etag = crypto.randomUUID();
+    const res = await d1()
+      .prepare(
+        "UPDATE blobs SET value = ?3, updated_at = ?4, etag = ?5 " +
+          "WHERE store = ?1 AND key = ?2 AND etag = ?6",
+      )
+      .bind(store, key, value, Date.now(), etag, onlyIfMatch)
+      .run();
+    const modified = (res.meta?.changes ?? 0) > 0;
+    return { modified, etag: modified ? etag : null };
   };
 
   return {
@@ -67,8 +96,9 @@ export function getStore(opts: { name: string; consistency?: string } | string):
         typeof value === "string" ? value : new TextDecoder().decode(new Uint8Array(value));
       await write(key, text);
     },
-    async setJSON(key, value) {
-      await write(key, JSON.stringify(value));
+    async setJSON(key, value, opts) {
+      if (opts?.onlyIfMatch) return await writeIfMatch(key, JSON.stringify(value), opts.onlyIfMatch);
+      return { modified: true, etag: await write(key, JSON.stringify(value)) };
     },
     async delete(key) {
       await d1()
@@ -82,6 +112,24 @@ export function getStore(opts: { name: string; consistency?: string } | string):
         .bind(store, key)
         .first<{ key: string }>();
       return row ? { key: row.key } : null;
+    },
+    async getWithMetadata(key, o) {
+      const row = await d1()
+        .prepare("SELECT value, etag FROM blobs WHERE store = ?1 AND key = ?2")
+        .bind(store, key)
+        .first<{ value: string; etag: string | null }>();
+      if (!row) return null;
+      let data: unknown = row.value;
+      if (o?.type === "json") {
+        try {
+          data = JSON.parse(row.value);
+        } catch {
+          data = null;
+        }
+      }
+      // A row written before etags existed gets one lazily-shaped stand-in;
+      // the next write stamps a real one.
+      return { data, etag: row.etag || "pre-etag" };
     },
     async list(o) {
       const prefix = (o && o.prefix) || "";

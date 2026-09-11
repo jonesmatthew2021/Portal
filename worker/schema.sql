@@ -48,5 +48,7 @@ CREATE TABLE IF NOT EXISTS blobs (
   key TEXT NOT NULL,
   value TEXT NOT NULL,
   updated_at INTEGER NOT NULL,
+  -- The version mark conditional writes compare against (job claiming).
+  etag TEXT,
   PRIMARY KEY (store, key)
 );
