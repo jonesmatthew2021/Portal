@@ -12,6 +12,7 @@
  * comparison, which is far too long to answer a request with.
  */
 
+import { Buffer } from "node:buffer";
 import { getStore } from "../compat/blobs.js";
 import { getEnv } from "../env.js";
 import { and, desc, eq, isNull } from "drizzle-orm";
@@ -196,11 +197,13 @@ export function mediaFor(row: Row) {
 }
 
 export function base64(bytes: ArrayBuffer) {
-  // Native all the way: a latin1 decode maps each byte to one character in
-  // the runtime's fast path, and btoa is native too. The old chunked
-  // String.fromCharCode loop was real JavaScript CPU — enough to put a 4 MB
-  // scan over the worker's per-request budget and jam the read loop on it.
-  return btoa(new TextDecoder("latin1").decode(bytes));
+  // Node's Buffer, which the worker runtime provides natively: one call,
+  // C++ speed, correct for every byte. The two roads not taken both failed
+  // in production: the chunked String.fromCharCode loop was real JavaScript
+  // CPU (a 4 MB scan blew the per-request budget), and TextDecoder("latin1")
+  // is really windows-1252, which maps some bytes outside the range btoa
+  // will accept and threw on scans containing them.
+  return Buffer.from(bytes).toString("base64");
 }
 
 /** Pull the object out of whatever the model wrapped it in. */

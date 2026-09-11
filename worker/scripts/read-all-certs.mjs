@@ -19,6 +19,7 @@ if (!Array.isArray(cols) || !cols.length) throw new Error("The matrix columns ar
 
 let batch = 0;
 let stumbles = 0;
+let stalled = 0;
 while (true) {
   let out = null;
   try {
@@ -41,7 +42,19 @@ while (true) {
   }
   stumbles = 0;
   batch++;
-  if (batch % 5 === 0 || out.remaining === 0) {
+  // A batch that read nothing and failed everything is not progress — after a
+  // few of those in a row the same certificates are jamming the queue, and
+  // looping on them burns requests while reading nothing. Say what failed and
+  // stop for a person to look.
+  if ((out.extracted ?? 0) === 0 && Array.isArray(out.failures) && out.failures.length) {
+    if (++stalled >= 4) {
+      console.log(`STALLED on the same batch — first failure: ${out.failures[0].filename}: ${out.failures[0].error}`);
+      break;
+    }
+  } else {
+    stalled = 0;
+  }
+  if (batch % 20 === 0 || out.remaining === 0) {
     console.log(`read so far: batch ${batch}, remaining ${out.remaining}`);
   }
   if (out.remaining === 0) { console.log("ALL CERTIFICATES READ"); break; }
