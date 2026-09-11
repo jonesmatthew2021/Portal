@@ -10,6 +10,7 @@ import archive from "./routes/archive.js";
 import run from "./routes/run.js";
 import sync from "./routes/sync.js";
 import migrate from "./routes/migrate.js";
+import clearR2 from "./routes/clear-r2.js";
 
 /**
  * The portal's front door on Cloudflare.
@@ -45,6 +46,7 @@ export default {
       if (path === "/api/archive") return await archive(req);
       if (path === "/api/sync") return await sync(req);
       if (path === "/api/migrate-files") return await migrate(req);
+      if (path === "/api/clear-r2") return await clearR2(req);
 
       const runMatch = /^\/api\/run\/([a-z-]+)$/.exec(path);
       if (runMatch) return await run(req, runMatch[1]);

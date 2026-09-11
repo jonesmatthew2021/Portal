@@ -2,6 +2,7 @@
 import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
+import { getEnv } from "../env.js";
 import {
   CERT_ROOT,
   SINGLE_FILE_CATEGORIES,
@@ -451,19 +452,33 @@ export default async (req: Request) => {
     // removed and can be put back.
     const wantRemoved = new URL(req.url).searchParams.get("removed") === "1";
 
-    const rows = await db
-      .select()
-      .from(documents)
-      .where(wantRemoved ? isNotNull(documents.removedAt) : isNull(documents.removedAt))
-      .orderBy(desc(wantRemoved ? documents.removedAt : documents.createdAt));
+    // Raw D1 rather than the ORM here on purpose: this is the portal's
+    // biggest read — every file row at once — and the ORM's per-row mapping
+    // was enough to put the request over the free plan's CPU allowance.
+    // Plain rows with aliased column names cost almost nothing.
+    const listed = await getEnv().DB.prepare(
+      `SELECT id, category, bucket, blob_key AS blobKey, filename,
+              content_type AS contentType, size_bytes AS sizeBytes, title,
+              uploaded_by AS uploadedBy, tag, source, party, rank, swing,
+              filed_on AS filedOn, session_id AS sessionId, person, folder,
+              qual_code AS qualCode, expires_on AS expiresOn, checksum,
+              removed_at AS removedAt, removed_by AS removedBy
+       FROM documents WHERE removed_at IS ${wantRemoved ? "NOT" : ""} NULL
+       ORDER BY ${wantRemoved ? "removed_at" : "created_at"} DESC`,
+    ).all<Row & { removedAt: number | null }>();
 
     return Response.json(
-      rows.map((row) => ({
+      (listed.results || []).map((row) => ({
         category: row.category,
         bucket: row.bucket,
-        record: toRecord(row),
+        record: toRecord(row as unknown as Row),
         ...(wantRemoved
-          ? { removedAt: row.removedAt, removedBy: row.removedBy, person: row.person, title: row.title }
+          ? {
+              removedAt: row.removedAt ? new Date(Number(row.removedAt) * 1000).toISOString() : null,
+              removedBy: row.removedBy,
+              person: row.person,
+              title: row.title,
+            }
           : null),
       })),
       // Safari on iOS caches a repeated GET and would keep handing a phone the
