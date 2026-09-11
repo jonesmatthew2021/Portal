@@ -1,4 +1,5 @@
 import { setEnv, type PortalEnv } from "./env.js";
+import { gate } from "./gate.js";
 import { fileStore } from "./files/store.js";
 import state from "./routes/state.js";
 import files from "./routes/files.js";
@@ -25,6 +26,11 @@ export default {
     const path = url.pathname;
 
     try {
+      // The crew password stands in front of everything, the way Netlify's
+      // password protection used to. No password configured means local dev.
+      const barred = await gate(req, path);
+      if (barred) return barred;
+
       if (path === "/api/state") return await state(req);
       if (path === "/api/files") return await files(req);
 
@@ -41,15 +47,12 @@ export default {
       const runMatch = /^\/api\/run\/([a-z-]+)$/.exec(path);
       if (runMatch) return await run(req, runMatch[1]);
 
-      // Local seeding only: bytes written straight into the file store by the
-      // seed script, through the same code path uploads use. Never answered
-      // anywhere but localhost, so a deployed worker doesn't carry it.
+      // Seeding and migration: bytes written straight into the file store,
+      // through the same code path uploads use. Behind the crew-password
+      // gate like everything else — which is no more than the ordinary
+      // upload endpoint already allows anyone inside the door.
       const devBlob = /^\/api\/dev\/blob\/(.+)$/.exec(path);
-      if (
-        devBlob &&
-        req.method === "PUT" &&
-        (url.hostname === "localhost" || url.hostname === "127.0.0.1")
-      ) {
+      if (devBlob && req.method === "PUT") {
         const key = decodeURIComponent(devBlob[1]);
         await fileStore().set(key, await req.arrayBuffer());
         return Response.json({ stored: key });

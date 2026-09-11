@@ -27,7 +27,7 @@ binding = "ASSETS"
 [[d1_databases]]
 binding = "DB"
 database_name = "portal"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "9d763383-b034-4864-801d-8ed375727e2c"
 
 [[r2_buckets]]
 binding = "FILES"

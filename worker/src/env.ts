@@ -14,6 +14,7 @@ export type PortalEnv = {
   ASSETS: Fetcher;
   ANTHROPIC_API_KEY?: string;
   ANTHROPIC_BASE_URL?: string;
+  PORTAL_PASSWORD?: string;
   FILE_STORE?: string;
   MS_TENANT_ID?: string;
   MS_CLIENT_ID?: string;
