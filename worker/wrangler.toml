@@ -41,8 +41,11 @@ ANTHROPIC_BASE_URL = "https://api.anthropic.com"
 FILE_STORE = "r2"
 # SharePoint, for when FILE_STORE flips: the tenant, the app registration's
 # client id, the site, and the document library the portal files into.
-MS_TENANT_ID = ""
-MS_CLIENT_ID = ""
+# From Atcom's app registration, ticket 259549 (11 Sep 2026). The client
+# secret is a worker secret, never written here; it expires ~11 Sep 2027 —
+# ask Atcom for a new one before then.
+MS_TENANT_ID = "7faf9a35-e2e2-46aa-a65f-041ea912894e"
+MS_CLIENT_ID = "1a98fdfd-a0bf-4cf6-ae83-448d7ace84e8"
 SHAREPOINT_HOSTNAME = "unitedmarineau.sharepoint.com"
 # The site the files live in: the United Operations Team's own SharePoint
 # site — a Teams team is a SharePoint site underneath, and its Shared files
@@ -61,14 +64,16 @@ SHAREPOINT_LIBRARY = "Documents"
 # under the portal's own SHAREPOINT_ROOT folder. Moving or renaming a file
 # the portal has on its books still breaks its link — run /api/sync after a
 # tidy-up rather than doing nothing.
-SHAREPOINT_ROOT = "Crew Portal"
+# A Teams channel's files sit inside a folder named after the channel in the
+# site's Documents library, so every path starts with the channel folder.
+SHAREPOINT_ROOT = "United Operations Team/Crew Portal"
 SHAREPOINT_MAP = """
 {
-  "certification/spreadsheet/": "OPMS Documents/Crew Certificates Spreadsheet/",
-  "certification/": "Crew Certificate Verifications/",
-  "matrices/": "Matrix/",
-  "opms/": "OPMS Documents/",
-  "roster/": "Crew Roster/",
-  "notes/": "Handover Notes/"
+  "certification/spreadsheet/": "United Operations Team/OPMS Documents/Crew Certificates Spreadsheet/",
+  "certification/": "United Operations Team/Crew Certificate Verifications/",
+  "matrices/": "United Operations Team/Matrix/",
+  "opms/": "United Operations Team/OPMS Documents/",
+  "roster/": "United Operations Team/Crew Roster/",
+  "notes/": "United Operations Team/Handover Notes/"
 }
 """
