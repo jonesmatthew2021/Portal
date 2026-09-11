@@ -20,6 +20,8 @@ if (!Array.isArray(cols) || !cols.length) throw new Error("The matrix columns ar
 let batch = 0;
 let stumbles = 0;
 let stalled = 0;
+let throttled = 0;
+const sleep = (ms) => new Promise((s) => setTimeout(s, ms));
 while (true) {
   let out = null;
   try {
@@ -30,10 +32,16 @@ while (true) {
     });
     out = await r.json();
   } catch (e) {
-    console.log(`connection stumble (${e.cause?.code || e.message}) — waiting and carrying on`);
-    await new Promise((s) => setTimeout(s, 8000));
+    // A throttled worker stays throttled while it keeps being hit, so each
+    // consecutive miss backs further off — half a minute, then one, two,
+    // five — and one success resets the clock.
+    throttled = Math.min(throttled + 1, 4);
+    const wait = [30, 60, 120, 300, 300][throttled] * 1000;
+    console.log(`throttled — backing off ${wait / 1000}s`);
+    await sleep(wait);
     continue;
   }
+  throttled = 0;
   if (out.error) {
     if (++stumbles > 5) { console.log(`stopping after repeated errors: ${out.error}`); break; }
     console.log(`server said: ${out.error} — waiting and carrying on`);
@@ -58,4 +66,7 @@ while (true) {
     console.log(`read so far: batch ${batch}, remaining ${out.remaining}`);
   }
   if (out.remaining === 0) { console.log("ALL CERTIFICATES READ"); break; }
+  // A breather between batches keeps sustained load under the free plan's
+  // throttle trigger — slower per hour, faster to actually finish.
+  await sleep(15000);
 }
