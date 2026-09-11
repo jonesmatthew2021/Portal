@@ -36,9 +36,10 @@ bucket_name = "portal-files"
 [vars]
 # Where the model lives. The key itself is a secret (above).
 ANTHROPIC_BASE_URL = "https://api.anthropic.com"
-# Which file store holds the bytes: "r2" until the SharePoint app registration
-# arrives from IT, then "sharepoint" — nothing else changes.
-FILE_STORE = "r2"
+# Which file store holds the bytes. Flipped to SharePoint on 11 Sep 2026,
+# the day Atcom's app registration landed; "r2" remains the fallback and the
+# local-dev driver.
+FILE_STORE = "sharepoint"
 # SharePoint, for when FILE_STORE flips: the tenant, the app registration's
 # client id, the site, and the document library the portal files into.
 # From Atcom's app registration, ticket 259549 (11 Sep 2026). The client

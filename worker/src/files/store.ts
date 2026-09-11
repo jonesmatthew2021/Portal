@@ -167,12 +167,17 @@ const fromReal = (path: string) => {
   return root && path.startsWith(root) ? path.slice(root.length) : path;
 };
 
-/** Graph's simple upload needs the parent folders to exist; make them, one level at a time. */
+/** Graph's simple upload needs the parent folders to exist; make them, one
+ * level at a time. Folders already seen this isolate aren't asked about
+ * again — a bulk copy files hundreds of certificates into the same handful
+ * of folders, and one existence check per folder is plenty. */
+const ensuredFolders = new Set<string>();
 async function ensureFolders(drive: string, key: string) {
   const parts = key.split("/").slice(0, -1);
   let path = "";
   for (const part of parts) {
     const next = path ? `${path}/${part}` : part;
+    if (ensuredFolders.has(`${drive}:${next}`)) { path = next; continue; }
     const there = await graph(`/drives/${drive}/root:/${encodePath(next)}`);
     if (there.status === 404) {
       const parent = path ? `/drives/${drive}/root:/${encodePath(path)}:/children` : `/drives/${drive}/root/children`;
@@ -182,6 +187,7 @@ async function ensureFolders(drive: string, key: string) {
         body: JSON.stringify({ name: part, folder: {}, "@microsoft.graph.conflictBehavior": "fail" }),
       });
     }
+    ensuredFolders.add(`${drive}:${next}`);
     path = next;
   }
 }
