@@ -482,12 +482,25 @@ export async function askJson(opts: {
   }
 }
 
-export async function liveCertificates() {
-  return db
-    .select()
-    .from(documents)
-    .where(and(eq(documents.category, "certificate"), isNull(documents.removedAt)))
-    .orderBy(desc(documents.createdAt));
+export async function liveCertificates(): Promise<Row[]> {
+  // Raw D1 on purpose: mapping 1,400 rows through the ORM costs enough CPU
+  // to brush the free plan's per-request budget, and this listing runs at
+  // the top of every certificate-reading batch. Plain aliased rows cost
+  // almost nothing (same treatment as the /api/files listing).
+  const res = await getEnv()
+    .DB.prepare(
+      `SELECT id, category, bucket, blob_key AS blobKey, filename,
+              content_type AS contentType, size_bytes AS sizeBytes, title,
+              uploaded_by AS uploadedBy, tag, source, party, rank, swing,
+              filed_on AS filedOn, session_id AS sessionId, person, folder,
+              qual_code AS qualCode, expires_on AS expiresOn, checksum,
+              created_at AS createdAt, removed_at AS removedAt,
+              removed_by AS removedBy
+       FROM documents WHERE category = 'certificate' AND removed_at IS NULL
+       ORDER BY created_at DESC`,
+    )
+    .all();
+  return (res.results || []) as unknown as Row[];
 }
 
 export const blankish = (v: string | null | undefined) => !v || v.trim() === "" || v.trim() === "?";
