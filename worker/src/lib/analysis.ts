@@ -196,13 +196,11 @@ export function mediaFor(row: Row) {
 }
 
 export function base64(bytes: ArrayBuffer) {
-  const view = new Uint8Array(bytes);
-  let out = "";
-  // In chunks: one spread of a four megabyte array is enough to blow the stack.
-  for (let i = 0; i < view.length; i += 0x8000) {
-    out += String.fromCharCode(...view.subarray(i, i + 0x8000));
-  }
-  return btoa(out);
+  // Native all the way: a latin1 decode maps each byte to one character in
+  // the runtime's fast path, and btoa is native too. The old chunked
+  // String.fromCharCode loop was real JavaScript CPU — enough to put a 4 MB
+  // scan over the worker's per-request budget and jam the read loop on it.
+  return btoa(new TextDecoder("latin1").decode(bytes));
 }
 
 /** Pull the object out of whatever the model wrapped it in. */
