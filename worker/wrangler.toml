@@ -20,6 +20,13 @@ main = "src/index.ts"
 compatibility_date = "2026-08-01"
 compatibility_flags = ["nodejs_compat"]
 
+# The portal's own name, bought 13 Sep 2026 and held in the same Cloudflare
+# account. The long workers.dev address keeps working alongside it.
+routes = [
+  { pattern = "coolibah-portal.com", custom_domain = true },
+  { pattern = "www.coolibah-portal.com", custom_domain = true },
+]
+
 [assets]
 directory = "./assets"
 binding = "ASSETS"
