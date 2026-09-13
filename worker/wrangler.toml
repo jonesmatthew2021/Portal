@@ -30,6 +30,15 @@ routes = [
 [assets]
 directory = "./assets"
 binding = "ASSETS"
+# The worker always answers first, so the sign-in gate stands in front of the
+# page itself — without this, the asset layer can serve the portal straight
+# past the gate (and does, in local dev).
+run_worker_first = true
+
+# Sign-in codes go out through Cloudflare's own email sending, from the
+# portal's domain. Needs the domain onboarded once under Email Service.
+[[send_email]]
+name = "EMAIL"
 
 [[d1_databases]]
 binding = "DB"
@@ -41,6 +50,10 @@ binding = "FILES"
 bucket_name = "portal-files"
 
 [vars]
+# The first IT Help account: with the users table empty, this address may
+# sign in and becomes the portal's first user. Meaningless once anyone
+# exists — every later grant is made on the Access grants page.
+BOOTSTRAP_IT_EMAIL = "matthew.jones@unitedmarine.au"
 # Where the model lives. The key itself is a secret (above).
 ANTHROPIC_BASE_URL = "https://api.anthropic.com"
 # Which file store holds the bytes. Flipped to SharePoint on 11 Sep 2026,

@@ -12,6 +12,16 @@ export type PortalEnv = {
   DB: D1Database;
   FILES: R2Bucket;
   ASSETS: Fetcher;
+  EMAIL?: {
+    send(message: {
+      to: string;
+      from: string;
+      subject: string;
+      text?: string;
+      html?: string;
+    }): Promise<{ messageId: string }>;
+  };
+  BOOTSTRAP_IT_EMAIL?: string;
   ANTHROPIC_API_KEY?: string;
   ANTHROPIC_BASE_URL?: string;
   PORTAL_PASSWORD?: string;

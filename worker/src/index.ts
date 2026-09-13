@@ -1,6 +1,8 @@
 import { setEnv, type PortalEnv } from "./env.js";
-import { gate } from "./gate.js";
+import { gate } from "./auth.js";
+import { allowed, crewStateBody, denied } from "./authz.js";
 import { fileStore } from "./files/store.js";
+import users from "./routes/users.js";
 import state from "./routes/state.js";
 import files from "./routes/files.js";
 import file from "./routes/file.js";
@@ -28,12 +30,24 @@ export default {
     const path = url.pathname;
 
     try {
-      // The crew password stands in front of everything, the way Netlify's
-      // password protection used to. No password configured means local dev.
-      const barred = await gate(req, path);
+      // Real sign-in stands in front of everything: who this is, then what
+      // their level allows, decided here for every request.
+      const { barred, user } = await gate(req, path);
       if (barred) return barred;
+      if (user && path.startsWith("/api/") && !allowed(user, req.method, path)) {
+        return denied();
+      }
 
-      if (path === "/api/state") return await state(req);
+      if (path === "/api/users") return await users(req, user!);
+      const grantMatch = /^\/api\/users\/([^/]+)$/.exec(path);
+      if (grantMatch) return await users(req, user!, decodeURIComponent(grantMatch[1]));
+
+      if (path === "/api/state") {
+        // A crew save is rebuilt server-side to carry only their comments —
+        // read-only means read-only whatever the page happened to send.
+        const save = user && user.role === "crew" && req.method === "PUT" ? await crewStateBody(req) : req;
+        return await state(save);
+      }
       if (path === "/api/files") return await files(req);
 
       const fileMatch = /^\/api\/files\/([^/]+)$/.exec(path);

@@ -40,6 +40,39 @@ CREATE TABLE IF NOT EXISTS documents (
 CREATE INDEX IF NOT EXISTS documents_category_idx ON documents (category, bucket);
 CREATE INDEX IF NOT EXISTS documents_folder_idx ON documents (folder, checksum);
 
+-- Real per-person access. A user signs in with their email and a one-time
+-- code sent to it; a session cookie keeps them in. Three roles, enforced by
+-- the server on every request: 'it' (everything, including the maintenance
+-- machinery), 'management' (everything but the machinery), 'crew' (read and
+-- comment only).
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL,
+  disabled INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  created_by TEXT,
+  last_login INTEGER
+);
+
+-- One live code per email at a time; hashed, short-lived, few attempts.
+CREATE TABLE IF NOT EXISTS login_codes (
+  email TEXT PRIMARY KEY,
+  code_hash TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  sent_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  revoked INTEGER NOT NULL DEFAULT 0
+);
+
 -- The JSON records the Netlify build kept in named blob stores. Strongly
 -- consistent on purpose: poll loops read these back the moment after they are
 -- written.

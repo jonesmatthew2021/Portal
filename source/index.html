@@ -216,10 +216,18 @@ const IT_SUPPORT_ACCOUNT_NAME = "IT SUPPORT";
 const STANDALONE_ACCOUNTS = [ADMIN_ACCOUNT_NAME, IT_SUPPORT_ACCOUNT_NAME];
 const MANAGEMENT_TEAM = ADMINS.filter((a) => !STANDALONE_ACCOUNTS.includes(a));
 
-const isAdmin = (u) => ADMINS.includes(u);
+/* Who is signed in, on the server's word. /api/me fills this at boot, and
+   the two checks below answer from it — the name lists above stay for
+   labels, but the honour system they were is retired: the server enforces
+   every level on every request regardless of what a page claims. */
+let SESSION_USER = { name: "", role: "crew", email: "" };
+const isAdmin = (u) => SESSION_USER.role === "management" || SESSION_USER.role === "it";
 // The portal-plumbing half of the Admin tab — tab removal, the file store, the
 // save status and the redeploy notes — is kept to the IT SUPPORT account.
-const isITSupport = (u) => u === IT_SUPPORT_ACCOUNT_NAME;
+
+// The portal-plumbing half of the Admin tab — tab removal, the file store, the
+// save status and the redeploy notes — is kept to the IT SUPPORT account.
+const isITSupport = (u) => SESSION_USER.role === "it";
 const canPostCorrespondence = isAdmin;
 
 // Swing rotation. The roster runs four weeks, Wednesday to Wednesday: ANCHOR is
@@ -4899,6 +4907,10 @@ function SuggestionBoard({ data, setData, log, currentUser, title, logLabel, blu
         </div>
       )}
 
+      {/* Crew access is read-and-comment: putting suggestions forward (and
+          voting below) belongs to Management and IT, and the server refuses
+          a crew save of anything but comments regardless. */}
+      {SESSION_USER.role !== "crew" && (
       <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderRadius: 2, padding: 16, marginBottom: 20 }}>
         <div style={{ marginBottom: 11 }}><Eyebrow color={T.accent}>Put something forward</Eyebrow></div>
         <div style={{ display: "grid", gap: 10 }}>
@@ -4921,6 +4933,7 @@ function SuggestionBoard({ data, setData, log, currentUser, title, logLabel, blu
           </div>
         </div>
       </div>
+      )}
 
       {admin && (
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 22,
@@ -4938,7 +4951,7 @@ function SuggestionBoard({ data, setData, log, currentUser, title, logLabel, blu
             borderRadius: 2, padding: "13px 15px", marginBottom: 10 }}>
             <div style={{ display: "flex", gap: 18 }}>
               <button className="um-btn" onClick={() => {
-                if (hasVoted) return;
+                if (hasVoted || SESSION_USER.role === "crew") return;
                 setVoted({ ...voted, [s.id]: true });
                 setData(data.map((x) => (x.id === s.id ? { ...x, votes: x.votes + 1 } : x)));
               }}
@@ -15258,6 +15271,132 @@ function CrewListFormPage({ people }) {
   );
 }
 
+/* Access grants — who may enter the portal and at what level.
+
+   Three levels, enforced by the server on every request: IT Help runs
+   everything including the maintenance machinery, Management runs everything
+   but that machinery, and Crew reads and comments. Granting access here is
+   all a new person needs — they sign in with their email and the code it
+   receives; there is no password to hand out. Disabling a grant signs their
+   devices out on the spot. */
+const ACCESS_LEVELS = [
+  { id: "crew", label: "Crew", blurb: "Reads everything, comments on posts. No Admin tab." },
+  { id: "management", label: "Management", blurb: "Everything — uploads, checkers, rosters — except the portal's maintenance machinery." },
+  { id: "it", label: "IT Help", blurb: "Everything, the machinery included. Only IT Help can grant IT Help." },
+];
+
+function AccessGrantsPage() {
+  const [grants, setGrants] = useState(null);
+  const [err, setErr] = useState("");
+  const [busyId, setBusyId] = useState(null);
+  const [draft, setDraft] = useState({ name: "", email: "", role: "crew" });
+  const myRole = SESSION_USER.role;
+
+  const load = async () => {
+    try {
+      const r = await fetch("/api/users");
+      if (!r.ok) throw new Error((await r.json()).error || `The list couldn't be read (${r.status}).`);
+      setGrants(await r.json());
+      setErr("");
+    } catch (e) { setErr(String(e.message || e)); }
+  };
+  React.useEffect(() => { load(); }, []);
+
+  const grant = async () => {
+    setErr("");
+    try {
+      const r = await fetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft) });
+      const out = await r.json();
+      if (!r.ok) throw new Error(out.error || `The grant was refused (${r.status}).`);
+      setDraft({ name: "", email: "", role: "crew" });
+      await load();
+    } catch (e) { setErr(String(e.message || e)); }
+  };
+
+  const change = async (id, patch) => {
+    setBusyId(id); setErr("");
+    try {
+      const r = await fetch(`/api/users/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch) });
+      const out = await r.json();
+      if (!r.ok) throw new Error(out.error || `The change was refused (${r.status}).`);
+      await load();
+    } catch (e) { setErr(String(e.message || e)); }
+    setBusyId(null);
+  };
+
+  const roleChip = (role) => {
+    const on = { it: { fg: T.violet, bg: T.violetBg }, management: { fg: T.accent, bg: T.accentSoft }, crew: { fg: T.muted, bg: T.raised } }[role] || {};
+    const label = (ACCESS_LEVELS.find((l) => l.id === role) || { label: role }).label;
+    return <Chip fg={on.fg} bg={on.bg}>{label}</Chip>;
+  };
+
+  return (
+    <div style={{ maxWidth: 820 }}>
+      <div style={{ marginBottom: 10 }}><Eyebrow color={T.accent}>Who can enter, and at what level</Eyebrow></div>
+      <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.7, marginBottom: 16 }}>
+        A grant is all somebody needs: they sign in with this email address and the six-digit code it
+        receives — no password to hand out, nothing shared. Disabling a grant signs their devices out
+        on the spot. The levels: {ACCESS_LEVELS.map((l) => `${l.label} — ${l.blurb}`).join(" ")}
+      </div>
+
+      {/* Granting */}
+      <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderLeft: `4px solid ${T.accent}`,
+        borderRadius: 2, padding: "13px 15px", marginBottom: 16, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <input className="um-in" style={{ flex: "1 1 150px" }} placeholder="Full name" value={draft.name}
+          onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+        <input className="um-in" style={{ flex: "1 1 200px" }} placeholder="Email address" value={draft.email}
+          onChange={(e) => setDraft({ ...draft, email: e.target.value })} />
+        <select className="um-in" style={{ flex: "0 1 150px" }} value={draft.role}
+          onChange={(e) => setDraft({ ...draft, role: e.target.value })}>
+          {ACCESS_LEVELS.filter((l) => l.id !== "it" || myRole === "it").map((l) => (
+            <option key={l.id} value={l.id}>{l.label}</option>
+          ))}
+        </select>
+        <Button onClick={grant} disabled={!draft.name.trim() || !draft.email.trim()}>Grant access</Button>
+      </div>
+
+      {err && <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.bRed, marginBottom: 12 }}>{err}</div>}
+
+      {/* The grants */}
+      {!grants ? <Empty>Loading the grants...</Empty> : grants.length === 0 ? (
+        <Empty>Nobody has a grant yet — the first sign-in seeds the first IT Help account.</Empty>
+      ) : grants.map((g) => {
+        const mine = g.email === SESSION_USER.email || g.name === SESSION_USER.name;
+        const untouchable = mine || (g.role === "it" && myRole !== "it");
+        return (
+          <div key={g.id} style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap",
+            padding: "9px 12px", borderBottom: `1px solid ${T.rule}`, opacity: g.disabled ? 0.55 : 1 }}>
+            <span style={{ flex: "1 1 200px", minWidth: 0 }}>
+              <span style={{ fontFamily: T.body, fontSize: 14, fontWeight: 600, color: T.text }}>{g.name}</span>
+              <span style={{ fontFamily: T.mono, fontSize: 11, color: T.muted }}> · {g.email}</span>
+            </span>
+            {roleChip(g.role)}
+            {g.disabled && <Chip fg={T.bRed} bg={T.bRedBg}>disabled</Chip>}
+            {mine && <Chip fg={T.teal} bg={T.raised}>you</Chip>}
+            {!untouchable && (
+              <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <select className="um-in" style={{ fontSize: 11.5, padding: "3px 6px" }} value={g.role}
+                  disabled={busyId === g.id}
+                  onChange={(e) => change(g.id, { role: e.target.value })}>
+                  {ACCESS_LEVELS.filter((l) => l.id !== "it" || myRole === "it").map((l) => (
+                    <option key={l.id} value={l.id}>{l.label}</option>
+                  ))}
+                </select>
+                <Button variant="quiet" disabled={busyId === g.id}
+                  onClick={() => change(g.id, { disabled: !g.disabled })}>
+                  {g.disabled ? "Re-enable" : "Disable"}
+                </Button>
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /* The Admin tab's own pages. Kept as a list so the strip that switches between
    them and the page that is rendered can't disagree about what exists. */
 const ADMIN_PAGES = [
@@ -15266,6 +15405,7 @@ const ADMIN_PAGES = [
   { id: "checker", label: "Certification Checker" },
   { id: "elearning", label: "E-Learning Status" },
   { id: "swing-compliance", label: "Swing Compliance" },
+  { id: "access", label: "Access Grants" },
   { id: "opms", label: "OPMS Checker" },
   { id: "portways-docs", label: "Portways Documentation" },
   { id: "ai-checker", label: "AI Checker" },
@@ -15355,6 +15495,7 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
         <SwingCompliancePage currentUser={currentUser} people={people} setPeople={setPeople}
           overrides={overrides} swingBoard={swingBoard} setSwingBoard={setSwingBoard} log={log} />
       )}
+      {page === "access" && <AccessGrantsPage />}
       {page === "opms" && <OPMSChecker />}
       {/* Portways' Crew List & Shift Allocation form, kept where the OPMS
           work is done. The page once carried a document library under it;
@@ -16565,28 +16706,72 @@ function CoolibahPortal({ role, onSignOut }) {
 }
 
 function App() {
-  // The signed-in name survives a refresh of the same tab — it is kept in the
-  // tab's own sessionStorage, so closing the tab still signs out and another
-  // tab is its own sign-in. This is also what lets the local preview reload
-  // itself after an edit without dropping whoever is looking at it back to
-  // the sign-in screen.
-  const [role, setRole] = useState(() => {
+  // Who this is comes from the server: the page only ever loads behind a
+  // real sign-in (email plus a code sent to it), and /api/me says the name
+  // and the level. The old name-picker (SignIn, kept above unused) and the
+  // per-tab remembering are superseded — the session cookie is the memory,
+  // and it holds for ninety days per device. On the local preview, where no
+  // server sign-in exists, /api/me answers 404/failed and the page falls
+  // back to the picker so the preview keeps working.
+  const [me, setMe] = useState(null);
+  const [noServer, setNoServer] = useState(false);
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/me");
+        if (r.status === 401) { window.location.href = "/login"; return; }
+        if (!r.ok) { setNoServer(true); return; }
+        const who = await r.json();
+        SESSION_USER = { name: who.name, role: who.role, email: who.email || "" };
+        setMe(who);
+      } catch (e) {
+        setNoServer(true);
+      }
+    })();
+  }, []);
+
+  // Preview fallback: the honour-system picker, exactly as it always was.
+  const [picked, setPicked] = useState(() => {
     try { return sessionStorage.getItem("um-signed-in") || null; } catch (e) { return null; }
   });
-  const signIn = (r) => { try { sessionStorage.setItem("um-signed-in", r); } catch (e) {} setRole(r); };
-  const signOut = () => { try { sessionStorage.removeItem("um-signed-in"); } catch (e) {} setRole(null); };
-
-  if (!role) {
+  if (noServer) {
+    if (picked) {
+      // Restored from the tab's memory: keep the role map in step.
+      SESSION_USER = { name: picked, role: picked === IT_SUPPORT_ACCOUNT_NAME ? "it" : ADMINS.includes(picked) ? "management" : "crew", email: "" };
+    }
+    if (!picked) {
+      return (
+        <Boundary>
+          <SignIn onSignIn={(r) => {
+            try { sessionStorage.setItem("um-signed-in", r); } catch (e) {}
+            SESSION_USER = { name: r, role: r === IT_SUPPORT_ACCOUNT_NAME ? "it" : ADMINS.includes(r) ? "management" : "crew", email: "" };
+            setPicked(r);
+          }} />
+        </Boundary>
+      );
+    }
     return (
       <Boundary>
-        <SignIn onSignIn={signIn} />
+        <CoolibahPortal role={picked} onSignOut={() => {
+          try { sessionStorage.removeItem("um-signed-in"); } catch (e) {}
+          setPicked(null);
+        }} />
+      </Boundary>
+    );
+  }
+
+  if (!me) {
+    return (
+      <Boundary>
+        <div style={{ minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center",
+          fontFamily: "system-ui", color: "#5b6b7a", fontSize: 14 }}>Signing you in...</div>
       </Boundary>
     );
   }
 
   return (
     <Boundary>
-      <CoolibahPortal role={role} onSignOut={signOut} />
+      <CoolibahPortal role={me.name} onSignOut={() => { window.location.href = "/logout"; }} />
     </Boundary>
   );
 }
