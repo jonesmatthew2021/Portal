@@ -73,6 +73,21 @@ CREATE TABLE IF NOT EXISTS sessions (
   revoked INTEGER NOT NULL DEFAULT 0
 );
 
+-- Every knock on the door, wanted or not: code requests, unknown addresses
+-- probing the sign-in, wrong codes, lockouts, sign-ins, and refused actions.
+-- What the Access Grants page's traffic view reads to spot anyone trying
+-- their luck. Kept ninety days.
+CREATE TABLE IF NOT EXISTS login_events (
+  ts INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  email TEXT,
+  ip TEXT,
+  country TEXT,
+  ua TEXT,
+  detail TEXT
+);
+CREATE INDEX IF NOT EXISTS login_events_ts_idx ON login_events (ts);
+
 -- The JSON records the Netlify build kept in named blob stores. Strongly
 -- consistent on purpose: poll loops read these back the moment after they are
 -- written.

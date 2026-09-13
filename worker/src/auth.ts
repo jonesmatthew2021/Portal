@@ -41,6 +41,38 @@ const sha256 = async (s: string) => {
 const cleanEmail = (v: unknown) =>
   typeof v === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()) ? v.trim().toLowerCase() : null;
 
+/**
+ * Every knock on the door goes in the book — who asked for a code, addresses
+ * the portal has never heard of trying the sign-in, wrong codes, lockouts,
+ * sign-ins, refused actions — with the caller's address and country off the
+ * edge. The Access Grants page reads it to spot anyone trying their luck.
+ * Never allowed to break the door itself: a logging failure is swallowed.
+ */
+export async function logLoginEvent(req: Request, kind: string, email: string | null, detail?: string) {
+  try {
+    const cf = (req as Request & { cf?: { country?: string } }).cf;
+    const db = getEnv().DB;
+    await db
+      .prepare("INSERT INTO login_events (ts, kind, email, ip, country, ua, detail) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)")
+      .bind(
+        now(),
+        kind,
+        email,
+        req.headers.get("CF-Connecting-IP") || "",
+        (cf && cf.country) || "",
+        (req.headers.get("User-Agent") || "").slice(0, 160),
+        detail || null,
+      )
+      .run();
+    // Ninety days is plenty of hindsight; one-in-fifty writes sweeps the rest.
+    if (Math.random() < 0.02) {
+      await db.prepare("DELETE FROM login_events WHERE ts < ?1").bind(now() - 90 * 86400).run();
+    }
+  } catch (e) {
+    console.error("login event not recorded:", e);
+  }
+}
+
 function cookieOf(req: Request): string | null {
   const raw = req.headers.get("cookie") || "";
   for (const part of raw.split(/;\s*/)) {
@@ -158,7 +190,13 @@ async function handleRequestCode(req: Request): Promise<Response> {
 
   // Whatever the truth, the answer reads the same — an address is never
   // confirmed or denied to whoever is typing addresses at the door.
+  if (!user) {
+    await logLoginEvent(req, "unknown_email", email);
+  } else if (user.disabled) {
+    await logLoginEvent(req, "disabled_account", email);
+  }
   if (user && !user.disabled) {
+    await logLoginEvent(req, "code_requested", email);
     const recent = await db
       .prepare("SELECT sent_at FROM login_codes WHERE email = ?1")
       .bind(email)
@@ -203,9 +241,18 @@ async function handleVerify(req: Request): Promise<Response> {
     return html(CODE_FORM(email, msg), 401);
   };
 
-  if (!row || row.expires_at < now()) return fail("That code has lapsed — start again and a fresh one is sent.");
-  if (row.attempts >= CODE_MAX_ATTEMPTS) return fail("Too many tries. Start again for a fresh code.");
-  if (row.code_hash !== (await sha256(`${email}:${code}`))) return fail("That's not the code — check the email and try again.");
+  if (!row || row.expires_at < now()) {
+    await logLoginEvent(req, "code_expired", email);
+    return fail("That code has lapsed — start again and a fresh one is sent.");
+  }
+  if (row.attempts >= CODE_MAX_ATTEMPTS) {
+    await logLoginEvent(req, "code_lockout", email);
+    return fail("Too many tries. Start again for a fresh code.");
+  }
+  if (row.code_hash !== (await sha256(`${email}:${code}`))) {
+    await logLoginEvent(req, "code_wrong", email);
+    return fail("That's not the code — check the email and try again.");
+  }
 
   const user = await db
     .prepare("SELECT id, email, name, role FROM users WHERE email = ?1 AND disabled = 0")
@@ -223,6 +270,7 @@ async function handleVerify(req: Request): Promise<Response> {
     .bind(await sha256(token), user.id, now(), now() + SESSION_DAYS * 86400)
     .run();
   await db.prepare("UPDATE users SET last_login = ?2 WHERE id = ?1").bind(user.id, now()).run();
+  await logLoginEvent(req, "signed_in", email);
 
   return new Response(null, {
     status: 303,
@@ -236,7 +284,9 @@ async function handleVerify(req: Request): Promise<Response> {
 async function handleLogout(req: Request): Promise<Response> {
   const sid = cookieOf(req);
   if (sid) {
+    const who = await currentUser(req);
     await getEnv().DB.prepare("UPDATE sessions SET revoked = 1 WHERE id = ?1").bind(await sha256(sid)).run();
+    await logLoginEvent(req, "signed_out", who ? who.email : null);
   }
   return new Response(null, {
     status: 303,

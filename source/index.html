@@ -15286,11 +15286,56 @@ const ACCESS_LEVELS = [
 ];
 
 function AccessGrantsPage() {
+  const { swingLists } = usePortal();
   const [grants, setGrants] = useState(null);
   const [err, setErr] = useState("");
   const [busyId, setBusyId] = useState(null);
   const [draft, setDraft] = useState({ name: "", email: "", role: "crew" });
+  const [traffic, setTraffic] = useState(null);
+  const [trafficErr, setTrafficErr] = useState("");
   const myRole = SESSION_USER.role;
+
+  // The company address a muster name almost certainly has: first name, dot,
+  // surname, all lowercase — "Cornelius James KEOGH" becomes
+  // cornelius.keogh@unitedmarine.au. Editable before granting, for the
+  // exceptions.
+  const guessEmail = (name) => {
+    const parts = String(name || "").trim().toLowerCase().split(/\s+/).map((p) => p.replace(/[^a-z-]/g, ""));
+    if (parts.length < 2 || !parts[0] || !parts[parts.length - 1]) return "";
+    return `${parts[0]}.${parts[parts.length - 1]}@unitedmarine.au`;
+  };
+
+  // Everyone on the muster lists who doesn't hold a grant yet — the same
+  // names Swing Compliance runs on, ready to be granted in one click each.
+  const ungranted = useMemo(() => {
+    const seen = new Set(); const out = [];
+    const held = new Set((grants || []).flatMap((g) => [g.name.toLowerCase(), g.email.toLowerCase()]));
+    Object.keys(swingLists || {}).sort().forEach((k) => {
+      (((swingLists || {})[k] || {}).entries || []).forEach((e) => {
+        const name = String(e.name || "").trim();
+        if (!name || seen.has(name.toLowerCase())) return;
+        seen.add(name.toLowerCase());
+        if (held.has(name.toLowerCase()) || held.has(guessEmail(name))) return;
+        out.push({ name, rank: e.rank || "" });
+      });
+    });
+    return out;
+  }, [swingLists, grants]);
+
+  // Per-muster-row drafts: email prefilled from the name, level picked here.
+  const [rowDrafts, setRowDrafts] = useState({});
+  const rowOf = (name) => rowDrafts[name] || { email: guessEmail(name), role: "crew" };
+  const setRow = (name, patch) => setRowDrafts((d) => ({ ...d, [name]: { ...rowOf(name), ...patch } }));
+
+  const loadTraffic = async () => {
+    try {
+      const r = await fetch("/api/login-events");
+      if (!r.ok) throw new Error((await r.json()).error || `The traffic couldn't be read (${r.status}).`);
+      setTraffic(await r.json());
+      setTrafficErr("");
+    } catch (e) { setTrafficErr(String(e.message || e)); }
+  };
+  React.useEffect(() => { loadTraffic(); }, []);
 
   const load = async () => {
     try {
@@ -15302,16 +15347,25 @@ function AccessGrantsPage() {
   };
   React.useEffect(() => { load(); }, []);
 
+  const post = async (body) => {
+    const r = await fetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body) });
+    const out = await r.json();
+    if (!r.ok) throw new Error(out.error || `The grant was refused (${r.status}).`);
+    await load();
+  };
   const grant = async () => {
     setErr("");
     try {
-      const r = await fetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draft) });
-      const out = await r.json();
-      if (!r.ok) throw new Error(out.error || `The grant was refused (${r.status}).`);
+      await post(draft);
       setDraft({ name: "", email: "", role: "crew" });
-      await load();
     } catch (e) { setErr(String(e.message || e)); }
+  };
+  const grantRow = async (name) => {
+    setBusyId(name); setErr("");
+    try { await post({ name, email: rowOf(name).email, role: rowOf(name).role }); }
+    catch (e) { setErr(String(e.message || e)); }
+    setBusyId(null);
   };
 
   const change = async (id, patch) => {
@@ -15393,6 +15447,94 @@ function AccessGrantsPage() {
           </div>
         );
       })}
+
+      {/* The muster lists, ready to grant — names arrive by themselves, the
+          level is all that's picked. */}
+      {ungranted.length > 0 && (
+        <div style={{ marginTop: 26 }}>
+          <div style={{ marginBottom: 8 }}><Eyebrow color={T.teal}>On the muster lists, not yet granted</Eyebrow></div>
+          <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, lineHeight: 1.6, marginBottom: 10 }}>
+            Everyone below is on a swing list. The email is guessed as first.last@unitedmarine.au —
+            correct it if theirs differs, pick the level, and grant.
+          </div>
+          {ungranted.map((p) => (
+            <div key={p.name} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
+              padding: "7px 12px", borderBottom: `1px solid ${T.rule}` }}>
+              <span style={{ flex: "1 1 170px", minWidth: 0 }}>
+                <span style={{ fontFamily: T.body, fontSize: 13.5, fontWeight: 600, color: T.text }}>{p.name}</span>
+                {p.rank && <span style={{ fontFamily: T.mono, fontSize: 10.5, color: T.muted }}> · {p.rank}</span>}
+              </span>
+              <input className="um-in" style={{ flex: "1 1 230px", fontSize: 12 }} value={rowOf(p.name).email}
+                onChange={(e) => setRow(p.name, { email: e.target.value })} />
+              <select className="um-in" style={{ fontSize: 11.5, padding: "3px 6px" }} value={rowOf(p.name).role}
+                onChange={(e) => setRow(p.name, { role: e.target.value })}>
+                {ACCESS_LEVELS.filter((l) => l.id !== "it" || myRole === "it").map((l) => (
+                  <option key={l.id} value={l.id}>{l.label}</option>
+                ))}
+              </select>
+              <Button variant="quiet" disabled={busyId === p.name || !rowOf(p.name).email.trim()}
+                onClick={() => grantRow(p.name)}>Grant</Button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* The sign-in book — every knock on the door, wanted or not. */}
+      <div style={{ marginTop: 30 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+          <Eyebrow color={T.violet}>Sign-in traffic</Eyebrow>
+          <Button variant="quiet" onClick={loadTraffic}>Refresh</Button>
+        </div>
+        <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, lineHeight: 1.6, marginBottom: 10 }}>
+          Every attempt at the door for the last ninety days — sign-ins, code requests, wrong codes,
+          addresses the portal has never heard of, and refused actions. A run of unknown addresses or
+          wrong codes from one IP is somebody trying their luck.
+        </div>
+        {trafficErr && <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.bRed, marginBottom: 10 }}>{trafficErr}</div>}
+        {!traffic ? (!trafficErr && <Empty>Reading the sign-in book...</Empty>) : (
+          <>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+              {Object.keys(traffic.week || {}).length === 0 ? (
+                <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted }}>Nothing in the last seven days.</span>
+              ) : Object.entries(traffic.week).sort().map(([kind, n]) => {
+                const bad = ["unknown_email", "code_wrong", "code_lockout", "denied", "disabled_account"].includes(kind);
+                return <Chip key={kind} fg={bad ? T.bRed : T.teal} bg={bad ? T.bRedBg : T.raised}>{kind.replace(/_/g, " ")}: {n} this week</Chip>;
+              })}
+            </div>
+            {traffic.events.length === 0 ? <Empty>No traffic recorded yet.</Empty> : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ borderCollapse: "collapse", width: "100%", fontFamily: T.mono, fontSize: 11 }}>
+                  <thead><tr>
+                    {["When", "What", "Email", "IP", "Country"].map((h) => (
+                      <th key={h} style={{ textAlign: "left", padding: "5px 10px", borderBottom: `2px solid ${T.rule}`,
+                        fontFamily: T.body, fontSize: 11, color: T.muted, textTransform: "uppercase", letterSpacing: ".06em" }}>{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody>
+                    {traffic.events.map((ev, i) => {
+                      const bad = ["unknown_email", "code_wrong", "code_lockout", "denied", "disabled_account"].includes(ev.kind);
+                      return (
+                        <tr key={i} style={{ borderBottom: `1px solid ${T.rule}` }}>
+                          <td style={{ padding: "5px 10px", whiteSpace: "nowrap", color: T.muted }}>
+                            {new Date(ev.ts * 1000).toLocaleString("en-AU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                          </td>
+                          <td style={{ padding: "5px 10px" }}>
+                            <Chip fg={bad ? T.bRed : T.teal} bg={bad ? T.bRedBg : T.raised}>{ev.kind.replace(/_/g, " ")}</Chip>
+                            {ev.detail && <span style={{ color: T.muted }}> {ev.detail}</span>}
+                          </td>
+                          <td style={{ padding: "5px 10px", color: T.text }}>{ev.email || "—"}</td>
+                          <td style={{ padding: "5px 10px", color: T.muted }}>{ev.ip || "—"}</td>
+                          <td style={{ padding: "5px 10px", color: T.muted }}>{ev.country || "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -15405,10 +15547,10 @@ const ADMIN_PAGES = [
   { id: "checker", label: "Certification Checker" },
   { id: "elearning", label: "E-Learning Status" },
   { id: "swing-compliance", label: "Swing Compliance" },
-  { id: "access", label: "Access Grants" },
   { id: "opms", label: "OPMS Checker" },
   { id: "portways-docs", label: "Portways Documentation" },
   { id: "ai-checker", label: "AI Checker" },
+  { id: "access", label: "Access Grants" },
 ];
 
 function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingBoard, setSwingBoard, notes, corrCount, history, allTabs, hiddenTabs, onHideTab, onRestoreTab, onRestoreAllTabs, files, sync, log }) {

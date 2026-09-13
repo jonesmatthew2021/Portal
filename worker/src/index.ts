@@ -1,8 +1,9 @@
 import { setEnv, type PortalEnv } from "./env.js";
-import { gate } from "./auth.js";
+import { gate, logLoginEvent } from "./auth.js";
 import { allowed, crewStateBody, denied } from "./authz.js";
 import { fileStore } from "./files/store.js";
 import users from "./routes/users.js";
+import traffic from "./routes/traffic.js";
 import state from "./routes/state.js";
 import files from "./routes/files.js";
 import file from "./routes/file.js";
@@ -35,10 +36,14 @@ export default {
       const { barred, user } = await gate(req, path);
       if (barred) return barred;
       if (user && path.startsWith("/api/") && !allowed(user, req.method, path)) {
+        // A refused action goes in the sign-in book too — someone reaching
+        // past their level is exactly what the traffic view is for.
+        await logLoginEvent(req, "denied", user.email, `${req.method} ${path}`);
         return denied();
       }
 
       if (path === "/api/users") return await users(req, user!);
+      if (path === "/api/login-events") return await traffic(req, user!);
       const grantMatch = /^\/api\/users\/([^/]+)$/.exec(path);
       if (grantMatch) return await users(req, user!, decodeURIComponent(grantMatch[1]));
 
