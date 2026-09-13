@@ -15573,12 +15573,27 @@ function AccessGrantsPage() {
   // on a swing list, one row each, ready to be granted in one click.
   const ungranted = useMemo(() => {
     const seen = new Set(); const out = [];
-    const held = new Set((grants || []).flatMap((g) => [g.name.toLowerCase(), g.email.toLowerCase()]));
-    const add = (name, rank) => {
-      name = String(name || "").trim();
-      if (!name || seen.has(name.toLowerCase())) return;
-      seen.add(name.toLowerCase());
-      if (held.has(name.toLowerCase()) || held.has(guessEmail(name))) return;
+    // Matrix names read "SURNAME, First"; swing lists read "First Surname".
+    // Both become "First Surname" so one person is one row however spelled,
+    // and the guessed email runs the right way round.
+    const canonical = (raw) => {
+      let name = String(raw || "").trim();
+      const m = name.match(/^([^,]+),\s*(.+)$/);
+      if (m) name = `${m[2].trim()} ${m[1].trim()}`;
+      return name.split(/\s+/).map((w) => (/^[A-Z][A-Z'-]+$/.test(w) ? w[0] + w.slice(1).toLowerCase() : w)).join(" ");
+    };
+    const keyOf = (name) => {
+      const parts = name.toLowerCase().split(/\s+/);
+      return parts.length < 2 ? parts[0] : `${parts[0]}|${parts[parts.length - 1]}`;
+    };
+    const held = new Set((grants || []).flatMap((g) => [keyOf(canonical(g.name)), g.email.toLowerCase()]));
+    const add = (rawName, rank) => {
+      const name = canonical(rawName);
+      if (!name) return;
+      const key = keyOf(name);
+      if (seen.has(key)) return;
+      seen.add(key);
+      if (held.has(key) || held.has(guessEmail(name))) return;
       out.push({ name, rank: rank || "" });
     };
     (((quals || {}).rows) || []).forEach((r) => add(r[0], r[1]));
@@ -15588,6 +15603,18 @@ function AccessGrantsPage() {
     out.sort((a, b) => a.name.localeCompare(b.name));
     return out;
   }, [swingLists, quals, grants]);
+
+  // The same rank order the swing board reads under: bridge, engine room,
+  // galley — anyone whose rank matches nothing waits under Other.
+  const rankGroups = useMemo(() => {
+    const groups = RANK_GROUPS.map(([label]) => ({ label, people: [] }));
+    const other = { label: "Other", people: [] };
+    ungranted.forEach((p) => {
+      const at = RANK_GROUPS.findIndex(([, re]) => re.test(p.rank));
+      (at >= 0 ? groups[at] : other).people.push(p);
+    });
+    return [...groups, other].filter((g) => g.people.length > 0);
+  }, [ungranted]);
 
   // Per-muster-row drafts: email prefilled from the name, level picked here.
   const [rowDrafts, setRowDrafts] = useState({});
@@ -15739,23 +15766,29 @@ function AccessGrantsPage() {
             Everyone on the crew matrix or a swing list who can't sign in yet. The email is guessed as
             first.last@unitedmarine.au — correct it if theirs differs, pick the level, and grant.
           </div>
-          {ungranted.map((p) => (
-            <div key={p.name} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
-              padding: "7px 12px", borderBottom: `1px solid ${T.rule}` }}>
-              <span style={{ flex: "1 1 170px", minWidth: 0 }}>
-                <span style={{ fontFamily: T.body, fontSize: 13.5, fontWeight: 600, color: T.text }}>{p.name}</span>
-                {p.rank && <span style={{ fontFamily: T.mono, fontSize: 10.5, color: T.muted }}> · {p.rank}</span>}
-              </span>
-              <input className="um-in" style={{ flex: "1 1 230px", fontSize: 12 }} value={rowOf(p.name).email}
-                onChange={(e) => setRow(p.name, { email: e.target.value })} />
-              <select className="um-in" style={{ fontSize: 11.5, padding: "3px 6px" }} value={rowOf(p.name).role}
-                onChange={(e) => setRow(p.name, { role: e.target.value })}>
-                {ACCESS_LEVELS.filter((l) => l.id !== "it" || myRole === "it").map((l) => (
-                  <option key={l.id} value={l.id}>{l.label}</option>
-                ))}
-              </select>
-              <Button variant="quiet" disabled={busyId === p.name || !rowOf(p.name).email.trim()}
-                onClick={() => grantRow(p.name)}>Grant</Button>
+          {rankGroups.map((grp) => (
+            <div key={grp.label} style={{ marginBottom: 6 }}>
+              <div style={{ fontFamily: T.body, fontSize: 11, fontWeight: 700, color: T.accent,
+                textTransform: "uppercase", letterSpacing: ".08em", padding: "10px 12px 4px" }}>{grp.label}</div>
+              {grp.people.map((p) => (
+                <div key={p.name} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
+                  padding: "7px 12px", borderBottom: `1px solid ${T.rule}` }}>
+                  <span style={{ flex: "1 1 170px", minWidth: 0 }}>
+                    <span style={{ fontFamily: T.body, fontSize: 13.5, fontWeight: 600, color: T.text }}>{p.name}</span>
+                    {p.rank && <span style={{ fontFamily: T.mono, fontSize: 10.5, color: T.muted }}> · {p.rank}</span>}
+                  </span>
+                  <input className="um-in" style={{ flex: "1 1 230px", fontSize: 12 }} value={rowOf(p.name).email}
+                    onChange={(e) => setRow(p.name, { email: e.target.value })} />
+                  <select className="um-in" style={{ fontSize: 11.5, padding: "3px 6px" }} value={rowOf(p.name).role}
+                    onChange={(e) => setRow(p.name, { role: e.target.value })}>
+                    {ACCESS_LEVELS.filter((l) => l.id !== "it" || myRole === "it").map((l) => (
+                      <option key={l.id} value={l.id}>{l.label}</option>
+                    ))}
+                  </select>
+                  <Button variant="quiet" disabled={busyId === p.name || !rowOf(p.name).email.trim()}
+                    onClick={() => grantRow(p.name)}>Grant</Button>
+                </div>
+              ))}
             </div>
           ))}
         </div>
