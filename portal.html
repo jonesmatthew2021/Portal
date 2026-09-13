@@ -15855,6 +15855,95 @@ function AccessGrantsPage() {
 
 }
 
+/* The company's SharePoint library, browsed live — the United Operations
+   Team's real folders and files exactly as Teams holds them, one folder per
+   request through the worker's Graph connection. */
+function SharePointPage() {
+  const [path, setPath] = useState("");
+  const [listing, setListing] = useState(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = async (at) => {
+    setBusy(true);setErr("");
+    try {
+      const r = await fetch(`/api/sharepoint?path=${encodeURIComponent(at)}`);
+      const out = await r.json();
+      if (!r.ok) throw new Error(out.error || `The library couldn't be read (${r.status}).`);
+      setListing(out);
+    } catch (e) {setErr(String(e.message || e));}
+    setBusy(false);
+  };
+  React.useEffect(() => {load(path);}, [path]);
+
+  const fmtBytes = (n) => n == null ? "" :
+  n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`;
+  const fmtWhen = (s) => !s ? "" :
+  new Date(s).toLocaleDateString("en-AU", { day: "2-digit", month: "short", year: "numeric" });
+
+  const crumbs = path ? path.split("/") : [];
+  const entries = listing && listing.entries || [];
+
+  return (/*#__PURE__*/
+    React.createElement("div", { style: { maxWidth: 820 } }, /*#__PURE__*/
+    React.createElement("div", { style: { marginBottom: 10 } }, /*#__PURE__*/React.createElement(Eyebrow, { color: T.accent }, "The company library, live")), /*#__PURE__*/
+    React.createElement("div", { style: { fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.7, marginBottom: 14 } }, "The United Operations Team's SharePoint, exactly as Teams holds it \u2014 every folder, every file, read the moment this page asks. Open a file and it comes straight from SharePoint."
+
+
+    ), /*#__PURE__*/
+
+
+    React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", fontFamily: T.mono,
+        fontSize: 12, padding: "9px 12px", background: T.panel, border: `1px solid ${T.rule}`,
+        borderLeft: `4px solid ${T.accent}`, borderRadius: 2, marginBottom: 12 } }, /*#__PURE__*/
+    React.createElement("a", { style: { cursor: "pointer", color: T.accent, fontWeight: 700 }, onClick: () => setPath("") }, "Library"),
+    crumbs.map((c, i) => /*#__PURE__*/
+    React.createElement(React.Fragment, { key: i }, /*#__PURE__*/
+    React.createElement("span", { style: { color: T.muted } }, "/"), /*#__PURE__*/
+    React.createElement("a", { style: { cursor: "pointer", color: i === crumbs.length - 1 ? T.text : T.accent },
+      onClick: () => setPath(crumbs.slice(0, i + 1).join("/")) }, c)
+    )
+    ), /*#__PURE__*/
+    React.createElement("span", { style: { flex: 1 } }), /*#__PURE__*/
+    React.createElement(Button, { variant: "quiet", disabled: busy, onClick: () => load(path) }, "Refresh")
+    ),
+
+    err && /*#__PURE__*/React.createElement("div", { style: { fontFamily: T.body, fontSize: 12.5, color: T.bRed, marginBottom: 12 } }, err),
+    busy && !listing ? /*#__PURE__*/React.createElement(Empty, null, "Reading the library...") : null,
+
+    listing && !busy && entries.length === 0 && !err && /*#__PURE__*/React.createElement(Empty, null, "This folder is empty."),
+
+    entries.map((e) => /*#__PURE__*/
+    React.createElement("div", { key: e.path, style: { display: "flex", gap: 10, alignItems: "center", padding: "8px 12px",
+        borderBottom: `1px solid ${T.rule}`, opacity: busy ? 0.5 : 1 } },
+    e.folder ? /*#__PURE__*/
+    React.createElement(React.Fragment, null, /*#__PURE__*/
+    React.createElement("span", { style: { color: T.accent, fontFamily: T.mono, fontSize: 12 } }, "\u25B8"), /*#__PURE__*/
+    React.createElement("a", { style: { cursor: "pointer", flex: 1, fontFamily: T.body, fontSize: 13.5, fontWeight: 600,
+        color: T.text }, onClick: () => setPath(e.path) }, e.name), /*#__PURE__*/
+    React.createElement("span", { style: { fontFamily: T.mono, fontSize: 10.5, color: T.muted } },
+    e.count == null ? "" : `${e.count} item${e.count === 1 ? "" : "s"}`
+    )
+    ) : /*#__PURE__*/
+
+    React.createElement(React.Fragment, null, /*#__PURE__*/
+    React.createElement("span", { style: { width: 10 } }), /*#__PURE__*/
+    React.createElement("span", { style: { flex: 1, fontFamily: T.body, fontSize: 13, color: T.text, minWidth: 0,
+        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, e.name), /*#__PURE__*/
+    React.createElement("span", { style: { fontFamily: T.mono, fontSize: 10.5, color: T.muted } }, fmtBytes(e.size)), /*#__PURE__*/
+    React.createElement("span", { style: { fontFamily: T.mono, fontSize: 10.5, color: T.muted } }, fmtWhen(e.modified)),
+    e.downloadUrl && /*#__PURE__*/
+    React.createElement("a", { href: e.downloadUrl, target: "_blank", rel: "noreferrer",
+      style: { fontFamily: T.body, fontSize: 12, fontWeight: 600, color: T.accent } }, "Open")
+
+    )
+
+    )
+    )
+    ));
+
+}
+
 /* The Admin tab's own pages. Kept as a list so the strip that switches between
    them and the page that is rendered can't disagree about what exists. */
 const ADMIN_PAGES = [
@@ -15866,6 +15955,7 @@ const ADMIN_PAGES = [
 { id: "opms", label: "OPMS Checker" },
 { id: "portways-docs", label: "Portways Documentation" },
 { id: "ai-checker", label: "AI Checker" },
+{ id: "sharepoint", label: "SharePoint" },
 { id: "access", label: "Access Grants" }];
 
 
@@ -15953,6 +16043,7 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
     React.createElement(SwingCompliancePage, { currentUser: currentUser, people: people, setPeople: setPeople,
       overrides: overrides, swingBoard: swingBoard, setSwingBoard: setSwingBoard, log: log }),
 
+    page === "sharepoint" && /*#__PURE__*/React.createElement(SharePointPage, null),
     page === "access" && /*#__PURE__*/React.createElement(AccessGrantsPage, null),
     page === "opms" && /*#__PURE__*/React.createElement(OPMSChecker, null),
 

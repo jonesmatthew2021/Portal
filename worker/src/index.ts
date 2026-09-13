@@ -4,6 +4,7 @@ import { allowed, crewStateBody, denied } from "./authz.js";
 import { fileStore } from "./files/store.js";
 import users from "./routes/users.js";
 import traffic from "./routes/traffic.js";
+import sharepoint from "./routes/sharepoint.js";
 import state from "./routes/state.js";
 import files from "./routes/files.js";
 import file from "./routes/file.js";
@@ -44,6 +45,7 @@ export default {
 
       if (path === "/api/users") return await users(req, user!);
       if (path === "/api/login-events") return await traffic(req, user!);
+      if (path === "/api/sharepoint") return await sharepoint(req, user!);
       const grantMatch = /^\/api\/users\/([^/]+)$/.exec(path);
       if (grantMatch) return await users(req, user!, decodeURIComponent(grantMatch[1]));
 

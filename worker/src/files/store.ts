@@ -257,6 +257,64 @@ function sharepointStore(): FileStore {
   };
 }
 
+/* ----------------------------------------------------------- browsing -- */
+
+export type SharePointEntry = {
+  name: string;
+  path: string;
+  folder: boolean;
+  count?: number;
+  size?: number;
+  modified?: string;
+  downloadUrl?: string;
+};
+
+/**
+ * One folder of the site's document library, as it really is — real paths,
+ * not the portal's keys. What the SharePoint page in Admin walks through.
+ * Files carry Graph's short-lived download link so the browser can open
+ * them directly.
+ */
+export async function sharepointBrowse(path: string): Promise<SharePointEntry[]> {
+  const drive = await driveId();
+  const clean = path.replace(/^\/+|\/+$/g, "");
+  const out: SharePointEntry[] = [];
+  let url: string | null = clean
+    ? `/drives/${drive}/root:/${encodePath(clean)}:/children?$top=500`
+    : `/drives/${drive}/root/children?$top=500`;
+  while (url) {
+    const res: Response = await graph(url);
+    if (res.status === 404) throw new Error("That folder isn't in the library any more — go back up and refresh.");
+    if (!res.ok) throw new Error(`SharePoint listing failed (${res.status})`);
+    const page = (await res.json()) as {
+      value: {
+        name: string;
+        size?: number;
+        lastModifiedDateTime?: string;
+        folder?: { childCount?: number };
+        "@microsoft.graph.downloadUrl"?: string;
+      }[];
+      "@odata.nextLink"?: string;
+    };
+    for (const item of page.value) {
+      out.push({
+        name: item.name,
+        path: clean ? `${clean}/${item.name}` : item.name,
+        folder: !!item.folder,
+        count: item.folder?.childCount,
+        size: item.size,
+        modified: item.lastModifiedDateTime,
+        downloadUrl: item["@microsoft.graph.downloadUrl"],
+      });
+    }
+    url = page["@odata.nextLink"]
+      ? page["@odata.nextLink"].replace("https://graph.microsoft.com/v1.0", "")
+      : null;
+  }
+  out.sort((a, b) => (a.folder === b.folder ? a.name.localeCompare(b.name) : a.folder ? -1 : 1));
+  return out;
+}
+
 /* ---------------------------------------------------------- the picker -- */
 
 export function fileStore(): FileStore {
