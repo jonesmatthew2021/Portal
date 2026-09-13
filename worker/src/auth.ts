@@ -416,7 +416,7 @@ export async function gate(
     if (path === "/api/me") {
       return {
         barred: Response.json(
-          { name: user.name, email: user.email, role: user.role },
+          { name: user.name, email: user.email, role: user.role, fitToSail: getEnv().FIT_TO_SAIL_URL || null },
           { headers: { "Cache-Control": "no-store" } },
         ),
         user,

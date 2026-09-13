@@ -487,7 +487,7 @@ const MANAGEMENT_TEAM = ADMINS.filter((a) => !STANDALONE_ACCOUNTS.includes(a));
    the two checks below answer from it — the name lists above stay for
    labels, but the honour system they were is retired: the server enforces
    every level on every request regardless of what a page claims. */
-let SESSION_USER = { name: "", role: "crew", email: "" };
+let SESSION_USER = { name: "", role: "crew", email: "", fitToSail: "" };
 const isAdmin = (u) => SESSION_USER.role === "management" || SESSION_USER.role === "it";
 // The portal-plumbing half of the Admin tab — tab removal, the file store, the
 // save status and the redeploy notes — is kept to the IT SUPPORT account.
@@ -17247,6 +17247,16 @@ function CoolibahPortal({ role, onSignOut }) {
                 {sync.state === "ok" ? "Saved" : sync.state === "error" ? "Not saving" : "..."}
               </span>
               <NotifyToggle log={log} on={notifyOn} setOn={setNotifyOn} count={unreadTotal} />
+              {/* Chris's FIT TO SAIL, one click away — the address comes from the
+                  server with the sign-in, so the button only shows when it's set. */}
+              {SESSION_USER.fitToSail && (
+                <a className="um-btn" href={SESSION_USER.fitToSail} target="_blank" rel="noreferrer"
+                  style={{ background: T.accent, color: "#fff", border: `1px solid ${T.accent}`, fontSize: 11,
+                    fontWeight: 700, padding: "7px 11px", borderRadius: 2, textDecoration: "none",
+                    letterSpacing: "0.06em" }}>
+                  FIT TO SAIL
+                </a>
+              )}
               <Chip fg={admin ? T.accent : T.muted} bg={admin ? T.accentSoft : T.raised}>{currentUser}</Chip>
               <button className="um-btn" onClick={onSignOut}
                 style={{ background: "transparent", color: T.muted, border: `1px solid ${T.rule}`,
@@ -17311,7 +17321,7 @@ function App() {
         if (r.status === 401) { window.location.href = "/login"; return; }
         if (!r.ok) { setNoServer(true); return; }
         const who = await r.json();
-        SESSION_USER = { name: who.name, role: who.role, email: who.email || "" };
+        SESSION_USER = { name: who.name, role: who.role, email: who.email || "", fitToSail: who.fitToSail || "" };
         setMe(who);
       } catch (e) {
         setNoServer(true);

@@ -22,6 +22,7 @@ export type PortalEnv = {
     }): Promise<{ messageId: string }>;
   };
   BOOTSTRAP_IT_EMAIL?: string;
+  FIT_TO_SAIL_URL?: string;
   ANTHROPIC_API_KEY?: string;
   ANTHROPIC_BASE_URL?: string;
   PORTAL_PASSWORD?: string;
