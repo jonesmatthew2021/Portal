@@ -3,6 +3,7 @@ import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
 import { CERT_ROOT, SINGLE_FILE_CATEGORIES, fileStore, safeName } from "../db/documents.js";
 import { todayThere } from "../lib/analysis.js";
+import { getStore } from "../compat/blobs.js";
 
 /**
  * Taking the folders' own contents onto the portal's books.
@@ -125,28 +126,72 @@ async function survey() {
   return { newCertificates, singles, strays, missing };
 }
 
-export default async (req: Request) => {
+/** What the last applied sync did — shown on the SharePoint page. */
+export type SyncRecord = {
+  at: number;
+  by: string;
+  registered: number;
+  adopted: number;
+  strays: number;
+  missing: number;
+  leftAlone: number;
+  error: string | null;
+};
+
+const record = (r: SyncRecord) => getStore("sync").setJSON("last-run", r);
+
+export const lastSync = () => getStore("sync").get("last-run", { type: "json" }) as Promise<SyncRecord | null>;
+
+/**
+ * The survey applied, by whoever asked — the hourly schedule or the Sync now
+ * button — and the outcome written down either way, a failure included, so
+ * the SharePoint page can always say when the folders were last read.
+ */
+export async function runSync(by: string) {
+  const at = Date.now();
+  try {
+    const out = await apply(await survey());
+    await record({
+      at,
+      by,
+      registered: out.registered.length,
+      adopted: out.adopted.length,
+      strays: out.strays.length,
+      missing: out.missing.length,
+      leftAlone: out.leftAlone.length,
+      error: null,
+    });
+    return out;
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    await record({ at, by, registered: 0, adopted: 0, strays: 0, missing: 0, leftAlone: 0, error });
+    throw e;
+  }
+}
+
+export default async (req: Request, by = "Sync now") => {
   if (req.method !== "GET" && req.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
   }
 
-  let result;
   try {
-    result = await survey();
+    if (req.method === "GET") {
+      const result = await survey();
+      return Response.json(
+        { ...result, note: "Survey only — POST /api/sync to take these onto the portal's books." },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    return Response.json(await runSync(by));
   } catch (e) {
     return Response.json(
       { error: e instanceof Error ? e.message : String(e) },
       { status: 502 },
     );
   }
+};
 
-  if (req.method === "GET") {
-    return Response.json(
-      { ...result, note: "Survey only — POST /api/sync to take these onto the portal's books." },
-      { headers: { "Cache-Control": "no-store" } },
-    );
-  }
-
+async function apply(result: Awaited<ReturnType<typeof survey>>) {
   const today = todayThere();
   const registered: { id: string; key: string; person: string }[] = [];
   for (const c of result.newCertificates) {
@@ -184,7 +229,7 @@ export default async (req: Request) => {
     adopted.push({ category, key: f.key });
   }
 
-  return Response.json({
+  return {
     registered,
     adopted,
     strays: result.strays,
@@ -199,5 +244,5 @@ export default async (req: Request) => {
           ? "a current one is already on the portal — replace it through the portal if this newer file should take over"
           : "more than one candidate — upload the right one through the portal",
       })),
-  });
-};
+  };
+}

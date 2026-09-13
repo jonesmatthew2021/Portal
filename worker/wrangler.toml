@@ -40,6 +40,11 @@ run_worker_first = true
 [[send_email]]
 name = "EMAIL"
 
+# Every hour, at ten past: files people have dropped into the SharePoint
+# folders from Teams are taken onto the portal's books (src/routes/sync.ts).
+[triggers]
+crons = ["10 * * * *"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "portal"

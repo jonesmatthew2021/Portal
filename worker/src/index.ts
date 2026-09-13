@@ -12,7 +12,7 @@ import analyse from "./routes/analyse.js";
 import aiChecker from "./routes/ai-checker.js";
 import archive from "./routes/archive.js";
 import run from "./routes/run.js";
-import sync from "./routes/sync.js";
+import sync, { runSync } from "./routes/sync.js";
 import migrate from "./routes/migrate.js";
 import clearR2 from "./routes/clear-r2.js";
 
@@ -95,6 +95,19 @@ export default {
         { error: e instanceof Error ? e.message : String(e) },
         { status: 500 },
       );
+    }
+  },
+
+  // The hourly tick (wrangler.toml [triggers]): whatever people have dropped
+  // into the SharePoint folders from Teams since last time is taken onto the
+  // portal's books, nobody pressing anything. The outcome is written down for
+  // the SharePoint page either way.
+  async scheduled(_event: ScheduledEvent, env: PortalEnv) {
+    setEnv(env);
+    try {
+      await runSync("hourly schedule");
+    } catch (e) {
+      console.error("scheduled SharePoint sync failed:", e);
     }
   },
 };

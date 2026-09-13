@@ -15876,6 +15876,31 @@ function SharePointPage() {
   };
   React.useEffect(() => { load(path); }, [path]);
 
+  // Folders → portal, on demand: the same pass the hourly schedule runs.
+  const [syncing, setSyncing] = useState(false);
+  const [syncOut, setSyncOut] = useState(null);
+  const syncNow = async () => {
+    setSyncing(true); setSyncOut(null);
+    try {
+      const r = await fetch("/api/sync", { method: "POST" });
+      const out = await r.json();
+      if (!r.ok) throw new Error(out.error || `The sync failed (${r.status}).`);
+      setSyncOut(out);
+      await load(path);
+    } catch (e) { setSyncOut({ error: String(e.message || e) }); }
+    setSyncing(false);
+  };
+  const syncLine = () => {
+    const ls = listing && listing.lastSync;
+    if (!ls) return "Files dropped into these folders from Teams are taken onto the portal's books every hour — no sync has run yet.";
+    const when = new Date(ls.at).toLocaleString("en-AU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+    if (ls.error) return `Last sync ${when} (${ls.by}) failed: ${ls.error}`;
+    return `Folders last read ${when} (${ls.by}): ${ls.registered} new certificate${ls.registered === 1 ? "" : "s"} taken on` +
+      (ls.adopted ? `, ${ls.adopted} document${ls.adopted === 1 ? "" : "s"} adopted` : "") +
+      (ls.missing ? `, ${ls.missing} on the books but gone from the folders` : "") +
+      (ls.strays ? `, ${ls.strays} loose in the certificates root` : "") + ". Runs every hour.";
+  };
+
   const fmtBytes = (n) => n == null ? "" :
     n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`;
   const fmtWhen = (s) => !s ? "" :
@@ -15891,6 +15916,21 @@ function SharePointPage() {
         The United Operations Team's SharePoint, exactly as Teams holds it — every folder, every file,
         read the moment this page asks. Open a file and it comes straight from SharePoint.
       </div>
+
+      {/* Folders → portal: what the hourly sync last did, and a button to run it now. */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontFamily: T.body,
+        fontSize: 12.5, color: T.muted, padding: "9px 12px", border: `1px solid ${T.rule}`, borderRadius: 2,
+        marginBottom: 12 }}>
+        <span style={{ flex: 1, minWidth: 0, lineHeight: 1.6 }}>{syncLine()}</span>
+        <Button variant="quiet" disabled={syncing} onClick={syncNow}>{syncing ? "Syncing..." : "Sync now"}</Button>
+      </div>
+      {syncOut && (
+        <div style={{ fontFamily: T.body, fontSize: 12.5, color: syncOut.error ? T.bRed : T.teal, marginBottom: 12 }}>
+          {syncOut.error ? syncOut.error :
+            `Done — ${syncOut.registered.length} new certificate${syncOut.registered.length === 1 ? "" : "s"} taken on, ` +
+            `${syncOut.adopted.length} adopted, ${syncOut.missing.length} missing from the folders.`}
+        </div>
+      )}
 
       {/* Where we are */}
       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", fontFamily: T.mono,
