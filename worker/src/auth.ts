@@ -36,6 +36,19 @@ const CODE_RESEND_SECONDS = 60;
 const CODE_MAX_ATTEMPTS = 5;
 
 const now = () => Math.floor(Date.now() / 1000);
+
+// The door slows down under a hammering: this many events from one address
+// inside the window and that address waits. Generous enough for the whole
+// crew behind the vessel's one shared connection; far too slow for guessing.
+const RATE_MAX = 30;
+const RATE_WINDOW = 10 * 60;
+
+// A burst of suspicious traffic raises the alarm: this many bad events
+// inside the window emails every IT Help account — at most once an hour.
+const SUSPECT_KINDS = ["unknown_email", "disabled_account", "code_wrong", "code_lockout", "denied", "rate_limited"];
+const ALERT_BURST = 8;
+const ALERT_WINDOW = 15 * 60;
+const ALERT_QUIET = 60 * 60;
 const sha256 = async (s: string) => {
   const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
   return [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -70,8 +83,83 @@ export async function logLoginEvent(req: Request, kind: string, email: string | 
     if (Math.random() < 0.02) {
       await db.prepare("DELETE FROM login_events WHERE ts < ?1").bind(now() - 90 * 86400).run();
     }
+    if (SUSPECT_KINDS.includes(kind)) await maybeRaiseAlarm(db);
   } catch (e) {
     console.error("login event not recorded:", e);
+  }
+}
+
+/** Too many door events from this address lately? Checked before the door answers. */
+async function rateLimited(req: Request): Promise<boolean> {
+  const ip = req.headers.get("CF-Connecting-IP") || "";
+  if (!ip) return false;
+  const row = await getEnv()
+    .DB.prepare("SELECT COUNT(*) AS n FROM login_events WHERE ts >= ?1 AND ip = ?2")
+    .bind(now() - RATE_WINDOW, ip)
+    .first<{ n: number }>();
+  return (row?.n ?? 0) >= RATE_MAX;
+}
+
+/**
+ * The alarm: when suspicious events pile up, every enabled IT Help account
+ * gets an email saying what and from where — at most one an hour, so a
+ * sustained attack is one clear message, not a flood.
+ */
+async function maybeRaiseAlarm(db: ReturnType<typeof getEnv>["DB"]) {
+  const marks = SUSPECT_KINDS.map((k) => `'${k}'`).join(",");
+  const since = now() - ALERT_WINDOW;
+  const burst = await db
+    .prepare(`SELECT COUNT(*) AS n FROM login_events WHERE ts >= ?1 AND kind IN (${marks})`)
+    .bind(since)
+    .first<{ n: number }>();
+  if ((burst?.n ?? 0) < ALERT_BURST) return;
+
+  const last = await db
+    .prepare("SELECT updated_at FROM blobs WHERE store = 'security' AND key = 'last-alert'")
+    .first<{ updated_at: number }>();
+  if (last && now() - last.updated_at < ALERT_QUIET) return;
+  await db
+    .prepare(
+      "INSERT INTO blobs (store, key, value, updated_at) VALUES ('security', 'last-alert', 'sent', ?1) " +
+        "ON CONFLICT (store, key) DO UPDATE SET updated_at = ?1",
+    )
+    .bind(now())
+    .run();
+
+  const kinds = await db
+    .prepare(`SELECT kind, COUNT(*) AS n FROM login_events WHERE ts >= ?1 AND kind IN (${marks}) GROUP BY kind ORDER BY n DESC`)
+    .bind(since)
+    .all<{ kind: string; n: number }>();
+  const ips = await db
+    .prepare(`SELECT ip, country, COUNT(*) AS n FROM login_events WHERE ts >= ?1 AND kind IN (${marks}) GROUP BY ip, country ORDER BY n DESC LIMIT 5`)
+    .bind(since)
+    .all<{ ip: string; country: string; n: number }>();
+  const watchers = await db
+    .prepare("SELECT email FROM users WHERE role = 'it' AND disabled = 0")
+    .all<{ email: string }>();
+
+  const what = (kinds.results || []).map((k) => `  ${k.kind.replace(/_/g, " ")}: ${k.n}`).join("\n");
+  const where = (ips.results || []).map((i) => `  ${i.ip || "unknown"} (${i.country || "?"}): ${i.n} events`).join("\n");
+  const env = getEnv();
+  if (!env.EMAIL) return;
+  for (const w of watchers.results || []) {
+    try {
+      await env.EMAIL.send({
+        to: w.email,
+        from: "TSV Coolibah Crew Portal <portal@coolibah-portal.com>",
+        subject: "Portal security alarm - suspicious sign-in traffic",
+        text:
+          `The crew portal has seen ${burst!.n} suspicious sign-in events in the last ${ALERT_WINDOW / 60} minutes.\n\n` +
+          `What:\n${what}\n\nFrom where:\n${where}\n\n` +
+          `The full record is on the Access Grants page, under Sign-in traffic:\n` +
+          `https://coolibah-portal.com\n\n` +
+          `Nothing needs doing if this is expected (a crew round of first sign-ins, say). ` +
+          `If it isn't, disable any grant in doubt - that signs its devices out on the spot. ` +
+          `At most one of these emails is sent an hour.`,
+      });
+    } catch (e) {
+      console.error("alarm email not sent:", e);
+    }
   }
 }
 
@@ -305,6 +393,17 @@ export async function gate(
   req: Request,
   path: string,
 ): Promise<{ barred: Response | null; user: PortalUser | null }> {
+  // A hammered door pauses before it does anything else — the same neutral
+  // answer whatever was being tried, and the attempt itself goes in the book.
+  if ((path === "/login" || path === "/login/verify") && req.method === "POST") {
+    if (await rateLimited(req)) {
+      await logLoginEvent(req, "rate_limited", null, path);
+      return {
+        barred: html(EMAIL_FORM("Too many attempts from this connection. Wait ten minutes and try again."), 429),
+        user: null,
+      };
+    }
+  }
   if (path === "/login") {
     if (req.method === "POST") return { barred: await handleRequestCode(req), user: null };
     return { barred: html(EMAIL_FORM()), user: null };

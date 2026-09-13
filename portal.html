@@ -15800,7 +15800,8 @@ function AccessGrantsPage() {
     React.createElement(Eyebrow, { color: T.violet }, "Sign-in traffic"), /*#__PURE__*/
     React.createElement(Button, { variant: "quiet", onClick: loadTraffic }, "Refresh")
     ), /*#__PURE__*/
-    React.createElement("div", { style: { fontFamily: T.body, fontSize: 12.5, color: T.muted, lineHeight: 1.6, marginBottom: 10 } }, "Every attempt at the door for the last ninety days \u2014 sign-ins, code requests, wrong codes, addresses the portal has never heard of, and refused actions. A run of unknown addresses or wrong codes from one IP is somebody trying their luck."
+    React.createElement("div", { style: { fontFamily: T.body, fontSize: 12.5, color: T.muted, lineHeight: 1.6, marginBottom: 10 } }, "Every attempt at the door for the last ninety days \u2014 sign-ins, code requests, wrong codes, addresses the portal has never heard of, and refused actions. A run of unknown addresses or wrong codes from one IP is somebody trying their luck. A connection hammering the door is paused automatically, and a burst of suspicious traffic emails every IT Help account."
+
 
 
 
@@ -15812,7 +15813,7 @@ function AccessGrantsPage() {
     Object.keys(traffic.week || {}).length === 0 ? /*#__PURE__*/
     React.createElement("span", { style: { fontFamily: T.body, fontSize: 12.5, color: T.muted } }, "Nothing in the last seven days.") :
     Object.entries(traffic.week).sort().map(([kind, n]) => {
-      const bad = ["unknown_email", "code_wrong", "code_lockout", "denied", "disabled_account"].includes(kind);
+      const bad = ["unknown_email", "code_wrong", "code_lockout", "denied", "disabled_account", "rate_limited"].includes(kind);
       return /*#__PURE__*/React.createElement(Chip, { key: kind, fg: bad ? T.bRed : T.teal, bg: bad ? T.bRedBg : T.raised }, kind.replace(/_/g, " "), ": ", n, " this week");
     })
     ),
@@ -15827,7 +15828,7 @@ function AccessGrantsPage() {
     )), /*#__PURE__*/
     React.createElement("tbody", null,
     traffic.events.map((ev, i) => {
-      const bad = ["unknown_email", "code_wrong", "code_lockout", "denied", "disabled_account"].includes(ev.kind);
+      const bad = ["unknown_email", "code_wrong", "code_lockout", "denied", "disabled_account", "rate_limited"].includes(ev.kind);
       return (/*#__PURE__*/
         React.createElement("tr", { key: i, style: { borderBottom: `1px solid ${T.rule}` } }, /*#__PURE__*/
         React.createElement("td", { style: { padding: "5px 10px", whiteSpace: "nowrap", color: T.muted } },
