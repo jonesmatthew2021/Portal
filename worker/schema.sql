@@ -53,10 +53,15 @@ CREATE TABLE IF NOT EXISTS users (
   disabled INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   created_by TEXT,
-  last_login INTEGER
+  last_login INTEGER,
+  -- Optional mobile (+614...), for sign-in codes by text instead of email.
+  -- Added 13 Sep 2026; existing tables got it via ALTER TABLE users ADD COLUMN.
+  phone TEXT
 );
 
--- One live code per email at a time; hashed, short-lived, few attempts.
+-- One live code per person at a time; hashed, short-lived, few attempts.
+-- The email column holds whichever identifier was typed at the door: an
+-- email address or a normalised mobile number.
 CREATE TABLE IF NOT EXISTS login_codes (
   email TEXT PRIMARY KEY,
   code_hash TEXT NOT NULL,

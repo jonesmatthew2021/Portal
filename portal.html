@@ -15653,7 +15653,7 @@ function AccessGrantsPage() {
   return (/*#__PURE__*/
     React.createElement("div", { style: { maxWidth: 820 } }, /*#__PURE__*/
     React.createElement("div", { style: { marginBottom: 10 } }, /*#__PURE__*/React.createElement(Eyebrow, { color: T.accent }, "Who can enter, and at what level")), /*#__PURE__*/
-    React.createElement("div", { style: { fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.7, marginBottom: 16 } }, "A grant is all somebody needs: they sign in with this email address and the six-digit code it receives \u2014 no password to hand out, nothing shared. Disabling a grant signs their devices out on the spot. The levels: ",
+    React.createElement("div", { style: { fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.7, marginBottom: 16 } }, "A grant is all somebody needs: they sign in with this email address and the six-digit code it receives \u2014 no password to hand out, nothing shared. A sign-in lasts one week, then a fresh code re-verifies them. Disabling a grant signs their devices out on the spot. The levels: ",
 
 
     ACCESS_LEVELS.map((l) => `${l.label} — ${l.blurb}`).join(" ")

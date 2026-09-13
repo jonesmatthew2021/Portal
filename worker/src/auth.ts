@@ -28,7 +28,9 @@ export type PortalUser = {
 };
 
 const SESSION_COOKIE = "portal_session";
-const SESSION_DAYS = 90;
+// A sign-in lasts one week, then the person proves the email is still theirs
+// with a fresh code — access on file is re-verified, not granted forever.
+const SESSION_DAYS = 7;
 const CODE_MINUTES = 10;
 const CODE_RESEND_SECONDS = 60;
 const CODE_MAX_ATTEMPTS = 5;
@@ -124,7 +126,7 @@ const EMAIL_FORM = (msg?: string) =>
   ${msg ? `<p class="wrong">${msg}</p>` : ""}
   <input type="email" name="email" placeholder="Your email address" autofocus autocomplete="email" required>
   <button type="submit">Email me a sign-in code</button>
-  <p class="note">A six-digit code goes to your email &mdash; on your phone or anywhere your mail is. Type it on the next screen and this device stays signed in.</p>
+  <p class="note">A six-digit code goes to your email &mdash; on your phone or anywhere your mail is. Type it on the next screen and this device stays signed in for one week.</p>
 </form>`);
 
 const CODE_FORM = (email: string, msg?: string) =>
