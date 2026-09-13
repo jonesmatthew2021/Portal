@@ -7,6 +7,7 @@ import { getEnv } from "../env.js";
  *   GET    /api/users        the list
  *   POST   /api/users        { name, email, role } — grant access
  *   PATCH  /api/users/:id    { role? , disabled?, name? } — change a grant
+ *   DELETE /api/users/:id    remove a grant entirely (their sessions die too)
  *
  * Management and IT run this page. Two lines only IT may cross: creating or
  * changing an IT account is IT's alone, and the last standing IT account can
@@ -93,6 +94,28 @@ export default async (req: Request, actor: PortalUser, id?: string): Promise<Res
       .bind(user.id, user.email, user.name, user.role, user.created_at, actor.email)
       .run();
     return Response.json(shown(user), { status: 201 });
+  }
+
+  if (req.method === "DELETE" && id) {
+    const target = await db
+      .prepare("SELECT id, email, role FROM users WHERE id = ?1")
+      .bind(id)
+      .first<{ id: string; email: string; role: string }>();
+    if (!target) return Response.json({ error: "That grant is no longer on the portal." }, { status: 404 });
+    if (target.email === actor.email) {
+      return Response.json({ error: "Your own grant is removed by another holder, not by you." }, { status: 403 });
+    }
+    if (target.role === "it" && actor.role !== "it") {
+      return Response.json({ error: "Only IT Help can remove an IT Help grant." }, { status: 403 });
+    }
+    if (target.role === "it" && (await itStanding(target.id)) === 0) {
+      return Response.json({ error: "That is the last IT Help account — grant IT Help to someone else first." }, { status: 409 });
+    }
+    await db.batch([
+      db.prepare("DELETE FROM sessions WHERE user_id = ?1").bind(id),
+      db.prepare("DELETE FROM users WHERE id = ?1").bind(id),
+    ]);
+    return Response.json({ removed: true });
   }
 
   if (req.method === "PATCH" && id) {

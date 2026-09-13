@@ -15550,7 +15550,7 @@ const ACCESS_LEVELS = [
 
 
 function AccessGrantsPage() {
-  const { swingLists } = usePortal();
+  const { swingLists, quals } = usePortal();
   const [grants, setGrants] = useState(null);
   const [err, setErr] = useState("");
   const [busyId, setBusyId] = useState(null);
@@ -15569,22 +15569,25 @@ function AccessGrantsPage() {
     return `${parts[0]}.${parts[parts.length - 1]}@unitedmarine.au`;
   };
 
-  // Everyone on the muster lists who doesn't hold a grant yet — the same
-  // names Swing Compliance runs on, ready to be granted in one click each.
+  // All crew without a grant yet — everyone on the crew matrix plus anyone
+  // on a swing list, one row each, ready to be granted in one click.
   const ungranted = useMemo(() => {
     const seen = new Set();const out = [];
     const held = new Set((grants || []).flatMap((g) => [g.name.toLowerCase(), g.email.toLowerCase()]));
+    const add = (name, rank) => {
+      name = String(name || "").trim();
+      if (!name || seen.has(name.toLowerCase())) return;
+      seen.add(name.toLowerCase());
+      if (held.has(name.toLowerCase()) || held.has(guessEmail(name))) return;
+      out.push({ name, rank: rank || "" });
+    };
+    ((quals || {}).rows || []).forEach((r) => add(r[0], r[1]));
     Object.keys(swingLists || {}).sort().forEach((k) => {
-      (((swingLists || {})[k] || {}).entries || []).forEach((e) => {
-        const name = String(e.name || "").trim();
-        if (!name || seen.has(name.toLowerCase())) return;
-        seen.add(name.toLowerCase());
-        if (held.has(name.toLowerCase()) || held.has(guessEmail(name))) return;
-        out.push({ name, rank: e.rank || "" });
-      });
+      (((swingLists || {})[k] || {}).entries || []).forEach((e) => add(e.name, e.rank));
     });
+    out.sort((a, b) => a.name.localeCompare(b.name));
     return out;
-  }, [swingLists, grants]);
+  }, [swingLists, quals, grants]);
 
   // Per-muster-row drafts: email prefilled from the name, level picked here.
   const [rowDrafts, setRowDrafts] = useState({});
@@ -15639,6 +15642,18 @@ function AccessGrantsPage() {
         body: JSON.stringify(patch) });
       const out = await r.json();
       if (!r.ok) throw new Error(out.error || `The change was refused (${r.status}).`);
+      await load();
+    } catch (e) {setErr(String(e.message || e));}
+    setBusyId(null);
+  };
+
+  const remove = async (g) => {
+    if (!window.confirm(`Remove ${g.name}'s grant entirely? They are signed out everywhere and can only return if granted again.`)) return;
+    setBusyId(g.id);setErr("");
+    try {
+      const r = await fetch(`/api/users/${g.id}`, { method: "DELETE" });
+      const out = await r.json();
+      if (!r.ok) throw new Error(out.error || `The removal was refused (${r.status}).`);
       await load();
     } catch (e) {setErr(String(e.message || e));}
     setBusyId(null);
@@ -15705,6 +15720,9 @@ function AccessGrantsPage() {
         React.createElement(Button, { variant: "quiet", disabled: busyId === g.id,
           onClick: () => change(g.id, { disabled: !g.disabled }) },
         g.disabled ? "Re-enable" : "Disable"
+        ), /*#__PURE__*/
+        React.createElement(Button, { variant: "quiet", disabled: busyId === g.id, onClick: () => remove(g) }, /*#__PURE__*/
+        React.createElement("span", { style: { color: T.bRed } }, "Delete")
         )
         )
 
@@ -15716,8 +15734,8 @@ function AccessGrantsPage() {
 
     ungranted.length > 0 && /*#__PURE__*/
     React.createElement("div", { style: { marginTop: 26 } }, /*#__PURE__*/
-    React.createElement("div", { style: { marginBottom: 8 } }, /*#__PURE__*/React.createElement(Eyebrow, { color: T.teal }, "On the muster lists, not yet granted")), /*#__PURE__*/
-    React.createElement("div", { style: { fontFamily: T.body, fontSize: 12.5, color: T.muted, lineHeight: 1.6, marginBottom: 10 } }, "Everyone below is on a swing list. The email is guessed as first.last@unitedmarine.au \u2014 correct it if theirs differs, pick the level, and grant."
+    React.createElement("div", { style: { marginBottom: 8 } }, /*#__PURE__*/React.createElement(Eyebrow, { color: T.teal }, "Crew without a grant yet")), /*#__PURE__*/
+    React.createElement("div", { style: { fontFamily: T.body, fontSize: 12.5, color: T.muted, lineHeight: 1.6, marginBottom: 10 } }, "Everyone on the crew matrix or a swing list who can't sign in yet. The email is guessed as first.last@unitedmarine.au \u2014 correct it if theirs differs, pick the level, and grant."
 
 
     ),
