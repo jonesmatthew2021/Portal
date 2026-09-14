@@ -21,8 +21,8 @@ import clearR2 from "./routes/clear-r2.js";
  *
  * The routes are the same ones the page has always called — /api/state,
  * /api/files, /api/files/:id, /api/analyse, /api/ai-checker, /api/archive —
- * plus /api/run/:kind, where the browser starts the long jobs that Netlify
- * used to hand to background functions. Anything that isn't /api is the page
+ * plus /api/run/:kind, where the browser starts the long jobs the earlier
+ * build handed to background functions. Anything that isn't /api is the page
  * itself, served from the assets directory.
  */
 export default {

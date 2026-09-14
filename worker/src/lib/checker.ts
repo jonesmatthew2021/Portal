@@ -705,8 +705,8 @@ export async function runCheckerJob(id: string) {
   // between them with nothing to say why.
   //
   // So the job is claimed before anything else happens: read it, and write a
-  // claim mark back conditioned on the record not having moved since. Netlify
-  // Blobs' conditional write is atomic — of two calls racing to write the same
+  // claim mark back conditioned on the record not having moved since. The
+  // blob store's conditional write is atomic — of two calls racing to write the same
   // condition, only one can ever have it hold — so exactly one of two
   // concurrent invocations wins the claim and the other finds out its write
   // didn't take and stops here, before any AI work or further writes.

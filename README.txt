@@ -9,8 +9,8 @@ WHAT IS IN HERE
 ------------------------------------------------------------
 
 source/
-    Every file the portal is built from — the front end, the Netlify
-    functions behind it, the database schema and its migrations.
+    Every file the portal is built from — the front end and the worker
+    routes behind it (the worker/ folder holds the live backend).
     index.html is the live page as served at the time above (931 KB).
     The rest was packaged on 2026-08-22 by scripts/build-archive-source.mjs.
 

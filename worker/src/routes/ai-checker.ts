@@ -2,7 +2,7 @@ import { getEnv } from "../env.js";
 import { CheckerBusy, readCheckerJob, startCheckerJob, turnsFrom } from "../lib/checker.js";
 
 /**
- * The AI Checker page — ported from the Netlify build. The one host
+ * The AI Checker page — ported from the earlier build. The one host
  * difference: there is no background function to hand a question to, so every
  * start answer carries startPath and the browser starts the run itself
  * (/api/run/ai-checker), holding that request open while the answer is

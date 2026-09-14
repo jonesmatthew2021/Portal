@@ -1,6 +1,6 @@
 /* Seeds the local dev worker from the build folder's archive.
  *
- * The archive taken off Netlify holds everything needed to stand the portal
+ * The archive taken off the previous host holds everything needed to stand the portal
  * up again: portal-state.json (the shared state, rev 342) and
  * documents/index.json (every file row, live and removed) with the files
  * themselves laid out beside it. This script rebuilds the local D1 database
@@ -75,7 +75,7 @@ try {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ rev: 0, data: state.data }),
   });
-  if (res.ok) console.log(`portal state seeded (was rev ${state.rev || "?"} on Netlify)`);
+  if (res.ok) console.log(`portal state seeded (rev ${state.rev || "?"} in the archive)`);
   else if (res.status === 409) console.log("portal state already seeded — left as it is");
   else console.log(`portal state not seeded: ${res.status} ${await res.text()}`);
 } catch {

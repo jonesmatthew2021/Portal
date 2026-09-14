@@ -1,9 +1,9 @@
 import { getEnv } from "../env.js";
 
 /**
- * The @netlify/blobs surface the ported code uses, re-spoken over D1.
+ * The named-blob-store surface the ported code uses, re-spoken over D1.
  *
- * Every named store the Netlify build kept JSON in — certificate readings,
+ * Every named store the earlier build kept JSON in — certificate readings,
  * matrix readings, job records, held answers — asked for strong consistency:
  * a record is read back the instant after it is written, usually by a poll
  * loop. D1 gives exactly that, so the records live in one `blobs` table keyed
@@ -61,7 +61,7 @@ export function getStore(opts: { name: string; consistency?: string } | string):
     return etag;
   };
 
-  // The compare-and-swap the Netlify store offered: the row only moves if it
+  // The compare-and-swap the earlier blob store offered: the row only moves if it
   // still carries the etag the caller read. D1 runs the statement atomically,
   // so of two racers only one can find the etag standing.
   const writeIfMatch = async (key: string, value: string, onlyIfMatch: string) => {

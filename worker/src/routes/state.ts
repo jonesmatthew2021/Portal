@@ -2,7 +2,7 @@ import { PORTAL_ROW_ID } from "../db/schema.js";
 import { getEnv } from "../env.js";
 
 /**
- * The portal's one shared row — ported from the Netlify build unchanged in
+ * The portal's one shared row — ported from the earlier build unchanged in
  * behaviour. The only host difference: SQLite has no now(), so the timestamp
  * is stamped from here.
  */

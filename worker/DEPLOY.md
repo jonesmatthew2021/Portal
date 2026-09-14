@@ -10,7 +10,7 @@ machine once they're done.
 - **Cloudflare** — free plan: https://dash.cloudflare.com/sign-up
 - **Anthropic API key** — for the AI readings (certificate reading, checkers):
   https://console.anthropic.com → API keys. This is the one running cost, and
-  it's per-use, the same bill Netlify's AI gateway was passing through.
+  it's per-use.
 - **SharePoint app registration** — from the IT provider: Application
   (client) ID, Directory (tenant) ID, client secret, with Sites.Selected
   write access granted on the **United Operations Team's site**
@@ -57,8 +57,8 @@ point at.
 
 ## 6. Move the data in
 
-The archive in this folder's parent is the complete portal as it stood on
-Netlify (state rev 342 + 1,421 files). A remote seed mirrors the local one:
+The archive in this folder's parent is the complete portal as it stood on the
+previous host (state rev 342 + 1,421 files). A remote seed mirrors the local one:
 the document rows go in through D1, the state through /api/state, the bytes
 through the portal's upload path. Ask Claude to run the migration against the
 deployed address — scripts/seed-local.mjs is the local half and the model for
@@ -96,10 +96,10 @@ npm run dev              # the whole portal at http://localhost:8788
 node scripts/seed-local.mjs --bytes matrices,opms   # local data from the archive
 ```
 
-## What's different from the Netlify build (for whoever reads the code)
+## What's different from the earlier build (for whoever reads the code)
 
-- source/netlify/* stays in the repo untouched as the reference; this folder
-  is the port. Libraries carried over nearly verbatim.
+- The earlier serverless build was retired from the repo (git history holds
+  it); this folder is the port. Libraries carried over nearly verbatim.
 - Blob stores became one strongly consistent D1 table (src/compat/blobs.ts).
 - db.transaction became D1's atomic batch (routes/files.ts).
 - Background functions became /api/run/:kind, started by the browser itself —

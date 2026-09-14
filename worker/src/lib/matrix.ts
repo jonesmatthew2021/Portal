@@ -9,7 +9,7 @@
  * where the crew stand today. None of them says anything much on its own — the
  * point is the set of them together, and that is what the check works out.
  *
- * It sits outside `netlify/functions`, the same as `lib/opms.ts` and
+ * It sits outside the route files, the same as `lib/opms.ts` and
  * `lib/shift.ts`, because reading one document and holding the readings against
  * each other are each one long question to the model, and a request that waits
  * for one is cut off by the platform at sixty seconds and reaches the portal as a

@@ -160,7 +160,7 @@
   const humanSize = (b) =>
     b >= 1024 * 1024 ? (b / (1024 * 1024)).toFixed(1) + " MB" : Math.max(1, Math.round(b / 1024)) + " KB";
 
-  // Mirrors toRecord() in netlify/functions/files.mts.
+  // Mirrors toRecord() in worker/src/routes/files.ts.
   const toRecord = (row) => {
     const common = {
       id: row.id,
@@ -518,7 +518,7 @@ const renameDepts = (list) =>
 // SHARED STATE
 // Everything the portal holds that isn't a file — the roster, notes,
 // correspondence, comments, suggestions, the crew matrix and the change history
-// — is kept on the server as one document in the Netlify database. Every change
+// — is kept on the server as one document in the portal's database. Every change
 // anyone makes is saved within a second of them making it, is there for
 // everyone on every device, and survives a refresh, a new browser, and a
 // redeploy. Nothing the portal holds lives only in the tab it was typed into.
@@ -578,9 +578,9 @@ async function saveState(data, rev) {
 
 // ---------------------------------------------------------------------------
 // STORED FILES
-// Every file anyone attaches is uploaded to Netlify and kept there: the bytes go
-// to Netlify Blobs, the record of what the file is and where it belongs goes to
-// the Netlify database. Nothing is held in the browser, so an upload is there
+// Every file anyone attaches is uploaded to the server and kept there: the bytes go
+// to the company SharePoint, the record of what the file is and where it belongs goes to
+// the portal's database. Nothing is held in the browser, so an upload is there
 // for everyone, on every device, and it survives a refresh and a redeploy.
 // ---------------------------------------------------------------------------
 const FILES_API = "/api/files";
@@ -2425,7 +2425,7 @@ function parseWorkbook(XLSX, buf, current) {
 /**
  * A document the portal keeps exactly one of.
  *
- * One file is kept on Netlify per document — the crew certificates spreadsheet,
+ * One file is kept on the server per document — the crew certificates spreadsheet,
  * the training matrix, the skills matrix — and uploading a new one replaces it.
  * Because that takes the old one out of the portal, the replacement is never
  * silent: the first attempt writes nothing and comes back with the file that is
@@ -5919,7 +5919,7 @@ function UploadCertificates() {
     null;
   }, [validityPeriods]);
   // "2 years", "24 months" — the shapes a validity period is written in. Kept
-  // in step by hand with monthsFrom/addMonths in netlify/functions/analyse.mts,
+  // in step by hand with monthsFrom/addMonths in worker/src/routes/analyse.ts,
   // which work the same date out on the server; this page has no bundler.
   const monthsIn = (text) => {
     const m = /(\d+(?:\.\d+)?)\s*(years?|yrs?|months?|mths?|mos?)\b/i.exec(text || "");
@@ -6408,8 +6408,8 @@ function UploadCertificates() {
 
   return (/*#__PURE__*/
     React.createElement("div", null, /*#__PURE__*/
-    React.createElement("div", { style: { fontFamily: T.body, fontSize: 14, color: T.muted, lineHeight: 1.7, marginBottom: 14 } }, "Certificates are kept on Netlify in a ", /*#__PURE__*/
-    React.createElement("b", null, "certification"), " folder, with a folder of their own for each crew member. Drop the crew folders straight in \u2014 ", /*#__PURE__*/
+    React.createElement("div", { style: { fontFamily: T.body, fontSize: 14, color: T.muted, lineHeight: 1.7, marginBottom: 14 } }, "Certificates are kept in the company SharePoint's ", /*#__PURE__*/
+    React.createElement("b", null, "Crew Certificate Verifications"), " folder, with a folder of their own for each crew member. Drop the crew folders straight in \u2014 ", /*#__PURE__*/
     React.createElement("b", null, "Brenton - OPMS"), " and the rest, or the one folder holding all of them \u2014 and each folder is matched to its person on the matrix and filed under them. Anything the roster doesn't recognise is set once, for the whole folder. If a certificate is already in that person's folder, nothing is written until you have said what to do about it."
 
 
@@ -7985,8 +7985,8 @@ function archiveReadme({ startedAt, source, state, docs, missing, frontEnd }) {
   "-".repeat(60),
   "",
   "source/",
-  "    Every file the portal is built from — the front end, the Netlify",
-  "    functions behind it, the database schema and its migrations.",
+  "    Every file the portal is built from — the front end, the worker",
+  "    routes behind it, the database schema and its migrations.",
   `    index.html is the live page as served at the time above (${kb(frontEndBytes)}).`,
   ...(source ?
   [`    The rest was packaged on ${source.packagedOn} by scripts/build-archive-source.mjs.`] :
@@ -9755,10 +9755,9 @@ async function analyseOPMS({ quals, opmsSheet, fresh = false, onPhase = () => {}
   // that waited for it would be cut off partway and arrive back as a 504 with
   // nothing in it. So the server hands back a job, and we ask after it.
   //
-  // Normally the server sets the worker going itself. It can't when the portal is
-  // behind Netlify's password protection: that is applied at the edge to every
-  // request without an answer to it, and a call the server makes to itself has
-  // none, so it is turned away before it reaches the worker. This browser does
+  // Normally the server would set the worker going itself. It can't: a worker
+  // can't call itself, and every request has to carry a signed-in session,
+  // which a call the server makes to itself has none of. This browser does
   // have one — it is how the page in front of you was fetched — so when the
   // server says it couldn't hand the run over, it is handed over from here.
   if (started && started.pending && started.jobId && started.startPath) {
@@ -16176,7 +16175,7 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
     React.createElement("div", { style: { fontFamily: T.mono, fontSize: 12, color: T.muted, marginTop: 8 } }, files.msg)
     ) : /*#__PURE__*/
 
-    React.createElement(React.Fragment, null, "Every file anyone attaches \u2014 handover notes, documents, emails and crew matrix spreadsheets \u2014 is uploaded to Netlify and kept there. Uploads are shared with everyone on every device, and they survive a refresh and a redeploy.",
+    React.createElement(React.Fragment, null, "Every file anyone attaches \u2014 handover notes, documents, emails and crew matrix spreadsheets \u2014 is uploaded to the server and kept in the company SharePoint. Uploads are shared with everyone on every device, and they survive a refresh and a redeploy.",
 
 
 

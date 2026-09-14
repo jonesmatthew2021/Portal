@@ -1,5 +1,5 @@
 /* Loads the deployed portal from the build folder's archive — the one-time
- * migration off Netlify.
+ * migration off the previous host.
  *
  *   PORTAL_URL=https://coolibah-portal.<account>.workers.dev \
  *   PORTAL_PASSWORD=<the crew password> \
@@ -60,7 +60,7 @@ const state = JSON.parse(readFileSync(join(REPO, "portal-state.json"), "utf8"));
     headers: { "Content-Type": "application/json", cookie },
     body: JSON.stringify({ rev: 0, data: state.data }),
   });
-  if (res.ok) console.log(`portal state loaded (was rev ${state.rev || "?"} on Netlify)`);
+  if (res.ok) console.log(`portal state loaded (rev ${state.rev || "?"} in the archive)`);
   else if (res.status === 409) console.log("portal state already there — left alone");
   else throw new Error(`state load refused: ${res.status} ${await res.text()}`);
 }

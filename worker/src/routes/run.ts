@@ -6,7 +6,7 @@ import { runShiftJob } from "../lib/shift.js";
 /**
  * The long runs, one route: /api/run/:kind with { jobId } in the body.
  *
- * On Netlify each of these was a background function — the endpoint wrote the
+ * In the earlier build each of these was a background function — the endpoint wrote the
  * job down, handed it over, and answered 202. A Cloudflare worker has no
  * background half, but it may work for as long as the caller holds the line —
  * so the browser is the one that calls this (the start endpoints hand it the

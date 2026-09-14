@@ -1,7 +1,7 @@
 /**
  * The worker's bindings, reachable from anywhere.
  *
- * The Netlify code read its configuration from ambient process.env and module
+ * The earlier build read its configuration from ambient process.env and module
  * state, and the ported libraries still do — so the fetch handler parks each
  * request's env here first, and everything else asks for it. One request at a
  * time per isolate makes this safe; nothing holds env across an await boundary

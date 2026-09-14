@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS login_events (
 );
 CREATE INDEX IF NOT EXISTS login_events_ts_idx ON login_events (ts);
 
--- The JSON records the Netlify build kept in named blob stores. Strongly
+-- The JSON records the earlier build kept in named blob stores. Strongly
 -- consistent on purpose: poll loops read these back the moment after they are
 -- written.
 CREATE TABLE IF NOT EXISTS blobs (

@@ -3,7 +3,7 @@ import * as schema from "./schema.js";
 import { getEnv } from "../env.js";
 
 /**
- * The database, bound per request. The Netlify build exported a single `db`
+ * The database, bound per request. The earlier build exported a single `db`
  * const; here the binding only exists once a request is in flight, so `db` is
  * a getter the ported code calls exactly as it always did — `db.select()...`
  * still reads naturally because the proxy hands every property through to a

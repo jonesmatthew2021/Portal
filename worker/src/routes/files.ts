@@ -382,7 +382,7 @@ async function uploadSingleFile(form: FormData, file: File, category: string) {
   let row: Row;
   try {
     // Same shape as the certificate save: one atomic D1 batch in place of the
-    // interactive transaction the Netlify driver had.
+    // interactive transaction the earlier Postgres driver had.
     const marks = archived.map(({ row: r, blobKey: archivedKey }) =>
       db
         .update(documents)

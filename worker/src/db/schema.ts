@@ -1,7 +1,7 @@
 import { sqliteTable, text, integer, blob, index, primaryKey } from "drizzle-orm/sqlite-core";
 
 /**
- * The one row's id — same as it always was; see the Netlify original for the
+ * The one row's id — same as it always was; see the earlier build for the
  * full story. This schema is that one re-spoken for D1 (SQLite): jsonb becomes
  * JSON-mode text, timestamps become integer epoch dates, and everything else
  * carries over column for column so the ported queries read identically.
@@ -64,7 +64,7 @@ export const documents = sqliteTable(
 );
 
 /**
- * The JSON records the Netlify build kept in named blob stores — certificate
+ * The JSON records the earlier build kept in named blob stores — certificate
  * readings, matrix readings and checks, job records, held answers. D1 rather
  * than KV, because these are read back the instant after they are written
  * (poll loops, three-call sequences) and D1 is strongly consistent where KV is

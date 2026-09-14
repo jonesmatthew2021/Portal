@@ -992,7 +992,7 @@ async function certificateDates() {
  * have fifteen minutes, and the portal asks after the job until it is done. The
  * prompts, the reading and the checking themselves, and the job records are all
  * in `lib/matrix.ts` — a background function needs the same code the endpoint
- * does, and a Netlify function file can't import another one.
+ * does, and a serverless function file couldn't import another one.
  *
  * A workbook can't be looked at by a vision model, so the portal reads it in the
  * browser with SheetJS and sends the sheets as text. A PDF or a scan is sent as
@@ -1112,7 +1112,7 @@ const MATRIX_CHECK_WORKER_PATH = "/api/run/matrix-check";
  * A background function answers the moment it has the request and carries on
  * without it, so this waits for the handover and nothing else.
  *
- * The portal sits behind Netlify's password protection, and the password is
+ * The portal used to sit behind its host's password protection, and the password was
  * asked for at the edge — before a request reaches any function, and of every
  * request that arrives without an answer to it. This call is the portal's own
  * server calling itself, and a server has no browser and no cookie, so left as

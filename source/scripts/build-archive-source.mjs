@@ -31,10 +31,9 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(ROOT, "review", "portal-source.json");
 
 /* Directories never worth walking into. node_modules is installed rather than
-   written, .git is the history rather than the project, and .netlify is a
-   local scratch folder — all three are already ignored by git, and none of them
-   is source anybody would want handed back to them. */
-const SKIP_DIRS = new Set(["node_modules", ".git", ".netlify"]);
+   written and .git is the history rather than the project — both are already
+   ignored by git, and neither is source anybody would want handed back to them. */
+const SKIP_DIRS = new Set(["node_modules", ".git"]);
 
 /* Generated files in review/. They are packaged copies of the source that is
    already going into the archive whole, so including them would put the same

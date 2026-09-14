@@ -7,7 +7,7 @@
  * document can be sent, and read what the certificate store already holds. That
  * is what is here.
  *
- * It sits outside `netlify/functions` because two functions need it — the
+ * It sits outside the route files because two of them need it — the
  * endpoint the portal calls, and the background worker that runs the OPMS
  * comparison, which is far too long to answer a request with.
  */
@@ -147,7 +147,7 @@ export function readingKey(row: Row) {
  *
  * Change MATRIX_VERSION when a matrix prompt or answer shape changes and
  * everything is read again rather than answered from a cache built to different
- * rules. The prompts themselves are in `netlify/functions/analyse.mts`.
+ * rules. The prompts themselves are in `routes/analyse.ts`.
  */
 export const MATRIX_VERSION = "m2";
 
