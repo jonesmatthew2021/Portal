@@ -59,13 +59,14 @@ bucket_name = "portal-files"
 # sign in and becomes the portal's first user. Meaningless once anyone
 # exists — every later grant is made on the Access grants page.
 BOOTSTRAP_IT_EMAIL = "matthew.jones@unitedmarine.au"
-# Where Chris's FIT TO SAIL (CREWCOMP) lives: the header button opens it.
-# Today that's his tailnet box — reachable only from machines on the
-# tailnet; change to the public address once it has one. Empty hides the
-# button. Who may enter FIT TO SAIL is still its own sign-in's decision until
-# it allow-lists the portal as an identity provider (see the handoff note in
-# the attest repo).
-FIT_TO_SAIL_URL = "https://attest.monster-mora.ts.net"
+# Where the header's FIT TO SAIL button goes. For now: the preview of Chris's
+# CREWCOMP running on Matthew's own laptop ("Start FIT TO SAIL preview.bat" in
+# the build folder starts it), so the live portal can demonstrate the two
+# together at work. It only works on that laptop while the preview runs —
+# everyone else gets nothing. Point this at the public address once Chris
+# hosts one (his tailnet box is https://attest.monster-mora.ts.net, reachable
+# only with Tailscale connected). Empty hides the button.
+FIT_TO_SAIL_URL = "http://localhost:5173"
 # Where the model lives. The key itself is a secret (above).
 ANTHROPIC_BASE_URL = "https://api.anthropic.com"
 # Which file store holds the bytes. Flipped to SharePoint on 11 Sep 2026,
