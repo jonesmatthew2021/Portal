@@ -9,9 +9,20 @@
         "-ExecutionPolicy",
         "Bypass",
         "-File",
-        "C:\\Users\\jones\\OneDrive\\Desktop\\portal build\\tools\\serve.ps1"
+        "tools/serve.ps1"
       ],
       "port": 8787
+    },
+    {
+      "name": "portal-worker",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "worker"
+      ],
+      "port": 8788
     },
     {
       "name": "crewcomp-web",
@@ -20,7 +31,7 @@
         "run",
         "dev",
         "--prefix",
-        "C:\\Users\\jones\\OneDrive\\Desktop\\attest\\admin-web"
+        "../attest/admin-web"
       ],
       "port": 5173
     }

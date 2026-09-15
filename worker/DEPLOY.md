@@ -96,6 +96,10 @@ npm run dev              # the whole portal at http://localhost:8788
 node scripts/seed-local.mjs --bytes matrices,opms   # local data from the archive
 ```
 
+Local settings (the file store to use, the SharePoint secret, the AI key)
+go in `.dev.vars` — copy `.dev.vars.example` and fill it in. Never committed.
+Setting up a fresh device end to end: `../SETUP.md`.
+
 ## What's different from the earlier build (for whoever reads the code)
 
 - The earlier serverless build was retired from the repo (git history holds

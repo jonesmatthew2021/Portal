@@ -10,8 +10,11 @@ rem laptop's hotspot), so a phone can open it at the address printed below and
 rem add it to its home screen. The first time, Windows asks whether to allow
 rem Node.js through the firewall - click Allow (private networks).
 
-set "ATTEST=C:\Users\jones\OneDrive\Desktop\attest"
-set "JAVA_HOME=C:\Program Files\Microsoft\jdk-21.0.12.101-hotspot"
+rem The attest repo is expected beside this folder (see SETUP.md).
+set "ATTEST=%~dp0..\attest"
+rem Use the Java already on this machine if JAVA_HOME is set; otherwise the
+rem Microsoft build of JDK 21 in its usual place.
+if not defined JAVA_HOME set "JAVA_HOME=C:\Program Files\Microsoft\jdk-21.0.12.101-hotspot"
 set "PATH=%JAVA_HOME%\bin;%PATH%"
 set "QUARKUS_DATASOURCE_JDBC_URL=jdbc:postgresql://localhost:5432/crewcomp"
 set "QUARKUS_DATASOURCE_USERNAME=postgres"

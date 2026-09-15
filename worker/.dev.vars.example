@@ -1,0 +1,21 @@
+# Local settings for `npm run dev` (the portal at http://localhost:8788).
+#
+# Copy this file to .dev.vars in the same folder and fill in what you have.
+# .dev.vars is never committed — it holds secrets. The live portal gets the
+# same values from `wrangler secret put`, not from here.
+
+# Local dev keeps file bytes in wrangler's own local R2 (seeded by
+# `npm run seed`). Set to "sharepoint" and fill in MS_CLIENT_SECRET below to
+# read and file straight into the company SharePoint from your machine.
+FILE_STORE=r2
+
+# The SharePoint app's secret from Atcom's app registration (ticket 259549).
+# Needed only when FILE_STORE=sharepoint. Expires ~11 Sep 2027.
+MS_CLIENT_SECRET=
+
+# Your Anthropic key, for the AI readings and checkers. Leave empty and the
+# AI features simply say they aren't configured.
+ANTHROPIC_API_KEY=
+
+# Where the header's FIT TO SAIL button goes while developing.
+FIT_TO_SAIL_URL=http://localhost:5173
