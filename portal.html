@@ -15907,8 +15907,17 @@ function SharePointPage() {
   // Folders → portal, on demand: the same pass the hourly schedule runs.
   const [syncing, setSyncing] = useState(false);
   const [syncOut, setSyncOut] = useState(null);
+  const [prog, setProg] = useState(null);
   const syncNow = async () => {
-    setSyncing(true);setSyncOut(null);
+    setSyncing(true);setSyncOut(null);setProg({ pct: 0, word: "Asking the portal to read the folders" });
+    // While the sync request is held open, the worker writes its progress down
+    // and this poll reads the percentage back for the window.
+    const poll = setInterval(async () => {
+      try {
+        const r = await fetch("/api/sync/progress");
+        if (r.ok) {const p = await r.json();if (p && !p.done) setProg(p);}
+      } catch (e) {}
+    }, 700);
     try {
       const r = await fetch("/api/sync", { method: "POST" });
       const out = await r.json();
@@ -15916,6 +15925,7 @@ function SharePointPage() {
       setSyncOut(out);
       await load(path);
     } catch (e) {setSyncOut({ error: String(e.message || e) });}
+    clearInterval(poll);
     setSyncing(false);
   };
   const syncLine = () => {
@@ -15952,11 +15962,66 @@ function SharePointPage() {
     React.createElement("span", { style: { flex: 1, minWidth: 0, lineHeight: 1.6 } }, syncLine()), /*#__PURE__*/
     React.createElement(Button, { variant: "quiet", disabled: syncing, onClick: syncNow }, syncing ? "Syncing..." : "Sync now")
     ),
-    syncOut && /*#__PURE__*/
-    React.createElement("div", { style: { fontFamily: T.body, fontSize: 12.5, color: syncOut.error ? T.bRed : T.teal, marginBottom: 12 } },
-    syncOut.error ? syncOut.error :
-    `Done — ${syncOut.registered.length} new certificate${syncOut.registered.length === 1 ? "" : "s"} taken on, ` +
-    `${syncOut.adopted.length} adopted, ${syncOut.missing.length} missing from the folders.`
+
+
+    (syncing || syncOut) && /*#__PURE__*/
+    React.createElement("div", { style: { position: "fixed", inset: 0, background: "rgba(22,50,74,0.45)", zIndex: 60,
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 20 } }, /*#__PURE__*/
+    React.createElement("div", { style: { background: T.panel, border: `1px solid ${T.rule}`, borderTop: `4px solid ${T.accent}`,
+        borderRadius: 3, padding: "22px 26px", width: "min(540px, 92vw)", maxHeight: "80vh", overflowY: "auto" } }, /*#__PURE__*/
+    React.createElement(Eyebrow, { color: T.accent }, syncing ? "Syncing with SharePoint" : "Sync finished"),
+    syncing ? /*#__PURE__*/
+    React.createElement(React.Fragment, null, /*#__PURE__*/
+    React.createElement("div", { style: { fontFamily: T.display, fontSize: 46, fontWeight: 700, color: T.text, margin: "10px 0 2px" } },
+    Math.round(prog && prog.pct || 0), "%"
+    ), /*#__PURE__*/
+    React.createElement("div", { style: { height: 8, background: T.raised, borderRadius: 4, overflow: "hidden", margin: "8px 0 10px" } }, /*#__PURE__*/
+    React.createElement("div", { style: { height: "100%", width: `${Math.round(prog && prog.pct || 0)}%`, background: T.accent,
+        transition: "width .5s" } })
+    ), /*#__PURE__*/
+    React.createElement("div", { style: { fontFamily: T.body, fontSize: 13, color: T.muted } }, prog && prog.word || "Working...")
+    ) :
+    syncOut.error ? /*#__PURE__*/
+    React.createElement("div", { style: { fontFamily: T.body, fontSize: 13, color: T.bRed, margin: "12px 0" } }, syncOut.error) : /*#__PURE__*/
+
+    React.createElement("div", { style: { fontFamily: T.body, fontSize: 13, color: T.text, lineHeight: 1.7, margin: "12px 0" } },
+    syncOut.registered.length === 0 ? /*#__PURE__*/
+    React.createElement(React.Fragment, null, /*#__PURE__*/
+    React.createElement("b", null, "Nothing new to take on"), " \u2014 every file in the folders is already on the portal's books. The hourly sync may have taken your new files on before you pressed the button. A certificate that sits in a document-type folder (HRWL Verification and the like) appears against its person only after the AI Checker's next read \u2014 that is the step that identifies whose it is."
+
+
+
+
+    ) : /*#__PURE__*/
+
+    React.createElement(React.Fragment, null, /*#__PURE__*/
+    React.createElement("b", null, syncOut.registered.length, " new certificate", syncOut.registered.length === 1 ? "" : "s", " taken on:"), /*#__PURE__*/
+    React.createElement("ul", { style: { margin: "6px 0", paddingLeft: 20, fontFamily: T.mono, fontSize: 11.5 } },
+    syncOut.registered.slice(0, 12).map((r) => /*#__PURE__*/React.createElement("li", { key: r.id }, r.key.split("/").slice(1).join(" / ")))
+    ),
+    syncOut.registered.length > 12 && /*#__PURE__*/React.createElement("div", null, "...and ", syncOut.registered.length - 12, " more."), /*#__PURE__*/
+    React.createElement("div", { style: { color: T.muted, marginTop: 6 } }, "Each is filed under the folder it sits in for now. Run a read on the AI Checker page and it is refiled under the right person with its expiry date."
+
+
+    )
+    ),
+
+    syncOut.adopted.length > 0 && /*#__PURE__*/
+    React.createElement("div", { style: { marginTop: 6 } }, syncOut.adopted.length, " document", syncOut.adopted.length === 1 ? "" : "s", " adopted."),
+
+    syncOut.missing.length > 0 && /*#__PURE__*/
+    React.createElement("div", { style: { color: T.bRed, marginTop: 8 } },
+    syncOut.missing.length, " on the books but gone from the folders (moved or renamed by hand) \u2014 nothing was deleted."
+    )
+
+    ),
+
+    !syncing && /*#__PURE__*/
+    React.createElement("div", { style: { display: "flex", justifyContent: "flex-end" } }, /*#__PURE__*/
+    React.createElement(Button, { onClick: () => setSyncOut(null) }, "Close")
+    )
+
+    )
     ), /*#__PURE__*/
 
 

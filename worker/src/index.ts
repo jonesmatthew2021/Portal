@@ -12,7 +12,7 @@ import analyse from "./routes/analyse.js";
 import aiChecker from "./routes/ai-checker.js";
 import archive from "./routes/archive.js";
 import run from "./routes/run.js";
-import sync, { runSync } from "./routes/sync.js";
+import sync, { runSync, syncProgress } from "./routes/sync.js";
 import migrate from "./routes/migrate.js";
 import clearR2 from "./routes/clear-r2.js";
 
@@ -65,6 +65,11 @@ export default {
       if (path === "/api/analyse") return await analyse(req);
       if (path === "/api/ai-checker") return await aiChecker(req);
       if (path === "/api/archive") return await archive(req);
+      if (path === "/api/sync/progress") {
+        return Response.json((await syncProgress()) ?? { pct: 0, word: "No sync has run yet", done: true }, {
+          headers: { "Cache-Control": "no-store" },
+        });
+      }
       if (path === "/api/sync") return await sync(req);
       if (path === "/api/migrate-files") return await migrate(req);
       if (path === "/api/clear-r2") return await clearR2(req);

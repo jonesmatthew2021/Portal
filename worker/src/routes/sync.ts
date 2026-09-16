@@ -60,7 +60,7 @@ const personFrom = (folder: string) =>
 
 type Found = { key: string; size?: number };
 
-async function survey() {
+async function survey(tick: (pct: number, word: string) => Promise<void> = async () => {}) {
   const store = fileStore();
   const rows = await db.select().from(documents);
   const known = new Set(rows.map((r) => r.blobKey));
@@ -72,6 +72,7 @@ async function survey() {
   const singleFolders = Object.values(SINGLE_FILE_CATEGORIES).map((c) => c.folder + "/");
 
   // --- certificates: every file under certification/<folder>/ ------------
+  await tick(8, "Walking the certificate folders in SharePoint");
   const certListing = await store.list({ prefix: `${CERT_ROOT}/` });
   const newCertificates: { key: string; folder: string; person: string; size?: number }[] = [];
   const strays: Found[] = [];
@@ -90,11 +91,15 @@ async function survey() {
   }
 
   // --- the single-file documents ------------------------------------------
+  await tick(55, "Certificates read — checking the single documents");
   const singles: Record<
     string,
     { label: string; live: boolean; found: Found[]; adoptable: boolean }
   > = {};
+  let nthSingle = 0;
+  const nSingles = Object.keys(SINGLE_FILE_CATEGORIES).length;
   for (const [category, def] of Object.entries(SINGLE_FILE_CATEGORIES)) {
+    await tick(55 + Math.round(28 * (++nthSingle) / nSingles), `Checking ${def.label}`);
     const listing = await store.list({ prefix: def.folder + "/" });
     const found = listing.blobs.filter((f) => !known.has(f.key));
     const live = (liveByCategory.get(category) || 0) > 0;
@@ -109,6 +114,7 @@ async function survey() {
   }
 
   // --- live files whose bytes are gone from the folders --------------------
+  await tick(88, "Comparing the folders with the portal's books");
   const scannedPrefixes = [`${CERT_ROOT}/`, ...singleFolders];
   const seen = new Set([
     ...certListing.blobs.map((f) => f.key),
@@ -140,6 +146,17 @@ export type SyncRecord = {
 
 const record = (r: SyncRecord) => getStore("sync").setJSON("last-run", r);
 
+/* The sync's own running commentary, written as it works so the page's
+   progress window can read percentages off it while the POST is held open. */
+async function sayProgress(pct: number, word: string, extra: Record<string, unknown> = {}) {
+  try {
+    await getStore("sync").setJSON("progress", { pct: Math.round(pct), word, done: false, at: Date.now(), ...extra });
+  } catch (e) {
+    console.error("sync progress not written:", e);
+  }
+}
+export const syncProgress = () => getStore("sync").get("progress", { type: "json" });
+
 export const lastSync = () => getStore("sync").get("last-run", { type: "json" }) as Promise<SyncRecord | null>;
 
 /**
@@ -150,7 +167,8 @@ export const lastSync = () => getStore("sync").get("last-run", { type: "json" })
 export async function runSync(by: string) {
   const at = Date.now();
   try {
-    const out = await apply(await survey());
+    await sayProgress(2, "Asking SharePoint for the folders");
+    const out = await apply(await survey(sayProgress), sayProgress);
     await record({
       at,
       by,
@@ -161,10 +179,12 @@ export async function runSync(by: string) {
       leftAlone: out.leftAlone.length,
       error: null,
     });
+    await sayProgress(100, "Done", { done: true });
     return out;
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
     await record({ at, by, registered: 0, adopted: 0, strays: 0, missing: 0, leftAlone: 0, error });
+    await sayProgress(100, "Failed", { done: true, error });
     throw e;
   }
 }
@@ -191,10 +211,15 @@ export default async (req: Request, by = "Sync now") => {
   }
 };
 
-async function apply(result: Awaited<ReturnType<typeof survey>>) {
+async function apply(
+  result: Awaited<ReturnType<typeof survey>>,
+  tick: (pct: number, word: string) => Promise<void> = async () => {},
+) {
   const today = todayThere();
   const registered: { id: string; key: string; person: string }[] = [];
+  let taken = 0;
   for (const c of result.newCertificates) {
+    await tick(90 + Math.round(9 * (++taken) / result.newCertificates.length), `Taking on ${c.key.split("/").pop()}`);
     const id = crypto.randomUUID();
     await db.insert(documents).values({
       id,
