@@ -1350,11 +1350,11 @@ function noteSwings() {
   return { current, all: [current, ...past, ...LEGACY_NOTE_SWINGS] };
 }
 
-// How far ahead the compliance check looks: the swing onboard now, and the three
-// after it. Three is what a certificate takes to renew, so it is the look-ahead
-// that lets somebody be sorted out before the swing they would have flown out on
-// with an expired ticket.
-const SWING_LOOKAHEAD = 3;
+// How far ahead the compliance check looks: the swing onboard now, and the five
+// after it — six swings, two rows of three on the Swing Compliance page, so a
+// crew change or a certificate renewal can be planned the best part of half a
+// year out, not just the three swings a renewal takes.
+const SWING_LOOKAHEAD = 5;
 
 /**
  * A swing carrying the dates the office has given for it.
@@ -12304,7 +12304,7 @@ function SwingCompliance({ people, overrides, at, setAt, roster }) {
   const { quals: QUALS, swingDates, setSwingDates, log, certDates, swingBoard, swingBoards } = usePortal();
   const validityFor = useValidityLookup();
   const k0 = currentSwingIndex();
-  // The swing onboard now and the three coming, each carrying the office's dates
+  // The swing onboard now and the five coming, each carrying the office's dates
   // where somebody has given them and the four-week pattern's where nobody has.
   const swings = useMemo(
     () => Array.from({ length: SWING_LOOKAHEAD + 1 }, (_, i) => swingWithDates(k0 + i, swingDates)),
@@ -12474,8 +12474,11 @@ function SwingCompliance({ people, overrides, at, setAt, roster }) {
       React.createElement("span", { style: { fontFamily: T.display, fontSize: 15, fontWeight: 700, color: T.text } },
       swingLabel(r.swing)
       ), /*#__PURE__*/
+      React.createElement("span", { style: { display: "flex", gap: 6, alignItems: "baseline" } },
+      k === k0 && /*#__PURE__*/React.createElement(Chip, { fg: T.accent, bg: T.accentSoft }, "On now"), /*#__PURE__*/
       React.createElement(Chip, { fg: bad ? T.bRed : T.teal, bg: bad ? T.bRedBg : T.raised },
       bad ? `${bad} not clear` : "All clear"
+      )
       )
       ), /*#__PURE__*/
       React.createElement("div", { style: { fontFamily: T.mono, fontSize: 11.5, color: T.muted, marginTop: 4 } }, "Crew ",
@@ -12554,17 +12557,12 @@ function SwingCompliance({ people, overrides, at, setAt, roster }) {
 
 
 
-
-    React.createElement("div", { style: { maxWidth: 560, margin: "0 auto 18px" } }, /*#__PURE__*/
-    React.createElement("div", { style: { marginBottom: 8, textAlign: "center" } }, /*#__PURE__*/React.createElement(Eyebrow, { color: T.accent }, "On swing")),
-    card(results[0])
-    ), /*#__PURE__*/
     React.createElement("div", { style: { marginBottom: 18 } }, /*#__PURE__*/
     React.createElement("div", { style: { marginBottom: 8 } }, /*#__PURE__*/
-    React.createElement(Eyebrow, { color: T.muted }, "Upcoming swings \xB7 next ", SWING_LOOKAHEAD)
+    React.createElement(Eyebrow, { color: T.accent }, "Swings \xB7 on now and the next ", SWING_LOOKAHEAD)
     ), /*#__PURE__*/
     React.createElement("div", { className: "um-swing3" },
-    results.slice(1).map(card)
+    results.map(card)
     )
     ),
 

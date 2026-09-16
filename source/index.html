@@ -1086,11 +1086,11 @@ function noteSwings() {
   return { current, all: [current, ...past, ...LEGACY_NOTE_SWINGS] };
 }
 
-// How far ahead the compliance check looks: the swing onboard now, and the three
-// after it. Three is what a certificate takes to renew, so it is the look-ahead
-// that lets somebody be sorted out before the swing they would have flown out on
-// with an expired ticket.
-const SWING_LOOKAHEAD = 3;
+// How far ahead the compliance check looks: the swing onboard now, and the five
+// after it — six swings, two rows of three on the Swing Compliance page, so a
+// crew change or a certificate renewal can be planned the best part of half a
+// year out, not just the three swings a renewal takes.
+const SWING_LOOKAHEAD = 5;
 
 /**
  * A swing carrying the dates the office has given for it.
@@ -12040,7 +12040,7 @@ function SwingCompliance({ people, overrides, at, setAt, roster }) {
   const { quals: QUALS, swingDates, setSwingDates, log, certDates, swingBoard, swingBoards } = usePortal();
   const validityFor = useValidityLookup();
   const k0 = currentSwingIndex();
-  // The swing onboard now and the three coming, each carrying the office's dates
+  // The swing onboard now and the five coming, each carrying the office's dates
   // where somebody has given them and the four-week pattern's where nobody has.
   const swings = useMemo(
     () => Array.from({ length: SWING_LOOKAHEAD + 1 }, (_, i) => swingWithDates(k0 + i, swingDates)),
@@ -12210,9 +12210,12 @@ function SwingCompliance({ people, overrides, at, setAt, roster }) {
           <span style={{ fontFamily: T.display, fontSize: 15, fontWeight: 700, color: T.text }}>
             {swingLabel(r.swing)}
           </span>
-          <Chip fg={bad ? T.bRed : T.teal} bg={bad ? T.bRedBg : T.raised}>
-            {bad ? `${bad} not clear` : "All clear"}
-          </Chip>
+          <span style={{ display: "flex", gap: 6, alignItems: "baseline" }}>
+            {k === k0 && <Chip fg={T.accent} bg={T.accentSoft}>On now</Chip>}
+            <Chip fg={bad ? T.bRed : T.teal} bg={bad ? T.bRedBg : T.raised}>
+              {bad ? `${bad} not clear` : "All clear"}
+            </Chip>
+          </span>
         </div>
         <div style={{ fontFamily: T.mono, fontSize: 11.5, color: T.muted, marginTop: 4 }}>
           Crew {r.swing.crew} · {r.checked.length + r.unchecked.length} rostered
@@ -12286,21 +12289,16 @@ function SwingCompliance({ people, overrides, at, setAt, roster }) {
         sections below follow it, and each one's heading says whether it needs you before you open it.
       </div>
 
-      {/* The swing that is on sits by itself, centred — it is the first question
-          this page is opened with: who can't sail now. The three swings coming
-          sit side by side across the page underneath, one column each, so who
-          has to be sorted out before they fly can be read left to right. Below
-          900px the row drops to one column with the nearest swing first. */}
-      <div style={{ maxWidth: 560, margin: "0 auto 18px" }}>
-        <div style={{ marginBottom: 8, textAlign: "center" }}><Eyebrow color={T.accent}>On swing</Eyebrow></div>
-        {card(results[0])}
-      </div>
+      {/* Six swings, three to a row: the one on now first (marked), then the
+          five coming, so who has to be sorted out before they fly can be read
+          left to right and down. Press any card to work on that swing below.
+          Under 900px the grid drops to one column with the nearest swing first. */}
       <div style={{ marginBottom: 18 }}>
         <div style={{ marginBottom: 8 }}>
-          <Eyebrow color={T.muted}>Upcoming swings · next {SWING_LOOKAHEAD}</Eyebrow>
+          <Eyebrow color={T.accent}>Swings · on now and the next {SWING_LOOKAHEAD}</Eyebrow>
         </div>
         <div className="um-swing3">
-          {results.slice(1).map(card)}
+          {results.map(card)}
         </div>
       </div>
 
