@@ -138,6 +138,84 @@ const REMOVED_ROOT = "removed";
 // leaving one person's certificates scattered across three. The portal uses the
 // same rule in the browser, so the folder a file is about to land in can be
 // shown before it is sent.
+/**
+ * The team's own certificate filing: one "<Name> - OPMS" folder per person in
+ * the OPMS Documents folder — Brenton - OPMS, Evan - OPMS and so on. That is
+ * where the crew's certificates actually live and are kept up to date, so the
+ * portal treats those folders as the certificate home: the sync reads them,
+ * and uploads and refiles write into them. This table marries the portal's
+ * person tokens to the folder names the team already uses — first names
+ * mostly, surnames where first names collide (three Matthews, two Michaels),
+ * and the nicknames the folders were made with. Anyone not in the table gets
+ * "<First name> - OPMS", which is the convention for everyone new.
+ */
+export const OPMS_FOLDER_NAMES: Record<string, string> = {
+  "asange-kyle": "Kyle",
+  "athihe-savio": "Savio",
+  "ayers-christopher-james": "Chris",
+  "baterna-eric": "Eric",
+  "bautista-john-leo": "John",
+  "butler-david-robert": "David",
+  "clemones-leon": "Leon",
+  "cook-jack": "Jack",
+  "douglas-michael": "Douglas",
+  "dwyer-matthew": "Dwyer",
+  "english-jake": "Jake",
+  "english-zane": "Zane",
+  "evans-brenton": "Brenton",
+  "evans-dylan": "Dylan",
+  "farmer-evan": "Evan",
+  "hearfield-bradd": "Bradd",
+  "jitender-rohin": "Rohin",
+  "jones-matthew-james": "Jones",
+  "keeley-finn": "Finn",
+  "keogh-cornelius-james": "Con",
+  "kingdon-matthew": "Kingdon",
+  "kumar-preetham": "Pk",
+  "macdonald-justin": "Justin",
+  "macknamara-luke": "Luke",
+  "mata-marlou": "Marlou",
+  "michalzic-travis": "Travis",
+  "miller-jamie": "Jamie",
+  "murugesan-karthik": "Karthik",
+  "orosz-tamas": "Tamas",
+  "ozhoga-andriy": "Andriy",
+  "patwardhan-anand": "Anand",
+  "pejic-anton": "Anton",
+  "rogers-michael": "Rogers",
+  "rubock-zachary": "Zac",
+  "sittiyos-kachin": "Kachin",
+  "stewart-ryan": "Ryan",
+  "tadiaman-mark-jay": "Mark",
+  "tymofeyev-arthur": "Arthur",
+  "witharana-ruwan": "Ruwan",
+  "wright-andrew": "Andrew",
+};
+
+/** The person token's OPMS folder name — from the table, or first-name-cased
+ * off the token (tokens read surname-first, so the first name is last). */
+export function opmsFolderName(token: string) {
+  const named = OPMS_FOLDER_NAMES[token];
+  if (named) return named;
+  const parts = (token || "").split("-").filter(Boolean);
+  const first = parts[parts.length - 1] || token || "unnamed";
+  return first[0].toUpperCase() + first.slice(1);
+}
+
+/** Where this person's certificates are written: their OPMS folder. */
+export const opmsCertPrefix = (token: string) => `opms/${opmsFolderName(token)} - OPMS`;
+
+const TOKEN_BY_OPMS_NAME: Record<string, string> = Object.fromEntries(
+  Object.entries(OPMS_FOLDER_NAMES).map(([t, n]) => [n.toLowerCase(), t]),
+);
+
+/** The person token an OPMS folder belongs to — the table backwards, or a
+ * fresh token for somebody new (Evgeny - OPMS becomes evgeny). */
+export function tokenForOpmsFolder(folderName: string) {
+  const name = folderName.replace(/\s*-\s*OPMS\s*$/i, "").trim();
+  return TOKEN_BY_OPMS_NAME[name.toLowerCase()] ?? certFolderFor(name);
+}
+
 export function certFolderFor(person: string) {
   return (
     (person || "")
@@ -329,7 +407,7 @@ export async function purgeDocument(row: DocumentRow) {
  */
 export async function refileCertificate(row: DocumentRow, person: string, folder: string) {
   const filename = await freeCertName(folder, row.filename);
-  const blobKey = await moveBlob(row.blobKey, `${CERT_ROOT}/${folder}/${filename}`);
+  const blobKey = await moveBlob(row.blobKey, `${opmsCertPrefix(folder)}/${filename}`);
 
   const [updated] = await db
     .update(documents)

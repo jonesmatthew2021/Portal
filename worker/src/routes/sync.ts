@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
-import { CERT_ROOT, SINGLE_FILE_CATEGORIES, fileStore, safeName } from "../db/documents.js";
+import { CERT_ROOT, SINGLE_FILE_CATEGORIES, fileStore, safeName, tokenForOpmsFolder } from "../db/documents.js";
 import { todayThere } from "../lib/analysis.js";
 import { getStore } from "../compat/blobs.js";
 
@@ -90,6 +90,32 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
     newCertificates.push({ key: f.key, folder, person: personFrom(folder), size: f.size });
   }
 
+  // --- the team's own "<Name> - OPMS" folders ------------------------------
+  // The certificate home: where the office keeps each person's certificates
+  // up to date, and where the portal's own uploads now land. Many of these
+  // files are already on the books from the old certification folders — the
+  // same name and size against the same person is the same certificate, and
+  // is left alone rather than taken on twice.
+  await tick(35, "Walking the OPMS person folders");
+  const opmsListing = await store.list({ prefix: "opms/" });
+  const rowsByToken = new Map<string, { name: string; size: number }[]>();
+  rows.forEach((r) => {
+    if (r.removedAt) return;
+    const list = rowsByToken.get(r.folder || "") || [];
+    list.push({ name: (r.filename || "").toLowerCase(), size: r.sizeBytes ?? -1 });
+    rowsByToken.set(r.folder || "", list);
+  });
+  for (const f of opmsListing.blobs) {
+    if (known.has(f.key)) continue;
+    const m = /^opms\/([^/]+ - OPMS)\//i.exec(f.key);
+    if (!m) continue;
+    const token = tokenForOpmsFolder(m[1]);
+    const name = safeName(f.key.split("/").pop() || "").toLowerCase();
+    const twin = (rowsByToken.get(token) || []).some((r) => r.name === name && r.size === (f.size ?? -2));
+    if (twin) continue;
+    newCertificates.push({ key: f.key, folder: token, person: personFrom(token), size: f.size });
+  }
+
   // --- the single-file documents ------------------------------------------
   await tick(55, "Certificates read — checking the single documents");
   const singles: Record<
@@ -115,9 +141,10 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
 
   // --- live files whose bytes are gone from the folders --------------------
   await tick(88, "Comparing the folders with the portal's books");
-  const scannedPrefixes = [`${CERT_ROOT}/`, ...singleFolders];
+  const scannedPrefixes = [`${CERT_ROOT}/`, "opms/", ...singleFolders];
   const seen = new Set([
     ...certListing.blobs.map((f) => f.key),
+    ...opmsListing.blobs.map((f) => f.key),
     ...Object.values(singles).flatMap((s) => s.found.map((f) => f.key)),
   ]);
   // The singles listings above only kept unknown keys; list the known ones too.

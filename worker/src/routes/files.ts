@@ -8,6 +8,7 @@ import {
   SINGLE_FILE_CATEGORIES,
   certFolderFor,
   fileStore,
+  opmsCertPrefix,
   relocateToRemovedBlob,
   safeContentType,
   safeName,
@@ -227,7 +228,10 @@ async function uploadCertificate(form: FormData, file: File) {
   for (let n = 2; taken.has(stored.toLowerCase()); n++) stored = withSuffix(filename, n);
 
   const id = crypto.randomUUID();
-  const blobKey = `${CERT_ROOT}/${folder}/${stored}`;
+  // The bytes go into the person's own "<Name> - OPMS" folder — the team's
+  // filing — so an upload here appears in Teams exactly where the office
+  // already keeps that person's certificates.
+  const blobKey = `${opmsCertPrefix(folder)}/${stored}`;
 
   // Written before anything in the database changes: if this throws, no row
   // has been touched, so a failed upload can't leave the certificate looking
