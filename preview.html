@@ -12636,6 +12636,37 @@ function SwingCompliance({ people, overrides, at, setAt, roster }) {
    it. The cards fall back to the swing that is on when the pick goes stale
    (a changeover passing while the page is open), and the roster reads any
    pick that isn't ahead of today as the live board, so the two can't drift. */
+/* The Roster on a page of its own: the same board Swing Compliance carries,
+   for when the job is moving crew rather than checking them. The picker holds
+   the same six swings the compliance cards do — the live board for the swing
+   on now, a coming swing's own board for any other, so ad hoc changes land on
+   that swing only. */
+function RosterPage({ currentUser, people, setPeople, overrides, swingBoard, setSwingBoard, log }) {
+  const { swingDates } = usePortal();
+  const k0 = currentSwingIndex();
+  const [at, setAt] = useState(k0);
+  const swings = useMemo(
+    () => Array.from({ length: SWING_LOOKAHEAD + 1 }, (_, i) => swingWithDates(k0 + i, swingDates)),
+    [k0, swingDates],
+  );
+  return (
+    <>
+      <SectionHead title="Roster" />
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
+        {swings.map((s) => (
+          <Button key={s.k} variant={s.k === at ? "ghost" : "quiet"} onClick={() => setAt(s.k)}>
+            {swingLabel(s)} · Crew {s.crew}{s.k === k0 ? " · on now" : ""}
+          </Button>
+        ))}
+      </div>
+      <CrewRosters people={people} setPeople={setPeople} board={swingBoard}
+        setBoard={setSwingBoard} log={log} currentUser={currentUser}
+        viewSwing={at} overrides={overrides}
+        onShowNow={() => setAt(k0)} />
+    </>
+  );
+}
+
 function SwingCompliancePage({ currentUser, people, setPeople, overrides, swingBoard, setSwingBoard, log }) {
   const [at, setAt] = useState(currentSwingIndex());
   return (
@@ -15988,6 +16019,7 @@ const ADMIN_PAGES = [
   { id: "required-docs", label: "Required Documents For Upload" },
   { id: "checker", label: "Certification Checker" },
   { id: "elearning", label: "E-Learning Status" },
+  { id: "roster", label: "Roster" },
   { id: "swing-compliance", label: "Swing Compliance" },
   { id: "opms", label: "OPMS Checker" },
   { id: "portways-docs", label: "Portways Documentation" },
@@ -16076,6 +16108,10 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
       {/* One page for the swing: the compliance cards first — the swing that is
           on and the three coming — then the roster, which follows whichever
           card is clicked, then the compliance details read against it. */}
+      {page === "roster" && (
+        <RosterPage currentUser={currentUser} people={people} setPeople={setPeople}
+          overrides={overrides} swingBoard={swingBoard} setSwingBoard={setSwingBoard} log={log} />
+      )}
       {page === "swing-compliance" && (
         <SwingCompliancePage currentUser={currentUser} people={people} setPeople={setPeople}
           overrides={overrides} swingBoard={swingBoard} setSwingBoard={setSwingBoard} log={log} />
