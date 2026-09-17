@@ -2949,7 +2949,8 @@ function DateColsHead({ trail = 150, validity = false }) {
   );
 }
 
-/* The button in the top right of the certification screens. One press runs the
+/* Lives on Required Documents For Upload, beside the crew certificates it
+   works on. One press runs the
    same AI check the portal runs after an upload: every certificate on file is
    read (ones already read are answered from the cache, so pressing it again
    costs nothing), each is refiled under the person named on it, the validity
@@ -2964,7 +2965,7 @@ function UpdateTableButton() {
     <Button variant="solid" disabled={running}
       title="Check every certificate and expiry date against the spreadsheets and bring this list up to date"
       onClick={() => { if (!running) runMatrixAuto({ origin: "update-table" }); }}>
-      {running ? "Updating…" : "Update table"}
+      {running ? "Syncing…" : "Sync with SharePoint certification"}
     </Button>
   );
 }
@@ -4200,14 +4201,15 @@ function PersonEditor({ person, onSave, onRemove, onCancel, matrix, onRank }) {
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <Button onClick={() => {
             if (!name) return;
+            const canon = canonicalName(name);
             const r = rank.trim();
             if (matrix && onRank && r && r !== (matrix.rank || "")) {
-              onRank(matrix.name, r, name);
+              onRank(matrix.name, r, canon);
             }
             // The rank decides the roster's own grouping too — the department
             // follows it, so one save applies the rank everywhere at once.
             const dept = r ? deptForRank(r) : f.dept;
-            onSave({ ...person, ...f, dept, name, crew: f.crew || null });
+            onSave({ ...person, ...f, dept, name: canon, crew: f.crew || null });
           }}
           disabled={!name}>
           {person.id ? "Save" : "Add to the roster"}
@@ -4248,6 +4250,30 @@ function looksLikeName(v) {
   if (NOT_A_NAME.has(s.toLowerCase())) return false;
   if (!/^[A-Za-z][A-Za-z'\-., ]*$/.test(s)) return false;
   return s.split(/\s+/).length <= 4;
+}
+
+/* Every name typed anywhere on the portal is written down one way:
+   LASTNAME, First — the format the crew matrix has always used — so the same
+   person can never exist in two spellings. "evan farmer", "Farmer, Evan" and
+   "EVAN FARMER" all come out as "FARMER, Evan"; hyphens and apostrophes keep
+   their capitals (O'Brien, Smith-Jones); a single word is left as a
+   capitalised first name, for somebody whose surname isn't known yet. */
+function canonicalName(raw) {
+  const s = String(raw == null ? "" : raw).trim().replace(/\s+/g, " ");
+  if (!s) return s;
+  const word = (w) => w.split(/([-'])/).map((p) =>
+    p === "-" || p === "'" ? p : p ? p[0].toUpperCase() + p.slice(1).toLowerCase() : p).join("");
+  let last, firsts;
+  if (s.includes(",")) {
+    const [l, ...rest] = s.split(",");
+    last = l.trim(); firsts = rest.join(",").trim();
+  } else {
+    const parts = s.split(" ");
+    if (parts.length === 1) return word(parts[0]);
+    last = parts[parts.length - 1]; firsts = parts.slice(0, -1).join(" ");
+  }
+  const first = firsts.split(" ").filter(Boolean).map(word).join(" ");
+  return first ? `${last.toUpperCase()}, ${first}` : last.toUpperCase();
 }
 
 /* The two swings the vessel runs to. The roster has always held A and B against
@@ -6412,7 +6438,7 @@ function UploadCertificates() {
      own spelling; the roster's spelling is edited on the Roster page. */
   const [nameEdit, setNameEdit] = useState(null); // { person, value, busy }
   const saveName = async (person) => {
-    const value = ((nameEdit && nameEdit.value) || "").trim();
+    const value = canonicalName(((nameEdit && nameEdit.value) || "").trim());
     if (!value || value === person) { setNameEdit(null); return; }
     setNameEdit((ed) => ({ ...ed, busy: true }));
     try {
@@ -6672,7 +6698,8 @@ function UploadCertificates() {
                           {item.custom ? (
                             <input className="um-in" placeholder="Name, as it should be filed"
                               value={item.person === OTHER ? "" : item.person}
-                              onChange={(e) => patch(item.key, { person: e.target.value })} />
+                              onChange={(e) => patch(item.key, { person: e.target.value })}
+                              onBlur={(e) => patch(item.key, { person: canonicalName(e.target.value) })} />
                           ) : (
                             <NameSelect value={names.includes(item.person) ? item.person : ""}
                               onPick={(v) => {
@@ -7520,8 +7547,9 @@ function CertChecker() {
   return (
     <div>
       {/* Sits above the far right of the tiles, over Unconfirmed: the day the
-          crew certificates spreadsheet was last uploaded, with the button that
-          re-checks every certificate against the spreadsheets beside it. */}
+          crew certificates spreadsheet was last uploaded. The button that
+          re-checks every certificate moved to Required Documents For Upload,
+          renamed Sync with SharePoint certification. */}
       <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 14,
         flexWrap: "wrap", marginBottom: 7 }}>
         <div style={{ textAlign: "right" }}>
@@ -7531,7 +7559,6 @@ function CertChecker() {
             {certSheet && certSheet.uploaded ? fmtDate(certSheet.uploaded) : "No spreadsheet uploaded yet"}
           </div>
         </div>
-        <UpdateTableButton />
       </div>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
@@ -15232,12 +15259,18 @@ function RequiredDocuments() {
 
       <div style={{ height: 1, background: T.rule, margin: "22px 0" }} />
 
-      <div style={{ marginBottom: 14 }}>
-        <Eyebrow color={T.accent}>Crew certificates</Eyebrow>
-        <div style={{ fontFamily: T.body, fontSize: 14, color: T.muted, lineHeight: 1.7, marginTop: 8 }}>
-          The certificates themselves, filed one folder per crew member. Unlike the spreadsheets
-          above, the portal holds as many of these as you give it.
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start",
+        gap: 14, flexWrap: "wrap", marginBottom: 14 }}>
+        <div style={{ flex: "1 1 320px" }}>
+          <Eyebrow color={T.accent}>Crew certificates</Eyebrow>
+          <div style={{ fontFamily: T.body, fontSize: 14, color: T.muted, lineHeight: 1.7, marginTop: 8 }}>
+            The certificates themselves, filed one folder per crew member. Unlike the spreadsheets
+            above, the portal holds as many of these as you give it. Once new files have arrived
+            from SharePoint, the button reads each one and settles it under its person with its
+            dates — certificates already read cost nothing to press it again over.
+          </div>
         </div>
+        <UpdateTableButton />
       </div>
       <UploadCertificates />
     </div>
@@ -15807,13 +15840,13 @@ function AccessGrantsPage() {
   const grant = async () => {
     setErr("");
     try {
-      await post(draft);
+      await post({ ...draft, name: canonicalName(draft.name) });
       setDraft({ name: "", email: "", role: "crew" });
     } catch (e) { setErr(String(e.message || e)); }
   };
   const grantRow = async (name) => {
     setBusyId(name); setErr("");
-    try { await post({ name, email: rowOf(name).email, role: rowOf(name).role }); }
+    try { await post({ name: canonicalName(name), email: rowOf(name).email, role: rowOf(name).role }); }
     catch (e) { setErr(String(e.message || e)); }
     setBusyId(null);
   };
