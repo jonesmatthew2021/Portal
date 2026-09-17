@@ -4686,7 +4686,12 @@ function CrewRosters({ people, setPeople, board, setBoard, log, currentUser, vie
   const fullNames = useMemo(() => {
     const names = MATRIX.rows.map((r) => r[0]);
     const m = {};
-    people.forEach((p) => {m[p.id] = matchRoster(p.name, names) || p.name;});
+    // A name already in SURNAME, First form is shown exactly as stored. The
+    // matrix match only fills out old shorthand entries ("Brenton") — it must
+    // never swallow a new person who shares a given name with somebody.
+    people.forEach((p) => {
+      m[p.id] = p.name.includes(",") ? p.name : matchRoster(p.name, names) || p.name;
+    });
     return m;
   }, [people, MATRIX]);
   const fullName = (p) => fullNames[p.id] || p.name;
