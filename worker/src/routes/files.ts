@@ -373,7 +373,12 @@ async function uploadSingleFile(form: FormData, file: File, category: string) {
 
   const id = crypto.randomUUID();
   const filename = safeName(file.name);
-  const blobKey = `${folder}/${filename}`;
+  // Everything uploaded from the portal lands in OPMS Documents, where the
+  // office keeps its own copies. The two spreadsheet homes already inside it
+  // keep their sub-folders; the rest go in at the top, beside the office's
+  // qualification-expiry sheet. Old keys elsewhere still serve what they hold.
+  const uploadRoot = folder.startsWith("opms/") || folder.startsWith("certification/") ? folder : "opms";
+  const blobKey = `${uploadRoot}/${filename}`;
 
   // Written before anything in the database changes — if this throws, nothing
   // has changed yet, rather than leaving the old copy marked removed with no
