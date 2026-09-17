@@ -4169,11 +4169,13 @@ function PersonEditor({ person, onSave, onRemove, onCancel, matrix, onRank }) {
     )
     ),
 
-    matrix && matrix.name ? /*#__PURE__*/
+    matrix ? /*#__PURE__*/
     React.createElement("div", { style: { marginBottom: 13 } }, /*#__PURE__*/
     React.createElement("div", { style: { display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" } }, /*#__PURE__*/
     React.createElement("div", { style: { flex: "1 1 260px" } }, /*#__PURE__*/
-    React.createElement(ChoiceField, { label: `Rank / position — on the matrix as ${matrix.name}` }, /*#__PURE__*/
+    React.createElement(ChoiceField, { label: matrix.name ?
+      `Rank / position — on the matrix as ${matrix.name}` :
+      "Rank / position — saving adds them to the crew matrix" }, /*#__PURE__*/
     React.createElement(Choices, { value: rank, compact: true, onPick: (v) => setRank(v),
       options: matrix.options.map((p) => ({ value: p, label: p })) })
     )
@@ -4184,10 +4186,6 @@ function PersonEditor({ person, onSave, onRemove, onCancel, matrix, onRank }) {
     )
     )
     )
-    ) :
-    person.id ? /*#__PURE__*/
-    React.createElement("div", { style: { fontFamily: T.body, fontSize: 12.5, color: T.muted, marginBottom: 13 } }, "The rank lives on the crew matrix, and this name isn't matched to a matrix row yet."
-
     ) :
     null, /*#__PURE__*/
 
@@ -4202,10 +4200,14 @@ function PersonEditor({ person, onSave, onRemove, onCancel, matrix, onRank }) {
     React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } }, /*#__PURE__*/
     React.createElement(Button, { onClick: () => {
         if (!name) return;
-        if (matrix && matrix.name && onRank && rank.trim() && rank.trim() !== (matrix.rank || "")) {
-          onRank(matrix.name, rank.trim());
+        const r = rank.trim();
+        if (matrix && onRank && r && r !== (matrix.rank || "")) {
+          onRank(matrix.name, r, name);
         }
-        onSave({ ...person, ...f, name, crew: f.crew || null });
+        // The rank decides the roster's own grouping too — the department
+        // follows it, so one save applies the rank everywhere at once.
+        const dept = r ? deptForRank(r) : f.dept;
+        onSave({ ...person, ...f, dept, name, crew: f.crew || null });
       },
       disabled: !name },
     person.id ? "Save" : "Add to the roster"
@@ -5001,15 +5003,25 @@ function CrewRosters({ people, setPeople, board, setBoard, log, currentUser, vie
           options: Array.from(new Set(MATRIX.rows.map((r) => String(r[1] || "").trim()).filter(Boolean)))
         };
       })(),
-      onRank: (matrixName, value) => {
-        const i = MATRIX.rows.findIndex((r) => r[0] === matrixName);
-        if (i < 0) return;
-        const before = MATRIX.rows[i][1] || "—";
-        if (before === value) return;
+      onRank: (matrixName, value, personName) => {
         const rows = MATRIX.rows.map((row) => [row[0], row[1], row[2], (row[3] || []).slice()]);
-        rows[i][1] = value;
-        setQuals({ cols: MATRIX.cols, rows });
-        log("Crew Matrix", `${matrixName}'s rank changed`, `${before} → ${value}`);
+        if (matrixName) {
+          const i = rows.findIndex((r) => r[0] === matrixName);
+          if (i < 0) return;
+          const before = rows[i][1] || "—";
+          if (before === value) return;
+          rows[i][1] = value;
+          setQuals({ cols: MATRIX.cols, rows });
+          log("Crew Matrix", `${matrixName}'s rank changed`, `${before} → ${value}`);
+        } else {
+          // Not on the matrix yet: the rank puts them there — one
+          // empty row, which the readings and spreadsheets fill in
+          // from here on. From that moment the checker, the swing
+          // pages and the shift checks all know them.
+          rows.push([personName, value, "", MATRIX.cols.map(() => "")]);
+          setQuals({ cols: MATRIX.cols, rows });
+          log("Crew Matrix", `${personName} added to the crew matrix`, `Rank ${value}`);
+        }
       } }), /*#__PURE__*/
 
 
