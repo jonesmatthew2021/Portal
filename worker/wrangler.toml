@@ -58,7 +58,7 @@ bucket_name = "portal-files"
 # The first IT Help account: with the users table empty, this address may
 # sign in and becomes the portal's first user. Meaningless once anyone
 # exists — every later grant is made on the Access grants page.
-BOOTSTRAP_IT_EMAIL = "matthew.jones@unitedmarine.au"
+BOOTSTRAP_IT_EMAIL = "jonesmatthew2021@gmail.com"
 # Where the header's FIT TO SAIL button goes. For now: the preview of Chris's
 # CREWCOMP running on Matthew's own laptop ("Start FIT TO SAIL preview.bat" in
 # the build folder starts it), so the live portal can demonstrate the two
