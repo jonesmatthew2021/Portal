@@ -7015,11 +7015,6 @@ function UploadCertificates() {
               disabled: !(rankEdit.value || "").trim() }, "Save"), /*#__PURE__*/
             React.createElement(Button, { variant: "quiet", onClick: () => setRankEdit(null) }, "Cancel")
             )
-            ), /*#__PURE__*/
-            React.createElement("div", { style: { fontFamily: T.body, fontSize: 12.5, color: T.muted, lineHeight: 1.6, marginTop: 8 } }, "Saving writes the rank onto the crew matrix against ",
-            f.person, ", so everywhere that reads it \u2014 this list's headings, the swing roster's groups, the shift checks \u2014 follows straight away."
-
-
             )
             ),
 
@@ -7040,12 +7035,6 @@ function UploadCertificates() {
             ), /*#__PURE__*/
             React.createElement(Button, { variant: "quiet", onClick: () => setNameEdit(null) }, "Cancel")
             )
-            ), /*#__PURE__*/
-            React.createElement("div", { style: { fontFamily: T.body, fontSize: 12.5, color: T.muted, lineHeight: 1.6, marginTop: 8 } }, "For fixing a mistake. Saving renames ",
-            f.person, " on the crew matrix and on every certificate record filed under them, then reloads the page so everything reads the corrected name. The files themselves stay where they are, and the change is logged."
-
-
-
             )
             ), /*#__PURE__*/
 
@@ -15263,9 +15252,7 @@ function RequiredDocuments() {
         gap: 14, flexWrap: "wrap", marginBottom: 14 } }, /*#__PURE__*/
     React.createElement("div", { style: { flex: "1 1 320px" } }, /*#__PURE__*/
     React.createElement(Eyebrow, { color: T.accent }, "Crew certificates"), /*#__PURE__*/
-    React.createElement("div", { style: { fontFamily: T.body, fontSize: 14, color: T.muted, lineHeight: 1.7, marginTop: 8 } }, "The certificates themselves, filed one folder per crew member. Unlike the spreadsheets above, the portal holds as many of these as you give it. Once new files have arrived from SharePoint, the button reads each one and settles it under its person with its dates \u2014 certificates already read cost nothing to press it again over."
-
-
+    React.createElement("div", { style: { fontFamily: T.body, fontSize: 14, color: T.muted, lineHeight: 1.7, marginTop: 8 } }, "The certificates themselves, filed one folder per crew member. Unlike the spreadsheets above, the portal holds as many of these as you give it."
 
 
     )
@@ -15884,11 +15871,6 @@ function AccessGrantsPage() {
   return (/*#__PURE__*/
     React.createElement("div", { style: { maxWidth: 820 } }, /*#__PURE__*/
     React.createElement("div", { style: { marginBottom: 10 } }, /*#__PURE__*/React.createElement(Eyebrow, { color: T.accent }, "Who can enter, and at what level")), /*#__PURE__*/
-    React.createElement("div", { style: { fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.7, marginBottom: 16 } }, "A grant is all somebody needs: they sign in with this email address and the six-digit code it receives \u2014 no password to hand out, nothing shared. A sign-in lasts one week, then a fresh code re-verifies them. Disabling a grant signs their devices out on the spot. The levels: ",
-
-
-    ACCESS_LEVELS.map((l) => `${l.label} — ${l.blurb}`).join(" ")
-    ), /*#__PURE__*/
 
 
     React.createElement("div", { style: { background: T.panel, border: `1px solid ${T.rule}`, borderLeft: `4px solid ${T.accent}`,
@@ -15950,11 +15932,7 @@ function AccessGrantsPage() {
 
     ungranted.length > 0 && /*#__PURE__*/
     React.createElement("div", { style: { marginTop: 26 } }, /*#__PURE__*/
-    React.createElement("div", { style: { marginBottom: 8 } }, /*#__PURE__*/React.createElement(Eyebrow, { color: T.teal }, "Crew without a grant yet")), /*#__PURE__*/
-    React.createElement("div", { style: { fontFamily: T.body, fontSize: 12.5, color: T.muted, lineHeight: 1.6, marginBottom: 10 } }, "Everyone on the crew matrix or a swing list who can't sign in yet. The email is guessed as first.last@unitedmarine.au \u2014 correct it if theirs differs, pick the level, and grant."
-
-
-    ),
+    React.createElement("div", { style: { marginBottom: 8 } }, /*#__PURE__*/React.createElement(Eyebrow, { color: T.teal }, "Crew without a grant yet")),
     rankGroups.map((grp) => /*#__PURE__*/
     React.createElement("div", { key: grp.label, style: { marginBottom: 6 } }, /*#__PURE__*/
     React.createElement("div", { style: { fontFamily: T.body, fontSize: 11, fontWeight: 700, color: T.accent,
@@ -15988,12 +15966,6 @@ function AccessGrantsPage() {
     React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 8 } }, /*#__PURE__*/
     React.createElement(Eyebrow, { color: T.violet }, "Sign-in traffic"), /*#__PURE__*/
     React.createElement(Button, { variant: "quiet", onClick: loadTraffic }, "Refresh")
-    ), /*#__PURE__*/
-    React.createElement("div", { style: { fontFamily: T.body, fontSize: 12.5, color: T.muted, lineHeight: 1.6, marginBottom: 10 } }, "Every attempt at the door for the last ninety days \u2014 sign-ins, code requests, wrong codes, addresses the portal has never heard of, and refused actions. A run of unknown addresses or wrong codes from one IP is somebody trying their luck. A connection hammering the door is paused automatically, and a burst of suspicious traffic emails every IT Help account."
-
-
-
-
     ),
     trafficErr && /*#__PURE__*/React.createElement("div", { style: { fontFamily: T.body, fontSize: 12.5, color: T.bRed, marginBottom: 10 } }, trafficErr),
     !traffic ? !trafficErr && /*#__PURE__*/React.createElement(Empty, null, "Reading the sign-in book...") : /*#__PURE__*/
@@ -16111,11 +16083,6 @@ function SharePointPage() {
   return (/*#__PURE__*/
     React.createElement("div", { style: { maxWidth: 820 } }, /*#__PURE__*/
     React.createElement("div", { style: { marginBottom: 10 } }, /*#__PURE__*/React.createElement(Eyebrow, { color: T.accent }, "The company library, live")), /*#__PURE__*/
-    React.createElement("div", { style: { fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.7, marginBottom: 14 } }, "The United Operations Team's SharePoint, exactly as Teams holds it \u2014 every folder, every file, read the moment this page asks. Open a file and it comes straight from SharePoint."
-
-
-    ), /*#__PURE__*/
-
 
     React.createElement("div", { style: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontFamily: T.body,
         fontSize: 12.5, color: T.muted, padding: "9px 12px", border: `1px solid ${T.rule}`, borderRadius: 2,
@@ -16147,24 +16114,14 @@ function SharePointPage() {
 
     React.createElement("div", { style: { fontFamily: T.body, fontSize: 13, color: T.text, lineHeight: 1.7, margin: "12px 0" } },
     syncOut.registered.length === 0 ? /*#__PURE__*/
-    React.createElement(React.Fragment, null, /*#__PURE__*/
-    React.createElement("b", null, "Nothing new to take on"), " \u2014 every file in the folders is already on the portal's books. The hourly sync may have taken your new files on before you pressed the button. A certificate that sits in a document-type folder (HRWL Verification and the like) appears against its person only after the AI Checker's next read \u2014 that is the step that identifies whose it is."
-
-
-
-
-    ) : /*#__PURE__*/
+    React.createElement("b", null, "Nothing new to take on.") : /*#__PURE__*/
 
     React.createElement(React.Fragment, null, /*#__PURE__*/
     React.createElement("b", null, syncOut.registered.length, " new certificate", syncOut.registered.length === 1 ? "" : "s", " taken on:"), /*#__PURE__*/
     React.createElement("ul", { style: { margin: "6px 0", paddingLeft: 20, fontFamily: T.mono, fontSize: 11.5 } },
     syncOut.registered.slice(0, 12).map((r) => /*#__PURE__*/React.createElement("li", { key: r.id }, r.key.split("/").slice(1).join(" / ")))
     ),
-    syncOut.registered.length > 12 && /*#__PURE__*/React.createElement("div", null, "...and ", syncOut.registered.length - 12, " more."), /*#__PURE__*/
-    React.createElement("div", { style: { color: T.muted, marginTop: 6 } }, "Each is filed under the folder it sits in for now. Run a read on the AI Checker page and it is refiled under the right person with its expiry date."
-
-
-    )
+    syncOut.registered.length > 12 && /*#__PURE__*/React.createElement("div", null, "...and ", syncOut.registered.length - 12, " more.")
     ),
 
     syncOut.adopted.length > 0 && /*#__PURE__*/

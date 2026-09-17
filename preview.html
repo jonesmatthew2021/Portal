@@ -7016,11 +7016,6 @@ function UploadCertificates() {
                         <Button variant="quiet" onClick={() => setRankEdit(null)}>Cancel</Button>
                       </div>
                     </div>
-                    <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, lineHeight: 1.6, marginTop: 8 }}>
-                      Saving writes the rank onto the crew matrix against {f.person}, so everywhere
-                      that reads it — this list's headings, the swing roster's groups, the shift
-                      checks — follows straight away.
-                    </div>
                   </div>
                 )}
                 {nameEdit && nameEdit.person === f.person && (
@@ -7040,12 +7035,6 @@ function UploadCertificates() {
                         </Button>
                         <Button variant="quiet" onClick={() => setNameEdit(null)}>Cancel</Button>
                       </div>
-                    </div>
-                    <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, lineHeight: 1.6, marginTop: 8 }}>
-                      For fixing a mistake. Saving renames {f.person} on the crew matrix and on
-                      every certificate record filed under them, then reloads the page so
-                      everything reads the corrected name. The files themselves stay where they
-                      are, and the change is logged.
                     </div>
                   </div>
                 )}
@@ -15265,9 +15254,7 @@ function RequiredDocuments() {
           <Eyebrow color={T.accent}>Crew certificates</Eyebrow>
           <div style={{ fontFamily: T.body, fontSize: 14, color: T.muted, lineHeight: 1.7, marginTop: 8 }}>
             The certificates themselves, filed one folder per crew member. Unlike the spreadsheets
-            above, the portal holds as many of these as you give it. Once new files have arrived
-            from SharePoint, the button reads each one and settles it under its person with its
-            dates — certificates already read cost nothing to press it again over.
+            above, the portal holds as many of these as you give it.
           </div>
         </div>
         <UpdateTableButton />
@@ -15884,12 +15871,7 @@ function AccessGrantsPage() {
   return (
     <div style={{ maxWidth: 820 }}>
       <div style={{ marginBottom: 10 }}><Eyebrow color={T.accent}>Who can enter, and at what level</Eyebrow></div>
-      <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.7, marginBottom: 16 }}>
-        A grant is all somebody needs: they sign in with this email address and the six-digit code it
-        receives — no password to hand out, nothing shared. A sign-in lasts one week, then a fresh
-        code re-verifies them. Disabling a grant signs their devices out on the spot. The levels: {ACCESS_LEVELS.map((l) => `${l.label} — ${l.blurb}`).join(" ")}
-      </div>
-
+      
       {/* Granting */}
       <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderLeft: `4px solid ${T.accent}`,
         borderRadius: 2, padding: "13px 15px", marginBottom: 16, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -15951,10 +15933,6 @@ function AccessGrantsPage() {
       {ungranted.length > 0 && (
         <div style={{ marginTop: 26 }}>
           <div style={{ marginBottom: 8 }}><Eyebrow color={T.teal}>Crew without a grant yet</Eyebrow></div>
-          <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, lineHeight: 1.6, marginBottom: 10 }}>
-            Everyone on the crew matrix or a swing list who can't sign in yet. The email is guessed as
-            first.last@unitedmarine.au — correct it if theirs differs, pick the level, and grant.
-          </div>
           {rankGroups.map((grp) => (
             <div key={grp.label} style={{ marginBottom: 6 }}>
               <div style={{ fontFamily: T.body, fontSize: 11, fontWeight: 700, color: T.accent,
@@ -15988,12 +15966,6 @@ function AccessGrantsPage() {
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
           <Eyebrow color={T.violet}>Sign-in traffic</Eyebrow>
           <Button variant="quiet" onClick={loadTraffic}>Refresh</Button>
-        </div>
-        <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, lineHeight: 1.6, marginBottom: 10 }}>
-          Every attempt at the door for the last ninety days — sign-ins, code requests, wrong codes,
-          addresses the portal has never heard of, and refused actions. A run of unknown addresses or
-          wrong codes from one IP is somebody trying their luck. A connection hammering the door is
-          paused automatically, and a burst of suspicious traffic emails every IT Help account.
         </div>
         {trafficErr && <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.bRed, marginBottom: 10 }}>{trafficErr}</div>}
         {!traffic ? (!trafficErr && <Empty>Reading the sign-in book...</Empty>) : (
@@ -16111,11 +16083,6 @@ function SharePointPage() {
   return (
     <div style={{ maxWidth: 820 }}>
       <div style={{ marginBottom: 10 }}><Eyebrow color={T.accent}>The company library, live</Eyebrow></div>
-      <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.7, marginBottom: 14 }}>
-        The United Operations Team's SharePoint, exactly as Teams holds it — every folder, every file,
-        read the moment this page asks. Open a file and it comes straight from SharePoint.
-      </div>
-
       {/* Folders → portal: what the hourly sync last did, and a button to run it now. */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontFamily: T.body,
         fontSize: 12.5, color: T.muted, padding: "9px 12px", border: `1px solid ${T.rule}`, borderRadius: 2,
@@ -16147,13 +16114,7 @@ function SharePointPage() {
             ) : (
               <div style={{ fontFamily: T.body, fontSize: 13, color: T.text, lineHeight: 1.7, margin: "12px 0" }}>
                 {syncOut.registered.length === 0 ? (
-                  <>
-                    <b>Nothing new to take on</b> — every file in the folders is already on the
-                    portal's books. The hourly sync may have taken your new files on before you
-                    pressed the button. A certificate that sits in a document-type folder (HRWL
-                    Verification and the like) appears against its person only after the AI
-                    Checker's next read — that is the step that identifies whose it is.
-                  </>
+                  <b>Nothing new to take on.</b>
                 ) : (
                   <>
                     <b>{syncOut.registered.length} new certificate{syncOut.registered.length === 1 ? "" : "s"} taken on:</b>
@@ -16161,10 +16122,6 @@ function SharePointPage() {
                       {syncOut.registered.slice(0, 12).map((r) => <li key={r.id}>{r.key.split("/").slice(1).join(" / ")}</li>)}
                     </ul>
                     {syncOut.registered.length > 12 && <div>...and {syncOut.registered.length - 12} more.</div>}
-                    <div style={{ color: T.muted, marginTop: 6 }}>
-                      Each is filed under the folder it sits in for now. Run a read on the AI
-                      Checker page and it is refiled under the right person with its expiry date.
-                    </div>
                   </>
                 )}
                 {syncOut.adopted.length > 0 && (
