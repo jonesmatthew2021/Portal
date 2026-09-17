@@ -2197,7 +2197,7 @@ function bandFor(v) {
   return { key: "green", fg: T.bGreen, bg: T.bGreenBg, days: d, date: v };
 }
 
-function Cell({ value }) {
+function Cell({ value, onOpen }) {
   const b = bandFor(value);
   if (!b) return (
     <div title="Not required for this position" style={{
@@ -2205,18 +2205,24 @@ function Cell({ value }) {
       backgroundImage: `repeating-linear-gradient(45deg, ${T.hatchLine} 0 1.5px, ${T.hatchBg} 1.5px 5px)`,
     }} />
   );
+  const openable = !!onOpen;
   if (b.date) {
     return (
-      <div title={`${b.date} - ${b.days < 0 ? Math.abs(b.days) + " days ago" : "in " + b.days + " days"}`}
+      <div title={`${b.date} - ${b.days < 0 ? Math.abs(b.days) + " days ago" : "in " + b.days + " days"}${openable ? " · open the certificate" : ""}`}
+        onClick={openable ? onOpen : undefined}
         style={{ background: b.bg, color: b.fg, borderRadius: 2, padding: "2px 3px", minWidth: 56,
-          fontFamily: T.mono, fontSize: 9.5, fontWeight: 600, lineHeight: 1.25 }}>
+          fontFamily: T.mono, fontSize: 9.5, fontWeight: 600, lineHeight: 1.25,
+          cursor: openable ? "pointer" : undefined,
+          textDecoration: openable ? "underline" : undefined, textUnderlineOffset: 2 }}>
         {b.date.slice(8, 10)}/{b.date.slice(5, 7)}/{b.date.slice(2, 4)}
       </div>
     );
   }
   return (
-    <div style={{ background: b.bg, color: b.fg, borderRadius: 2, padding: "3px", minWidth: 56,
-      fontFamily: T.mono, fontSize: 9.5, lineHeight: 1.25 }}>{b.text}</div>
+    <div onClick={openable ? onOpen : undefined}
+      style={{ background: b.bg, color: b.fg, borderRadius: 2, padding: "3px", minWidth: 56,
+        fontFamily: T.mono, fontSize: 9.5, lineHeight: 1.25,
+        cursor: openable ? "pointer" : undefined }}>{b.text}</div>
   );
 }
 
@@ -3733,8 +3739,10 @@ const MX_NAME_W = 184;
 const MX_COL_W = 64;
 
 function TrainingMatrix() {
-  const { quals: QUALS, setQuals, log, matrixUpdated, certSheet } = usePortal();
+  const { quals: QUALS, setQuals, log, matrixUpdated, certSheet, certificates, certDates } = usePortal();
   const [report, setReport] = useState(null);
+  // The scan behind a pressed cell, opened in the same viewer the checker uses.
+  const [cellScan, setCellScan] = useState(null);
   const [group, setGroup] = useState("All");
   const frame = useRef(null);
   const bar = useRef(null);
@@ -4020,12 +4028,18 @@ function TrainingMatrix() {
                       </div>
                     </button>
                   </td>
-                  {colIdx.map((i) => (
+                  {colIdx.map((i) => {
+                    const url = String(r[3][i] || "").trim()
+                      ? certLinkFor(certDates, certificates, r[0], QUALS.cols[i][0])
+                      : null;
+                    return (
                     <td key={i} style={{ padding: "2px", borderBottom: `1px solid ${T.rule}`, textAlign: "center",
                       background: isPicked ? T.raised : "transparent" }}>
-                      <Cell value={r[3][i]} />
+                      <Cell value={r[3][i]}
+                        onOpen={url ? () => setCellScan({ url, person: r[0], code: QUALS.cols[i][0], title: QUALS.cols[i][1] }) : undefined} />
                     </td>
-                  ))}
+                    );
+                  })}
                   <td style={{ borderBottom: `1px solid ${T.rule}`, background: isPicked ? T.raised : "transparent" }} />
                 </tr>
                 );
@@ -4084,6 +4098,13 @@ function TrainingMatrix() {
 
       {/* floats above everything, pinned to the bottom of the screen */}
       <div ref={bar} className="um-floatbar"><div ref={inner} style={{ height: 1 }} /></div>
+
+      {cellScan && (
+        <CertViewer url={cellScan.url} person={cellScan.person} code={cellScan.code}
+          title={cellScan.title}
+          filename={((certificates || []).find((c) => c.url === cellScan.url) || {}).filename}
+          onClose={() => setCellScan(null)} />
+      )}
     </div>
   );
 }
