@@ -3540,7 +3540,13 @@ function TrainingMatrix() {
   const offTicketStrong = offTicket.filter((x) => x.strong).length;
 
   const rows = QUALS.rows.filter((r) => {
-    if (q && !(r[0] + " " + r[1]).toLowerCase().includes(q.toLowerCase())) return false;
+    if (q) {
+      // Several names at once, comma-separated — a first name is enough.
+      const hay = (r[0] + " " + r[1]).toLowerCase();
+      const words = hay.split(/[^a-z0-9]+/).filter(Boolean);
+      const terms = q.toLowerCase().split(",").map((t) => t.trim()).filter(Boolean);
+      if (terms.length && !terms.some((t) => hay.includes(t) || words.some((w) => w.startsWith(t)))) return false;
+    }
     if (only === "all") return true;
     // Not a band, so it can't be asked of the cells - it is asked of the person.
     if (only === "ticket") return standings.has(keyOf(r));
