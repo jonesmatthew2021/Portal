@@ -3864,7 +3864,10 @@ function settledBoard(people, board) {
  * trip, or somebody shore-based — because those people are moved by hand and
  * are not carried across by a crew change.
  */
-function PersonEditor({ person, onSave, onRemove, onCancel }) {
+function PersonEditor({ person, onSave, onRemove, onCancel, matrix, onRank }) {
+  // The rank is the position the crew matrix holds against them; saving
+  // writes it there, and every page that reads it follows.
+  const [rank, setRank] = useState((matrix && matrix.rank) || "");
   const [f, setF] = useState({
     name: person.name || "",
     dept: person.dept || DEPT_ORDER[0],
@@ -3902,6 +3905,28 @@ function PersonEditor({ person, onSave, onRemove, onCancel }) {
         </div>
       </div>
 
+      {matrix && matrix.name ? (
+        <div style={{ marginBottom: 13 }}>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div style={{ flex: "1 1 260px" }}>
+              <ChoiceField label={`Rank / position — on the matrix as ${matrix.name}`}>
+                <Choices value={rank} compact onPick={(v) => setRank(v)}
+                  options={matrix.options.map((p) => ({ value: p, label: p }))} />
+              </ChoiceField>
+            </div>
+            <div style={{ flex: "0 1 220px" }}>
+              <Field label="Or type a new one">
+                <input className="um-in" value={rank} onChange={(e) => setRank(e.target.value)} />
+              </Field>
+            </div>
+          </div>
+        </div>
+      ) : person.id ? (
+        <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, marginBottom: 13 }}>
+          The rank lives on the crew matrix, and this name isn't matched to a matrix row yet.
+        </div>
+      ) : null}
+
       <label style={{ display: "flex", gap: 9, alignItems: "center", marginBottom: 15,
         fontFamily: T.body, fontSize: 13.5, color: T.text, cursor: "pointer" }}>
         <input type="checkbox" checked={f.active}
@@ -3911,7 +3936,13 @@ function PersonEditor({ person, onSave, onRemove, onCancel }) {
       </label>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <Button onClick={() => name && onSave({ ...person, ...f, name, crew: f.crew || null })}
+        <Button onClick={() => {
+            if (!name) return;
+            if (matrix && matrix.name && onRank && rank.trim() && rank.trim() !== (matrix.rank || "")) {
+              onRank(matrix.name, rank.trim());
+            }
+            onSave({ ...person, ...f, name, crew: f.crew || null });
+          }}
           disabled={!name}>
           {person.id ? "Save" : "Add to the roster"}
         </Button>
@@ -4326,7 +4357,7 @@ const RANK_GROUPS = [
 
 function CrewRosters({ people, setPeople, board, setBoard, log, currentUser, viewSwing, overrides, onShowNow }) {
   const admin = isAdmin(currentUser);
-  const { swingLists, setSwingLists, swingDates, swingBoards, setSwingBoards, quals: MATRIX } = usePortal();
+  const { swingLists, setSwingLists, swingDates, swingBoards, setSwingBoards, quals: MATRIX, setQuals } = usePortal();
 
   // The roster is typed in shorthand — "Arthur", "Ruwan" — but the crew have
   // one full name each on the matrix, so that is the name shown: whoever a
@@ -4695,7 +4726,27 @@ function CrewRosters({ people, setPeople, board, setBoard, log, currentUser, vie
 
           {editing && admin && (
             <PersonEditor person={editing} onSave={savePerson} onRemove={removePerson}
-              onCancel={() => setEditing(null)} />
+              onCancel={() => setEditing(null)}
+              matrix={(() => {
+                const names = MATRIX.rows.map((r) => r[0]);
+                const name = editing.name ? matchRoster(editing.name, names) : null;
+                const row = name ? MATRIX.rows.find((r) => r[0] === name) : null;
+                return {
+                  name,
+                  rank: row ? String(row[1] || "") : "",
+                  options: Array.from(new Set(MATRIX.rows.map((r) => String(r[1] || "").trim()).filter(Boolean))),
+                };
+              })()}
+              onRank={(matrixName, value) => {
+                const i = MATRIX.rows.findIndex((r) => r[0] === matrixName);
+                if (i < 0) return;
+                const before = MATRIX.rows[i][1] || "—";
+                if (before === value) return;
+                const rows = MATRIX.rows.map((row) => [row[0], row[1], row[2], (row[3] || []).slice()]);
+                rows[i][1] = value;
+                setQuals({ cols: MATRIX.cols, rows });
+                log("Crew Matrix", `${matrixName}'s rank changed`, `${before} → ${value}`);
+              }} />
           )}
 
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-start" }}>
@@ -6037,7 +6088,12 @@ function UploadCertificates() {
     );
   }, [certificates]);
 
+  // Only crew members' folders. Documents synced from the type folders (HRWL
+  // Verification and the like) carry the folder's own name rather than a
+  // person token — crew folders are lowercase slugs — and a whole-crew
+  // document isn't anyone's certificate set, so those stay off this list.
   const shownFolders = folders
+    .filter((f) => /^[a-z0-9-]+$/.test(f.folder))
     .map((f) => ({
       ...f,
       items: (q
@@ -6073,6 +6129,32 @@ function UploadCertificates() {
      page that reads it (this list's headings, the swing roster's groups, the
      shift checks) follows on its own. The choices are the positions the
      matrix already carries, with room to type one it doesn't. */
+  /* Fixing somebody's name in place. A typo on the matrix follows a person
+     everywhere, so saving rewrites the matrix row, has the server relabel
+     every record filed under the old name, and reloads so every page reads
+     the corrected books. Swing lists are uploaded documents and keep their
+     own spelling; the roster's spelling is edited on the Roster page. */
+  const [nameEdit, setNameEdit] = useState(null); // { person, value, busy }
+  const saveName = async (person) => {
+    const value = ((nameEdit && nameEdit.value) || "").trim();
+    if (!value || value === person) { setNameEdit(null); return; }
+    setNameEdit((ed) => ({ ...ed, busy: true }));
+    try {
+      await fetch("/api/rename-person", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from: person, to: value }) });
+    } catch (e) {}
+    const i = QUALS.rows.findIndex(
+      (row) => String(row[0]).trim().toUpperCase() === String(person).trim().toUpperCase(),
+    );
+    if (i >= 0) {
+      const rows = QUALS.rows.map((row) => [row[0], row[1], row[2], (row[3] || []).slice()]);
+      rows[i][0] = value;
+      setQuals({ cols: QUALS.cols, rows });
+    }
+    log("Crew Matrix", `${person} renamed`, `${person} → ${value}, records included`);
+    // The matrix save is debounced; give it a breath, then read everything back.
+    setTimeout(() => window.location.reload(), 2500);
+  };
   const [rankEdit, setRankEdit] = useState(null); // { person, value }
   const allPositions = useMemo(
     () => Array.from(new Set(QUALS.rows.map((r) => String(r[1] || "").trim()).filter(Boolean))),
@@ -6599,6 +6681,14 @@ function UploadCertificates() {
                       {rankEdit && rankEdit.person === f.person ? "Close" : "Change rank"}
                     </button>
                   )}
+                  <button className="um-btn"
+                    onClick={() => setNameEdit(nameEdit && nameEdit.person === f.person
+                      ? null
+                      : { person: f.person, value: f.person })}
+                    style={{ background: "transparent", color: T.muted, fontSize: 10,
+                      fontWeight: 700, padding: "2px 0" }}>
+                    {nameEdit && nameEdit.person === f.person ? "Close" : "Fix name"}
+                  </button>
                 </div>
                 {rankEdit && rankEdit.person === f.person && (
                   <div style={{ background: T.deep, border: `1px solid ${T.rule}`, borderRadius: 2,
@@ -6627,6 +6717,32 @@ function UploadCertificates() {
                       Saving writes the rank onto the crew matrix against {f.person}, so everywhere
                       that reads it — this list's headings, the swing roster's groups, the shift
                       checks — follows straight away.
+                    </div>
+                  </div>
+                )}
+                {nameEdit && nameEdit.person === f.person && (
+                  <div style={{ background: T.deep, border: `1px solid ${T.rule}`, borderRadius: 2,
+                    padding: "11px 13px", margin: "6px 0 8px" }}>
+                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                      <div style={{ flex: "1 1 280px" }}>
+                        <Field label="Name, as it should read">
+                          <input className="um-in" value={nameEdit.value}
+                            onChange={(e) => setNameEdit((ed) => ({ ...ed, value: e.target.value }))} />
+                        </Field>
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <Button onClick={() => saveName(f.person)}
+                          disabled={!!nameEdit.busy || !(nameEdit.value || "").trim() || nameEdit.value.trim() === f.person}>
+                          {nameEdit.busy ? "Saving everywhere..." : "Save"}
+                        </Button>
+                        <Button variant="quiet" onClick={() => setNameEdit(null)}>Cancel</Button>
+                      </div>
+                    </div>
+                    <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, lineHeight: 1.6, marginTop: 8 }}>
+                      For fixing a mistake. Saving renames {f.person} on the crew matrix and on
+                      every certificate record filed under them, then reloads the page so
+                      everything reads the corrected name. The files themselves stay where they
+                      are, and the change is logged.
                     </div>
                   </div>
                 )}
