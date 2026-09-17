@@ -364,14 +364,17 @@ function holderOnMatrix(holderName: string, names: string[]) {
  * read, the name printed on it settles the question, so anything sitting in the
  * wrong folder is moved to the right one, bytes and record together.
  */
-async function refile(names: string[]) {
+async function refile(names: string[], limit = Infinity) {
   const certs = await liveCertificates();
   const store = readingStore();
 
   const moved: { id: string; filename: string; folder: string; from: string | null; to: string }[] = [];
+  let remaining = 0;
 
   // One at a time: each move is a copy, a delete and a row update in the blob
-  // store, and they are only worth doing carefully.
+  // store, and they are only worth doing carefully. A big backlog is taken a
+  // slice per request (limit + remaining), so no single request runs longer
+  // than its caller can wait.
   for (const row of certs) {
     const reading = (await store.get(readingKey(row), { type: "json" })) as Reading | null;
     if (!reading || !reading.readable || !reading.holderName) continue;
@@ -382,12 +385,16 @@ async function refile(names: string[]) {
     const folder = certFolderFor(person);
     if (folder === row.folder) continue;
 
+    if (moved.length >= limit) {
+      remaining++;
+      continue;
+    }
     const from = row.person;
     const updated = await refileCertificate(row, person, folder);
     moved.push({ id: updated.id, filename: updated.filename, folder, from, to: person });
   }
 
-  return Response.json({ moved });
+  return Response.json({ moved, remaining });
 }
 
 // ---------------------------------------------------------------------------
@@ -1513,8 +1520,9 @@ export default async (req: Request) => {
     if (!names.length) {
       return Response.json({ error: "The crew names weren't included." }, { status: 400 });
     }
+    const limit = typeof body.limit === "number" && body.limit > 0 ? body.limit : Infinity;
     try {
-      return await refile(names);
+      return await refile(names, limit);
     } catch (e) {
       return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 502 });
     }

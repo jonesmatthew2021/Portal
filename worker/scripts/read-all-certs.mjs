@@ -3,14 +3,12 @@
  * the file's fingerprint, so this is paid for once — interrupting and
  * rerunning is always safe and never re-reads a certificate.
  *
- *   PORTAL_URL=... PORTAL_PASSWORD=... node scripts/read-all-certs.mjs
+ *   PORTAL_URL=... PORTAL_SESSION=<a signed-in session token> node scripts/read-all-certs.mjs
  */
-import { createHash } from "node:crypto";
-
 const BASE = (process.env.PORTAL_URL || "").replace(/\/+$/, "");
-const PASSWORD = process.env.PORTAL_PASSWORD || "";
-if (!BASE || !PASSWORD) throw new Error("Set PORTAL_URL and PORTAL_PASSWORD.");
-const cookie = `portal_key=${createHash("sha256").update(`${PASSWORD}:coolibah-gate`).digest("hex")}`;
+const SESSION = process.env.PORTAL_SESSION || "";
+if (!BASE || !SESSION) throw new Error("Set PORTAL_URL and PORTAL_SESSION.");
+const cookie = `portal_session=${SESSION}`;
 const H = { cookie, "Content-Type": "application/json" };
 
 const state = await (await fetch(`${BASE}/api/state`, { headers: { cookie } })).json();
