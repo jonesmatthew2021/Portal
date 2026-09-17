@@ -67,6 +67,7 @@ function toRecord(row: Row) {
     return { ...common, by: row.uploadedBy, uploaded: row.filedOn };
   }
   if (row.category === "certificate") {
+    const read = row as Row & { readIssued?: string | null; readExpires?: string | null };
     return {
       ...common,
       person: row.person,
@@ -76,6 +77,8 @@ function toRecord(row: Row) {
       title: row.title,
       expires: row.expiresOn,
       checksum: row.checksum,
+      readIssued: read.readIssued ?? null,
+      readExpires: read.readExpires ?? null,
       by: row.uploadedBy,
       uploaded: row.filedOn,
     };
@@ -460,16 +463,25 @@ export default async (req: Request) => {
     // biggest read — every file row at once — and the ORM's per-row mapping
     // was enough to put the request over the free plan's CPU allowance.
     // Plain rows with aliased column names cost almost nothing.
+    // Each certificate row rides out with its own reading's dates — joined by
+    // the fingerprint the reading is keyed under — so a renewal shows what is
+    // printed on it, not what an older scan of the same item said.
     const listed = await getEnv().DB.prepare(
-      `SELECT id, category, bucket, blob_key AS blobKey, filename,
-              content_type AS contentType, size_bytes AS sizeBytes, title,
-              uploaded_by AS uploadedBy, tag, source, party, rank, swing,
-              filed_on AS filedOn, session_id AS sessionId, person, folder,
-              qual_code AS qualCode, expires_on AS expiresOn, checksum,
-              removed_at AS removedAt, removed_by AS removedBy
-       FROM documents WHERE removed_at IS ${wantRemoved ? "NOT" : ""} NULL
+      `SELECT d.id, d.category, d.bucket, d.blob_key AS blobKey, d.filename,
+              d.content_type AS contentType, d.size_bytes AS sizeBytes, d.title,
+              d.uploaded_by AS uploadedBy, d.tag, d.source, d.party, d.rank, d.swing,
+              d.filed_on AS filedOn, d.session_id AS sessionId, d.person, d.folder,
+              d.qual_code AS qualCode, d.expires_on AS expiresOn, d.checksum,
+              d.removed_at AS removedAt, d.removed_by AS removedBy,
+              json_extract(b.value, '$.issuedOn') AS readIssued,
+              json_extract(b.value, '$.expiresOn') AS readExpires,
+              json_extract(b.value, '$.readable') AS readReadable
+       FROM documents d
+       LEFT JOIN blobs b ON b.store = 'certificate-readings'
+        AND b.key = 'r1/' || COALESCE(d.checksum, d.id) || '.json'
+       WHERE d.removed_at IS ${wantRemoved ? "NOT" : ""} NULL
        ORDER BY ${wantRemoved ? "removed_at" : "created_at"} DESC`,
-    ).all<Row & { removedAt: number | null }>();
+    ).all<Row & { removedAt: number | null; readIssued: string | null; readExpires: string | null; readReadable: number | null }>();
 
     return Response.json(
       (listed.results || []).map((row) => ({

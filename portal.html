@@ -6020,6 +6020,7 @@ function UploadCertificates() {
     return hit ? hit[0] : "";
   };
   const readOf = (c) => {
+    if (c.readIssued || c.readExpires) return { issued: c.readIssued || null, expires: c.readExpires || null };
     const code = codeOf(c);
     return code ? certDateFor(certDates, c.person, code) : null;
   };
@@ -6410,9 +6411,32 @@ function UploadCertificates() {
     const words = p.split(/\s+/);
     return (words[words.length - 1] || p).toUpperCase();
   };
+  // Byte-identical copies filed under the same person: the first-filed copy
+  // stays in the person's folder, every further copy goes to the one
+  // duplicates table at the bottom.
+  const dupExtras = useMemo(() => {
+    const byKey = new Map();
+    certificates.forEach((c) => {
+      if (!c.checksum || !c.folder) return;
+      const k = c.folder + "|" + c.checksum;
+      if (!byKey.has(k)) byKey.set(k, []);
+      byKey.get(k).push(c);
+    });
+    const extras = [];
+    for (const g of byKey.values()) {
+      if (g.length < 2) continue;
+      const sorted = [...g].sort((a, b) =>
+      String(a.uploaded || "").localeCompare(String(b.uploaded || "")) || String(a.id).localeCompare(String(b.id)));
+      sorted.slice(1).forEach((c) => extras.push(c));
+    }
+    return extras;
+  }, [certificates]);
+  const dupIds = useMemo(() => new Set(dupExtras.map((c) => c.id)), [dupExtras]);
+
   const folders = useMemo(() => {
     const byFolder = new Map();
     certificates.forEach((c) => {
+      if (dupIds.has(c.id)) return;
       const key = c.folder || certFolder(c.person);
       if (!byFolder.has(key)) byFolder.set(key, { folder: key, person: c.person || key, items: [] });
       byFolder.get(key).items.push(c);
@@ -6420,7 +6444,7 @@ function UploadCertificates() {
     return [...byFolder.values()].sort(
       (a, b) => surnameOf(a.person).localeCompare(surnameOf(b.person)) || a.person.localeCompare(b.person)
     );
-  }, [certificates]);
+  }, [certificates, dupIds]);
 
   // Only crew members' folders. Documents synced from the type folders (HRWL
   // Verification and the like) carry the folder's own name rather than a
@@ -7278,7 +7302,41 @@ function UploadCertificates() {
         })
         ));
 
-    }), /*#__PURE__*/
+    }),
+
+    dupExtras.length > 0 && /*#__PURE__*/
+    React.createElement("div", { style: { marginTop: 22 } }, /*#__PURE__*/
+    React.createElement("div", { style: { marginBottom: 8 } }, /*#__PURE__*/
+    React.createElement(Eyebrow, { color: T.bOrange }, "Duplicates \xB7 ", dupExtras.length)
+    ), /*#__PURE__*/
+    React.createElement("div", { style: { overflowX: "auto", background: T.panel, border: `1px solid ${T.rule}`,
+        borderLeft: `4px solid ${T.bOrange}`, borderRadius: 2 } }, /*#__PURE__*/
+    React.createElement("table", { style: { borderCollapse: "collapse", width: "100%", fontFamily: T.mono, fontSize: 11 } }, /*#__PURE__*/
+    React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null,
+    ["Crew member", "File", "Code", "Filed", "Size", "", ""].map((h, i) => /*#__PURE__*/
+    React.createElement("th", { key: i, style: { textAlign: "left", padding: "7px 12px", borderBottom: `2px solid ${T.rule}`,
+        fontFamily: T.body, fontSize: 11, color: T.muted, textTransform: "uppercase",
+        letterSpacing: ".06em", whiteSpace: "nowrap" } }, h)
+    )
+    )), /*#__PURE__*/
+    React.createElement("tbody", null,
+    dupExtras.map((c) => /*#__PURE__*/
+    React.createElement("tr", { key: c.id, style: { borderBottom: `1px solid ${T.rule}` } }, /*#__PURE__*/
+    React.createElement("td", { style: { padding: "6px 12px", fontFamily: T.body, fontSize: 13, fontWeight: 600,
+        color: T.text, whiteSpace: "nowrap" } }, c.person), /*#__PURE__*/
+    React.createElement("td", { style: { padding: "6px 12px", color: T.text, wordBreak: "break-word", minWidth: 240 } }, c.filename), /*#__PURE__*/
+    React.createElement("td", { style: { padding: "6px 12px", color: T.muted, whiteSpace: "nowrap" } }, codeOf(c) || "—"), /*#__PURE__*/
+    React.createElement("td", { style: { padding: "6px 12px", color: T.muted, whiteSpace: "nowrap" } }, c.uploaded || "—", c.by ? ` · ${c.by}` : ""), /*#__PURE__*/
+    React.createElement("td", { style: { padding: "6px 12px", color: T.muted, whiteSpace: "nowrap" } }, c.size || "—"), /*#__PURE__*/
+    React.createElement("td", { style: { padding: "6px 12px" } }, /*#__PURE__*/React.createElement(OpenLink, { url: c.url })), /*#__PURE__*/
+    React.createElement("td", { style: { padding: "6px 12px" } }, /*#__PURE__*/React.createElement(DeleteBtn, { item: c, onDelete: () => removeCertificate(c) }))
+    )
+    )
+    )
+    )
+    )
+    ), /*#__PURE__*/
+
 
 
 
