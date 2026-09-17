@@ -19,7 +19,7 @@ import { getEnv } from "./env.js";
  */
 
 // The maintenance machinery: bulk moves, store wipes, raw byte writes. IT only.
-const IT_ONLY = ["/api/dev/blob/", "/api/migrate-files", "/api/clear-r2"];
+const IT_ONLY = ["/api/dev/blob/", "/api/migrate-files", "/api/migrate-certs-opms", "/api/clear-r2"];
 
 export function allowed(user: PortalUser, method: string, path: string): boolean {
   if (user.role === "it") return true;

@@ -15,6 +15,7 @@ import archive from "./routes/archive.js";
 import run from "./routes/run.js";
 import sync, { runSync, syncProgress } from "./routes/sync.js";
 import migrate from "./routes/migrate.js";
+import migrateCerts from "./routes/migrate-certs.js";
 import clearR2 from "./routes/clear-r2.js";
 
 /**
@@ -74,6 +75,7 @@ export default {
       }
       if (path === "/api/sync") return await sync(req);
       if (path === "/api/migrate-files") return await migrate(req);
+      if (path === "/api/migrate-certs-opms") return await migrateCerts(req, user!);
       if (path === "/api/clear-r2") return await clearR2(req);
 
       const runMatch = /^\/api\/run\/([a-z-]+)$/.exec(path);

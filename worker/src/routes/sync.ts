@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
 import { CERT_ROOT, SINGLE_FILE_CATEGORIES, fileStore, safeName, tokenForOpmsFolder } from "../db/documents.js";
@@ -71,32 +71,15 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
 
   const singleFolders = Object.values(SINGLE_FILE_CATEGORIES).map((c) => c.folder + "/");
 
-  // --- certificates: every file under certification/<folder>/ ------------
-  await tick(8, "Walking the certificate folders in SharePoint");
-  const certListing = await store.list({ prefix: `${CERT_ROOT}/` });
+  // --- the certificates' one home: the "<Name> - OPMS" folders ------------
   const newCertificates: { key: string; folder: string; person: string; size?: number }[] = [];
   const strays: Found[] = [];
-  for (const f of certListing.blobs) {
-    if (known.has(f.key)) continue;
-    if (singleFolders.some((s) => f.key.startsWith(s))) continue;
-    const parts = f.key.split("/");
-    if (parts.length < 3) {
-      // A file sitting loose in the root of the certificates folder belongs
-      // to nobody the portal can name — reported, not guessed at.
-      strays.push(f);
-      continue;
-    }
-    const folder = parts[1];
-    newCertificates.push({ key: f.key, folder, person: personFrom(folder), size: f.size });
-  }
-
-  // --- the team's own "<Name> - OPMS" folders ------------------------------
   // The certificate home: where the office keeps each person's certificates
   // up to date, and where the portal's own uploads now land. Many of these
   // files are already on the books from the old certification folders — the
   // same name and size against the same person is the same certificate, and
   // is left alone rather than taken on twice.
-  await tick(35, "Walking the OPMS person folders");
+  await tick(20, "Walking the OPMS person folders");
   const opmsListing = await store.list({ prefix: "opms/" });
   const rowsByToken = new Map<string, { name: string; size: number }[]>();
   rows.forEach((r) => {
@@ -115,6 +98,13 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
     if (twin) continue;
     newCertificates.push({ key: f.key, folder: token, person: personFrom(token), size: f.size });
   }
+
+  // The office drops the crew qualification expiry spreadsheet loose in OPMS
+  // Documents; the newest one there is the training matrix to hold.
+  const sheetCandidates = opmsListing.blobs
+    .filter((f) => /^opms\/[^/]+$/.test(f.key) && /qualification\s*expiry/i.test(f.key));
+  sheetCandidates.sort((a, b) => (a.key < b.key ? 1 : -1));
+  const trainingSheet = sheetCandidates[0] || null;
 
   // --- the single-file documents ------------------------------------------
   await tick(55, "Certificates read — checking the single documents");
@@ -141,9 +131,8 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
 
   // --- live files whose bytes are gone from the folders --------------------
   await tick(88, "Comparing the folders with the portal's books");
-  const scannedPrefixes = [`${CERT_ROOT}/`, "opms/", ...singleFolders];
+  const scannedPrefixes = ["opms/", ...singleFolders];
   const seen = new Set([
-    ...certListing.blobs.map((f) => f.key),
     ...opmsListing.blobs.map((f) => f.key),
     ...Object.values(singles).flatMap((s) => s.found.map((f) => f.key)),
   ]);
@@ -156,7 +145,7 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
     .filter((r) => !seen.has(r.blobKey))
     .map((r) => ({ id: r.id, key: r.blobKey, filename: r.filename, category: r.category }));
 
-  return { newCertificates, singles, strays, missing };
+  return { newCertificates, singles, strays, missing, trainingSheet };
 }
 
 /** What the last applied sync did — shown on the SharePoint page. */
@@ -264,8 +253,41 @@ async function apply(
     registered.push({ id, key: c.key, person: c.person });
   }
 
+  // The newest qualification-expiry sheet replaces the training matrix when a
+  // newer one has been dropped in — dated filenames make newest a plain
+  // comparison — and stands as it the first time.
+  let sheetTaken: { key: string } | null = null;
+  if (result.trainingSheet) {
+    const cand = result.trainingSheet;
+    const candName = safeName(cand.key.split("/").pop() || "");
+    const [cur] = await db
+      .select()
+      .from(documents)
+      .where(and(eq(documents.category, "training-matrix"), isNull(documents.removedAt)));
+    if (!cur || (cur.blobKey !== cand.key && candName > cur.filename)) {
+      if (cur) {
+        await db
+          .update(documents)
+          .set({ removedAt: new Date(), removedBy: "SharePoint sync" })
+          .where(eq(documents.id, cur.id));
+      }
+      await db.insert(documents).values({
+        id: crypto.randomUUID(),
+        category: "training-matrix",
+        blobKey: cand.key,
+        filename: candName,
+        contentType: typeFor(candName),
+        sizeBytes: cand.size ?? 0,
+        uploadedBy: "SharePoint sync",
+        filedOn: todayThere(),
+      });
+      sheetTaken = { key: cand.key };
+    }
+  }
+
   const adopted: { category: string; key: string }[] = [];
   for (const [category, s] of Object.entries(result.singles)) {
+    if (category === "training-matrix" && sheetTaken) continue;
     if (!s.adoptable) continue;
     const f = s.found[0];
     await db.insert(documents).values({
@@ -283,7 +305,7 @@ async function apply(
 
   return {
     registered,
-    adopted,
+    adopted: sheetTaken ? [...adopted, { category: "training-matrix", key: sheetTaken.key }] : adopted,
     strays: result.strays,
     missing: result.missing,
     leftAlone: Object.entries(result.singles)

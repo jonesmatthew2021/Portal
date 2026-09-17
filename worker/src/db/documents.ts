@@ -250,7 +250,7 @@ function keyedByName(row: DocumentRow) {
 // already gone the key is still handed back — the row is what the portal lists
 // from, and a row pointing at nothing reads as "no longer on the portal" rather
 // than breaking the listing for everyone.
-async function moveBlob(from: string, to: string) {
+export async function moveBlob(from: string, to: string) {
   if (from === to) return to;
   const store = fileStore();
   const bytes = await store.get(from, { type: "arrayBuffer" });
