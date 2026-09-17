@@ -12564,7 +12564,7 @@ function SwingCompliancePage({ currentUser, people, setPeople, overrides, swingB
       {rosterOpen && (
         <div style={{ position: "fixed", inset: 0, zIndex: 70, background: T.deep, overflowY: "auto" }}>
           <div style={{ borderTop: `6px solid ${onNow ? T.teal : T.accent}`, minHeight: "100%" }}>
-            <div style={{ maxWidth: 1180, margin: "0 auto", padding: "16px 22px 44px" }}>
+            <div style={{ margin: "0 auto", padding: "16px 22px 44px" }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
                 <span style={{ fontFamily: T.display, fontSize: 22, fontWeight: 700, color: T.text }}>
                   {swingLabel(opened)} · Crew {opened.crew}
@@ -15427,7 +15427,7 @@ function CrewListFormPage({ people }) {
   };
 
   return (
-    <div style={{ maxWidth: 680 }}>
+    <div>
       <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderLeft: `4px solid ${T.accent}`,
         borderRadius: 2, padding: "16px 18px", marginBottom: 14 }}>
         <Eyebrow color={T.accent}>Portways form</Eyebrow>
@@ -15629,7 +15629,7 @@ function AccessGrantsPage() {
   };
 
   return (
-    <div style={{ maxWidth: 820 }}>
+    <div>
       <div style={{ marginBottom: 10 }}><Eyebrow color={T.accent}>Who can enter, and at what level</Eyebrow></div>
       
       {/* Granting */}
@@ -15841,7 +15841,7 @@ function SharePointPage() {
   const entries = (listing && listing.entries) || [];
 
   return (
-    <div style={{ maxWidth: 820 }}>
+    <div>
       <div style={{ marginBottom: 10 }}><Eyebrow color={T.accent}>The company library, live</Eyebrow></div>
       {/* Folders → portal: what the hourly sync last did, and a button to run it now. */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontFamily: T.body,
@@ -17198,7 +17198,7 @@ function CoolibahPortal({ role, onSignOut }) {
     <div className="um" style={{ background: T.deep, minHeight: "100vh", fontFamily: T.body }}>
       <style>{STYLES}</style>
       <div style={{ height: 3, background: `linear-gradient(90deg, ${T.accent} 0%, ${T.teal} 100%)` }} />
-      <div style={{ maxWidth: 1400, margin: "0 auto", padding: "0 18px 44px" }}>
+      <div style={{ margin: "0 auto", padding: "0 18px 44px" }}>
         <header className="um-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 24, padding: "16px 0 12px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
             <Roundel />
