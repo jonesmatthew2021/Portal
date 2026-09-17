@@ -6561,8 +6561,8 @@ function UploadCertificates() {
   return (
     <div>
       <div style={{ fontFamily: T.body, fontSize: 14, color: T.muted, lineHeight: 1.7, marginBottom: 14 }}>
-        Certificates are kept in the company SharePoint's <b>Crew Certificate Verifications</b> folder, with a folder of their own
-        for each crew member. Drop the crew folders straight in — <b>Brenton - OPMS</b> and the rest,
+        Certificates are kept in the company SharePoint's <b>OPMS Documents</b> folder, in each crew
+        member's own <b>Name - OPMS</b> folder. Drop the crew folders straight in — <b>Brenton - OPMS</b> and the rest,
         or the one folder holding all of them — and each folder is matched to its person on the matrix
         and filed under them. Anything the roster doesn't recognise is set once, for the whole folder.
         If a certificate is already in that person's folder, nothing is written until you have said
@@ -6703,7 +6703,7 @@ function UploadCertificates() {
                           </div>
                           <div style={{ fontFamily: T.mono, fontSize: 11, color: T.muted, marginTop: 3 }}>
                             {humanSize(item.file.size)}
-                            {folder ? ` · certification/${folder}/` : " · no crew member chosen"}
+                            {folder ? ` · filed for ${item.person}` : " · no crew member chosen"}
                           </div>
                           {clash && (
                             <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.bOrange, marginTop: 5, lineHeight: 1.5 }}>
@@ -6993,7 +6993,13 @@ function UploadCertificates() {
                 );
               })()}
               <span style={{ fontFamily: T.mono, fontSize: 11, color: T.muted, letterSpacing: 0, textTransform: "none" }}>
-                certification/{f.folder}/ · {f.items.length}
+                {(() => {
+                  // Where these are actually filed — read off the real path
+                  // any item in the folder carries, not guessed at.
+                  const real = f.items[0] && f.items[0].path;
+                  const dir = real ? real.split("/").slice(0, -1).join("/") : ('certification/' + f.folder);
+                  return dir + '/ · ' + f.items.length;
+                })()}
               </span>
             </button>
 
