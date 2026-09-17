@@ -74,8 +74,10 @@ export default async (req: Request, actor: PortalUser, id?: string): Promise<Res
     if (!name || !email || !role || !ROLES.has(role)) {
       return Response.json({ error: "A grant needs a name, a working email, and a level." }, { status: 400 });
     }
-    if (role === "it" && actor.role !== "it") {
-      return Response.json({ error: "Only IT Help can grant IT Help." }, { status: 403 });
+    if (role === "it") {
+      // IT Help is the Master's alone: the accounts that hold it hold it,
+      // and no new grant can mint another — whoever is asking.
+      return Response.json({ error: "IT Help can't be granted — it is held by the Master alone." }, { status: 403 });
     }
     const taken = await db.prepare("SELECT id FROM users WHERE email = ?1").bind(email).first();
     if (taken) return Response.json({ error: "That email already has a grant." }, { status: 409 });
@@ -136,8 +138,8 @@ export default async (req: Request, actor: PortalUser, id?: string): Promise<Res
     if (body && "role" in body) {
       const role = clean(body.role);
       if (!role || !ROLES.has(role)) return Response.json({ error: "That's not a level the portal has." }, { status: 400 });
-      if (role === "it" && actor.role !== "it") {
-        return Response.json({ error: "Only IT Help can grant IT Help." }, { status: 403 });
+      if (role === "it") {
+        return Response.json({ error: "IT Help can't be granted — it is held by the Master alone." }, { status: 403 });
       }
       patch.role = role;
     }

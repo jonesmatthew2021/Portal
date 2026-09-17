@@ -16039,7 +16039,7 @@ function AccessGrantsPage() {
       onChange: (e) => setDraft({ ...draft, email: e.target.value }) }), /*#__PURE__*/
     React.createElement("select", { className: "um-in", style: { flex: "0 1 150px" }, value: draft.role,
       onChange: (e) => setDraft({ ...draft, role: e.target.value }) },
-    ACCESS_LEVELS.filter((l) => l.id !== "it" || myRole === "it").map((l) => /*#__PURE__*/
+    ACCESS_LEVELS.filter((l) => l.id !== "it").map((l) => /*#__PURE__*/
     React.createElement("option", { key: l.id, value: l.id }, l.label)
     )
     ), /*#__PURE__*/
@@ -16069,7 +16069,7 @@ function AccessGrantsPage() {
         React.createElement("select", { className: "um-in", style: { fontSize: 11.5, padding: "3px 6px" }, value: g.role,
           disabled: busyId === g.id,
           onChange: (e) => change(g.id, { role: e.target.value }) },
-        ACCESS_LEVELS.filter((l) => l.id !== "it" || myRole === "it").map((l) => /*#__PURE__*/
+        ACCESS_LEVELS.filter((l) => l.id !== "it").map((l) => /*#__PURE__*/
         React.createElement("option", { key: l.id, value: l.id }, l.label)
         )
         ), /*#__PURE__*/
@@ -16106,7 +16106,7 @@ function AccessGrantsPage() {
       onChange: (e) => setRow(p.name, { email: e.target.value }) }), /*#__PURE__*/
     React.createElement("select", { className: "um-in", style: { fontSize: 11.5, padding: "3px 6px" }, value: rowOf(p.name).role,
       onChange: (e) => setRow(p.name, { role: e.target.value }) },
-    ACCESS_LEVELS.filter((l) => l.id !== "it" || myRole === "it").map((l) => /*#__PURE__*/
+    ACCESS_LEVELS.filter((l) => l.id !== "it").map((l) => /*#__PURE__*/
     React.createElement("option", { key: l.id, value: l.id }, l.label)
     )
     ), /*#__PURE__*/
