@@ -12179,7 +12179,7 @@ function FoldSection({ title, meta, tone = T.accent, children, boxRef }) {
   );
 }
 
-function SwingCompliance({ people, overrides, at, setAt, roster }) {
+function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing }) {
   const { shiftAnalysis: heldShift } = usePortal();
   const { quals: QUALS, swingDates, setSwingDates, log, certDates, swingBoard, swingBoards } = usePortal();
   const validityFor = useValidityLookup();
@@ -12327,10 +12327,7 @@ function SwingCompliance({ people, overrides, at, setAt, roster }) {
   const pick = (k, e) => {
     if (e.target.closest("input, button, select, textarea, label")) return;
     setAt(k);
-    setTimeout(() => {
-      const target = rosterRef.current || detailRef.current;
-      if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 60);
+    if (onOpenSwing) onOpenSwing(k);
   };
 
   /* One swing as a card: the dates it is read against, in boxes that can be
@@ -12548,17 +12545,44 @@ function RosterPage({ currentUser, people, setPeople, overrides, swingBoard, set
 }
 
 function SwingCompliancePage({ currentUser, people, setPeople, overrides, swingBoard, setSwingBoard, log }) {
+  const { swingDates } = usePortal();
   const [at, setAt] = useState(currentSwingIndex());
+  const [rosterOpen, setRosterOpen] = useState(false);
+  const onNow = at === currentSwingIndex();
+  const opened = swingWithDates(at, swingDates);
   return (
     <>
       <SectionHead title="Swing Compliance" />
       <SwingCompliance people={people} overrides={overrides} at={at} setAt={setAt}
+        onOpenSwing={() => setRosterOpen(true)}
         roster={
           <CrewRosters people={people} setPeople={setPeople} board={swingBoard}
             setBoard={setSwingBoard} log={log} currentUser={currentUser}
             viewSwing={at} overrides={overrides}
             onShowNow={() => setAt(currentSwingIndex())} />
         } />
+      {rosterOpen && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 70, background: T.deep, overflowY: "auto" }}>
+          <div style={{ borderTop: `6px solid ${onNow ? T.teal : T.accent}`, minHeight: "100%" }}>
+            <div style={{ maxWidth: 1180, margin: "0 auto", padding: "16px 22px 44px" }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+                <span style={{ fontFamily: T.display, fontSize: 22, fontWeight: 700, color: T.text }}>
+                  {swingLabel(opened)} · Crew {opened.crew}
+                </span>
+                <Chip fg={onNow ? T.teal : T.accent} bg={onNow ? T.raised : T.accentSoft}>
+                  {onNow ? "On now" : "Coming swing"}
+                </Chip>
+                <span style={{ flex: 1 }} />
+                <Button variant="quiet" onClick={() => setRosterOpen(false)}>Back to Swing Compliance</Button>
+              </div>
+              <CrewRosters people={people} setPeople={setPeople} board={swingBoard}
+                setBoard={setSwingBoard} log={log} currentUser={currentUser}
+                viewSwing={at} overrides={overrides}
+                onShowNow={() => setAt(currentSwingIndex())} />
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
