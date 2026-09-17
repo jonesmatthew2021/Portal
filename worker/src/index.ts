@@ -9,7 +9,7 @@ import rename from "./routes/rename.js";
 import state from "./routes/state.js";
 import files from "./routes/files.js";
 import file from "./routes/file.js";
-import analyse from "./routes/analyse.js";
+import analyse, { extract, refile } from "./routes/analyse.js";
 import aiChecker from "./routes/ai-checker.js";
 import archive from "./routes/archive.js";
 import run from "./routes/run.js";
@@ -107,14 +107,50 @@ export default {
 
   // The hourly tick (wrangler.toml [triggers]): whatever people have dropped
   // into the SharePoint folders from Teams since last time is taken onto the
-  // portal's books, nobody pressing anything. The outcome is written down for
-  // the SharePoint page either way.
+  // portal's books, then read by the AI and refiled under whoever each
+  // certificate names — nobody pressing anything. Reads already cached cost
+  // nothing, so a quiet hour is a few database looks and done.
   async scheduled(_event: ScheduledEvent, env: PortalEnv) {
     setEnv(env);
+    const t0 = Date.now();
+    const timeLeft = () => Date.now() - t0 < 9 * 60 * 1000;
     try {
       await runSync("hourly schedule");
     } catch (e) {
       console.error("scheduled SharePoint sync failed:", e);
+    }
+    if (!env.ANTHROPIC_API_KEY) return;
+    try {
+      const row = await env.DB.prepare("SELECT data FROM portal_state LIMIT 1").first<{ data: string }>();
+      const quals = row ? JSON.parse(row.data)?.quals : null;
+      const codes: [string, string][] = (quals?.cols || []).map((c: string[]) => [c[0], c[1]]);
+      const names: string[] = (quals?.rows || []).map((r: string[]) => r[0]).filter(Boolean);
+      if (!codes.length) return;
+
+      let readCount = 0;
+      let stalled = 0;
+      while (timeLeft()) {
+        const out = (await (await extract(codes, 4)).json()) as {
+          remaining: number; attempted: number; extracted: number;
+        };
+        readCount += out.extracted;
+        if (out.remaining <= 0 || out.attempted === 0) break;
+        if (out.extracted === 0 && ++stalled >= 2) break;
+      }
+
+      let movedCount = 0;
+      while (names.length && timeLeft()) {
+        const out = (await (await refile(names, 10)).json()) as {
+          moved: unknown[]; remaining: number;
+        };
+        movedCount += (out.moved || []).length;
+        if (!out.remaining) break;
+      }
+      if (readCount || movedCount) {
+        console.log(`hourly read: ${readCount} certificates read, ${movedCount} refiled`);
+      }
+    } catch (e) {
+      console.error("scheduled certificate read failed:", e);
     }
   },
 };

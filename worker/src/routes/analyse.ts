@@ -228,7 +228,7 @@ async function askModel(row: Row, bytes: ArrayBuffer, codes: [string, string][])
 }
 
 /** Read up to `limit` certificates that have no reading yet. */
-async function extract(codes: [string, string][], limit: number) {
+export async function extract(codes: [string, string][], limit: number) {
   const certs = await liveCertificates();
   const store = readingStore();
 
@@ -364,7 +364,7 @@ function holderOnMatrix(holderName: string, names: string[]) {
  * read, the name printed on it settles the question, so anything sitting in the
  * wrong folder is moved to the right one, bytes and record together.
  */
-async function refile(names: string[], limit = Infinity) {
+export async function refile(names: string[], limit = Infinity) {
   const certs = await liveCertificates();
   const store = readingStore();
 
