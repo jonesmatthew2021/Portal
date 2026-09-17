@@ -12815,8 +12815,28 @@ function RosterPage({ currentUser, people, setPeople, overrides, swingBoard, set
 }
 
 function SwingCompliancePage({ currentUser, people, setPeople, overrides, swingBoard, setSwingBoard, log }) {
-  const { swingDates } = usePortal();
+  const { swingDates, setSwingDates } = usePortal();
   const [at, setAt] = useState(currentSwingIndex());
+  const beforeDates = useRef(null);
+  const pageTyped = (which) => ((swingDates || {})[at] || {})[which] || swingAt(at)[which];
+  const pageSetDate = (which, value) => {
+    setSwingDates((d) => {
+      const now = { ...(d || {}) };
+      const base = swingAt(at);
+      now[at] = { flyOut: base.flyOut, flyHome: base.flyHome, ...(now[at] || {}), [which]: value };
+      return now;
+    });
+  };
+  const pageDatesDone = () => {
+    const after = JSON.stringify((swingDates || {})[at] || null);
+    if (after === beforeDates.current) return;
+    beforeDates.current = after;
+    const d = (swingDates || {})[at];
+    if (!d || !d.flyOut || !d.flyHome || d.flyHome <= d.flyOut) return;
+    const s = swingWithDates(at, swingDates);
+    log("Swing Compliance", "Swing dates set",
+    `Crew ${s.crew} · out ${fmtDate(s.flyOut)}, home ${fmtDate(s.flyHome)}`);
+  };
   const [rosterOpen, setRosterOpen] = useState(false);
   const onNow = at === currentSwingIndex();
   const opened = swingWithDates(at, swingDates);
@@ -12844,6 +12864,24 @@ function SwingCompliancePage({ currentUser, people, setPeople, overrides, swingB
     ), /*#__PURE__*/
     React.createElement("span", { style: { flex: 1 } }), /*#__PURE__*/
     React.createElement(Button, { variant: "quiet", onClick: () => setRosterOpen(false) }, "Back to Swing Compliance")
+    ), /*#__PURE__*/
+    React.createElement("div", { style: { display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16, maxWidth: 560 } }, /*#__PURE__*/
+    React.createElement("div", { style: { flex: "1 1 200px" } }, /*#__PURE__*/
+    React.createElement(Field, { label: "Flies out" }, /*#__PURE__*/
+    React.createElement("input", { className: "um-in", type: "date", value: pageTyped("flyOut"),
+      onFocus: () => {beforeDates.current = JSON.stringify((swingDates || {})[at] || null);},
+      onBlur: pageDatesDone,
+      onChange: (e) => pageSetDate("flyOut", e.target.value) })
+    )
+    ), /*#__PURE__*/
+    React.createElement("div", { style: { flex: "1 1 200px" } }, /*#__PURE__*/
+    React.createElement(Field, { label: "Flies home" }, /*#__PURE__*/
+    React.createElement("input", { className: "um-in", type: "date", value: pageTyped("flyHome"),
+      onFocus: () => {beforeDates.current = JSON.stringify((swingDates || {})[at] || null);},
+      onBlur: pageDatesDone,
+      onChange: (e) => pageSetDate("flyHome", e.target.value) })
+    )
+    )
     ), /*#__PURE__*/
     React.createElement(CrewRosters, { people: people, setPeople: setPeople, board: swingBoard,
       setBoard: setSwingBoard, log: log, currentUser: currentUser,
