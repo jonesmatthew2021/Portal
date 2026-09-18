@@ -12529,7 +12529,7 @@ function ELearningStatus() {
 /* A section of the swing page, always open: the title, the verdict beside it,
    and the content underneath. The header still carries the numbers so the page
    reads top to bottom without a click. */
-function FoldSection({ title, meta, tone = T.accent, children, boxRef }) {
+function FoldSection({ title, meta, tone = T.accent, children, boxRef, right }) {
   return (/*#__PURE__*/
     React.createElement("div", { ref: boxRef, style: { background: T.panel, border: `1px solid ${T.rule}`,
         borderLeft: `4px solid ${tone}`, borderRadius: 2, marginBottom: 10, scrollMarginTop: 12 } }, /*#__PURE__*/
@@ -12537,14 +12537,16 @@ function FoldSection({ title, meta, tone = T.accent, children, boxRef }) {
         flexWrap: "wrap" } }, /*#__PURE__*/
     React.createElement("span", { style: { fontFamily: T.display, fontSize: 12, fontWeight: 700, letterSpacing: "0.1em",
         textTransform: "uppercase", color: tone } }, title), /*#__PURE__*/
-    React.createElement("span", { style: { fontFamily: T.body, fontSize: 12.5, color: T.muted, flex: 1, minWidth: 160 } }, meta)
-    ), /*#__PURE__*/
-    React.createElement("div", { style: { padding: "0 15px 15px" } }, children)
+    React.createElement("span", { style: { fontFamily: T.body, fontSize: 12.5, color: T.muted, flex: 1, minWidth: 160 } }, meta),
+    right
+    ),
+    children != null && /*#__PURE__*/React.createElement("div", { style: { padding: "0 15px 15px" } }, children)
     ));
 
 }
 
 function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, onAdhoc, cardsOnly, compact }) {
+  const [rosterShown, setRosterShown] = useState(false);
   const { shiftAnalysis: heldShift } = usePortal();
   const { quals: QUALS, swingDates, setSwingDates, log, certDates, swingBoard, swingBoards } = usePortal();
   const validityFor = useValidityLookup();
@@ -12833,8 +12835,12 @@ function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, on
 
     roster && /*#__PURE__*/
     React.createElement(FoldSection, { boxRef: rosterRef, title: "Roster",
-      meta: `${here.checked.length + here.unchecked.length} onboard ${swingLabel(here.swing)} · move crew on and off, set watches, switch swings` },
-    roster
+      meta: `${here.checked.length + here.unchecked.length} onboard ${swingLabel(here.swing)}` + (
+      rosterShown ? " · move crew on and off, set watches, switch swings" : ""),
+      right: /*#__PURE__*/React.createElement(Button, { variant: rosterShown ? "ghost" : "quiet", onClick: () => setRosterShown(!rosterShown) },
+      rosterShown ? "Hide roster" : "Show roster"
+      ) },
+    rosterShown ? roster : null
     ), /*#__PURE__*/
 
 
