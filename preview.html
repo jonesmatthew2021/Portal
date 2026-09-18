@@ -6356,7 +6356,7 @@ function UploadCertificates() {
    * nothing to take anyone's word for — those are left as they are.
    *
    * No file is written here. The training matrix spreadsheet catches up when
-   * Update the spreadsheet at the bottom of the page is pressed, and the OPMS
+   * Update the spreadsheet at the top of the page is pressed, and the OPMS
    * spreadsheet is never written by the portal at all — it is OPMS's own
    * weekly export, read here only to flag where it disagrees.
    */
@@ -6651,7 +6651,7 @@ function UploadCertificates() {
         name is printed on it — so a scan called <b>Scan_0043.pdf</b> ends up with its owner rather than
         wherever it was dropped. The crew matrix is then brought up to what the certificates say,
         without anyone having to run anything — and the training matrix spreadsheet catches up when
-        Update the spreadsheet at the bottom of the page is pressed.
+        Update the spreadsheet at the top of the page is pressed.
       </div>
 
       {/* Who the next files belong to */}
@@ -6929,7 +6929,7 @@ function UploadCertificates() {
               <div style={{ fontFamily: T.body, fontSize: 14, color: T.text, lineHeight: 1.7 }}>
                 {auto.applied.length
                   ? <>The crew matrix has been brought up to what the certificates say. Press Update the
-                      spreadsheet at the bottom of the page to write the dates into the training matrix
+                      spreadsheet at the top of the page to write the dates into the training matrix
                       workbook. The OPMS spreadsheet is never written by the portal.</>
                   : <>Nothing on the matrix disagreed with the certificates, so the matrix is as it was.</>}
               </div>
@@ -7391,28 +7391,6 @@ function UploadCertificates() {
           </div>
         </div>
       )}
-
-      {/* The one button to press once a batch of uploads and corrections is
-          done: it reviews the certificates on file — the expiry printed on
-          each one, or the issue date held against the validity periods matrix
-          where none is printed — and writes those dates into the training
-          matrix workbook on the portal, in place. The OPMS spreadsheet above
-          is never part of it. */}
-      <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderRadius: 2,
-        padding: "13px 15px", marginTop: 18 }}>
-        <Eyebrow color={T.accent}>Finished uploading or editing?</Eyebrow>
-        <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.muted, lineHeight: 1.7, margin: "7px 0 10px" }}>
-          Press this once everything is in, and the training matrix spreadsheet on file is brought up
-          to what the certificates say. Each certificate is reviewed for its expiry date — where one
-          isn't printed on it, the issue date is held against the validity periods matrix to work out
-          when it runs to. The dates are written into the workbook itself — its colours, formulas,
-          column widths, layout and every other sheet in it stay exactly as they are; only the expiry
-          dates the certificates settle change, and every other cell is left alone. The OPMS
-          spreadsheet is not updated by this — it belongs to OPMS and is replaced by their weekly
-          export.
-        </div>
-        <UpdateTrainingMatrixInPlace label="Update the spreadsheet" />
-      </div>
 
       {/* Notes — the standing footnotes, editable in place and shared */}
       <NotesPanel />
@@ -15793,6 +15771,22 @@ function RequiredDocuments() {
 
   return (
     <div>
+      {/* The one button on this page: every certificate on file is read, the
+          dates worked out, written into the training matrix spreadsheet, and
+          the crew matrix brought to the same figures. */}
+      <div style={{ background: T.panel, border: `1px solid ${T.rule}`,
+        borderLeft: `4px solid ${T.accent}`, borderRadius: 2, padding: "13px 15px",
+        marginBottom: 14, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ flex: "1 1 320px" }}>
+          <Eyebrow color={T.accent}>Update the spreadsheet</Eyebrow>
+          <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.muted, lineHeight: 1.6, marginTop: 6 }}>
+            Reads every certificate on file, writes the dates into the training matrix spreadsheet,
+            and brings the crew matrix to the same figures.
+          </div>
+        </div>
+        <UpdateTrainingMatrixInPlace label="Update the spreadsheet" />
+      </div>
+
       <div style={{ background: T.panel, border: `1px solid ${T.rule}`,
         borderLeft: `4px solid ${missing.length ? T.bRed : T.green}`, borderRadius: 2,
         padding: "15px 17px", marginBottom: 18 }}>
