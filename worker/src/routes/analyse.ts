@@ -459,6 +459,18 @@ export async function refile(names: string[], limit = Infinity) {
       continue;
     }
 
+    // The right folder, but the folder own wording on the row: certificates
+    // the sync took on carry the folder name as their person until a reading
+    // says whose they are, and they sit under Other on the certificates list
+    // with no rank to their name. The reading says whose they are, so the row
+    // takes the matrix name. A label, not a move - one row update, no file
+    // touched - so it does not count against the slice.
+    if ((row.person || "") !== person) {
+      await getEnv().DB.prepare("UPDATE documents SET person = ?2 WHERE id = ?1").bind(row.id, person).run();
+      moved.push({ id: row.id, filename: row.filename, folder, from: row.person, to: person });
+      row.person = person;
+    }
+
     // Already with the right person: the file takes the one filing name,
     // wrapped as a PDF where it is a photo.
     const code = String(codeFor(row, reading, eqTable) || "").trim().toUpperCase();
