@@ -1993,8 +1993,16 @@ function bandFor(v) {
   return { key: "green", fg: T.bGreen, bg: T.bGreenBg, days: d, date: v };
 }
 
-function Cell({ value, onOpen }) {
+function Cell({ value, onOpen, missing }) {
   const b = bandFor(value);
+  if (!b && missing) return (
+    <div title="Required for this position — nothing on file" style={{
+      background: T.bRedBg, color: T.bRed, border: `1px solid ${T.bRed}`, borderRadius: 2,
+      padding: "2px 3px", minWidth: 56, fontFamily: T.mono, fontSize: 9.5, fontWeight: 700,
+      lineHeight: 1.25 }}>
+      Missing
+    </div>
+  );
   if (!b) return (
     <div title="Not required for this position" style={{
       minWidth: 56, height: 15, borderRadius: 2, border: `1px solid ${T.hatchLine}`,
@@ -2166,7 +2174,68 @@ function ticketStandingFor(row, QUALS) {
    senior column the office accepts it for. Read fresh on every update run,
    so a newer sheet takes effect the next press. Column B of the page is the
    item not held; column C is the certificate accepted in its place. */
-async function storeEquivalences(record, cols) {
+/* The skills matrix's own sheet, read as a table: each position against the
+   items marked M — plain Mandatory. An M with a footnote, "mandatory if
+   applicable" and Recommended are left out, so nothing is called missing
+   that the office hasn't demanded outright. */
+function skillsRequirementsFrom(XLSX, wb) {
+  const name = wb.SheetNames.find((n) => /skills matrix/i.test(n)) || wb.SheetNames.find((n) => /matrix/i.test(n));
+  if (!name) return null;
+  const grid = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: "" });
+  // The row of item codes: the one carrying the most cells that read like one.
+  let codesAt = -1, best = 0;
+  grid.slice(0, 20).forEach((r, i) => {
+    const n = r.filter((c) => /^[A-Za-z]{2,4}-\d+/.test(String(c).trim())).length;
+    if (n > best) { best = n; codesAt = i; }
+  });
+  if (codesAt < 0 || best < 3) return null;
+  const codes = grid[codesAt].map((c) => String(c).trim().toUpperCase());
+  const positions = [];
+  for (const r of grid.slice(codesAt + 1)) {
+    const position = String(r[0] || "").replace(/\s+/g, " ").trim();
+    if (!position) continue;
+    const need = [];
+    r.forEach((cell, i) => {
+      if (String(cell).trim() === "M" && codes[i] && /^[A-Z]{2,4}-\d+/.test(codes[i])) need.push(codes[i]);
+    });
+    if (need.length) positions.push({ position, need });
+  }
+  return positions.length ? positions : null;
+}
+
+/* Which of those positions a crew member's own position answers to, and what
+   it must hold. The sheet's site prefix and berth letters are set aside, so
+   "ONS-MRN-TSV Chief Officer (A)" answers to "Chief Officer - Unlimited" —
+   and where a rank has two berths, only what every berth demands is asked,
+   so nobody is marked missing the other berth's ticket. */
+const REQ_SYNONYM = { chef: "cook", chefs: "cook", cooks: "cook" };
+function reqTokens(s) {
+  const site = SHIFT_MATRIX_VESSEL.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  return String(s || "").toLowerCase().normalize("NFKD").split(/[^a-z0-9]+/)
+    .map((w) => REQ_SYNONYM[w] || (w.length > 3 && w.endsWith("s") ? w.slice(0, -1) : w))
+    .filter((w) => w.length > 1 && !site.includes(w));
+}
+function requiredCodesFor(position, skillsRequirements) {
+  const out = new Set();
+  const table = skillsRequirements && Array.isArray(skillsRequirements.positions) ? skillsRequirements.positions : [];
+  if (!table.length) return out;
+  const crew = new Set(reqTokens(position));
+  if (!crew.size) return out;
+  const hits = table.filter((p) => {
+    const words = reqTokens(p.position);
+    return words.length && words.every((w) => crew.has(w));
+  });
+  if (!hits.length) return out;
+  let both = null;
+  for (const h of hits) {
+    const s = new Set(h.need);
+    both = both === null ? s : new Set([...both].filter((c) => s.has(c)));
+  }
+  (both || []).forEach((c) => out.add(c));
+  return out;
+}
+
+async function storeEquivalences(record, cols, onRequirements) {
   try {
     if (!record || !record.url) return;
     const XLSX = await loadXLSX();
@@ -2194,6 +2263,10 @@ async function storeEquivalences(record, cols) {
       rows.push({ held: held.title, code: wanted.code });
     }
     if (rows.length) await analyse({ action: "equivalences", rows });
+    if (onRequirements) {
+      const positions = skillsRequirementsFrom(XLSX, wb);
+      if (positions) onRequirements({ at: todayISO(), positions });
+    }
   } catch (e) {
     // The equivalence page failing to read must never stop a run.
   }
@@ -3573,7 +3646,35 @@ const MX_NAME_W = 184;
 const MX_COL_W = 64;
 
 function TrainingMatrix() {
-  const { quals: QUALS, setQuals, log, matrixUpdated, certSheet, certificates, certDates } = usePortal();
+  const { quals: QUALS, setQuals, log, matrixUpdated, certSheet, certificates, certDates,
+    skillsRequirements, setSkillsRequirements, validityMatrix } = usePortal();
+
+  // The requirements come off the skills matrix workbook. Read here once when
+  // nothing is held yet, so the page doesn't wait on an update run.
+  const askedForReq = useRef(false);
+  React.useEffect(() => {
+    if (askedForReq.current || skillsRequirements || !validityMatrix || !validityMatrix.url) return;
+    askedForReq.current = true;
+    (async () => {
+      try {
+        const XLSX = await loadXLSX();
+        const resp = await fetch(validityMatrix.url);
+        if (!resp.ok) return;
+        const wb = XLSX.read(await resp.arrayBuffer(), { type: "array" });
+        const positions = skillsRequirementsFrom(XLSX, wb);
+        if (positions) setSkillsRequirements({ at: todayISO(), positions });
+      } catch (e) {}
+    })();
+  }, [skillsRequirements, validityMatrix]);
+
+  const needByPosition = useMemo(() => {
+    const m = new Map();
+    QUALS.rows.forEach((r) => {
+      const p = r[1] || "";
+      if (!m.has(p)) m.set(p, requiredCodesFor(p, skillsRequirements));
+    });
+    return m;
+  }, [QUALS, skillsRequirements]);
   const [report, setReport] = useState(null);
   // The scan behind a pressed cell, opened in the same viewer the checker uses.
   const [cellScan, setCellScan] = useState(null);
@@ -3853,6 +3954,7 @@ function TrainingMatrix() {
                     <td key={i} style={{ padding: "2px", borderBottom: `1px solid ${T.rule}`, textAlign: "center",
                       background: isPicked ? T.raised : "transparent" }}>
                       <Cell value={r[3][i]}
+                        missing={!String(r[3][i] || "").trim() && (needByPosition.get(r[1] || "") || new Set()).has(QUALS.cols[i][0])}
                         onOpen={url ? () => setCellScan({ url, person: r[0], code: QUALS.cols[i][0], title: QUALS.cols[i][1] }) : undefined} />
                     </td>
                     );
@@ -9313,6 +9415,7 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
   const {
     quals: QUALS, setQuals, trainingMatrix, setTrainingMatrix,
     refileCertificates, setMatrixUpdated, validityMatrix, log, role,
+    setSkillsRequirements,
   } = usePortal();
 
   const [run, setRun] = useState(null);   // null | { phase, read, total } | { phase: "failed", message }
@@ -9391,7 +9494,7 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
       // losing the run over.
       // The equivalence page is read before the filing pass, so a certificate
       // it re-homes is renamed on this press rather than the one after.
-      await storeEquivalences(validityMatrix, QUALS.cols);
+      await storeEquivalences(validityMatrix, QUALS.cols, setSkillsRequirements);
 
       let moved = [];
       setRun({ phase: "filing", read: progress.read, total: progress.total, filed: 0, toFile: 0 });
@@ -17423,6 +17526,9 @@ function CoolibahPortal({ role, onSignOut }) {
     // Each swing as it stood when it ended — who was on, which watch, from
     // which day to which — kept five years.
     swingArchive: {},
+    // The skills matrix's positions against the items each must hold, read
+    // off the workbook's own sheet.
+    skillsRequirements: null,
     // The pattern those swings are worked out from: the first onswing's day out
     // and the days per swing. Four weeks, Wednesday to Wednesday, from
     // 12 Aug 2026 — until somebody moves it on Swing Compliance.
@@ -17496,6 +17602,7 @@ function CoolibahPortal({ role, onSignOut }) {
   const swingLists = store.swingLists || { A: null, B: null }, setSwingLists = put("swingLists");
   const swingDates = store.swingDates || {}, setSwingDates = put("swingDates");
   const swingArchive = store.swingArchive || {}, setSwingArchive = put("swingArchive");
+  const skillsRequirements = store.skillsRequirements || null, setSkillsRequirements = put("skillsRequirements");
   // The swing pattern, merged over the defaults so a portal saved before the
   // pattern could be moved still runs four weeks from 12 Aug 2026. The two
   // module-level values everything reads (ROSTER_ANCHOR, CYCLE) are re-pointed
@@ -18118,7 +18225,7 @@ function CoolibahPortal({ role, onSignOut }) {
 
   useFitToWidth();
 
-  const ctx = { role, admin, session: SESSION, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
+  const ctx = { role, admin, session: SESSION, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
 
   return (
     <Ctx.Provider value={ctx}>
