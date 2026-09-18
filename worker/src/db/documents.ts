@@ -381,8 +381,11 @@ export async function restoreDocument(row: DocumentRow) {
   const single = singleFileCategory(row.category);
 
   if (row.category === "certificate" && row.folder) {
+    // Back into the crew member own OPMS folder, which is where certificates
+    // live now - restoring to the old certification root would put the file
+    // somewhere nobody looks.
     filename = await freeCertName(row.folder, row.filename);
-    blobKey = await moveBlob(row.blobKey, `${CERT_ROOT}/${row.folder}/${filename}`);
+    blobKey = await moveBlob(row.blobKey, `${opmsCertPrefix(row.folder)}/${filename}`);
   } else if (single) {
     blobKey = await moveBlob(row.blobKey, `${single.folder}/${filename}`);
   }
@@ -458,6 +461,12 @@ export async function canonicaliseCertificate(
     const filename = await freeCertName(r.folder!, name, r.filename);
     const to = `${opmsCertPrefix(r.folder || "unnamed")}/${filename}`;
     if (to === r.blobKey && filename === r.filename) return null;
+    // Nothing is written over. The name was chosen from the portal own books,
+    // and the folder can still hold a file the books do not know about - or
+    // one another run has just written - so the destination is looked at
+    // first. Something already there means this rename is left for next time
+    // rather than a file being lost under it.
+    if (to !== r.blobKey && (await fileStore().getMetadata(to))) return null;
     await fileStore().set(to, data);
     if (to !== r.blobKey) await fileStore().delete(r.blobKey);
     const [updated] = await db
