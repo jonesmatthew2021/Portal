@@ -2425,6 +2425,44 @@ function ticketStandingFor(row, QUALS) {
 
 // Reads the crew qualification workbook in the browser. SheetJS is fetched on
 // demand rather than loaded on every visit.
+/* The Equivalence page of the skills matrix, taken as a table the server
+   keeps: each certificate that is not itself a matrix item, against the most
+   senior column the office accepts it for. Read fresh on every update run,
+   so a newer sheet takes effect the next press. Column B of the page is the
+   item not held; column C is the certificate accepted in its place. */
+async function storeEquivalences(record, cols) {
+  try {
+    if (!record || !record.url) return;
+    const XLSX = await loadXLSX();
+    const resp = await fetch(record.url);
+    if (!resp.ok) return;
+    const wb = XLSX.read(await resp.arrayBuffer(), { type: "array" });
+    const sheetName = wb.SheetNames.find((n) => /equivalen/i.test(n));
+    if (!sheetName) return;
+    const grid = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: "" });
+    const colCodes = new Set(cols.map((c) => String(c[0]).trim().toUpperCase()));
+    const part = (cell) => {
+      const m = String(cell || "").replace(/\s+/g, " ").trim().match(/^([A-Za-z]{2,4}-\d+[A-Za-z]?)\s+(.+)$/);
+      return m ? { code: m[1].toUpperCase(), title: m[2].trim() } : null;
+    };
+    const seen = new Set();
+    const rows = [];
+    for (const r of grid) {
+      const wanted = part(r[1]);
+      const held = part(r[2]);
+      if (!wanted || !held) continue;
+      if (!colCodes.has(wanted.code)) continue; // must land on a matrix column
+      if (colCodes.has(held.code)) continue; // a matrix item already has its home
+      if (seen.has(held.code)) continue; // the first row is the most senior column
+      seen.add(held.code);
+      rows.push({ held: held.title, code: wanted.code });
+    }
+    if (rows.length) await analyse({ action: "equivalences", rows });
+  } catch (e) {
+
+    // The equivalence page failing to read must never stop a run.
+  }}
+
 function loadXLSX() {
   if (typeof window === "undefined") return Promise.reject(new Error("no browser"));
   if (window.XLSX) return Promise.resolve(window.XLSX);
@@ -9615,6 +9653,10 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
       // Certificates filed under the wrong person are moved before comparing,
       // or they would be held against the wrong row. Failing is not worth
       // losing the run over.
+      // The equivalence page is read before the filing pass, so a certificate
+      // it re-homes is renamed on this press rather than the one after.
+      await storeEquivalences(validityMatrix, QUALS.cols);
+
       let moved = [];
       setRun({ phase: "filing", read: progress.read, total: progress.total, filed: 0, toFile: 0 });
       try {

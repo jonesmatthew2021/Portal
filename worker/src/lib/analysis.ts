@@ -547,9 +547,63 @@ export const isDate = (v: string | null | undefined) => !!v && ISO.test(v.trim()
  * only used when it wasn't a low-confidence one, and where two certificates
  * claim the same item the one that runs the longer is the one in force.
  */
+/**
+ * The skills matrix's Equivalence page, as the portal keeps it: certificates
+ * that are not themselves matrix items, each against the most senior column
+ * the office accepts them for. "Master <500GT" is no column of the matrix,
+ * but the page says it stands for Master <100m NC — so that is the column
+ * its dates belong in, however the certificate is worded.
+ */
+export type Equivalence = { held: string; code: string };
+export const EQUIV_KEY = "equivalences.json";
+
+export async function equivalences(): Promise<Equivalence[]> {
+  const held = (await matrixStore().get(EQUIV_KEY, { type: "json" })) as { rows?: Equivalence[] } | null;
+  return Array.isArray(held?.rows) ? (held!.rows as Equivalence[]) : [];
+}
+
+// Words a certificate prints that the sheet leaves out, or the other way
+// round — they tell no ticket from another.
+const EQ_NOISE = new Set(["certificate", "of", "competency", "coc", "the", "a", "and"]);
+const eqWords = (s: string) =>
+  s.toLowerCase().normalize("NFKD").split(/[^a-z0-9]+/).filter((w) => w && !EQ_NOISE.has(w));
+
+/** The column the equivalence page re-homes this title to, or null. An entry
+ * only fires when its whole name appears in the title, and the longest name
+ * wins — so "Master <500GT" beats a plain "Master", and a compound ticket
+ * beats both. */
+export function equivalentCode(title: string | null | undefined, table: Equivalence[]): string | null {
+  if (!title || !table.length) return null;
+  const have = new Set(eqWords(title));
+  let best: { code: string; n: number } | null = null;
+  for (const entry of table) {
+    const need = eqWords(entry.held);
+    if (!need.length || !need.every((w) => have.has(w))) continue;
+    if (!best || need.length > best.n) best = { code: entry.code, n: need.length };
+  }
+  return best ? best.code : null;
+}
+
+/** The one answer to "which column does this certificate speak to": the
+ * uploader's own tagging first, then the equivalence page's say over the
+ * model's guess — that guess is exactly what the page corrects. */
+export function codeFor(
+  row: { qualCode?: string | null },
+  reading: Reading | null,
+  table: Equivalence[],
+): string | null {
+  if (row.qualCode) return row.qualCode;
+  if (!reading) return null;
+  return (
+    equivalentCode(reading.certificateTitle, table) ||
+    (reading.codeConfidence !== "low" ? reading.qualCode || null : null)
+  );
+}
+
 export async function certificateStanding() {
   const certs = await liveCertificates();
   const store = readingStore();
+  const eqTable = await equivalences();
 
   const readings = await Promise.all(
     certs.map(async (row) => ({
@@ -565,7 +619,7 @@ export async function certificateStanding() {
 
   for (const { row, reading } of readings) {
     if (!reading || !reading.readable || !row.person || !row.person.trim()) continue;
-    const code = row.qualCode || (reading.codeConfidence !== "low" ? reading.qualCode : null) || null;
+    const code = codeFor(row, reading, eqTable);
     if (!code || !code.trim()) continue;
 
     // A date typed against the certificate on the portal beats the model's

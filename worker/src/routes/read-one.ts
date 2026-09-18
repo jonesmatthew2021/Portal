@@ -3,7 +3,7 @@ import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
 import { canonicaliseCertificate, certFolderFor, refileCertificate, relocateToRemovedBlob } from "../db/documents.js";
 import { holderOnMatrix, readCertificate } from "./analyse.js";
-import { readingKey, readingStore, type Reading } from "../lib/analysis.js";
+import { codeFor, equivalences, readingKey, readingStore, type Reading } from "../lib/analysis.js";
 import { imageToPdf } from "../lib/pdf-wrap.js";
 import { getEnv } from "../env.js";
 
@@ -77,7 +77,7 @@ export default async (req: Request): Promise<Response> => {
   if (holder && certFolderFor(holder) !== current.folder) {
     current = await refileCertificate(current, holder, certFolderFor(holder));
   }
-  const code = String(reading.qualCode || "").trim().toUpperCase();
+  const code = String(codeFor(current, reading, await equivalences()) || "").trim().toUpperCase();
   const title = code ? titles[code] || "" : "";
   const personName = names.includes(current.person || "") ? current.person : holder;
   if (code && title && personName) {

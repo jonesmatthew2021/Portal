@@ -14,7 +14,10 @@ import {
   askJson,
   base64,
   blankish,
+  EQUIV_KEY,
+  equivalences,
   certificateStanding,
+  codeFor,
   contentFor,
   date,
   isDate,
@@ -398,6 +401,7 @@ export function holderOnMatrix(holderName: string, names: string[]) {
 export async function refile(names: string[], limit = Infinity) {
   const certs = await liveCertificates();
   const readings = await allReadings();
+  const eqTable = await equivalences();
 
   // The matrix's own titles, for the one filing name a read certificate gets:
   // "PERSON - CODE Title.pdf".
@@ -457,7 +461,7 @@ export async function refile(names: string[], limit = Infinity) {
 
     // Already with the right person: the file takes the one filing name,
     // wrapped as a PDF where it is a photo.
-    const code = String(reading.qualCode || "").trim().toUpperCase();
+    const code = String(codeFor(row, reading, eqTable) || "").trim().toUpperCase();
     const title = code ? titles[code] : "";
     if (!code || !title || !/^[a-z0-9-]+$/.test(row.folder || "")) continue;
     const personName = names.includes(row.person || "") ? row.person : person;
@@ -634,6 +638,7 @@ async function compare(matrix: Matrix, sheet: { filename?: string; rows?: { name
   const validity = await validityPeriods().catch(() => null);
 
   const readings = certs.map((row) => ({ row, reading: held.get(readingKey(row)) || null }));
+  const eqTable = await equivalences();
 
   const cols = matrix.cols || [];
   // Keyed upper case, the same way the rest of the codebase matches matrix
@@ -667,7 +672,7 @@ async function compare(matrix: Matrix, sheet: { filename?: string; rows?: { name
     // The uploader's own tagging comes first — a person choosing the item off a
     // list beats a model inferring it from a scan. The model's code is only used
     // where nobody said, and only when it was sure.
-    const code = row.qualCode || (reading.codeConfidence !== "low" ? reading.qualCode : null) || null;
+    const code = codeFor(row, reading, eqTable);
     if (!code || !colAt.has(code.trim().toUpperCase())) {
       notes.push({
         kind: "no-code",
@@ -1586,6 +1591,25 @@ export default async (req: Request) => {
     } catch (e) {
       return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 502 });
     }
+  }
+
+  if (action === "equivalences") {
+    // The Equivalence page of the skills matrix, parsed by the page that has
+    // the workbook open and kept here for every reading that follows.
+    const rows = Array.isArray(body.rows)
+      ? (body.rows as unknown[])
+          .filter(
+            (r): r is { held: string; code: string } =>
+              !!r
+              && typeof (r as { held?: unknown }).held === "string"
+              && typeof (r as { code?: unknown }).code === "string",
+          )
+          .map((r) => ({ held: r.held.replace(/\s+/g, " ").trim().slice(0, 200), code: r.code.trim().toUpperCase().slice(0, 12) }))
+          .filter((r) => !!r.held && /^[A-Z]{2,4}-\d+[A-Z]?$/.test(r.code))
+          .slice(0, 400)
+      : [];
+    await matrixStore().setJSON(EQUIV_KEY, { rows, at: new Date().toISOString() });
+    return Response.json({ stored: rows.length });
   }
 
   if (action === "refile") {
