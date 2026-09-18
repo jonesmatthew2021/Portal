@@ -17970,6 +17970,8 @@ function CoolibahPortal({ role, onSignOut }) {
     });
   }, [people, swingBoard, swingDates, quals, swingArchive]);
 
+  useFitToWidth();
+
   const ctx = { role, admin, session: SESSION, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
 
   return (
@@ -18057,6 +18059,70 @@ function CoolibahPortal({ role, onSignOut }) {
     </div>
     </Ctx.Provider>
   );
+}
+
+/* Nothing on the portal runs off the side of the screen.
+ *
+ * Zooming in is the page getting narrower, and a box that can't fit its
+ * contents at that width would otherwise scroll sideways - which on a desk
+ * means half a swing, or half a table, sitting where nobody can see it. Any
+ * such box is shrunk just enough to fit instead, so the whole of it stays on
+ * screen at any zoom.
+ *
+ * Two exceptions, both deliberate: the crew matrix is a spreadsheet and scrolls
+ * side to side as one, and a phone-sized screen is left to scroll the way
+ * phones do rather than shrinking everything to nothing.
+ */
+const FIT_FLOOR = 0.4;
+// A phone is told apart by its screen being touched rather than by its width:
+// a laptop zoomed to 300% is as narrow as a phone, and on that the whole page
+// still has to fit.
+const onTouchScreen = () =>
+  !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+function useFitToWidth() {
+  React.useEffect(() => {
+    let frame = 0;
+    const fit = () => {
+      const phone = onTouchScreen();
+      document.querySelectorAll(".um-scroll").forEach((el) => {
+        // The matrix keeps its own sideways scroll, and so does the bar that
+        // drives it.
+        if (el.closest(".um-matrix") || el.querySelector(".um-matrix") || el.closest(".um-floatbar")) return;
+        el.style.zoom = "";
+        if (phone) return;
+        // Shrinking the box changes what it measures, so the fit is closed in
+        // on rather than guessed at once.
+        for (let pass = 0; pass < 3; pass++) {
+          const room = el.clientWidth;
+          const want = el.scrollWidth;
+          if (room <= 0 || want <= room + 1) break;
+          const at = parseFloat(el.style.zoom) || 1;
+          const next = Math.max(FIT_FLOOR, Math.floor(at * (room / want) * 995) / 1000);
+          if (next >= at) break;
+          el.style.zoom = String(next);
+        }
+      });
+    };
+    // The portal redraws constantly, so the check is booked on the first change
+    // and left to run - cancelling and rebooking it would mean it never ran at
+    // all. The timer is the backstop for anything that changes size without
+    // changing the page.
+    const soon = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => { frame = 0; fit(); });
+    };
+    soon();
+    window.addEventListener("resize", soon);
+    const tick = setInterval(soon, 400);
+    const watch = new MutationObserver(soon);
+    watch.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      window.removeEventListener("resize", soon);
+      watch.disconnect();
+      clearInterval(tick);
+      cancelAnimationFrame(frame);
+    };
+  }, []);
 }
 
 function App() {
