@@ -12897,20 +12897,39 @@ function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, on
    it. The cards fall back to the swing that is on when the pick goes stale
    (a changeover passing while the page is open), and the roster reads any
    pick that isn't ahead of today as the live board, so the two can't drift. */
-/* One swing, day by day — the window that opens when a swing card is pressed
-   on the Roster page. Every crew member on the swing is a row, every day of
-   the swing a column; a filled cell is a day they are onboard, coloured by the
-   watch they keep. A person's own fly-out and fly-home days are typed against
-   their row; somebody can be brought on for part of the swing underneath. */
+/* One swing, day by day — the window that opens from a swing card's Adhoc
+   changes button on the Roster page. Every crew member on the swing is a row,
+   every day of the swing a column; a filled cell is a day they are onboard,
+   coloured by the watch they keep. A person's own joining and fly-home days
+   are typed against their row; somebody can be brought on for part of the
+   swing underneath. An archived swing opens the same way, read-only. */
 const GRID_DAY = "#F2C14E", GRID_NIGHT = "#3F7FD1", GRID_NONE = "#9AA5B1";
 const isoShift = (iso, n) => new Date(new Date(iso + "T00:00:00Z").getTime() + n * 86400000).toISOString().slice(0, 10);
 const WEEKDAY_LETTER = ["S", "M", "T", "W", "T", "F", "S"];
+const ARCHIVE_YEARS = 5;
 
-function SwingDayGrid({ k, people, board, setBoard, overrides, log, onClose }) {
+/* The swing that is on, as it stands right now: who is onboard, on which
+   watch, from which day to which. Written under its swing number whenever it
+   changes, so that when the swing ends this is the record kept of it. */
+function swingSnapshot(k, people, board, swingDates, quals) {
+  const s = swingWithDates(k, swingDates);
+  const names = quals.rows.map((r) => r[0]);
+  const pos = Object.fromEntries(quals.rows.map((r) => [r[0], r[1] || ""]));
+  const rows = (people || []).filter((p) => p.active && boardSide(p, board) === "on").map((p) => {
+    const name = p.name.includes(",") ? p.name : (matchRoster(p.name, names) || p.name);
+    const w = ((board && board.window) || {})[p.id] || {};
+    return { id: p.id, name, position: pos[name] || p.dept || "", crew: p.crew || "",
+      shift: ((board && board.shift) || {})[p.id] || "", from: w.from || s.flyOut, to: w.to || s.flyHome };
+  });
+  return { k, crew: s.crew, flyOut: s.flyOut, flyHome: s.flyHome, rows };
+}
+
+function SwingDayGrid({ k, people, board, setBoard, overrides, log, onClose, snapshot }) {
   const { swingDates, swingBoards, setSwingBoards, quals: MATRIX } = usePortal();
-  const swing = swingWithDates(k, swingDates);
-  const looking = k > currentSwingIndex();
-  const held = looking ? (swingBoards || {})[k] || { side: {}, shift: {}, window: {} } : (board || {});
+  const readOnly = !!snapshot;
+  const swing = snapshot ? { ...swingAt(snapshot.k), crew: snapshot.crew, flyOut: snapshot.flyOut, flyHome: snapshot.flyHome } : swingWithDates(k, swingDates);
+  const looking = !readOnly && k > currentSwingIndex();
+  const held = readOnly ? {} : looking ? (swingBoards || {})[k] || { side: {}, shift: {}, window: {} } : (board || {});
   const today = todayISO();
   const days = [];
   for (let d = swing.flyOut; d < swing.flyHome; d = isoShift(d, 1)) days.push(d);
@@ -12920,8 +12939,8 @@ function SwingDayGrid({ k, people, board, setBoard, overrides, log, onClose }) {
   const posByName = useMemo(() => Object.fromEntries(MATRIX.rows.map((r) => [r[0], r[1] || ""])), [MATRIX]);
   const fullName = (p) => (p.name.includes(",") ? p.name : (matchRoster(p.name, names) || p.name));
   const positionOf = (p) => posByName[fullName(p)] || p.dept || "";
-  const groupIndex = (p) => {
-    const i = RANK_GROUPS.findIndex(([, re]) => re.test(positionOf(p)));
+  const groupIndexOf = (position) => {
+    const i = RANK_GROUPS.findIndex(([, re]) => re.test(position));
     return i < 0 ? RANK_GROUPS.length : i;
   };
 
@@ -12936,12 +12955,17 @@ function SwingDayGrid({ k, people, board, setBoard, overrides, log, onClose }) {
   const outOf = (p) => (windowOf(p) || {}).from || swing.flyOut;
   const homeOf = (p) => (windowOf(p) || {}).to || swing.flyHome;
 
-  const crew = people.filter((p) => p.active);
-  const rows = crew.filter((p) => sideOf(p) === "on")
-    .sort((a, b) => groupIndex(a) - groupIndex(b) || fullName(a).localeCompare(fullName(b)));
+  const crew = readOnly ? [] : people.filter((p) => p.active);
+  const byRank = (a, b) => groupIndexOf(a.position) - groupIndexOf(b.position) || a.name.localeCompare(b.name);
+  const rows = readOnly
+    ? [...snapshot.rows].map((r) => ({ ...r, key: r.id })).sort(byRank)
+    : crew.filter((p) => sideOf(p) === "on")
+        .map((p) => ({ key: p.id, p, name: fullName(p), position: positionOf(p), crew: p.crew || "",
+          shift: shiftOf(p), from: outOf(p), to: homeOf(p) }))
+        .sort(byRank);
   const offSwing = crew.filter((p) => sideOf(p) !== "on")
-    .sort((a, b) => groupIndex(a) - groupIndex(b) || fullName(a).localeCompare(fullName(b)));
-  const partial = rows.filter((p) => outOf(p) !== swing.flyOut || homeOf(p) !== swing.flyHome).length;
+    .sort((a, b) => groupIndexOf(positionOf(a)) - groupIndexOf(positionOf(b)) || fullName(a).localeCompare(fullName(b)));
+  const partial = rows.filter((r) => r.from !== swing.flyOut || r.to !== swing.flyHome).length;
 
   /* Every change writes the board out in full first, so moving one person
      can't leave everybody else drifting with the rotation. */
@@ -12976,7 +13000,7 @@ function SwingDayGrid({ k, people, board, setBoard, overrides, log, onClose }) {
       if (from === swing.flyOut && to === swing.flyHome) delete b.window[p.id];
       else b.window[p.id] = { from, to };
     });
-    log("Roster", `${fullName(p)} on ${swingLabel(swing)}`, `out ${fmtDate(from)}, home ${fmtDate(to)}`);
+    log("Roster", `${fullName(p)} on ${swingLabel(swing)}`, `joins ${fmtDate(from)}, home ${fmtDate(to)}`);
   };
   const offSwingNow = (p) => {
     write((b) => { b.side[p.id] = "off"; delete b.window[p.id]; });
@@ -12988,24 +13012,27 @@ function SwingDayGrid({ k, people, board, setBoard, overrides, log, onClose }) {
       if (from === swing.flyOut && to === swing.flyHome) delete b.window[p.id];
       else b.window[p.id] = { from, to };
     });
-    log("Roster", `${fullName(p)} onto ${swingLabel(swing)}`, `out ${fmtDate(from)}, home ${fmtDate(to)}`);
+    log("Roster", `${fullName(p)} onto ${swingLabel(swing)}`, `joins ${fmtDate(from)}, home ${fmtDate(to)}`);
   };
 
-  const covered = (p, day) => day >= outOf(p) && day < homeOf(p);
-  const colour = (p) => (shiftOf(p) === "day" ? GRID_DAY : shiftOf(p) === "night" ? GRID_NIGHT : GRID_NONE);
+  const colourOf = (shift) => (shift === "day" ? GRID_DAY : shift === "night" ? GRID_NIGHT : GRID_NONE);
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(22,50,74,0.55)", overflowY: "auto", padding: 16 }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderTop: `6px solid ${looking ? T.accent : T.teal}`,
+      <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderTop: `6px solid ${readOnly ? T.muted : looking ? T.accent : T.teal}`,
         borderRadius: 4, margin: "0 auto", maxWidth: 1800, padding: "18px 22px 24px" }}>
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontFamily: T.display, fontSize: 24, fontWeight: 700, color: T.text }}>
-              {swingLabel(swing)} · crew {swing.crew}
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ fontFamily: T.display, fontSize: 24, fontWeight: 700, color: T.text }}>
+                {swingLabel(swing)} · crew {swing.crew}
+              </span>
+              {readOnly && <Chip fg={T.muted} bg={T.raised}>Archived</Chip>}
             </div>
             <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, marginTop: 4 }}>
-              {rows.length} onboard · {partial === 0 ? "everyone the whole swing" : `${partial} for part of it`} · type a person's own fly-out and fly-home days to change them
+              {rows.length} onboard · {partial === 0 ? "everyone the whole swing" : `${partial} for part of it`}
+              {readOnly ? " · as it stood when the swing ended" : " · type a person's own joining and fly-home days to change them"}
             </div>
           </div>
           <a onClick={onClose} style={{ cursor: "pointer", fontFamily: T.display, fontSize: 22, color: T.muted, lineHeight: 1, padding: "2px 6px" }}>×</a>
@@ -13022,22 +13049,23 @@ function SwingDayGrid({ k, people, board, setBoard, overrides, log, onClose }) {
                     <span style={{ display: "block" }}>{d.slice(8)}</span>
                   </th>
                 ))}
-                <th style={{ minWidth: 150 }}>Flies out</th>
-                <th style={{ minWidth: 150 }}>Flies home</th>
-                <th />
+                <th style={{ minWidth: readOnly ? 110 : 150 }}>Joins</th>
+                <th style={{ minWidth: readOnly ? 110 : 150 }}>Flies home</th>
+                {!readOnly && <th />}
               </tr>
             </thead>
             <tbody>
-              {rows.map((p) => (
-                <GridRow key={p.id} p={p} name={fullName(p)} position={positionOf(p)} days={days} today={today}
-                  out={outOf(p)} home={homeOf(p)} swing={swing} lastDay={lastDay} colour={colour(p)}
-                  covered={(d) => covered(p, d)}
-                  onWindow={(from, to) => setWindow(p, from, to)}
-                  onWhole={() => setWindow(p, swing.flyOut, swing.flyHome)}
-                  onOff={() => offSwingNow(p)} />
+              {rows.map((r) => (
+                <GridRow key={r.key} row={r} days={days} today={today} swing={swing} lastDay={lastDay}
+                  colour={colourOf(r.shift)} readOnly={readOnly}
+                  onWindow={(from, to) => setWindow(r.p, from, to)}
+                  onWhole={() => setWindow(r.p, swing.flyOut, swing.flyHome)}
+                  onOff={() => offSwingNow(r.p)} />
               ))}
               {rows.length === 0 && (
-                <tr><td colSpan={days.length + 4} style={{ fontFamily: T.body, fontSize: 13, color: T.muted, padding: 14 }}>Nobody is on this swing yet.</td></tr>
+                <tr><td colSpan={days.length + 4} style={{ fontFamily: T.body, fontSize: 13, color: T.muted, padding: 14 }}>
+                  {readOnly ? "Nobody was recorded on this swing." : "Nobody is on this swing yet."}
+                </td></tr>
               )}
             </tbody>
           </table>
@@ -13049,37 +13077,59 @@ function SwingDayGrid({ k, people, board, setBoard, overrides, log, onClose }) {
           <span style={{ width: 14, height: 11, background: GRID_NONE, display: "inline-block", borderRadius: 2 }} /> onboard, no watch set · blank is ashore
         </div>
 
-        <PartSwing swing={swing} lastDay={lastDay} offSwing={offSwing} fullName={fullName} positionOf={positionOf} onBring={bringOn} />
+        {!readOnly && (
+          <PartSwing swing={swing} lastDay={lastDay} offSwing={offSwing} fullName={fullName} positionOf={positionOf} onBring={bringOn} />
+        )}
       </div>
     </div>
   );
 }
 
-function GridRow({ p, name, position, days, today, out, home, swing, lastDay, colour, covered, onWindow, onWhole, onOff }) {
+function GridRow({ row, days, today, swing, lastDay, colour, readOnly, onWindow, onWhole, onOff }) {
+  const { name, position, crew, from: out, to: home } = row;
   const [o, setO] = useState(out);
   const [h, setH] = useState(home);
   React.useEffect(() => { setO(out); setH(home); }, [out, home]);
   const backwards = !!o && !!h && h <= o;
   const whole = out === swing.flyOut && home === swing.flyHome;
-  const commit = () => {
-    if (!o || !h || backwards) return;
-    if (o === out && h === home) return;
-    onWindow(o, h);
+  // A date picked from the calendar is applied the moment it is complete,
+  // not only when the box is left.
+  const commit = (nextO, nextH) => {
+    if (!nextO || !nextH || nextH <= nextO) return;
+    if (nextO === out && nextH === home) return;
+    onWindow(nextO, nextH);
   };
+  const covered = (d) => d >= out && d < home;
+  const cells = days.map((d) => {
+    const on = covered(d);
+    return <td key={d} className={`um-daygrid-cell${d === today ? " um-daygrid-today" : ""}`}
+      style={{ background: on ? colour : "transparent" }} title={`${name} · ${fmtDate(d)} · ${on ? "onboard" : "ashore"}`} />;
+  });
+  const who = (
+    <th style={{ textAlign: "left" }}>
+      <div style={{ fontFamily: T.body, fontSize: 13.5, fontWeight: 600, color: T.accent }}>{name}</div>
+      <div style={{ fontFamily: T.mono, fontSize: 11, color: T.muted }}>{position}{crew ? ` · ${crew}` : ""}</div>
+    </th>
+  );
+  if (readOnly) {
+    return (
+      <tr>
+        {who}
+        {cells}
+        <td style={{ fontFamily: T.mono, fontSize: 11.5, color: T.text }}>{fmtDate(out)}</td>
+        <td style={{ fontFamily: T.mono, fontSize: 11.5, color: T.text }}>{fmtDate(home)}</td>
+      </tr>
+    );
+  }
   return (
     <>
       <tr>
-        <th style={{ textAlign: "left" }}>
-          <div style={{ fontFamily: T.body, fontSize: 13.5, fontWeight: 600, color: T.accent }}>{name}</div>
-          <div style={{ fontFamily: T.mono, fontSize: 11, color: T.muted }}>{position}{p.crew ? ` · ${p.crew}` : ""}</div>
-        </th>
-        {days.map((d) => {
-          const on = covered(d);
-          return <td key={d} className={`um-daygrid-cell${d === today ? " um-daygrid-today" : ""}`}
-            style={{ background: on ? colour : "transparent" }} title={`${name} · ${fmtDate(d)} · ${on ? "onboard" : "ashore"}`} />;
-        })}
-        <td><input className="um-in" type="date" value={o} min={swing.flyOut} max={lastDay} onChange={(e) => setO(e.target.value)} onBlur={commit} /></td>
-        <td><input className="um-in" type="date" value={h} min={isoShift(swing.flyOut, 1)} max={swing.flyHome} onChange={(e) => setH(e.target.value)} onBlur={commit} /></td>
+        {who}
+        {cells}
+        <td><input className="um-in" type="date" value={o} min={swing.flyOut} max={lastDay}
+          onChange={(e) => { setO(e.target.value); commit(e.target.value, h); }} onBlur={() => commit(o, h)} /></td>
+        <td><input className="um-in" type="date" value={h} min={isoShift(swing.flyOut, 1)} max={swing.flyHome}
+          onChange={(e) => { setH(e.target.value); commit(o, e.target.value); }} onBlur={() => commit(o, h)} /></td>
         <td style={{ whiteSpace: "nowrap" }}>
           {!whole && <Button variant="quiet" onClick={onWhole}>Whole swing</Button>}{" "}
           <Button variant="quiet" onClick={onOff}>Off swing</Button>
@@ -13087,7 +13137,7 @@ function GridRow({ p, name, position, days, today, out, home, swing, lastDay, co
       </tr>
       {backwards && (
         <tr><td colSpan={days.length + 4} style={{ fontFamily: T.body, fontSize: 12.5, color: T.bRed, padding: "2px 8px 8px" }}>
-          The day home is on or before the day out, so nothing was changed.
+          The day home is on or before the joining day, so nothing was changed.
         </td></tr>
       )}
     </>
@@ -13116,7 +13166,7 @@ function PartSwing({ swing, lastDay, offSwing, fullName, positionOf, onBring }) 
         </div>
       </div>
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end", marginTop: 14 }}>
-        <Field label="Flies out">
+        <Field label="Joins">
           <input className="um-in" type="date" value={o} min={swing.flyOut} max={lastDay} onChange={(e) => setO(e.target.value)} />
         </Field>
         <Field label="Flies home">
@@ -13128,7 +13178,7 @@ function PartSwing({ swing, lastDay, offSwing, fullName, positionOf, onBring }) 
             Bring onboard for those days
           </Button>
         </div>
-        {backwards && <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.bRed }}>The day home is on or before the day out.</span>}
+        {backwards && <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.bRed }}>The day home is on or before the joining day.</span>}
       </div>
     </div>
   );
@@ -13140,16 +13190,35 @@ function PartSwing({ swing, lastDay, offSwing, fullName, positionOf, onBring }) 
    on now, a coming swing's own board for any other, so ad hoc changes land on
    that swing only. */
 function RosterPage({ currentUser, people, setPeople, overrides, swingBoard, setSwingBoard, log }) {
+  const { swingArchive } = usePortal();
   const k0 = currentSwingIndex();
   const [at, setAt] = useState(k0);
   const [swingOpen, setSwingOpen] = useState(false);
+  const [archived, setArchived] = useState(null);
   const boardRef = useRef(null);
+  // Swings gone by, newest first — the record of each as it stood when it
+  // ended, kept five years.
+  const past = Object.values(swingArchive || {}).filter((a) => a && a.k < k0).sort((a, b) => b.k - a.k);
   return (
     <>
       <SectionHead title="Roster" />
       <SwingCompliance cardsOnly people={people} overrides={overrides} at={at} setAt={setAt}
         onOpenSwing={() => { if (boardRef.current) boardRef.current.scrollIntoView({ behavior: "smooth", block: "start" }); }}
         onAdhoc={() => setSwingOpen(true)} />
+      {past.length > 0 && (
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ marginBottom: 8 }}>
+            <Eyebrow>Archived swings</Eyebrow>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {past.map((a) => (
+              <Button key={a.k} variant="quiet" onClick={() => setArchived(a)}>
+                {swingLabel(a)} · Crew {a.crew} · {a.rows.length} onboard
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
       <div ref={boardRef}>
         <CrewRosters people={people} setPeople={setPeople} board={swingBoard}
           setBoard={setSwingBoard} log={log} currentUser={currentUser}
@@ -13159,6 +13228,9 @@ function RosterPage({ currentUser, people, setPeople, overrides, swingBoard, set
       {swingOpen && (
         <SwingDayGrid k={at} people={people} board={swingBoard} setBoard={setSwingBoard}
           overrides={overrides} log={log} onClose={() => setSwingOpen(false)} />
+      )}
+      {archived && (
+        <SwingDayGrid snapshot={archived} people={people} onClose={() => setArchived(null)} />
       )}
     </>
   );
@@ -17379,6 +17451,9 @@ function CoolibahPortal({ role, onSignOut }) {
     // because the dates the check is read against belong to the vessel rather
     // than to whoever typed them.
     swingDates: {},
+    // Each swing as it stood when it ended — who was on, which watch, from
+    // which day to which — kept five years.
+    swingArchive: {},
     // The pattern those swings are worked out from: the first onswing's day out
     // and the days per swing. Four weeks, Wednesday to Wednesday, from
     // 12 Aug 2026 — until somebody moves it on Swing Compliance.
@@ -17451,6 +17526,7 @@ function CoolibahPortal({ role, onSignOut }) {
   const swingBoards = store.swingBoards || {}, setSwingBoards = put("swingBoards");
   const swingLists = store.swingLists || { A: null, B: null }, setSwingLists = put("swingLists");
   const swingDates = store.swingDates || {}, setSwingDates = put("swingDates");
+  const swingArchive = store.swingArchive || {}, setSwingArchive = put("swingArchive");
   // The swing pattern, merged over the defaults so a portal saved before the
   // pattern could be moved still runs four weeks from 12 Aug 2026. The two
   // module-level values everything reads (ROSTER_ANCHOR, CYCLE) are re-pointed
@@ -18052,7 +18128,26 @@ function CoolibahPortal({ role, onSignOut }) {
       onRestoreTab={restoreTab} onRestoreAllTabs={restoreAllTabs} />,
   };
 
-  const ctx = { role, admin, session: SESSION, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
+  /* The swing that is on is written to the archive as it stands, under its
+     swing number, whenever it changes — so the day it ends, the record of it
+     is already there. Records older than five years are let go. */
+  React.useEffect(() => {
+    if (!quals || !quals.rows) return;
+    const k = currentSwingIndex();
+    const entry = swingSnapshot(k, people, swingBoard, swingDates, quals);
+    const keep = isoShift(todayISO(), -(ARCHIVE_YEARS * 365 + 2));
+    const stale = Object.keys(swingArchive || {}).filter((key) => (swingArchive[key] || {}).flyHome < keep);
+    const same = JSON.stringify((swingArchive || {})[k] || null) === JSON.stringify(entry);
+    if (same && !stale.length) return;
+    setSwingArchive((a) => {
+      const next = { ...(a || {}) };
+      stale.forEach((key) => { delete next[key]; });
+      next[k] = entry;
+      return next;
+    });
+  }, [people, swingBoard, swingDates, quals, swingArchive]);
+
+  const ctx = { role, admin, session: SESSION, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
 
   return (
     <Ctx.Provider value={ctx}>
