@@ -263,8 +263,12 @@ export async function moveBlob(from: string, to: string) {
 }
 
 // The name this certificate can go back under. Its own old name is usually free
-// again, but a renewal filed in the meantime may have taken it.
-async function freeCertName(folder: string, filename: string) {
+// again, but a renewal filed in the meantime may have taken it. A rename inside
+// the same folder passes the row own current name, which is free to keep -
+// without that, a duplicate whose wanted name is held by its twin was pushed
+// off its own suffix onto the next one every pass, and back again the pass
+// after, moving real bytes in SharePoint each time and never settling.
+async function freeCertName(folder: string, filename: string, own?: string | null) {
   const live = await db
     .select({ filename: documents.filename })
     .from(documents)
@@ -277,6 +281,7 @@ async function freeCertName(folder: string, filename: string) {
     );
 
   const taken = new Set(live.map((r) => r.filename.toLowerCase()));
+  if (own) taken.delete(own.toLowerCase());
   let name = filename;
   for (let n = 2; taken.has(name.toLowerCase()); n++) name = withSuffix(filename, n);
   return name;
@@ -424,6 +429,15 @@ export async function canonicaliseCertificate(
   const want = safeName(wantBase) + targetExt;
   if (row.filename === want && (!convertible || ext === ".pdf")) return null;
 
+  // Where the rename would land, settled before the bytes are fetched: a
+  // duplicate whose wanted name is held by its twin lands back on its own
+  // name, and that is known without downloading the file to move nowhere.
+  if (!convertible) {
+    const landing = await freeCertName(row.folder!, want, row.filename);
+    if (landing === row.filename
+      && `${opmsCertPrefix(row.folder || "unnamed")}/${landing}` === row.blobKey) return null;
+  }
+
   const store = fileStore();
   let bytes = (await store.get(row.blobKey, { type: "arrayBuffer" })) as ArrayBuffer | null;
   if (!bytes) return null;
@@ -441,7 +455,7 @@ export async function canonicaliseCertificate(
   return await renamed(row, want, bytes, contentType);
 
   async function renamed(r: DocumentRow, name: string, data: ArrayBuffer, type: string | null) {
-    const filename = await freeCertName(r.folder!, name);
+    const filename = await freeCertName(r.folder!, name, r.filename);
     const to = `${opmsCertPrefix(r.folder || "unnamed")}/${filename}`;
     if (to === r.blobKey && filename === r.filename) return null;
     await fileStore().set(to, data);
