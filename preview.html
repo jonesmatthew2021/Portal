@@ -9627,11 +9627,12 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
             action: "refile", names: QUALS.rows.map((row) => row[0]), limit: 40,
           });
           const got = r.moved || [];
+          const gone = r.removed || [];
           moved = moved.concat(got);
-          filed += got.length;
+          filed += got.length + gone.length;
           const left = Number(r.remaining) || 0;
           setRun({ phase: "filing", read: progress.read, total: progress.total, filed, toFile: filed + left });
-          if (!left || !got.length) break;
+          if (!left || (!got.length && !gone.length)) break;
         }
       } catch (e) {
         // Whatever was filed stands; the rest is picked up next time.

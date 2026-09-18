@@ -153,9 +153,9 @@ export default {
       let movedCount = 0;
       while (names.length && timeLeft()) {
         const out = (await (await refile(names, 50)).json()) as {
-          moved: unknown[]; remaining: number;
+          moved: unknown[]; removed?: unknown[]; remaining: number;
         };
-        movedCount += (out.moved || []).length;
+        movedCount += (out.moved || []).length + (out.removed || []).length;
         if (!out.remaining) break;
       }
       if (readCount || movedCount) {

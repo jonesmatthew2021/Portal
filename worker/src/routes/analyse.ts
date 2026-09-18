@@ -5,6 +5,7 @@ import {
   fileStore,
   liveSingleFileRow,
   refileCertificate,
+  removeDocument,
   safeName,
 } from "../db/documents.js";
 import { imageToPdf } from "../lib/pdf-wrap.js";
@@ -411,14 +412,33 @@ export async function refile(names: string[], limit = Infinity) {
   }
 
   const moved: { id: string; filename: string; folder: string; from: string | null; to: string }[] = [];
+  const removed: { id: string; filename: string; person: string | null }[] = [];
   let done = 0;
   let remaining = 0;
+
+  // The same certificate filed twice in the same folder: the newest copy
+  // stays, the older twin goes to the archive - nobody asked for it twice,
+  // and the removal is the same reversible one everything else gets. The
+  // rows arrive newest first, so the first of any pair is the keeper.
+  const keeperOf = new Set<string>();
+  const wasDuplicate = new Set<string>();
+  for (const row of certs) {
+    if (!row.checksum || !row.folder) continue;
+    const twin = `${row.folder}|${row.checksum}`;
+    if (!keeperOf.has(twin)) { keeperOf.add(twin); continue; }
+    if (done >= limit) { remaining++; wasDuplicate.add(row.id); continue; }
+    await removeDocument(row, "duplicate - the newer copy stays");
+    removed.push({ id: row.id, filename: row.filename, person: row.person });
+    wasDuplicate.add(row.id);
+    done++;
+  }
 
   // One at a time: each move is a copy, a delete and a row update in the blob
   // store, and they are only worth doing carefully. A big backlog is taken a
   // slice per request (limit + remaining), so no single request runs longer
   // than its caller can wait.
   for (const row of certs) {
+    if (wasDuplicate.has(row.id)) continue;
     const reading = readings.get(readingKey(row)) || null;
     if (!reading || !reading.readable || !reading.holderName) continue;
 
@@ -453,7 +473,7 @@ export async function refile(names: string[], limit = Infinity) {
     }
   }
 
-  return Response.json({ moved, remaining });
+  return Response.json({ moved, removed, remaining });
 }
 
 // ---------------------------------------------------------------------------
