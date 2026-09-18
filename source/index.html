@@ -13085,6 +13085,16 @@ function RosterPage({ currentUser, people, setPeople, overrides, swingBoard, set
   );
 }
 
+/* The circle against each name on a requirement: filled where they are one of
+   the number the guideline asks for, hollow where they are held over and above
+   it, and red where the requirement isn't met at all. */
+function holderCircle(r, n) {
+  const need = /^[0-9]+$/.test(String(r.required || "").trim()) ? Number(String(r.required).trim()) : null;
+  if (r.verdict === SHIFT_STATUS.short) return { colour: T.bRed, solid: true };
+  if (r.verdict === SHIFT_STATUS.unclear) return { colour: T.muted, solid: false };
+  return { colour: T.teal, solid: need == null || n < need };
+}
+
 /* What the colours on this page mean, said once at the top. The same five
    run through the swing cards, the tiles and the requirement lists. */
 function ComplianceLegend() {
@@ -13095,6 +13105,12 @@ function ComplianceLegend() {
     [T.accent, "On now", "the swing the vessel is on"],
     [T.muted, "Not on the matrix", "nothing on file to read them against"],
   ];
+  // The circles against the names under each requirement.
+  const circles = [
+    [T.teal, true, "Required", "one of the number the guideline asks for"],
+    [T.teal, false, "Surplus", "held over and above the number required"],
+    [T.bRed, true, "Requirement not met", "the shift is short of holders"],
+  ];
   return (
     <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderRadius: 2,
       padding: "11px 15px", marginBottom: 14, display: "flex", gap: 18, flexWrap: "wrap",
@@ -13102,6 +13118,15 @@ function ComplianceLegend() {
       {keys.map(([colour, word, what]) => (
         <span key={word} style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
           <span style={{ width: 13, height: 13, borderRadius: 2, background: colour, flex: "none" }} />
+          <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.text, fontWeight: 600 }}>{word}</span>
+          <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted }}>{what}</span>
+        </span>
+      ))}
+      <span style={{ width: "100%", height: 1, background: T.rule }} />
+      {circles.map(([colour, solid, word, what]) => (
+        <span key={word} style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+          <span style={{ width: 13, height: 13, borderRadius: "50%", flex: "none",
+            border: `2px solid ${colour}`, background: solid ? colour : "transparent" }} />
           <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.text, fontWeight: 600 }}>{word}</span>
           <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted }}>{what}</span>
         </span>
@@ -14298,10 +14323,22 @@ function SwingShiftAllocation({ here }) {
                           </button>
                         )}
                         {(holders.length > 0 || r.detail) && (
-                          <span style={{ width: "100%", fontFamily: T.mono, fontSize: 9.5, color: T.muted,
-                            lineHeight: 1.6, paddingLeft: 2 }}>
-                            {holders.length > 0 ? holders.join(" · ") : null}
-                            {r.detail && r.verdict !== SHIFT_STATUS.met ? (holders.length ? " — " : "") + r.detail : null}
+                          <span style={{ width: "100%", display: "flex", flexWrap: "wrap",
+                            gap: "5px 16px", alignItems: "center", lineHeight: 1.6, paddingLeft: 2 }}>
+                            {holders.map((who, n) => {
+                              const dress = holderCircle(r, n);
+                              return (
+                                <span key={`${who}-${n}`} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                  <span style={{ width: 11, height: 11, borderRadius: "50%", flex: "none",
+                                    border: `2px solid ${dress.colour}`,
+                                    background: dress.solid ? dress.colour : "transparent" }} />
+                                  <span style={{ fontFamily: T.mono, fontSize: 10.5, color: T.text }}>{who}</span>
+                                </span>
+                              );
+                            })}
+                            {r.detail && r.verdict !== SHIFT_STATUS.met ? (
+                              <span style={{ fontFamily: T.mono, fontSize: 9.5, color: T.muted }}>{r.detail}</span>
+                            ) : null}
                           </span>
                         )}
                       </div>
