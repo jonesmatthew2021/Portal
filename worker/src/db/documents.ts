@@ -232,7 +232,9 @@ export function certFolderFor(person: string) {
 // that would break a blob key or climb out of the folder.
 export function safeName(name: string) {
   const base = (name.split(/[\\/]/).pop() || "certificate").trim();
-  return base.replace(/[^A-Za-z0-9._ ()&+-]/g, "_").slice(0, 120) || "certificate";
+  // Commas and apostrophes stay: "PEJIC, Anton" and "O'BRIEN" are how the
+  // filing names read, and SharePoint takes both.
+  return base.replace(/[^A-Za-z0-9._ ()&+,'-]/g, "_").slice(0, 120) || "certificate";
 }
 
 export function withSuffix(name: string, n: number) {
