@@ -1,10 +1,14 @@
 
 import {
+  canonicaliseCertificate,
   certFolderFor,
   fileStore,
   liveSingleFileRow,
   refileCertificate,
+  safeName,
 } from "../db/documents.js";
+import { imageToPdf } from "../lib/pdf-wrap.js";
+import { getEnv } from "../env.js";
 import {
   askJson,
   base64,
@@ -368,7 +372,20 @@ export async function refile(names: string[], limit = Infinity) {
   const certs = await liveCertificates();
   const store = readingStore();
 
+  // The matrix's own titles, for the one filing name a read certificate gets:
+  // "PERSON - CODE Title.pdf".
+  const titles: Record<string, string> = {};
+  try {
+    const state = await getEnv().DB.prepare("SELECT data FROM portal_state LIMIT 1").first<{ data: string }>();
+    for (const c of JSON.parse(state?.data || "{}")?.quals?.cols || []) {
+      titles[String(c[0]).trim().toUpperCase()] = String(c[1] || "").trim();
+    }
+  } catch (e) {
+    console.error("matrix titles not read for renaming:", e);
+  }
+
   const moved: { id: string; filename: string; folder: string; from: string | null; to: string }[] = [];
+  let done = 0;
   let remaining = 0;
 
   // One at a time: each move is a copy, a delete and a row update in the blob
@@ -383,15 +400,31 @@ export async function refile(names: string[], limit = Infinity) {
     if (!person) continue;
 
     const folder = certFolderFor(person);
-    if (folder === row.folder) continue;
-
-    if (moved.length >= limit) {
-      remaining++;
+    if (folder !== row.folder) {
+      if (done >= limit) { remaining++; continue; }
+      const from = row.person;
+      const updated = await refileCertificate(row, person, folder);
+      moved.push({ id: updated.id, filename: updated.filename, folder, from, to: person });
+      done++;
       continue;
     }
-    const from = row.person;
-    const updated = await refileCertificate(row, person, folder);
-    moved.push({ id: updated.id, filename: updated.filename, folder, from, to: person });
+
+    // Already with the right person: the file takes the one filing name,
+    // wrapped as a PDF where it is a photo.
+    const code = String(reading.qualCode || "").trim().toUpperCase();
+    const title = code ? titles[code] : "";
+    if (!code || !title || !/^[a-z0-9-]+$/.test(row.folder || "")) continue;
+    const personName = names.includes(row.person || "") ? row.person : person;
+    if (!personName) continue;
+    const ext = ((row.filename.match(/\.[^.]+$/) || [""])[0] || "").toLowerCase();
+    const targetExt = ext === ".pdf" || [".jpg", ".jpeg", ".png"].includes(ext) ? ".pdf" : ext;
+    if (row.filename === safeName(`${personName} - ${code} ${title}`) + targetExt) continue;
+    if (done >= limit) { remaining++; continue; }
+    const renamedRow = await canonicaliseCertificate(row, `${personName} - ${code} ${title}`, imageToPdf);
+    if (renamedRow) {
+      moved.push({ id: renamedRow.id, filename: renamedRow.filename, folder: row.folder!, from: row.filename, to: personName });
+      done++;
+    }
   }
 
   return Response.json({ moved, remaining });

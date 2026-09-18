@@ -405,6 +405,54 @@ export async function purgeDocument(row: DocumentRow) {
  * to the folder of the person the certificate is actually for, under a name that
  * folder still has free, and the row follows them.
  */
+/**
+ * One filing name for a read certificate: "PERSON - CODE Title.pdf". The
+ * bytes are wrapped as a PDF where they are a photo the wrapper can carry;
+ * anything else keeps its own format behind the same name. A name already
+ * right is left alone.
+ */
+export async function canonicaliseCertificate(
+  row: DocumentRow,
+  wantBase: string,
+  imageToPdf: (bytes: ArrayBuffer, contentType: string | null) => Uint8Array | null,
+) {
+  const ext = ((row.filename.match(/\.[^.]+$/) || [""])[0] || "").toLowerCase();
+  const convertible = [".jpg", ".jpeg", ".png"].includes(ext);
+  const targetExt = ext === ".pdf" || convertible ? ".pdf" : ext;
+  const want = safeName(wantBase) + targetExt;
+  if (row.filename === want && (!convertible || ext === ".pdf")) return null;
+
+  const store = fileStore();
+  let bytes = (await store.get(row.blobKey, { type: "arrayBuffer" })) as ArrayBuffer | null;
+  if (!bytes) return null;
+  let contentType = row.contentType;
+  if (convertible) {
+    const pdf = imageToPdf(bytes, row.contentType);
+    if (!pdf) {
+      // Not a photo the wrapper can carry after all — keep its own format.
+      if (row.filename === safeName(wantBase) + ext) return null;
+      return await renamed(row, safeName(wantBase) + ext, bytes, row.contentType);
+    }
+    bytes = pdf.buffer.slice(pdf.byteOffset, pdf.byteOffset + pdf.byteLength) as ArrayBuffer;
+    contentType = "application/pdf";
+  }
+  return await renamed(row, want, bytes, contentType);
+
+  async function renamed(r: DocumentRow, name: string, data: ArrayBuffer, type: string | null) {
+    const filename = await freeCertName(r.folder!, name);
+    const to = `${opmsCertPrefix(r.folder || "unnamed")}/${filename}`;
+    if (to === r.blobKey && filename === r.filename) return null;
+    await fileStore().set(to, data);
+    if (to !== r.blobKey) await fileStore().delete(r.blobKey);
+    const [updated] = await db
+      .update(documents)
+      .set({ blobKey: to, filename, contentType: type, sizeBytes: data.byteLength })
+      .where(eq(documents.id, r.id))
+      .returning();
+    return updated;
+  }
+}
+
 export async function refileCertificate(row: DocumentRow, person: string, folder: string) {
   const filename = await freeCertName(folder, row.filename);
   const blobKey = await moveBlob(row.blobKey, `${opmsCertPrefix(folder)}/${filename}`);

@@ -3,6 +3,7 @@ import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
 import { getEnv } from "../env.js";
+import { imageToPdf } from "../lib/pdf-wrap.js";
 import {
   CERT_ROOT,
   SINGLE_FILE_CATEGORIES,
@@ -143,9 +144,22 @@ async function uploadCertificate(form: FormData, file: File) {
   }
 
   const folder = folderFor(person);
-  const bytes = await file.arrayBuffer();
+  // The filing rule is PDF: a photographed certificate is wrapped as a
+  // one-page PDF on the way in — same pixels, its own page size. What can't
+  // be wrapped honestly (HEIC, documents) is filed as it came.
+  let bytes = await file.arrayBuffer();
+  let uploadName = file.name;
+  let uploadType = safeContentType(file.type);
+  if (!/\.pdf$/i.test(file.name)) {
+    const pdf = imageToPdf(bytes, file.type || null);
+    if (pdf) {
+      bytes = pdf.buffer.slice(pdf.byteOffset, pdf.byteOffset + pdf.byteLength) as ArrayBuffer;
+      uploadName = file.name.replace(/\.[^.]+$/, "") + ".pdf";
+      uploadType = "application/pdf";
+    }
+  }
   const checksum = await sha256(bytes);
-  const filename = safeName(file.name);
+  const filename = safeName(uploadName);
 
   // Everything already in this person's folder, which answers both "is this file
   // already here" and "what is this new file allowed to be called". Certificates
@@ -266,8 +280,8 @@ async function uploadCertificate(form: FormData, file: File) {
         bucket: folder,
         blobKey,
         filename: stored,
-        contentType: safeContentType(file.type),
-        sizeBytes: file.size,
+        contentType: uploadType,
+        sizeBytes: bytes.byteLength,
         title: field(form, "title"),
         uploadedBy,
         filedOn: filedOnFrom(form),
