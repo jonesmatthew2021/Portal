@@ -3665,24 +3665,7 @@ function TrainingMatrix() {
 
   return (
     <div>
-      <SectionHead title="Crew Matrix" meta={
-        <div style={{ textAlign: "right" }}>
-          <div>{QUALS.rows.length} crew · {QUALS.cols.length} items</div>
-          <div style={{ marginTop: 3, color: matrixUpdated ? T.text : T.muted }}>
-            Matrix updated {matrixUpdated ? fmtDate(matrixUpdated) : "-"}
-          </div>
-          {/* The matrix and the spreadsheet on file are the same figures, so the
-              latest one is offered from here rather than only from the Admin tab. */}
-          {certSheet && certSheet.url && (
-            <div style={{ marginTop: 3 }}>
-              <a href={certSheet.url} target="_blank" rel="noreferrer"
-                style={{ fontFamily: T.mono, fontSize: 11, color: T.accent, textDecoration: "none" }}>
-                Latest matrix · {certSheet.filename}
-              </a>
-            </div>
-          )}
-        </div>
-      } />
+      <SectionHead title="Crew Matrix" />
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 13 }}>
         {chip("expired or within 30 days", T.bRed, tally.red, "red")}

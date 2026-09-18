@@ -3929,24 +3929,7 @@ function TrainingMatrix() {
 
   return (/*#__PURE__*/
     React.createElement("div", null, /*#__PURE__*/
-    React.createElement(SectionHead, { title: "Crew Matrix", meta: /*#__PURE__*/
-      React.createElement("div", { style: { textAlign: "right" } }, /*#__PURE__*/
-      React.createElement("div", null, QUALS.rows.length, " crew \xB7 ", QUALS.cols.length, " items"), /*#__PURE__*/
-      React.createElement("div", { style: { marginTop: 3, color: matrixUpdated ? T.text : T.muted } }, "Matrix updated ",
-      matrixUpdated ? fmtDate(matrixUpdated) : "-"
-      ),
-
-
-      certSheet && certSheet.url && /*#__PURE__*/
-      React.createElement("div", { style: { marginTop: 3 } }, /*#__PURE__*/
-      React.createElement("a", { href: certSheet.url, target: "_blank", rel: "noreferrer",
-        style: { fontFamily: T.mono, fontSize: 11, color: T.accent, textDecoration: "none" } }, "Latest matrix \xB7 ",
-      certSheet.filename
-      )
-      )
-
-      ) }
-    ), /*#__PURE__*/
+    React.createElement(SectionHead, { title: "Crew Matrix" }), /*#__PURE__*/
 
     React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 13 } },
     chip("expired or within 30 days", T.bRed, tally.red, "red"),
