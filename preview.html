@@ -4734,8 +4734,10 @@ const RANK_GROUPS = [
   ["Chefs", /cook|chef|steward/i],
 ];
 
-function CrewRosters({ people, setPeople, board, setBoard, log, currentUser, viewSwing, overrides, onShowNow }) {
-  const admin = isAdmin(currentUser);
+function CrewRosters({ people, setPeople, board, setBoard, log, currentUser, viewSwing, overrides, onShowNow, readOnly, asAt }) {
+  // Swing Compliance shows the board to read it against the certificates, not
+  // to work on it - the crew are moved on the Roster page.
+  const admin = isAdmin(currentUser) && !readOnly;
   const { swingLists, setSwingLists, swingDates, swingBoards, setSwingBoards, quals: MATRIX, setQuals } = usePortal();
 
   // The roster is typed in shorthand — "Arthur", "Ruwan" — but the crew have
@@ -4806,7 +4808,21 @@ function CrewRosters({ people, setPeople, board, setBoard, log, currentUser, vie
     if (held === "on" || held === "off") return held;
     return swingStatusFor(p, viewSwing, overrides);
   };
-  const sideOf = (p) => (looking ? aheadSide(p) : boardSide(p, board));
+  /* Read as at a day - Swing Compliance asks for today - somebody whose own
+     days have finished, or havent started, is ashore rather than onboard.
+     Left off, the board is the board: everyone on the swing, so they can be
+     worked on. */
+  const dayWindows = (looking ? (aheadHeld || {}).window : (board || {}).window) || {};
+  const aboardOn = (p) => {
+    if (!asAt) return true;
+    const w = dayWindows[p.id];
+    if (!w || !w.from || !w.to) return true;
+    return asAt >= w.from && asAt < w.to;
+  };
+  const sideOf = (p) => {
+    const side = looking ? aheadSide(p) : boardSide(p, board);
+    return side === "on" && !aboardOn(p) ? "off" : side;
+  };
   const shiftOf = (p) => (looking ? (aheadHeld.shift || {})[p.id] || "" : boardShift(p, board));
 
   /* A change to the picked swing's board, with the board written out in full
@@ -5052,7 +5068,7 @@ function CrewRosters({ people, setPeople, board, setBoard, log, currentUser, vie
       <SectionHead title="Swing Roster"
         meta={looking
           ? `${swingLabel(ahead)} · Crew ${ahead.crew} · ${shownOn.length} on the swing · ${shownOff.length} off`
-          : `${onboard.length} onboard · ${off.length} off swing`} />
+          : `${shownOn.length} onboard · ${shownOff.length} off swing`} />
 
       {/* The swing lists are what the crew came here to read, so the tabs are
           shown to everybody. Only an admin gets the crew change on the end of
@@ -12608,6 +12624,7 @@ function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, on
     [k0, swingDates],
   );
 
+  const today = todayISO();
   const names = useMemo(() => QUALS.rows.map((r) => r[0]), [QUALS]);
   const rowByName = useMemo(() => Object.fromEntries(QUALS.rows.map((r) => [r[0], r])), [QUALS]);
 
@@ -12633,7 +12650,17 @@ function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, on
       if (h === "on" || h === "off") return h;
       return swingStatusFor(p, s.k, overrides);
     };
-    const onboard = people.filter((p) => p.active && sideFor(p) === "on");
+    /* Somebody put on for part of the swing only - joining late, gone home
+       early, filling in for a fortnight - is onboard for their own days and
+       nobody else's. This page says who is actually onboard, so the swing that
+       is on is read against today and a coming one against its own dates. */
+    const windows = (live ? (swingBoard || {}).window : (held || {}).window) || {};
+    const aboard = (p) => {
+      const w = windows[p.id];
+      if (!w || !w.from || !w.to) return true;
+      return live ? today >= w.from && today < w.to : w.from < s.flyHome && w.to > s.flyOut;
+    };
+    const onboard = people.filter((p) => p.active && sideFor(p) === "on" && aboard(p));
     /* A Switch swings pressed before the pattern's changeover puts the other
        crew onboard while the pattern still says this swing is the old letter.
        The card wears the letter of the crew actually on, so the label and the
@@ -12885,8 +12912,7 @@ function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, on
           changes first; the compliance details read against it follow. */}
       {roster && (
         <FoldSection boxRef={rosterRef} title="Roster"
-          meta={`${here.checked.length + here.unchecked.length} onboard ${swingLabel(here.swing)}` +
-            (rosterShown ? " · move crew on and off, set watches, switch swings" : "")}
+          meta={`${here.checked.length + here.unchecked.length} onboard ${swingLabel(here.swing)}`}
           right={<Button variant={rosterShown ? "ghost" : "quiet"} onClick={() => setRosterShown(!rosterShown)}>
             {rosterShown ? "Hide roster" : "Show roster"}
           </Button>}>
@@ -13330,7 +13356,7 @@ function SwingCompliancePage({ currentUser, people, setPeople, overrides, swingB
       <SectionHead title="Swing Compliance" />
       <SwingCompliance compact people={people} overrides={overrides} at={at} setAt={setAt}
         roster={
-          <CrewRosters people={people} setPeople={setPeople} board={swingBoard}
+          <CrewRosters readOnly asAt={todayISO()} people={people} setPeople={setPeople} board={swingBoard}
             setBoard={setSwingBoard} log={log} currentUser={currentUser}
             viewSwing={at} overrides={overrides}
             onShowNow={() => setAt(currentSwingIndex())} />
@@ -13991,6 +14017,9 @@ function SwingShiftAllocation({ here }) {
         by: role,
         sheet: res.sheet || null,
         swing: payload.swing.label,
+        // Who was onboard when the answer was reached, so a crew change
+        // afterwards can't pass as this crew's standing.
+        crew: payload.crew.map((c) => c.name).sort(),
         check: res.check || null,
         problems: problem ? [problem] : [],
       });
@@ -14019,6 +14048,13 @@ function SwingShiftAllocation({ here }) {
   // isn't the swing picked above, it is said out loud rather than the old
   // answer quietly passing as this swing's.
   const madeFor = (shiftAnalysis && shiftAnalysis.swing) || "";
+  // An answer is this swing's only while the crew it was reached against are
+  // the crew onboard. Somebody sent ashore or brought on since leaves it
+  // standing for a crew that isn't the one on the vessel, so it is said out
+  // loud rather than read as current.
+  const countedCrew = Array.isArray(shiftAnalysis && shiftAnalysis.crew) ? shiftAnalysis.crew : null;
+  const aboardNow = [...here.checked.map((c) => c.name), ...here.unchecked.map((p) => p.name)].sort();
+  const crewMoved = !!(check && countedCrew && countedCrew.join("|") !== aboardNow.join("|"));
   const stale = !!(check && madeFor && madeFor !== swingLabel(here.swing));
   // The lists come back from a model, so a missing key or the wrong shape is
   // something to render around rather than throw on.
@@ -14393,6 +14429,16 @@ function SwingShiftAllocation({ here }) {
         </div>
       ) : (
         <>
+          {crewMoved && !stale && (
+            <div style={{ background: T.panel, border: `1px solid ${T.rule}`,
+              borderLeft: `4px solid ${T.bOrange}`, borderRadius: 2, padding: "12px 15px",
+              marginBottom: 10 }}>
+              <span style={{ fontFamily: T.body, fontSize: 13, color: T.text, lineHeight: 1.6 }}>
+                The crew onboard has changed since this was compared — press
+                "Compare again" to read the guideline against who is onboard now.
+              </span>
+            </div>
+          )}
           {stale && (
             <div style={{ background: T.panel, border: `1px solid ${T.rule}`,
               borderLeft: `4px solid ${T.bOrange}`, borderRadius: 2, padding: "12px 15px",
