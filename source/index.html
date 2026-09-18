@@ -1006,7 +1006,10 @@ const STYLES = `
 }
 .um-matrix thead th:first-child { z-index: 4; }
 .um-matrix tbody td:first-child { z-index: 2; }
-@media (max-width: 900px) {
+/* Three swing cards across while there is room for their date boxes; two,
+   then one, as the page narrows under zoom. */
+@media (max-width: 1250px) { .um-swing3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) {
   .um-swing3 { grid-template-columns: 1fr; }
 }
 /* The four required-document boxes sit side by side in one row, folding to two
@@ -1026,6 +1029,53 @@ const STYLES = `
 .um-bar { height: 6px; background: ${T.raised}; border-radius: 999px; overflow: hidden; }
 .um-bar > i { display: block; height: 100%; background: ${T.accent}; border-radius: 999px;
   transition: width 420ms ease; }
+/* Zoom is the page getting narrower, so everything that can give room gives
+   it. The tab bar wraps onto a second line rather than running off the side —
+   at any zoom every tab is still on the page. */
+.um-nav { flex-wrap: wrap; overflow-x: visible !important; }
+
+/* The swing day grid: the name and date columns hand back room as the page
+   narrows, and the day squares close up, so a whole swing stays on screen
+   instead of disappearing off the right. */
+.um-daygrid-name { text-align: left; min-width: 220px; }
+.um-daygrid-dates { min-width: 150px; }
+@media (max-width: 1500px) {
+  .um-daygrid-name { min-width: 168px; }
+  .um-daygrid-dates { min-width: 118px; }
+  .um-daygrid-cell { width: 17px; min-width: 17px; }
+  .um-daygrid .um-in { font-size: 12px; padding: 5px 6px; }
+  .um-modal { padding: 16px 14px 20px !important; }
+}
+@media (max-width: 1150px) {
+  .um-daygrid th, .um-daygrid td { padding: 4px 5px; font-size: 10px; }
+  .um-daygrid-name { min-width: 128px; }
+  .um-daygrid-dates { min-width: 100px; }
+  .um-daygrid-cell { width: 13px; min-width: 13px; height: 38px; }
+  .um-daygrid .um-in { font-size: 11px; padding: 3px 4px; }
+  .um-modal { padding: 14px 10px 18px !important; }
+}
+@media (max-width: 1500px) {
+  .um-daygrid thead th { padding: 4px 2px; font-size: 10px; }
+  .um-daygrid th.um-daygrid-name { text-align: left; padding: 6px 8px; }
+  .um-daygrid .um-btn { font-size: 10px; padding: 6px 7px; }
+}
+@media (max-width: 1150px) {
+  .um-daygrid thead th { padding: 3px 1px; font-size: 9px; }
+  .um-daygrid .um-btn { font-size: 9px; padding: 5px 6px; letter-spacing: 0.04em; }
+}
+.um-daygrid th.um-daygrid-name { text-align: left; }
+@media (max-width: 760px) {
+  .um-daygrid thead th { padding: 2px 1px; font-size: 8px; }
+  .um-daygrid-name { min-width: 104px; }
+  .um-daygrid-dates { min-width: 88px; }
+  .um-daygrid-cell { width: 10px; min-width: 10px; height: 34px; }
+  .um-daygrid .um-in { font-size: 9px; padding: 3px; }
+  .um-daygrid .um-btn { font-size: 8px; padding: 4px 5px; }
+}
+/* Six swings across is a wide screen's luxury; zoomed in they go three and
+   three rather than shrinking to nothing. */
+@media (max-width: 1100px) { .um-swing6 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .um-swing6 { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; } }
 @media (prefers-reduced-motion: reduce) { .um-btn, .um-card, .um-rank, .um-drop, .um-cue { transition: none; } .um-rank:hover { transform: none; } .um-bar > i { transition: none; } }
 `;
 
@@ -12763,7 +12813,7 @@ function SwingDayGrid({ k, people, board, setBoard, overrides, log, onClose, sna
     <div style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(22,50,74,0.55)", overflowY: "auto", padding: 16 }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderTop: `6px solid ${readOnly ? T.muted : looking ? T.accent : T.teal}`,
-        borderRadius: 4, margin: "0 auto", maxWidth: 1800, padding: "18px 22px 24px" }}>
+        borderRadius: 4, margin: "0 auto", maxWidth: 1800, padding: "18px 22px 24px" }} className="um-modal">
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
           <div style={{ flex: 1 }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
@@ -12784,15 +12834,15 @@ function SwingDayGrid({ k, people, board, setBoard, overrides, log, onClose, sna
           <table className="um-daygrid">
             <thead>
               <tr>
-                <th style={{ textAlign: "left", minWidth: 220 }}>Crew</th>
+                <th className="um-daygrid-name">Crew</th>
                 {days.map((d) => (
                   <th key={d} className={d === today ? "um-daygrid-today" : ""} title={fmtDate(d)}>
                     <span style={{ display: "block" }}>{WEEKDAY_LETTER[new Date(d + "T00:00:00Z").getUTCDay()]}</span>
                     <span style={{ display: "block" }}>{d.slice(8)}</span>
                   </th>
                 ))}
-                <th style={{ minWidth: readOnly ? 110 : 150 }}>Joins</th>
-                <th style={{ minWidth: readOnly ? 110 : 150 }}>Flies home</th>
+                <th className="um-daygrid-dates">Joins</th>
+                <th className="um-daygrid-dates">Flies home</th>
                 {!readOnly && <th />}
               </tr>
             </thead>
@@ -12859,7 +12909,7 @@ function GridRow({ row, days, today, swing, lastDay, colour, readOnly, offSwing,
       style={{ background: on ? colour : "transparent" }} title={`${name} · ${fmtDate(d)} · ${on ? "onboard" : "ashore"}`} />;
   });
   const who = (
-    <th style={{ textAlign: "left" }}>
+    <th className="um-daygrid-name">
       <div style={{ fontFamily: T.body, fontSize: 13.5, fontWeight: 600, color: T.accent }}>{name}</div>
       <div style={{ fontFamily: T.mono, fontSize: 11, color: T.muted }}>{position}{crew ? ` · ${crew}` : ""}</div>
     </th>
