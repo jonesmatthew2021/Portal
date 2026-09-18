@@ -12795,6 +12795,7 @@ function SwingDayGrid({ k, people, board, setBoard, overrides, log, onClose, sna
                 <GridRow key={r.key} row={r} days={days} today={today} swing={swing} lastDay={lastDay}
                   colour={colourOf(r.shift)} readOnly={readOnly}
                   offSwing={offSwing} fullName={fullName} positionOf={positionOf}
+                  others={rows.filter((x) => x.key !== r.key && (x.from !== swing.flyOut || x.to !== swing.flyHome))}
                   onCover={bringOn}
                   onWindow={(from, to) => setWindow(r.p, from, to)}
                   onWhole={() => setWindow(r.p, swing.flyOut, swing.flyHome)}
@@ -12823,16 +12824,17 @@ function SwingDayGrid({ k, people, board, setBoard, overrides, log, onClose, sna
   );
 }
 
-function GridRow({ row, days, today, swing, lastDay, colour, readOnly, offSwing, fullName, positionOf, onCover, onWindow, onWhole, onOff }) {
+function GridRow({ row, days, today, swing, lastDay, colour, readOnly, offSwing, fullName, positionOf, others, onCover, onWindow, onWhole, onOff }) {
   const { name, position, crew, from: out, to: home } = row;
   const [o, setO] = useState(out);
   const [h, setH] = useState(home);
   // The days this person isn't onboard, at either end of the swing — the
-  // gaps somebody else covers. Whoever did is put on for exactly those days.
+  // gaps somebody else covers. A gap that somebody's own part-swing stay
+  // already fills isn't asked about again: the pair is complete.
   const gaps = [
     ...(out > swing.flyOut ? [{ id: "before", from: swing.flyOut, to: out }] : []),
     ...(home < swing.flyHome ? [{ id: "after", from: home, to: swing.flyHome }] : []),
-  ];
+  ].filter((g) => !(others || []).some((w) => w.from <= g.from && w.to >= g.to));
   const [cover, setCover] = useState({});
   React.useEffect(() => { setO(out); setH(home); }, [out, home]);
   const backwards = !!o && !!h && h <= o;
