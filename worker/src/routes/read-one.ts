@@ -1,7 +1,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
-import { canonicaliseCertificate, certFolderFor, refileCertificate } from "../db/documents.js";
+import { canonicaliseCertificate, certFolderFor, refileCertificate, relocateToRemovedBlob } from "../db/documents.js";
 import { holderOnMatrix, readCertificate } from "./analyse.js";
 import { readingKey, readingStore, type Reading } from "../lib/analysis.js";
 import { imageToPdf } from "../lib/pdf-wrap.js";
@@ -18,8 +18,9 @@ import { getEnv } from "../env.js";
  */
 export default async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
-  const body = (await req.json().catch(() => null)) as { id?: unknown } | null;
+  const body = (await req.json().catch(() => null)) as { id?: unknown; discardUnreadable?: unknown } | null;
   const id = typeof body?.id === "string" ? body.id : "";
+  const discardUnreadable = body?.discardUnreadable === true;
   if (!id) return Response.json({ error: "Which certificate?" }, { status: 400 });
 
   const [row] = await db
@@ -51,6 +52,24 @@ export default async (req: Request): Promise<Response> => {
       );
     }
     await store.setJSON(readingKey(row), reading);
+  }
+
+  // A photo the AI can't make out is taken off the books again when the
+  // uploader asked for that (the phone flow) — so a blurred shot never sits
+  // in SharePoint, and the person is told to take it again.
+  if (!reading.readable && discardUnreadable) {
+    const archivedKey = await relocateToRemovedBlob(row);
+    await db
+      .update(documents)
+      .set({ removedAt: new Date(), removedBy: "not clear — retake", blobKey: archivedKey })
+      .where(eq(documents.id, row.id));
+    await store.delete(readingKey(row));
+    return Response.json({
+      id: row.id,
+      discarded: true,
+      readable: false,
+      reason: (reading as Reading & { reason?: string }).reason || "The photo isn't clear enough to read.",
+    });
   }
 
   let current = row;

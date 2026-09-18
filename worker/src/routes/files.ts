@@ -3,7 +3,7 @@ import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
 import { getEnv } from "../env.js";
-import { imageToPdf } from "../lib/pdf-wrap.js";
+import { imageToPdf, imagesToPdf } from "../lib/pdf-wrap.js";
 import {
   CERT_ROOT,
   SINGLE_FILE_CATEGORIES,
@@ -527,12 +527,26 @@ export default async (req: Request) => {
   }
 
   const form = await req.formData();
-  const file = form.get("file");
+  let file = form.get("file");
+
+  // A document photographed on a phone arrives a page at a time under
+  // "page"; the pages are bound here into the one PDF everything after sees.
+  const pages = form.getAll("page").filter((p): p is File => p instanceof File && p.size > 0);
+  if (!(file instanceof File) && pages.length) {
+    const pdf = imagesToPdf(
+      await Promise.all(pages.map(async (p) => ({ bytes: await p.arrayBuffer(), type: p.type || null }))),
+    );
+    if (!pdf) {
+      return Response.json({ error: "One of the photos couldn't be read. Take it again." }, { status: 400 });
+    }
+    const base = (field(form, "pagesName") || "certificate").replace(/\.pdf$/i, "");
+    file = new File([pdf as BlobPart], `${base}.pdf`, { type: "application/pdf" });
+  }
 
   if (!(file instanceof File) || file.size === 0) {
     return Response.json({ error: "No file was included in the upload." }, { status: 400 });
   }
-  if (file.size > MAX_BYTES) {
+  if (file.size > MAX_BYTES * (pages.length ? 4 : 1)) {
     return Response.json(
       { error: `${file.name} is ${humanSize(file.size)}. The limit is ${humanSize(MAX_BYTES)}.` },
       { status: 413 },

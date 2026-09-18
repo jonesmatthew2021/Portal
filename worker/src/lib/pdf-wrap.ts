@@ -1,11 +1,12 @@
 /**
- * Wrapping a scanned image as a one-page PDF, with nothing but bytes.
+ * Wrapping scanned images as a PDF, with nothing but bytes.
  *
  * The crew's certificates arrive as photos as often as PDFs, and the filing
- * rule is PDF. A JPEG goes into the page exactly as it is (PDF speaks JPEG
+ * rule is PDF. A JPEG goes onto its page exactly as it is (PDF speaks JPEG
  * natively as DCTDecode); a PNG's pixel stream is carried over as
  * FlateDecode with the predictor PDF shares with PNG, so neither is
- * re-encoded and nothing is lost. The page is the image's own size.
+ * re-encoded and nothing is lost. Each page is its image's own size, and a
+ * document photographed over several pages becomes one PDF of several.
  *
  * What can't be wrapped honestly is left alone: interlaced or paletted or
  * alpha-carrying PNGs, HEIC, and anything that isn't an image — those keep
@@ -64,10 +65,35 @@ function pngInfo(b: Uint8Array) {
   return { w, h, colorType, data };
 }
 
-function buildPdf(image: {
+type PageImage = {
   w: number; h: number; colorSpace: string; filter: string;
   decodeParms?: string; data: Uint8Array;
-}) {
+};
+
+function describe(bytes: ArrayBuffer, contentType: string | null): PageImage | null {
+  const b = new Uint8Array(bytes);
+  const type = (contentType || "").toLowerCase();
+  if (type.includes("jpeg") || type.includes("jpg") || (b[0] === 0xff && b[1] === 0xd8)) {
+    const size = jpegSize(b);
+    if (!size || !size.w || !size.h) return null;
+    return { w: size.w, h: size.h, colorSpace: "/DeviceRGB", filter: "/DCTDecode", data: b };
+  }
+  if (type.includes("png") || (b[0] === 0x89 && b[1] === 0x50)) {
+    const png = pngInfo(b);
+    if (!png || !png.w || !png.h) return null;
+    const colors = png.colorType === 2 ? 3 : 1;
+    return {
+      w: png.w, h: png.h,
+      colorSpace: png.colorType === 2 ? "/DeviceRGB" : "/DeviceGray",
+      filter: "/FlateDecode",
+      decodeParms: `/DecodeParms << /Predictor 15 /Colors ${colors} /BitsPerComponent 8 /Columns ${png.w} >>`,
+      data: png.data,
+    };
+  }
+  return null;
+}
+
+function buildPdf(pages: PageImage[]) {
   const parts: Uint8Array[] = [];
   const offsets: number[] = [0];
   let length = 0;
@@ -83,22 +109,28 @@ function buildPdf(image: {
     push(enc("endobj\n"));
   };
 
+  // Objects: 1 catalog, 2 pages, then per page: page, image, content.
+  const pageObj = (i: number) => 3 + i * 3;
   push(enc("%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"));
   obj(1, "<< /Type /Catalog /Pages 2 0 R >>");
-  obj(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
-  obj(3, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${image.w} ${image.h}] ` +
-    `/Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>`);
-  obj(4, `<< /Type /XObject /Subtype /Image /Width ${image.w} /Height ${image.h} ` +
-    `/ColorSpace ${image.colorSpace} /BitsPerComponent 8 /Filter ${image.filter} ` +
-    `${image.decodeParms || ""} /Length ${image.data.length} >>`, image.data);
-  const content = enc(`q ${image.w} 0 0 ${image.h} 0 0 cm /Im0 Do Q`);
-  obj(5, `<< /Length ${content.length} >>`, content);
+  obj(2, `<< /Type /Pages /Kids [${pages.map((_, i) => `${pageObj(i)} 0 R`).join(" ")}] /Count ${pages.length} >>`);
+  pages.forEach((image, i) => {
+    const p = pageObj(i);
+    obj(p, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${image.w} ${image.h}] ` +
+      `/Resources << /XObject << /Im0 ${p + 1} 0 R >> >> /Contents ${p + 2} 0 R >>`);
+    obj(p + 1, `<< /Type /XObject /Subtype /Image /Width ${image.w} /Height ${image.h} ` +
+      `/ColorSpace ${image.colorSpace} /BitsPerComponent 8 /Filter ${image.filter} ` +
+      `${image.decodeParms || ""} /Length ${image.data.length} >>`, image.data);
+    const content = enc(`q ${image.w} 0 0 ${image.h} 0 0 cm /Im0 Do Q`);
+    obj(p + 2, `<< /Length ${content.length} >>`, content);
+  });
 
+  const count = 3 + pages.length * 3;
   const xrefAt = length;
-  let xref = "xref\n0 6\n0000000000 65535 f \n";
-  for (let n = 1; n <= 5; n++) xref += String(offsets[n]).padStart(10, "0") + " 00000 n \n";
+  let xref = `xref\n0 ${count}\n0000000000 65535 f \n`;
+  for (let n = 1; n < count; n++) xref += String(offsets[n]).padStart(10, "0") + " 00000 n \n";
   push(enc(xref));
-  push(enc(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefAt}\n%%EOF\n`));
+  push(enc(`trailer\n<< /Size ${count} /Root 1 0 R >>\nstartxref\n${xrefAt}\n%%EOF\n`));
 
   const out = new Uint8Array(length);
   let at = 0;
@@ -108,24 +140,19 @@ function buildPdf(image: {
 
 /** The image as a one-page PDF, or null when it isn't one this can carry. */
 export function imageToPdf(bytes: ArrayBuffer, contentType: string | null): Uint8Array | null {
-  const b = new Uint8Array(bytes);
-  const type = (contentType || "").toLowerCase();
-  if (type.includes("jpeg") || type.includes("jpg") || (b[0] === 0xff && b[1] === 0xd8)) {
-    const size = jpegSize(b);
-    if (!size || !size.w || !size.h) return null;
-    return buildPdf({ w: size.w, h: size.h, colorSpace: "/DeviceRGB", filter: "/DCTDecode", data: b });
+  const page = describe(bytes, contentType);
+  return page ? buildPdf([page]) : null;
+}
+
+/** Several images as one PDF, a page each, in order — or null if any one
+ * of them isn't an image this can carry. */
+export function imagesToPdf(images: { bytes: ArrayBuffer; type: string | null }[]): Uint8Array | null {
+  if (!images.length) return null;
+  const pages: PageImage[] = [];
+  for (const im of images) {
+    const page = describe(im.bytes, im.type);
+    if (!page) return null;
+    pages.push(page);
   }
-  if (type.includes("png") || (b[0] === 0x89 && b[1] === 0x50)) {
-    const png = pngInfo(b);
-    if (!png || !png.w || !png.h) return null;
-    const colors = png.colorType === 2 ? 3 : 1;
-    return buildPdf({
-      w: png.w, h: png.h,
-      colorSpace: png.colorType === 2 ? "/DeviceRGB" : "/DeviceGray",
-      filter: "/FlateDecode",
-      decodeParms: `/DecodeParms << /Predictor 15 /Colors ${colors} /BitsPerComponent 8 /Columns ${png.w} >>`,
-      data: png.data,
-    });
-  }
-  return null;
+  return buildPdf(pages);
 }

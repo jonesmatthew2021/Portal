@@ -1205,6 +1205,15 @@ const STYLES = `
 .um-nav::-webkit-scrollbar-thumb { background: ${T.rule}; }
 .um-g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .um-swing3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.um-daygrid { border-collapse: collapse; width: 100%; }
+.um-daygrid th, .um-daygrid td { border: 1px solid ${T.rule}; padding: 6px 8px; font-family: ${T.mono}; font-size: 11px; color: ${T.muted}; text-align: center; }
+.um-daygrid th { background: ${T.raised}; }
+.um-daygrid-cell { width: 22px; min-width: 22px; height: 44px; padding: 0 !important; }
+.um-daygrid-today { box-shadow: inset 0 0 0 2px ${T.accent}; }
+.um-swing6 { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; align-items: stretch; }
+@media (max-width: 620px) { .um-swing6 { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; } }
+.um-shot { position: relative; width: 96px; height: 128px; border-radius: 3px; overflow: hidden; background: #000; }
+.um-shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .um-ranks { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
 .um-scroll { overflow-x: auto; }
 
@@ -12539,7 +12548,7 @@ function FoldSection({ title, meta, tone = T.accent, children, boxRef }) {
   );
 }
 
-function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing }) {
+function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, cardsOnly, compact }) {
   const { shiftAnalysis: heldShift } = usePortal();
   const { quals: QUALS, swingDates, setSwingDates, log, certDates, swingBoard, swingBoards } = usePortal();
   const validityFor = useValidityLookup();
@@ -12701,6 +12710,28 @@ function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing }) 
     const given = wasGiven(k);
     const bust = backwards(k);
     const half = partial(k);
+    if (compact) {
+      return (
+        <div key={k} className="um-swingcard" onClick={() => setAt(k)}
+          style={{ background: on ? T.accentSoft : T.panel, border: `1px solid ${on ? T.accent : T.rule}`,
+          borderLeft: `4px solid ${bad ? T.bRed : T.teal}`, borderRadius: 2, padding: "10px 12px",
+          cursor: "pointer", minWidth: 0 }}>
+          <div style={{ fontFamily: T.display, fontSize: 14, fontWeight: 700, color: T.text, whiteSpace: "nowrap",
+            overflow: "hidden", textOverflow: "ellipsis" }}>
+            {swingLabel(r.swing)}
+          </div>
+          <div style={{ fontFamily: T.mono, fontSize: 11, color: T.muted, marginTop: 3 }}>
+            Crew {r.swing.crew} · {r.checked.length + r.unchecked.length} rostered
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 7 }}>
+            {k === k0 && <Chip fg={T.accent} bg={T.accentSoft}>On now</Chip>}
+            <Chip fg={bad ? T.bRed : T.teal} bg={bad ? T.bRedBg : T.raised}>
+              {bad ? `${bad} not clear` : "All clear"}
+            </Chip>
+          </div>
+        </div>
+      );
+    }
     return (
       <div key={k} className="um-swingcard" onClick={(e) => pick(k, e)}
         style={{ background: T.panel, border: `1px solid ${on ? T.accent : T.rule}`,
@@ -12783,25 +12814,21 @@ function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing }) 
     })),
   });
 
+  const cards = (
+    <div style={{ marginBottom: 18 }}>
+      <div style={{ marginBottom: 8 }}>
+        <Eyebrow color={T.accent}>Swings · on now and the next {SWING_LOOKAHEAD}</Eyebrow>
+      </div>
+      <div className={compact ? "um-swing6" : "um-swing3"}>
+        {results.map(card)}
+      </div>
+    </div>
+  );
+  if (cardsOnly) return cards;
+
   return (
     <div>
-      <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.6, marginBottom: 14 }}>
-        Who is on each swing, and whether they are clear to sail. Press a swing to work on it — the
-        sections below follow it, and each one's heading says whether it needs you before you open it.
-      </div>
-
-      {/* Six swings, three to a row: the one on now first (marked), then the
-          five coming, so who has to be sorted out before they fly can be read
-          left to right and down. Press any card to work on that swing below.
-          Under 900px the grid drops to one column with the nearest swing first. */}
-      <div style={{ marginBottom: 18 }}>
-        <div style={{ marginBottom: 8 }}>
-          <Eyebrow color={T.accent}>Swings · on now and the next {SWING_LOOKAHEAD}</Eyebrow>
-        </div>
-        <div className="um-swing3">
-          {results.map(card)}
-        </div>
-      </div>
+      {cards}
 
       {/* The roster, showing the picked swing's crew — the board as it stands
           when the swing that is on is picked, a look ahead when a coming one
@@ -12873,114 +12900,281 @@ function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing }) 
    it. The cards fall back to the swing that is on when the pick goes stale
    (a changeover passing while the page is open), and the roster reads any
    pick that isn't ahead of today as the live board, so the two can't drift. */
+/* One swing, day by day — the window that opens when a swing card is pressed
+   on the Roster page. Every crew member on the swing is a row, every day of
+   the swing a column; a filled cell is a day they are onboard, coloured by the
+   watch they keep. A person's own fly-out and fly-home days are typed against
+   their row; somebody can be brought on for part of the swing underneath. */
+const GRID_DAY = "#F2C14E", GRID_NIGHT = "#3F7FD1", GRID_NONE = "#9AA5B1";
+const isoShift = (iso, n) => new Date(new Date(iso + "T00:00:00Z").getTime() + n * 86400000).toISOString().slice(0, 10);
+const WEEKDAY_LETTER = ["S", "M", "T", "W", "T", "F", "S"];
+
+function SwingDayGrid({ k, people, board, setBoard, overrides, log, onClose }) {
+  const { swingDates, swingBoards, setSwingBoards, quals: MATRIX } = usePortal();
+  const swing = swingWithDates(k, swingDates);
+  const looking = k > currentSwingIndex();
+  const held = looking ? (swingBoards || {})[k] || { side: {}, shift: {}, window: {} } : (board || {});
+  const today = todayISO();
+  const days = [];
+  for (let d = swing.flyOut; d < swing.flyHome; d = isoShift(d, 1)) days.push(d);
+  const lastDay = days[days.length - 1];
+
+  const names = useMemo(() => MATRIX.rows.map((r) => r[0]), [MATRIX]);
+  const posByName = useMemo(() => Object.fromEntries(MATRIX.rows.map((r) => [r[0], r[1] || ""])), [MATRIX]);
+  const fullName = (p) => (p.name.includes(",") ? p.name : (matchRoster(p.name, names) || p.name));
+  const positionOf = (p) => posByName[fullName(p)] || p.dept || "";
+  const groupIndex = (p) => {
+    const i = RANK_GROUPS.findIndex(([, re]) => re.test(positionOf(p)));
+    return i < 0 ? RANK_GROUPS.length : i;
+  };
+
+  const sideOf = (p) => {
+    if (!p.active) return "off";
+    const h = (held.side || {})[p.id];
+    if (h === "on" || h === "off") return h;
+    return looking ? swingStatusFor(p, k, overrides) : boardSide(p, board);
+  };
+  const shiftOf = (p) => (held.shift || {})[p.id] || "";
+  const windowOf = (p) => (held.window || {})[p.id] || null;
+  const outOf = (p) => (windowOf(p) || {}).from || swing.flyOut;
+  const homeOf = (p) => (windowOf(p) || {}).to || swing.flyHome;
+
+  const crew = people.filter((p) => p.active);
+  const rows = crew.filter((p) => sideOf(p) === "on")
+    .sort((a, b) => groupIndex(a) - groupIndex(b) || fullName(a).localeCompare(fullName(b)));
+  const offSwing = crew.filter((p) => sideOf(p) !== "on")
+    .sort((a, b) => groupIndex(a) - groupIndex(b) || fullName(a).localeCompare(fullName(b)));
+  const partial = rows.filter((p) => outOf(p) !== swing.flyOut || homeOf(p) !== swing.flyHome).length;
+
+  /* Every change writes the board out in full first, so moving one person
+     can't leave everybody else drifting with the rotation. */
+  const write = (change) => {
+    if (looking) {
+      setSwingBoards((all) => {
+        const was = (all || {})[k] || { side: {}, shift: {}, window: {} };
+        const out = { side: {}, shift: { ...(was.shift || {}) }, window: { ...(was.window || {}) } };
+        people.forEach((p) => {
+          if (!p.active) return;
+          const h = (was.side || {})[p.id];
+          out.side[p.id] = h === "on" || h === "off" ? h : swingStatusFor(p, k, overrides);
+        });
+        change(out);
+        const next = {};
+        Object.keys(all || {}).forEach((key) => { if (Number(key) > currentSwingIndex()) next[key] = all[key]; });
+        next[k] = out;
+        return next;
+      });
+    } else {
+      setBoard((b) => {
+        const out = { ...settledBoard(people, b), window: { ...((b && b.window) || {}) } };
+        change(out);
+        return out;
+      });
+    }
+  };
+
+  const setWindow = (p, from, to) => {
+    if (!from || !to || to <= from) return;
+    write((b) => {
+      if (from === swing.flyOut && to === swing.flyHome) delete b.window[p.id];
+      else b.window[p.id] = { from, to };
+    });
+    log("Roster", `${fullName(p)} on ${swingLabel(swing)}`, `out ${fmtDate(from)}, home ${fmtDate(to)}`);
+  };
+  const offSwingNow = (p) => {
+    write((b) => { b.side[p.id] = "off"; delete b.window[p.id]; });
+    log("Roster", `${fullName(p)} off ${swingLabel(swing)}`, "");
+  };
+  const bringOn = (p, from, to) => {
+    write((b) => {
+      b.side[p.id] = "on";
+      if (from === swing.flyOut && to === swing.flyHome) delete b.window[p.id];
+      else b.window[p.id] = { from, to };
+    });
+    log("Roster", `${fullName(p)} onto ${swingLabel(swing)}`, `out ${fmtDate(from)}, home ${fmtDate(to)}`);
+  };
+
+  const covered = (p, day) => day >= outOf(p) && day < homeOf(p);
+  const colour = (p) => (shiftOf(p) === "day" ? GRID_DAY : shiftOf(p) === "night" ? GRID_NIGHT : GRID_NONE);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(22,50,74,0.55)", overflowY: "auto", padding: 16 }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderTop: `6px solid ${looking ? T.accent : T.teal}`,
+        borderRadius: 4, margin: "0 auto", maxWidth: 1800, padding: "18px 22px 24px" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: T.display, fontSize: 24, fontWeight: 700, color: T.text }}>
+              {swingLabel(swing)} · crew {swing.crew}
+            </div>
+            <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, marginTop: 4 }}>
+              {rows.length} onboard · {partial === 0 ? "everyone the whole swing" : `${partial} for part of it`} · type a person's own fly-out and fly-home days to change them
+            </div>
+          </div>
+          <a onClick={onClose} style={{ cursor: "pointer", fontFamily: T.display, fontSize: 22, color: T.muted, lineHeight: 1, padding: "2px 6px" }}>×</a>
+        </div>
+
+        <div className="um-scroll">
+          <table className="um-daygrid">
+            <thead>
+              <tr>
+                <th style={{ textAlign: "left", minWidth: 220 }}>Crew</th>
+                {days.map((d) => (
+                  <th key={d} className={d === today ? "um-daygrid-today" : ""} title={fmtDate(d)}>
+                    <span style={{ display: "block" }}>{WEEKDAY_LETTER[new Date(d + "T00:00:00Z").getUTCDay()]}</span>
+                    <span style={{ display: "block" }}>{d.slice(8)}</span>
+                  </th>
+                ))}
+                <th style={{ minWidth: 150 }}>Flies out</th>
+                <th style={{ minWidth: 150 }}>Flies home</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((p) => (
+                <GridRow key={p.id} p={p} name={fullName(p)} position={positionOf(p)} days={days} today={today}
+                  out={outOf(p)} home={homeOf(p)} swing={swing} lastDay={lastDay} colour={colour(p)}
+                  covered={(d) => covered(p, d)}
+                  onWindow={(from, to) => setWindow(p, from, to)}
+                  onWhole={() => setWindow(p, swing.flyOut, swing.flyHome)}
+                  onOff={() => offSwingNow(p)} />
+              ))}
+              {rows.length === 0 && (
+                <tr><td colSpan={days.length + 4} style={{ fontFamily: T.body, fontSize: 13, color: T.muted, padding: 14 }}>Nobody is on this swing yet.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, marginTop: 10, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ width: 14, height: 11, background: GRID_DAY, display: "inline-block", borderRadius: 2 }} /> days ·
+          <span style={{ width: 14, height: 11, background: GRID_NIGHT, display: "inline-block", borderRadius: 2 }} /> nights ·
+          <span style={{ width: 14, height: 11, background: GRID_NONE, display: "inline-block", borderRadius: 2 }} /> onboard, no watch set · blank is ashore
+        </div>
+
+        <PartSwing swing={swing} lastDay={lastDay} offSwing={offSwing} fullName={fullName} positionOf={positionOf} onBring={bringOn} />
+      </div>
+    </div>
+  );
+}
+
+function GridRow({ p, name, position, days, today, out, home, swing, lastDay, colour, covered, onWindow, onWhole, onOff }) {
+  const [o, setO] = useState(out);
+  const [h, setH] = useState(home);
+  React.useEffect(() => { setO(out); setH(home); }, [out, home]);
+  const backwards = !!o && !!h && h <= o;
+  const whole = out === swing.flyOut && home === swing.flyHome;
+  const commit = () => {
+    if (!o || !h || backwards) return;
+    if (o === out && h === home) return;
+    onWindow(o, h);
+  };
+  return (
+    <>
+      <tr>
+        <th style={{ textAlign: "left" }}>
+          <div style={{ fontFamily: T.body, fontSize: 13.5, fontWeight: 600, color: T.accent }}>{name}</div>
+          <div style={{ fontFamily: T.mono, fontSize: 11, color: T.muted }}>{position}{p.crew ? ` · ${p.crew}` : ""}</div>
+        </th>
+        {days.map((d) => {
+          const on = covered(d);
+          return <td key={d} className={`um-daygrid-cell${d === today ? " um-daygrid-today" : ""}`}
+            style={{ background: on ? colour : "transparent" }} title={`${name} · ${fmtDate(d)} · ${on ? "onboard" : "ashore"}`} />;
+        })}
+        <td><input className="um-in" type="date" value={o} min={swing.flyOut} max={lastDay} onChange={(e) => setO(e.target.value)} onBlur={commit} /></td>
+        <td><input className="um-in" type="date" value={h} min={isoShift(swing.flyOut, 1)} max={swing.flyHome} onChange={(e) => setH(e.target.value)} onBlur={commit} /></td>
+        <td style={{ whiteSpace: "nowrap" }}>
+          {!whole && <Button variant="quiet" onClick={onWhole}>Whole swing</Button>}{" "}
+          <Button variant="quiet" onClick={onOff}>Off swing</Button>
+        </td>
+      </tr>
+      {backwards && (
+        <tr><td colSpan={days.length + 4} style={{ fontFamily: T.body, fontSize: 12.5, color: T.bRed, padding: "2px 8px 8px" }}>
+          The day home is on or before the day out, so nothing was changed.
+        </td></tr>
+      )}
+    </>
+  );
+}
+
+function PartSwing({ swing, lastDay, offSwing, fullName, positionOf, onBring }) {
+  const [who, setWho] = useState("");
+  const [o, setO] = useState(swing.flyOut);
+  const [h, setH] = useState(swing.flyHome);
+  const backwards = !!o && !!h && h <= o;
+  return (
+    <div style={{ background: T.raised, border: `1px solid ${T.rule}`, borderRadius: 3, padding: "16px 18px", marginTop: 18 }}>
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div style={{ flex: "3 1 420px", fontFamily: T.body, fontSize: 13.5, color: T.text, lineHeight: 1.6,
+          background: T.panel, border: `1px solid ${T.rule}`, borderRadius: 3, padding: "12px 14px" }}>
+          Bring somebody on for part of this swing — filling in, coming out late, or swapping with someone going home early. They share the seat of whoever holds it for the rest of the swing.
+        </div>
+        <div style={{ flex: "1 1 240px" }}>
+          <Field label="Who">
+            <select className="um-in" value={who} onChange={(e) => setWho(e.target.value)}>
+              <option value="">Choose…</option>
+              {offSwing.map((p) => <option key={p.id} value={p.id}>{fullName(p)} — {positionOf(p)}</option>)}
+            </select>
+          </Field>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end", marginTop: 14 }}>
+        <Field label="Flies out">
+          <input className="um-in" type="date" value={o} min={swing.flyOut} max={lastDay} onChange={(e) => setO(e.target.value)} />
+        </Field>
+        <Field label="Flies home">
+          <input className="um-in" type="date" value={h} min={isoShift(swing.flyOut, 1)} max={swing.flyHome} onChange={(e) => setH(e.target.value)} />
+        </Field>
+        <div style={{ paddingBottom: 1 }}>
+          <Button variant="ghost" disabled={!who || backwards || !o || !h}
+            onClick={() => { const p = offSwing.find((x) => String(x.id) === who); if (p) { onBring(p, o, h); setWho(""); } }}>
+            Bring onboard for those days
+          </Button>
+        </div>
+        {backwards && <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.bRed }}>The day home is on or before the day out.</span>}
+      </div>
+    </div>
+  );
+}
+
 /* The Roster on a page of its own: the same board Swing Compliance carries,
    for when the job is moving crew rather than checking them. The picker holds
    the same six swings the compliance cards do — the live board for the swing
    on now, a coming swing's own board for any other, so ad hoc changes land on
    that swing only. */
 function RosterPage({ currentUser, people, setPeople, overrides, swingBoard, setSwingBoard, log }) {
-  const { swingDates } = usePortal();
   const k0 = currentSwingIndex();
   const [at, setAt] = useState(k0);
-  const swings = useMemo(
-    () => Array.from({ length: SWING_LOOKAHEAD + 1 }, (_, i) => swingWithDates(k0 + i, swingDates)),
-    [k0, swingDates],
-  );
+  const [swingOpen, setSwingOpen] = useState(false);
   return (
     <>
       <SectionHead title="Roster" />
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
-        {swings.map((s) => (
-          <Button key={s.k} variant={s.k === at ? "ghost" : "quiet"} onClick={() => setAt(s.k)}>
-            {swingLabel(s)} · Crew {s.crew}{s.k === k0 ? " · on now" : ""}
-          </Button>
-        ))}
-      </div>
+      <SwingCompliance cardsOnly people={people} overrides={overrides} at={at} setAt={setAt}
+        onOpenSwing={() => setSwingOpen(true)} />
       <CrewRosters people={people} setPeople={setPeople} board={swingBoard}
         setBoard={setSwingBoard} log={log} currentUser={currentUser}
         viewSwing={at} overrides={overrides}
         onShowNow={() => setAt(k0)} />
+      {swingOpen && (
+        <SwingDayGrid k={at} people={people} board={swingBoard} setBoard={setSwingBoard}
+          overrides={overrides} log={log} onClose={() => setSwingOpen(false)} />
+      )}
     </>
   );
 }
 
 function SwingCompliancePage({ currentUser, people, setPeople, overrides, swingBoard, setSwingBoard, log }) {
-  const { swingDates, setSwingDates } = usePortal();
   const [at, setAt] = useState(currentSwingIndex());
-  const beforeDates = useRef(null);
-  const pageTyped = (which) => ((swingDates || {})[at] || {})[which] || swingAt(at)[which];
-  const pageSetDate = (which, value) => {
-    setSwingDates((d) => {
-      const now = { ...(d || {}) };
-      const base = swingAt(at);
-      now[at] = { flyOut: base.flyOut, flyHome: base.flyHome, ...(now[at] || {}), [which]: value };
-      return now;
-    });
-  };
-  const pageDatesDone = () => {
-    const after = JSON.stringify((swingDates || {})[at] || null);
-    if (after === beforeDates.current) return;
-    beforeDates.current = after;
-    const d = (swingDates || {})[at];
-    if (!d || !d.flyOut || !d.flyHome || d.flyHome <= d.flyOut) return;
-    const s = swingWithDates(at, swingDates);
-    log("Swing Compliance", "Swing dates set",
-      `Crew ${s.crew} · out ${fmtDate(s.flyOut)}, home ${fmtDate(s.flyHome)}`);
-  };
-  const [rosterOpen, setRosterOpen] = useState(false);
-  const onNow = at === currentSwingIndex();
-  const opened = swingWithDates(at, swingDates);
   return (
     <>
       <SectionHead title="Swing Compliance" />
-      <SwingCompliance people={people} overrides={overrides} at={at} setAt={setAt}
-        onOpenSwing={() => setRosterOpen(true)}
+      <SwingCompliance compact people={people} overrides={overrides} at={at} setAt={setAt}
         roster={
           <CrewRosters people={people} setPeople={setPeople} board={swingBoard}
             setBoard={setSwingBoard} log={log} currentUser={currentUser}
             viewSwing={at} overrides={overrides}
             onShowNow={() => setAt(currentSwingIndex())} />
         } />
-      {rosterOpen && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 70, background: T.deep, overflowY: "auto" }}>
-          <div style={{ borderTop: `6px solid ${onNow ? T.teal : T.accent}`, minHeight: "100%" }}>
-            <div style={{ margin: "0 auto", padding: "16px 22px 44px" }}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
-                <span style={{ fontFamily: T.display, fontSize: 22, fontWeight: 700, color: T.text }}>
-                  {swingLabel(opened)} · Crew {opened.crew}
-                </span>
-                <Chip fg={onNow ? T.teal : T.accent} bg={onNow ? T.raised : T.accentSoft}>
-                  {onNow ? "On now" : "Coming swing"}
-                </Chip>
-                <span style={{ flex: 1 }} />
-                <Button variant="quiet" onClick={() => setRosterOpen(false)}>Back to Swing Compliance</Button>
-              </div>
-              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16, maxWidth: 560 }}>
-                <div style={{ flex: "1 1 200px" }}>
-                  <Field label="Flies out">
-                    <input className="um-in" type="date" value={pageTyped("flyOut")}
-                      onFocus={() => { beforeDates.current = JSON.stringify((swingDates || {})[at] || null); }}
-                      onBlur={pageDatesDone}
-                      onChange={(e) => pageSetDate("flyOut", e.target.value)} />
-                  </Field>
-                </div>
-                <div style={{ flex: "1 1 200px" }}>
-                  <Field label="Flies home">
-                    <input className="um-in" type="date" value={pageTyped("flyHome")}
-                      onFocus={() => { beforeDates.current = JSON.stringify((swingDates || {})[at] || null); }}
-                      onBlur={pageDatesDone}
-                      onChange={(e) => pageSetDate("flyHome", e.target.value)} />
-                  </Field>
-                </div>
-              </div>
-              <CrewRosters people={people} setPeople={setPeople} board={swingBoard}
-                setBoard={setSwingBoard} log={log} currentUser={currentUser}
-                viewSwing={at} overrides={overrides}
-                onShowNow={() => setAt(currentSwingIndex())} />
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }
@@ -16370,11 +16564,62 @@ function CrewCertificateUpload() {
   const [hot, setHot] = useState(false);
   const [nameErr, setNameErr] = useState("");
   const fileRef = useRef(null);
+  const camRef = useRef(null);
+  const [shots, setShots] = useState([]);
+  const [retake, setRetake] = useState("");
   const patchJob = (key, p) => setJobs((js) => js.map((j) => (j.key === key ? { ...j, ...p } : j)));
+
+  /* A photo straight off the phone: turned the right way up, brought down to
+     a size that uploads quickly, re-saved as a JPEG, and measured for
+     sharpness so a blurred shot is caught before it goes anywhere. */
+  const takeIn = async (file) => {
+    const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    const scale = Math.min(1, 2200 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const small = document.createElement("canvas");
+    const sw = 400, sh = Math.max(1, Math.round(canvas.height * (400 / canvas.width)));
+    small.width = sw; small.height = sh;
+    small.getContext("2d").drawImage(canvas, 0, 0, sw, sh);
+    const px = small.getContext("2d").getImageData(0, 0, sw, sh).data;
+    const g = new Float32Array(sw * sh);
+    for (let i = 0; i < sw * sh; i++) g[i] = 0.299 * px[i * 4] + 0.587 * px[i * 4 + 1] + 0.114 * px[i * 4 + 2];
+    let sum = 0, sum2 = 0, n = 0;
+    for (let y = 1; y < sh - 1; y++) for (let x = 1; x < sw - 1; x++) {
+      const i = y * sw + x;
+      const v = 4 * g[i] - g[i - 1] - g[i + 1] - g[i - sw] - g[i + sw];
+      sum += v; sum2 += v * v; n++;
+    }
+    const sharpness = n ? sum2 / n - (sum / n) * (sum / n) : 0;
+    const blob = await new Promise((res) => canvas.toBlob(res, "image/jpeg", 0.86));
+    return { key: Date.now() + "-" + Math.random().toString(36).slice(2, 7), blob, preview: URL.createObjectURL(blob),
+      blurry: sharpness < 30 };
+  };
+
+  const addShots = async (files) => {
+    const list = [...files].filter((f) => f && f.size > 0);
+    if (!list.length) return;
+    setRetake("");
+    const taken = [];
+    for (const f of list) {
+      try { taken.push(await takeIn(f)); } catch (e) { setRetake("That photo couldn't be opened. Take it again."); }
+    }
+    setShots((s) => [...s, ...taken]);
+  };
+  const dropShot = (key) => setShots((s) => s.filter((x) => x.key !== key));
+  const clearShots = () => { shots.forEach((s) => URL.revokeObjectURL(s.preview)); setShots([]); };
 
   const uploadOne = (file, key) => new Promise((resolve) => {
     const fd = new FormData();
-    fd.append("file", file);
+    if (Array.isArray(file)) {
+      file.forEach((s, i) => fd.append("page", s.blob, `page-${i + 1}.jpg`));
+      fd.append("pagesName", `${filedAs} - certificate photo`);
+    } else {
+      fd.append("file", file);
+    }
     fd.append("category", "certificate");
     fd.append("person", filedAs);
     fd.append("uploadedBy", SESSION_USER.name || filedAs);
@@ -16393,12 +16638,13 @@ function CrewCertificateUpload() {
     xhr.send(fd);
   });
 
-  const run = async (files) => {
+  const run = async (files, fromCamera) => {
     if (!filedAs) { setNameErr("Type your name first."); return; }
     setNameErr("");
-    const list = [...files].filter((f) => f && f.size > 0);
+    const list = fromCamera ? [files] : [...files].filter((f) => f && f.size > 0);
     if (!list.length) return;
-    const start = list.map((f, i) => ({ key: Date.now() + "-" + i, name: f.name, pct: 0, phase: "Waiting", done: false }));
+    const start = list.map((f, i) => ({ key: Date.now() + "-" + i,
+      name: fromCamera ? `Photo · ${f.length} page${f.length === 1 ? "" : "s"}` : f.name, pct: 0, phase: "Waiting", done: false }));
     setJobs(start); setOpen(true);
     for (let i = 0; i < list.length; i++) {
       const key = start[i].key;
@@ -16412,15 +16658,21 @@ function CrewCertificateUpload() {
         continue;
       }
       const rec = up.body.record;
+      if (fromCamera) clearShots();
       patchJob(key, { pct: 50, phase: "Converting and reading the certificate" });
       let creep = 50;
       const timer = setInterval(() => { creep = Math.min(90, creep + 1); patchJob(key, { pct: creep }); }, 700);
       try {
         const r = await fetch("/api/certificates/read-one", { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: rec.id }) });
+          body: JSON.stringify({ id: rec.id, discardUnreadable: !!fromCamera }) });
         const out = await r.json();
         if (!r.ok) throw new Error(out.error || `Reading failed (${r.status})`);
         clearInterval(timer);
+        if (out.discarded) {
+          patchJob(key, { pct: 100, phase: "Not clear — take the photo again", done: true, failed: true, note: out.reason || "" });
+          setRetake("The photo wasn't clear enough to read. Take it again.");
+          continue;
+        }
         patchJob(key, { pct: 100, phase: "Done", done: true, filename: out.filename, url: out.url, code: out.code,
           note: out.readable ? (out.code ? "" : "Certificate type not identified — name kept as uploaded.") : (out.reason || "Couldn't be read.") });
       } catch (e) {
@@ -16475,6 +16727,40 @@ function CrewCertificateUpload() {
 
       <input ref={fileRef} type="file" multiple accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/*" style={{ display: "none" }}
         onChange={(e) => { run(e.target.files); if (fileRef.current) fileRef.current.value = ""; }} />
+      <input ref={camRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }}
+        onChange={(e) => { addShots(e.target.files); if (camRef.current) camRef.current.value = ""; }} />
+
+      <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderRadius: 3, padding: "14px 16px", marginBottom: 14 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <Button onClick={() => camRef.current && camRef.current.click()}>
+            {shots.length ? "Take the next page" : "Take a photo"}
+          </Button>
+          {shots.length > 0 && !shots.some((s) => s.blurry) && (
+            <Button variant="ghost" onClick={() => run(shots, true)}>
+              Upload {shots.length} page{shots.length === 1 ? "" : "s"} as one certificate
+            </Button>
+          )}
+          {shots.length > 0 && <Button variant="quiet" onClick={clearShots}>Start again</Button>}
+        </div>
+        {retake && <div style={{ fontFamily: T.body, fontSize: 13, fontWeight: 600, color: T.bRed, marginTop: 10 }}>{retake}</div>}
+        {shots.length > 0 && (
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
+            {shots.map((s, i) => (
+              <div key={s.key} style={{ width: 96 }}>
+                <div className="um-shot" style={{ outline: s.blurry ? `3px solid ${T.bRed}` : "none" }}>
+                  <img src={s.preview} alt="" />
+                </div>
+                <div style={{ fontFamily: T.mono, fontSize: 10.5, color: s.blurry ? T.bRed : T.muted, marginTop: 4, textAlign: "center" }}>
+                  {s.blurry ? "Not clear — retake" : `Page ${i + 1}`}
+                </div>
+                <div style={{ textAlign: "center", marginTop: 2 }}>
+                  <a style={{ fontFamily: T.body, fontSize: 11.5, color: T.accent, cursor: "pointer" }} onClick={() => dropShot(s.key)}>Remove</a>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
       <div className="um-drop"
         onDragOver={(e) => { e.preventDefault(); setHot(true); }}
         onDragLeave={() => setHot(false)}
@@ -16502,7 +16788,7 @@ function CrewCertificateUpload() {
                   <span style={{ fontFamily: T.display, fontSize: 22, fontWeight: 700, color: T.text }}>{j.pct}%</span>
                 </div>
                 <div style={{ height: 7, background: T.raised, borderRadius: 4, overflow: "hidden", margin: "8px 0 6px" }}>
-                  <div style={{ height: "100%", width: `${j.pct}%`, background: j.note && j.phase === "Failed" ? T.bRed : T.accent,
+                  <div style={{ height: "100%", width: `${j.pct}%`, background: j.failed || (j.note && j.phase === "Failed") ? T.bRed : T.accent,
                     transition: "width .4s" }} />
                 </div>
                 <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted }}>{j.phase}{j.note ? ` · ${j.note}` : ""}</div>
