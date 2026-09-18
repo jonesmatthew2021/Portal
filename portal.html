@@ -13058,6 +13058,8 @@ function SwingDayGrid({ k, people, board, setBoard, overrides, log, onClose, sna
     rows.map((r) => /*#__PURE__*/
     React.createElement(GridRow, { key: r.key, row: r, days: days, today: today, swing: swing, lastDay: lastDay,
       colour: colourOf(r.shift), readOnly: readOnly,
+      offSwing: offSwing, fullName: fullName, positionOf: positionOf,
+      onCover: bringOn,
       onWindow: (from, to) => setWindow(r.p, from, to),
       onWhole: () => setWindow(r.p, swing.flyOut, swing.flyHome),
       onOff: () => offSwingNow(r.p) })
@@ -13085,10 +13087,17 @@ function SwingDayGrid({ k, people, board, setBoard, overrides, log, onClose, sna
 
 }
 
-function GridRow({ row, days, today, swing, lastDay, colour, readOnly, onWindow, onWhole, onOff }) {
+function GridRow({ row, days, today, swing, lastDay, colour, readOnly, offSwing, fullName, positionOf, onCover, onWindow, onWhole, onOff }) {
   const { name, position, crew, from: out, to: home } = row;
   const [o, setO] = useState(out);
   const [h, setH] = useState(home);
+  // The days this person isn't onboard, at either end of the swing — the
+  // gaps somebody else covers. Whoever did is put on for exactly those days.
+  const gaps = [
+  ...(out > swing.flyOut ? [{ id: "before", from: swing.flyOut, to: out }] : []),
+  ...(home < swing.flyHome ? [{ id: "after", from: home, to: swing.flyHome }] : [])];
+
+  const [cover, setCover] = useState({});
   React.useEffect(() => {setO(out);setH(home);}, [out, home]);
   const backwards = !!o && !!h && h <= o;
   const whole = out === swing.flyOut && home === swing.flyHome;
@@ -13138,8 +13147,28 @@ function GridRow({ row, days, today, swing, lastDay, colour, readOnly, onWindow,
     backwards && /*#__PURE__*/
     React.createElement("tr", null, /*#__PURE__*/React.createElement("td", { colSpan: days.length + 4, style: { fontFamily: T.body, fontSize: 12.5, color: T.bRed, padding: "2px 8px 8px" } }, "The day home is on or before the joining day, so nothing was changed."
 
-    ))
+    )),
 
+    gaps.map((g) => /*#__PURE__*/
+    React.createElement("tr", { key: g.id }, /*#__PURE__*/
+    React.createElement("td", { colSpan: days.length + 4, style: { padding: "6px 8px 10px", textAlign: "left", background: T.raised } }, /*#__PURE__*/
+    React.createElement("div", { style: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" } }, /*#__PURE__*/
+    React.createElement("span", { style: { fontFamily: T.body, fontSize: 12.5, color: T.text } }, "Covered ",
+    fmtDate(g.from), " to ", fmtDate(g.to), " by"
+    ), /*#__PURE__*/
+    React.createElement("select", { className: "um-in", style: { width: "auto", minWidth: 260 }, value: cover[g.id] || "",
+      onChange: (e) => setCover({ ...cover, [g.id]: e.target.value }) }, /*#__PURE__*/
+    React.createElement("option", { value: "" }, "Choose\u2026"),
+    offSwing.map((p) => /*#__PURE__*/React.createElement("option", { key: p.id, value: p.id }, fullName(p), " \u2014 ", positionOf(p)))
+    ), /*#__PURE__*/
+    React.createElement(Button, { variant: "ghost", disabled: !cover[g.id],
+      onClick: () => {const p = offSwing.find((x) => String(x.id) === cover[g.id]);if (p) {onCover(p, g.from, g.to);setCover({ ...cover, [g.id]: "" });}} }, "Add for those days"
+
+    )
+    )
+    )
+    )
+    )
     ));
 
 }
