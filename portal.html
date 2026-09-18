@@ -4914,7 +4914,6 @@ function CrewRosters({ people, setPeople, board, setBoard, log, currentUser, vie
 
   const TABS = [
   { id: "board", label: "Onboard and off swing" },
-  { id: "lists", label: "Swing Alpha and Bravo" },
   ...(admin ? [{ id: "switch", label: "Switch swings" }] : [])];
 
 
@@ -5021,10 +5020,6 @@ function CrewRosters({ people, setPeople, board, setBoard, log, currentUser, vie
 
     })
     ),
-
-    sub === "lists" && /*#__PURE__*/
-    React.createElement(SwingListUploads, { lists: lists, people: people, admin: admin, onApply: applySwingList }),
-
 
     sub === "board" && /*#__PURE__*/
     React.createElement(React.Fragment, null,
@@ -12549,7 +12544,7 @@ function FoldSection({ title, meta, tone = T.accent, children, boxRef }) {
 
 }
 
-function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, cardsOnly, compact }) {
+function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, onAdhoc, cardsOnly, compact }) {
   const { shiftAnalysis: heldShift } = usePortal();
   const { quals: QUALS, swingDates, setSwingDates, log, certDates, swingBoard, swingBoards } = usePortal();
   const validityFor = useValidityLookup();
@@ -12782,7 +12777,8 @@ function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, ca
       "From the four-week pattern. Type the office's dates over it."
       ), /*#__PURE__*/
       React.createElement("span", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
-      (given || half || bust) && /*#__PURE__*/React.createElement(Button, { variant: "quiet", onClick: () => usePattern(k) }, "Use the pattern"), /*#__PURE__*/
+      (given || half || bust) && /*#__PURE__*/React.createElement(Button, { variant: "quiet", onClick: () => usePattern(k) }, "Use the pattern"),
+      onAdhoc && /*#__PURE__*/React.createElement(Button, { variant: "solid", onClick: () => {setAt(k);onAdhoc(k);} }, "Adhoc changes"), /*#__PURE__*/
       React.createElement(Button, { variant: on ? "ghost" : "quiet", onClick: () => setAt(k) },
       on ? "Shown below" : "Show below"
       )
@@ -13147,15 +13143,19 @@ function RosterPage({ currentUser, people, setPeople, overrides, swingBoard, set
   const k0 = currentSwingIndex();
   const [at, setAt] = useState(k0);
   const [swingOpen, setSwingOpen] = useState(false);
+  const boardRef = useRef(null);
   return (/*#__PURE__*/
     React.createElement(React.Fragment, null, /*#__PURE__*/
     React.createElement(SectionHead, { title: "Roster" }), /*#__PURE__*/
     React.createElement(SwingCompliance, { cardsOnly: true, people: people, overrides: overrides, at: at, setAt: setAt,
-      onOpenSwing: () => setSwingOpen(true) }), /*#__PURE__*/
+      onOpenSwing: () => {if (boardRef.current) boardRef.current.scrollIntoView({ behavior: "smooth", block: "start" });},
+      onAdhoc: () => setSwingOpen(true) }), /*#__PURE__*/
+    React.createElement("div", { ref: boardRef }, /*#__PURE__*/
     React.createElement(CrewRosters, { people: people, setPeople: setPeople, board: swingBoard,
       setBoard: setSwingBoard, log: log, currentUser: currentUser,
       viewSwing: at, overrides: overrides,
-      onShowNow: () => setAt(k0) }),
+      onShowNow: () => setAt(k0) })
+    ),
     swingOpen && /*#__PURE__*/
     React.createElement(SwingDayGrid, { k: at, people: people, board: swingBoard, setBoard: setSwingBoard,
       overrides: overrides, log: log, onClose: () => setSwingOpen(false) })

@@ -4650,7 +4650,6 @@ function CrewRosters({ people, setPeople, board, setBoard, log, currentUser, vie
 
   const TABS = [
     { id: "board", label: "Onboard and off swing" },
-    { id: "lists", label: "Swing Alpha and Bravo" },
     ...(admin ? [{ id: "switch", label: "Switch swings" }] : []),
   ];
 
@@ -4757,10 +4756,6 @@ function CrewRosters({ people, setPeople, board, setBoard, log, currentUser, vie
           );
         })}
       </div>
-
-      {sub === "lists" && (
-        <SwingListUploads lists={lists} people={people} admin={admin} onApply={applySwingList} />
-      )}
 
       {sub === "board" && (
         <>
@@ -12285,7 +12280,7 @@ function FoldSection({ title, meta, tone = T.accent, children, boxRef }) {
   );
 }
 
-function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, cardsOnly, compact }) {
+function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, onAdhoc, cardsOnly, compact }) {
   const { shiftAnalysis: heldShift } = usePortal();
   const { quals: QUALS, swingDates, setSwingDates, log, certDates, swingBoard, swingBoards } = usePortal();
   const validityFor = useValidityLookup();
@@ -12519,6 +12514,7 @@ function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, ca
           </span>
           <span style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {(given || half || bust) && <Button variant="quiet" onClick={() => usePattern(k)}>Use the pattern</Button>}
+            {onAdhoc && <Button variant="solid" onClick={() => { setAt(k); onAdhoc(k); }}>Adhoc changes</Button>}
             <Button variant={on ? "ghost" : "quiet"} onClick={() => setAt(k)}>
               {on ? "Shown below" : "Show below"}
             </Button>
@@ -12883,15 +12879,19 @@ function RosterPage({ currentUser, people, setPeople, overrides, swingBoard, set
   const k0 = currentSwingIndex();
   const [at, setAt] = useState(k0);
   const [swingOpen, setSwingOpen] = useState(false);
+  const boardRef = useRef(null);
   return (
     <>
       <SectionHead title="Roster" />
       <SwingCompliance cardsOnly people={people} overrides={overrides} at={at} setAt={setAt}
-        onOpenSwing={() => setSwingOpen(true)} />
-      <CrewRosters people={people} setPeople={setPeople} board={swingBoard}
-        setBoard={setSwingBoard} log={log} currentUser={currentUser}
-        viewSwing={at} overrides={overrides}
-        onShowNow={() => setAt(k0)} />
+        onOpenSwing={() => { if (boardRef.current) boardRef.current.scrollIntoView({ behavior: "smooth", block: "start" }); }}
+        onAdhoc={() => setSwingOpen(true)} />
+      <div ref={boardRef}>
+        <CrewRosters people={people} setPeople={setPeople} board={swingBoard}
+          setBoard={setSwingBoard} log={log} currentUser={currentUser}
+          viewSwing={at} overrides={overrides}
+          onShowNow={() => setAt(k0)} />
+      </div>
       {swingOpen && (
         <SwingDayGrid k={at} people={people} board={swingBoard} setBoard={setSwingBoard}
           overrides={overrides} log={log} onClose={() => setSwingOpen(false)} />
