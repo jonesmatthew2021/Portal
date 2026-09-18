@@ -22,6 +22,7 @@ import {
   liveCertificates,
   matrixCheckKey,
   matrixReadingKey,
+  allReadings,
   matrixStore,
   MAX_READ_BYTES,
   mediaFor,
@@ -395,7 +396,7 @@ export function holderOnMatrix(holderName: string, names: string[]) {
  */
 export async function refile(names: string[], limit = Infinity) {
   const certs = await liveCertificates();
-  const store = readingStore();
+  const readings = await allReadings();
 
   // The matrix's own titles, for the one filing name a read certificate gets:
   // "PERSON - CODE Title.pdf".
@@ -418,7 +419,7 @@ export async function refile(names: string[], limit = Infinity) {
   // slice per request (limit + remaining), so no single request runs longer
   // than its caller can wait.
   for (const row of certs) {
-    const reading = (await store.get(readingKey(row), { type: "json" })) as Reading | null;
+    const reading = readings.get(readingKey(row)) || null;
     if (!reading || !reading.readable || !reading.holderName) continue;
 
     const person = holderOnMatrix(reading.holderName, names);
@@ -605,16 +606,14 @@ async function validityPeriodList() {
 
 async function compare(matrix: Matrix, sheet: { filename?: string; rows?: { name: string; vals: (string | null)[] }[] } | null) {
   const certs = await liveCertificates();
-  const store = readingStore();
+  const held = await allReadings();
 
   // The validity periods matrix, where one is filed and has been read. It is
   // what turns a certificate that prints an issue date and no expiry into a
   // date the spreadsheet can carry.
   const validity = await validityPeriods().catch(() => null);
 
-  const readings = await Promise.all(
-    certs.map(async (row) => ({ row, reading: (await store.get(readingKey(row), { type: "json" })) as Reading | null })),
-  );
+  const readings = certs.map((row) => ({ row, reading: held.get(readingKey(row)) || null }));
 
   const cols = matrix.cols || [];
   // Keyed upper case, the same way the rest of the codebase matches matrix

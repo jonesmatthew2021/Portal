@@ -9559,9 +9559,10 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
   const pct = !run || run.phase === "failed" ? 0 :
   run.phase === "reading" ?
   run.total ? Math.min(90, Math.round(run.read / run.total * 90)) : 0 :
-  run.phase === "filing" ? 91 :
-  run.phase === "validity" ? 93 :
-  run.phase === "comparing" ? 95 :
+  run.phase === "filing" ?
+  91 + (run.toFile ? Math.min(3, Math.round(run.filed / run.toFile * 3)) : 0) :
+  run.phase === "validity" ? 95 :
+  run.phase === "comparing" ? 96 :
   98;
 
   React.useEffect(() => {
@@ -9577,7 +9578,10 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
   run.total ?
   `Reading the certificates — ${run.read} of ${run.total}.` :
   "Looking at what is on file." :
-  run.phase === "filing" ? "Filing each certificate under the person named on it." :
+  run.phase === "filing" ?
+  run.toFile ?
+  `Filing each certificate under the person named on it — ${run.filed} of ${run.toFile}.` :
+  "Filing each certificate under the person named on it." :
   run.phase === "validity" ? "Reading the validity periods off the skills matrix." :
   run.phase === "comparing" ? "Working out each expiry date." :
   run.phase === "writing" ? "Writing the dates into the training matrix workbook." :
@@ -9612,14 +9616,27 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
       // or they would be held against the wrong row. Failing is not worth
       // losing the run over.
       let moved = [];
+      setRun({ phase: "filing", read: progress.read, total: progress.total, filed: 0, toFile: 0 });
       try {
-        setRun({ phase: "filing", read: progress.read, total: progress.total });
-        const r = await analyse({ action: "refile", names: QUALS.rows.map((row) => row[0]) });
-        moved = r.moved || [];
+        // A slice at a time: the window keeps count as it goes, and no single
+        // request is asked to move more files than it can finish. What a pass
+        // couldn't reach is left for the next press or the hourly run.
+        let filed = 0;
+        for (let pass = 0; pass < 200; pass++) {
+          const r = await analyse({
+            action: "refile", names: QUALS.rows.map((row) => row[0]), limit: 40
+          });
+          const got = r.moved || [];
+          moved = moved.concat(got);
+          filed += got.length;
+          const left = Number(r.remaining) || 0;
+          setRun({ phase: "filing", read: progress.read, total: progress.total, filed, toFile: filed + left });
+          if (!left || !got.length) break;
+        }
       } catch (e) {
-        moved = [];
-      }
-      if (moved.length) refileCertificates(moved);
+
+        // Whatever was filed stands; the rest is picked up next time.
+      }if (moved.length) refileCertificates(moved);
 
       // The validity periods matrix is what turns "issued March 2024, runs two
       // years" into an expiry date. It failing to read only means the dates

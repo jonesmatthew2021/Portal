@@ -152,7 +152,7 @@ export default {
 
       let movedCount = 0;
       while (names.length && timeLeft()) {
-        const out = (await (await refile(names, 10)).json()) as {
+        const out = (await (await refile(names, 50)).json()) as {
           moved: unknown[]; remaining: number;
         };
         movedCount += (out.moved || []).length;

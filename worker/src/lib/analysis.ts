@@ -130,6 +130,31 @@ export function readingStore() {
   return getStore({ name: "certificate-readings", consistency: "strong" });
 }
 
+/**
+ * Every certificate reading there is, in one question to the database.
+ *
+ * A pass over the filing used to ask for each certificate's reading in turn.
+ * On a ship with fifteen hundred certificates on file that is fifteen hundred
+ * calls before a single file is touched, which is most of the wait and most of
+ * what a request is allowed. They all sit in one table, so they come back
+ * together and are looked up in memory after.
+ */
+export async function allReadings(): Promise<Map<string, Reading>> {
+  const out = new Map<string, Reading>();
+  const rows = await getEnv()
+    .DB.prepare("SELECT key, value FROM blobs WHERE store = ?1")
+    .bind("certificate-readings")
+    .all<{ key: string; value: string }>();
+  for (const r of rows.results || []) {
+    try {
+      out.set(r.key, JSON.parse(r.value) as Reading);
+    } catch (e) {
+      // A reading that won't parse is no reading; it is read again next run.
+    }
+  }
+  return out;
+}
+
 export function readingKey(row: Row) {
   // Keyed by the bytes, so the same certificate filed twice under two names is
   // read once, and a renewal is a different key rather than an overwrite.
