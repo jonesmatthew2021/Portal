@@ -14587,8 +14587,8 @@ function SwingShiftAllocation({ here }) {
                           </button>
                         )}
                         {(holders.length > 0 || r.detail) && (
-                          <span style={{ width: "100%", display: "flex", flexWrap: "wrap",
-                            gap: "5px 16px", alignItems: "center", lineHeight: 1.6, paddingLeft: 2 }}>
+                          <span style={{ width: "100%", display: "flex", flexDirection: "column",
+                            gap: 4, alignItems: "flex-start", lineHeight: 1.5, paddingLeft: 2, marginTop: 2 }}>
                             {holders.map((who, n) => {
                               const dress = holderCircle(r, n);
                               return (
