@@ -41,7 +41,12 @@ out = out.replace(/[ \t]*<script[^>]*babel\.min\.js[^>]*><\/script>\r?\n/, "");
 
 writeFileSync(join(ASSETS, "index.html"), out);
 copyFileSync(join(REPO, "source", "crew-list-form.html"), join(ASSETS, "crew-list-form.html"));
+// The home-screen app's icon (the United Marine roundel) and manifest, served
+// as real files so phones can fetch them when the portal is installed.
+for (const f of ["manifest.webmanifest", "icon-192.png", "icon-512.png", "apple-touch-icon.png"]) {
+  copyFileSync(join(REPO, "source", "app", f), join(ASSETS, f));
+}
 
 console.log(
-  `assets built — index.html ${(out.length / 1024 / 1024).toFixed(1)} MB (compiled in ${((Date.now() - t0) / 1000).toFixed(1)}s), crew-list-form.html copied`,
+  `assets built — index.html ${(out.length / 1024 / 1024).toFixed(1)} MB (compiled in ${((Date.now() - t0) / 1000).toFixed(1)}s), crew-list-form.html and app icons copied`,
 );

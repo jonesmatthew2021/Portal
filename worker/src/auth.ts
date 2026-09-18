@@ -389,6 +389,8 @@ async function handleLogout(req: Request): Promise<Response> {
  * Returns null when the request may pass (and the user, when there is one),
  * or the Response that answers it instead.
  */
+const PUBLIC_FILES = new Set(["/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/apple-touch-icon.png"]);
+
 export async function gate(
   req: Request,
   path: string,
@@ -410,6 +412,9 @@ export async function gate(
   }
   if (path === "/login/verify" && req.method === "POST") return { barred: await handleVerify(req), user: null };
   if (path === "/logout") return { barred: await handleLogout(req), user: null };
+  // The home-screen app's icon and manifest are fetched by the phone itself,
+  // outside any sign-in — they carry nothing but the roundel.
+  if (PUBLIC_FILES.has(path)) return { barred: null, user: null };
 
   const user = await currentUser(req);
   if (user) {
