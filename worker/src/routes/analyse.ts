@@ -232,6 +232,31 @@ async function askModel(row: Row, bytes: ArrayBuffer, codes: [string, string][])
 }
 
 /** Read up to `limit` certificates that have no reading yet. */
+/** One certificate read now — the same checks and the same question the
+ * batch read puts, for a file that has just been filed. A refusal from the
+ * model is written down as unreadable; a busy model throws, to be tried
+ * again. */
+export async function readCertificate(row: Row, codes: [string, string][]): Promise<Reading> {
+  const unreadable = (reason: string) =>
+    ({ version: READING_VERSION, at: new Date().toISOString(), model: null, readable: false, reason }) as Reading;
+  const shape = mediaFor(row);
+  if (!shape) return unreadable(`${row.filename} isn't a PDF or an image, so it can't be read.`);
+  if (row.sizeBytes > MAX_READ_BYTES) {
+    return unreadable(`${row.filename} is too large to read. Re-save it under 4 MB and upload it again.`);
+  }
+  const bytes = await fileStore().get(row.blobKey, { type: "arrayBuffer" });
+  if (!bytes) return unreadable("The file is no longer in the store.");
+  try {
+    return await askModel(row, bytes, codes);
+  } catch (e) {
+    if (e instanceof ModelRefusal && e.status === 400) {
+      const said = refusalSays(e);
+      return unreadable(`The model turned this file away${said ? `: ${said}` : " as one it can't read."}`);
+    }
+    throw e;
+  }
+}
+
 export async function extract(codes: [string, string][], limit: number) {
   const certs = await liveCertificates();
   const store = readingStore();
@@ -345,7 +370,7 @@ export async function extract(codes: [string, string][], limit: number) {
  * left exactly where it was filed and reported as a difference instead — moving
  * a certificate into the wrong person's folder is worse than leaving it be.
  */
-function holderOnMatrix(holderName: string, names: string[]) {
+export function holderOnMatrix(holderName: string, names: string[]) {
   const on = new Set(words(holderName));
   if (!on.size) return null;
 

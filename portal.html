@@ -16353,6 +16353,180 @@ function SharePointPage() {
 
 }
 
+/* Upload Crew Certificates — the crew's own door. A name and a drop, and the
+   file is filed into the company SharePoint under them, read, converted to
+   PDF and named the way OPMS wants it; the window then hands the finished
+   file back to save and upload to OPMS. */
+function CrewCertificateUpload() {
+  const { quals: QUALS } = usePortal();
+  const names = useMemo(() => QUALS.rows.map((r) => r[0]), [QUALS]);
+  const [typed, setTyped] = useState(SESSION_USER.name || "");
+  const filedAs = useMemo(() => {
+    const c = canonicalName(typed);
+    return c ? matchRoster(c, names) || c : "";
+  }, [typed, names]);
+  const [jobs, setJobs] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [hot, setHot] = useState(false);
+  const [nameErr, setNameErr] = useState("");
+  const fileRef = useRef(null);
+  const patchJob = (key, p) => setJobs((js) => js.map((j) => j.key === key ? { ...j, ...p } : j));
+
+  const uploadOne = (file, key) => new Promise((resolve) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("category", "certificate");
+    fd.append("person", filedAs);
+    fd.append("uploadedBy", SESSION_USER.name || filedAs);
+    fd.append("onDuplicate", "skip");
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/files");
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) patchJob(key, { pct: Math.round(e.loaded / e.total * 45), phase: "Uploading to SharePoint" });
+    };
+    xhr.onload = () => {
+      let body = {};
+      try {body = JSON.parse(xhr.responseText || "{}");} catch (e) {}
+      resolve({ status: xhr.status, body });
+    };
+    xhr.onerror = () => resolve({ status: 0, body: {} });
+    xhr.send(fd);
+  });
+
+  const run = async (files) => {
+    if (!filedAs) {setNameErr("Type your name first.");return;}
+    setNameErr("");
+    const list = [...files].filter((f) => f && f.size > 0);
+    if (!list.length) return;
+    const start = list.map((f, i) => ({ key: Date.now() + "-" + i, name: f.name, pct: 0, phase: "Waiting", done: false }));
+    setJobs(start);setOpen(true);
+    for (let i = 0; i < list.length; i++) {
+      const key = start[i].key;
+      const up = await uploadOne(list[i], key);
+      if (up.status === 200 && up.body.skipped) {
+        patchJob(key, { pct: 100, phase: "Already on file", done: true });
+        continue;
+      }
+      if (up.status < 200 || up.status >= 300 || !up.body.record) {
+        patchJob(key, { pct: 100, phase: "Failed", done: true, note: up.body.error || `Upload failed (${up.status || "no connection"})` });
+        continue;
+      }
+      const rec = up.body.record;
+      patchJob(key, { pct: 50, phase: "Converting and reading the certificate" });
+      let creep = 50;
+      const timer = setInterval(() => {creep = Math.min(90, creep + 1);patchJob(key, { pct: creep });}, 700);
+      try {
+        const r = await fetch("/api/certificates/read-one", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: rec.id }) });
+        const out = await r.json();
+        if (!r.ok) throw new Error(out.error || `Reading failed (${r.status})`);
+        clearInterval(timer);
+        patchJob(key, { pct: 100, phase: "Done", done: true, filename: out.filename, url: out.url, code: out.code,
+          note: out.readable ? out.code ? "" : "Certificate type not identified — name kept as uploaded." : out.reason || "Couldn't be read." });
+      } catch (e) {
+        clearInterval(timer);
+        patchJob(key, { pct: 100, phase: "Uploaded — not renamed", done: true, filename: rec.filename, url: rec.url, note: String(e.message || e) });
+      }
+    }
+  };
+
+  const save = async (j) => {
+    const r = await fetch(j.url);
+    const blob = await r.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = j.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  };
+
+  const allDone = jobs.length > 0 && jobs.every((j) => j.done);
+
+  return (/*#__PURE__*/
+    React.createElement("div", null, /*#__PURE__*/
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" } }, /*#__PURE__*/
+    React.createElement(SectionHead, { title: "Upload Crew Certificates" }), /*#__PURE__*/
+    React.createElement("a", { className: "um-btn", href: "https://portways.opms.com.au/", target: "_blank", rel: "noreferrer",
+      style: { background: T.accent, color: "#fff", border: `1px solid ${T.accent}`, fontSize: 11, fontWeight: 700,
+        padding: "8px 13px", borderRadius: 2, textDecoration: "none", letterSpacing: "0.06em" } }, "OPEN OPMS"
+
+    )
+    ), /*#__PURE__*/
+    React.createElement("div", { style: { fontFamily: T.body, fontSize: 14, color: T.muted, lineHeight: 1.7, marginBottom: 16 } }, "Drop your certificate here with your name on it. It is filed straight into the company SharePoint under you, converted to PDF and named the way OPMS wants it \u2014 then handed back so you can save the finished file and upload that same copy to OPMS."
+
+
+
+    ), /*#__PURE__*/
+
+    React.createElement("div", { style: { display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 12 } }, /*#__PURE__*/
+    React.createElement("div", { style: { flex: "1 1 260px" } }, /*#__PURE__*/
+    React.createElement(Field, { label: "Your name" }, /*#__PURE__*/
+    React.createElement("input", { className: "um-in", value: typed, placeholder: "First name and surname",
+      onChange: (e) => setTyped(e.target.value) })
+    )
+    ), /*#__PURE__*/
+    React.createElement("div", { style: { fontFamily: T.mono, fontSize: 11.5, color: filedAs ? T.text : T.muted, paddingBottom: 9 } },
+    filedAs ? `Filed as ${filedAs}` : ""
+    )
+    ),
+    nameErr && /*#__PURE__*/React.createElement("div", { style: { fontFamily: T.body, fontSize: 12.5, color: T.bRed, marginBottom: 10 } }, nameErr), /*#__PURE__*/
+
+    React.createElement("input", { ref: fileRef, type: "file", multiple: true, accept: ".pdf,.jpg,.jpeg,.png,application/pdf,image/*", style: { display: "none" },
+      onChange: (e) => {run(e.target.files);if (fileRef.current) fileRef.current.value = "";} }), /*#__PURE__*/
+    React.createElement("div", { className: "um-drop",
+      onDragOver: (e) => {e.preventDefault();setHot(true);},
+      onDragLeave: () => setHot(false),
+      onDrop: (e) => {e.preventDefault();setHot(false);run(e.dataTransfer.files);},
+      onClick: () => fileRef.current && fileRef.current.click(),
+      style: { border: `2px dashed ${hot ? T.accent : T.rule}`, borderRadius: 3, background: hot ? T.raised : T.panel,
+        padding: "34px 16px", textAlign: "center", cursor: "pointer", marginBottom: 18 } }, /*#__PURE__*/
+    React.createElement("div", { className: "um-cue", style: { fontFamily: T.display, fontSize: 14, fontWeight: 700, color: T.text, letterSpacing: "0.04em" } }, "Drop certificates here"
+
+    ), /*#__PURE__*/
+    React.createElement("div", { style: { fontFamily: T.mono, fontSize: 11, color: T.muted, marginTop: 6 } }, "or press to choose files \xB7 PDF or photo \xB7 5 MB each")
+    ),
+
+    open && /*#__PURE__*/
+    React.createElement("div", { style: { position: "fixed", inset: 0, background: "rgba(22,50,74,0.45)", zIndex: 60,
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 20 } }, /*#__PURE__*/
+    React.createElement("div", { style: { background: T.panel, border: `1px solid ${T.rule}`, borderTop: `4px solid ${T.accent}`,
+        borderRadius: 3, padding: "22px 26px", width: "min(600px, 94vw)", maxHeight: "84vh", overflowY: "auto" } }, /*#__PURE__*/
+    React.createElement(Eyebrow, { color: T.accent }, allDone ? "Finished" : "Uploading"),
+    jobs.map((j) => /*#__PURE__*/
+    React.createElement("div", { key: j.key, style: { padding: "12px 0", borderBottom: `1px solid ${T.rule}` } }, /*#__PURE__*/
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 } }, /*#__PURE__*/
+    React.createElement("span", { style: { fontFamily: T.body, fontSize: 13.5, fontWeight: 600, color: T.text, minWidth: 0,
+        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, j.filename || j.name), /*#__PURE__*/
+    React.createElement("span", { style: { fontFamily: T.display, fontSize: 22, fontWeight: 700, color: T.text } }, j.pct, "%")
+    ), /*#__PURE__*/
+    React.createElement("div", { style: { height: 7, background: T.raised, borderRadius: 4, overflow: "hidden", margin: "8px 0 6px" } }, /*#__PURE__*/
+    React.createElement("div", { style: { height: "100%", width: `${j.pct}%`, background: j.note && j.phase === "Failed" ? T.bRed : T.accent,
+        transition: "width .4s" } })
+    ), /*#__PURE__*/
+    React.createElement("div", { style: { fontFamily: T.body, fontSize: 12.5, color: T.muted } }, j.phase, j.note ? ` · ${j.note}` : ""),
+    j.done && j.url && /*#__PURE__*/
+    React.createElement("div", { style: { display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 10 } }, /*#__PURE__*/
+    React.createElement("span", { style: { fontFamily: T.body, fontSize: 13, color: T.text } }, "Save this document for upload to OPMS"), /*#__PURE__*/
+    React.createElement(Button, { onClick: () => save(j) }, "Save to this device")
+    )
+
+    )
+    ),
+    allDone && /*#__PURE__*/
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 14 } }, /*#__PURE__*/
+    React.createElement("span", { style: { fontFamily: T.body, fontSize: 14, fontWeight: 700, color: T.teal } }, "Upload successfully completed"), /*#__PURE__*/
+    React.createElement(Button, { variant: "quiet", onClick: () => {setOpen(false);setJobs([]);} }, "Close")
+    )
+
+    )
+    )
+
+    ));
+
+}
+
 /* The Admin tab's own pages. Kept as a list so the strip that switches between
    them and the page that is rendered can't disagree about what exists. */
 const ADMIN_PAGES = [
@@ -17542,6 +17716,7 @@ function CoolibahPortal({ role, onSignOut }) {
   { id: "handover", label: "Handover Notes" },
   { id: "training", label: "Crew Matrix" },
   { id: "documentation", label: "Documentation" },
+  { id: "upload-certs", label: "Upload Crew Certificates" },
   { id: "suggestions", label: "Crew Suggestions" },
   { id: "history", label: "History" },
   { id: "app-suggestions", label: "App / Portal Suggestions" }];
@@ -17573,6 +17748,7 @@ function CoolibahPortal({ role, onSignOut }) {
 
     documentation: /*#__PURE__*/React.createElement(DocumentationHub, { docs: docs, addDoc: addDoc, removeDoc: removeDoc, currentUser: currentUser,
       people: people, setPeople: setPeople, overrides: overrides, setOverrides: setOverrides, log: log }),
+    "upload-certs": /*#__PURE__*/React.createElement(CrewCertificateUpload, null),
     suggestions: /*#__PURE__*/React.createElement(SuggestionBoard, { data: suggestions, setData: setSuggestions, log: log, currentUser: currentUser,
       title: "Crew Suggestions", logLabel: "Crew Suggestions",
       placeholder: "Anything that would make the job safer, quicker or less painful." }),

@@ -31,6 +31,9 @@ export function allowed(user: PortalUser, method: string, path: string): boolean
   // crewStateBody strips to comments) and nothing else.
   if (method === "GET" || method === "HEAD") return true;
   if (method === "PUT" && path === "/api/state") return true;
+  // Crew may file their own certificates — the upload page's two calls. The
+  // files door is held to certificates in index.ts.
+  if (method === "POST" && (path === "/api/files" || path === "/api/certificates/read-one")) return true;
   return false;
 }
 

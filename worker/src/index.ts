@@ -16,6 +16,7 @@ import run from "./routes/run.js";
 import sync, { runSync, syncProgress } from "./routes/sync.js";
 import migrate from "./routes/migrate.js";
 import migrateCerts from "./routes/migrate-certs.js";
+import readOne from "./routes/read-one.js";
 import clearR2 from "./routes/clear-r2.js";
 
 /**
@@ -58,7 +59,16 @@ export default {
         const save = user && user.role === "crew" && req.method === "PUT" ? await crewStateBody(req) : req;
         return await state(save);
       }
+      if (path === "/api/files" && req.method === "POST" && user && user.role === "crew") {
+        // Crew may file certificates and nothing else through this door.
+        const form = await req.clone().formData().catch(() => null);
+        if (!form || form.get("category") !== "certificate") {
+          await logLoginEvent(req, "denied", user.email, "POST /api/files (not a certificate)");
+          return denied();
+        }
+      }
       if (path === "/api/files") return await files(req);
+      if (path === "/api/certificates/read-one") return await readOne(req);
 
       const fileMatch = /^\/api\/files\/([^/]+)$/.exec(path);
       if (fileMatch) {
