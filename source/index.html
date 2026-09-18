@@ -13085,11 +13085,37 @@ function RosterPage({ currentUser, people, setPeople, overrides, swingBoard, set
   );
 }
 
+/* What the colours on this page mean, said once at the top. The same five
+   run through the swing cards, the tiles and the requirement lists. */
+function ComplianceLegend() {
+  const keys = [
+    [T.teal, "Clear", "clear to sail, or the requirement is met"],
+    [T.bRed, "Not clear", "something is expired or not held, or the shift is short"],
+    [T.bOrange, "Expiring onboard", "runs out during the swing"],
+    [T.accent, "On now", "the swing the vessel is on"],
+    [T.muted, "Not on the matrix", "nothing on file to read them against"],
+  ];
+  return (
+    <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderRadius: 2,
+      padding: "11px 15px", marginBottom: 14, display: "flex", gap: 18, flexWrap: "wrap",
+      alignItems: "center" }}>
+      {keys.map(([colour, word, what]) => (
+        <span key={word} style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+          <span style={{ width: 13, height: 13, borderRadius: 2, background: colour, flex: "none" }} />
+          <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.text, fontWeight: 600 }}>{word}</span>
+          <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted }}>{what}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function SwingCompliancePage({ currentUser, people, setPeople, overrides, swingBoard, setSwingBoard, log }) {
   const [at, setAt] = useState(currentSwingIndex());
   return (
     <>
       <SectionHead title="Swing Compliance" />
+      <ComplianceLegend />
       <SwingCompliance compact people={people} overrides={overrides} at={at} setAt={setAt}
         roster={
           <CrewRosters readOnly asAt={todayISO()} people={people} setPeople={setPeople} board={swingBoard}
