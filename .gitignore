@@ -1,2 +1,8 @@
 tools/node_modules/
 tools/package-lock.json
+
+# Portal data lives in SharePoint and the worker store - the local mirror is not source code.
+documents/
+
+# Built from preview.html by tools/build-fast-preview.mjs - never edited by hand.
+portal.html
