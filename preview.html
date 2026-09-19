@@ -1231,6 +1231,8 @@ body.um-tight footer { margin-top: 12px !important; }
 .um-timeline.um-tl-can td.um-tl-d { cursor: cell; }
 .um-timeline.um-tl-can td.um-tl-f { cursor: pointer; }
 .um-timeline.um-tl-can td.um-tl-g { cursor: col-resize; }
+.um-timeline td.um-tl-p { box-shadow: inset 0 0 0 1px rgba(46,106,142,0.85);
+  background-image: linear-gradient(rgba(46,106,142,0.34), rgba(46,106,142,0.34)); }
 .um-nudge { font-family: ${T.mono}; font-size: 15px; line-height: 1; width: 26px; height: 30px;
   border: 1px solid ${T.rule}; background: ${T.panel}; color: ${T.text}; border-radius: 2px;
   cursor: pointer; flex: none; }
@@ -13747,7 +13749,7 @@ const RT_BG = {};
 const bgOf = (hex) => RT_BG[hex] || (RT_BG[hex] = { background: hex });
 const RT_NO_DAYS = new Map();
 
-function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRange }) {
+function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRange, onDeleteRange }) {
   const spine = (plan && plan.spine) || [];
   const rows = (plan && plan.rows) || [];
   const today = todayISO();
@@ -13986,6 +13988,84 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
     return m;
   }, [blocks]);
 
+  // The lines and the days in the order they are drawn, so a block picked out
+  // can be held as two corners rather than a list of squares.
+  const flatNames = useMemo(() => {
+    const out = [];
+    blocks.forEach((g) => g.people.forEach((p) => out.push(p.name)));
+    return out;
+  }, [blocks]);
+  const flatAt = useMemo(() => new Map(flatNames.map((n, i) => [n, i])), [flatNames]);
+  const dayAt = useMemo(() => new Map(days.map((d, i) => [d, i])), [days]);
+
+  const picked = useRef(null);   // the block standing picked out
+  const picking = useRef(null);  // the block being swept out under the hand
+  const live = useRef({});
+  live.current = { days, flatNames, onDeleteRange, onStint };
+
+  /* The tint is laid on the squares themselves rather than kept as something
+     the table is drawn from. Sweeping a block out touches only the squares at
+     its edges; drawing the table again for every square the hand passes over
+     would be twenty thousand squares a step. */
+  const paintPick = (sel) => {
+    const root = frame.current;
+    if (!root) return;
+    root.querySelectorAll("td.um-tl-p").forEach((td) => td.classList.remove("um-tl-p"));
+    if (!sel) return;
+    for (let i = sel.i0; i <= sel.i1; i++) {
+      const tr = root.querySelector('tr[data-i="' + i + '"]');
+      if (!tr) continue;
+      for (let k = sel.k0; k <= sel.k1; k++) {
+        const td = tr.cells[k + 3];
+        if (td) td.classList.add("um-tl-p");
+      }
+    }
+  };
+
+  const spread = (s) => ({
+    i0: Math.min(s.i0, s.i), i1: Math.max(s.i0, s.i),
+    k0: Math.min(s.k0, s.k), k1: Math.max(s.k0, s.k),
+  });
+
+  React.useEffect(() => {
+    const up = () => {
+      const s = picking.current;
+      if (!s) return;
+      picking.current = null;
+      if (!s.moved) {
+        // A press that went nowhere is the plain click it has always been.
+        paintPick(null);
+        if (s.row) live.current.onStint(s.row);
+        return;
+      }
+      picked.current = spread(s);
+      paintPick(picked.current);
+    };
+    const key = (e) => {
+      const sel = picked.current;
+      if (!sel) return;
+      if (e.key === "Escape") { picked.current = null; paintPick(null); return; }
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      const el = e.target;
+      const tag = el && el.tagName ? el.tagName.toLowerCase() : "";
+      if (tag === "input" || tag === "textarea" || tag === "select" || (el && el.isContentEditable)) return;
+      e.preventDefault();
+      const L = live.current;
+      const names = new Set();
+      for (let i = sel.i0; i <= sel.i1; i++) if (L.flatNames[i]) names.add(L.flatNames[i]);
+      const from = L.days[sel.k0], to = L.days[sel.k1];
+      picked.current = null;
+      paintPick(null);
+      if (names.size && from && to && L.onDeleteRange) L.onDeleteRange(names, from, to);
+    };
+    window.addEventListener("mouseup", up);
+    window.addEventListener("keydown", key);
+    return () => {
+      window.removeEventListener("mouseup", up);
+      window.removeEventListener("keydown", key);
+    };
+  }, []);
+
   const cellUnder = (e) => {
     const td = e.target && e.target.closest ? e.target.closest("td[data-d]") : null;
     if (!td || !td.parentElement) return null;
@@ -14006,7 +14086,19 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
     const at = cellUnder(e);
     if (!at) return;
     e.preventDefault();
+    if (picked.current) { picked.current = null; paintPick(null); }
     const c = cellFor(at.p, at.d);
+    // Held by the middle of a bar, or with shift down, the hand picks days out
+    // instead of moving them; the two ends still move the day they stand for.
+    if (e.shiftKey || (c && !c.edge)) {
+      const i = Number(at.td.parentElement.getAttribute("data-i"));
+      const k = dayAt.get(at.d);
+      if (i >= 0 && k !== undefined) {
+        picking.current = { i0: i, k0: k, i, k, row: c ? c.row : null, moved: false };
+        paintPick({ i0: i, i1: i, k0: k, k1: k });
+        return;
+      }
+    }
     if (c) setDrag({ kind: c.edge || "mid", row: c.row, from: at.d, at: at.d });
     else setDrag({ kind: "new", person: at.p, anchor: at.d, at: at.d, swing: freeSwing(at.p, at.d) });
   };
@@ -14016,10 +14108,20 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
   const tableOver = (e) => {
     const at = cellUnder(e);
     if (!at) return;
+    const s = picking.current;
+    if (s) {
+      const i = Number(at.td.parentElement.getAttribute("data-i"));
+      const k = dayAt.get(at.d);
+      if (i < 0 || k === undefined || (i === s.i && k === s.k)) return;
+      s.i = i; s.k = k; s.moved = true;
+      paintPick(spread(s));
+      return;
+    }
     const c = cellFor(at.p, at.d);
     if (c) {
       at.td.title = at.p.name + " · " + fmtDate(at.d) + " · " + c.word
-        + (c.edge ? " — drag to change the day" : "");
+        + (c.edge ? " — drag to change the day"
+          : admin ? " — drag to pick days out, then Delete" : "");
     } else if (admin) {
       const sw = freeSwing(at.p, at.d);
       at.td.title = "Drag across the days to put " + at.p.name + " on"
@@ -14121,7 +14223,7 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
                 {g.people.map((p) => {
                   const mine = dayCells.get(p.name) || RT_NO_DAYS;
                   return (
-                  <tr key={p.name} className="um-row" data-p={p.name}>
+                  <tr key={p.name} className="um-row" data-p={p.name} data-i={flatAt.get(p.name)}>
                     <td className="um-tl-crew" style={{ padding: "2px 5px", maxWidth: 52,
                       borderTop: "1px solid " + T.rule }} />
                     <td className="um-tl-rank" style={{ fontFamily: T.mono, fontSize: 10, color: T.muted,
@@ -14291,6 +14393,32 @@ function RosterListPage() {
     }, p.name + " onto the roster", fmtDate(on) + " – " + fmtDate(off));
   };
 
+  /* Days picked out on the table and taken off. A stint that sits wholly
+     inside the block goes; one that runs past an edge is trimmed back to it;
+     and a block punched through the middle of a stint leaves the two ends
+     behind, as two stints. */
+  const deleteRange = (names, from, to) => {
+    change((plan) => {
+      const out = [];
+      plan.rows.forEach((r) => {
+        if (!names.has(r.name) || r.off < from || r.on > to) { out.push(r); return; }
+        const left = r.on < from, right = r.off > to;
+        if (!left && !right) return;
+        if (left) {
+          const off = isoShift(from, -1);
+          out.push({ ...r, off, days: daysBetween(r.on, off), note: "" });
+        }
+        if (right) {
+          const on = isoShift(to, 1);
+          out.push({ ...r, id: left ? "r" + Date.now() + "x" + out.length : r.id,
+            on, days: daysBetween(on, r.off), note: "" });
+        }
+      });
+      plan.rows = out;
+    }, "Days taken off the roster",
+      fmtDate(from) + " – " + fmtDate(to) + " · " + [...names].join(", "));
+  };
+
   const dropPerson = (row) => {
     change((p) => { p.rows = p.rows.filter((r) => r.id !== row.id); },
       row.name + " off the swing", fmtDate(row.on) + " – " + fmtDate(row.off));
@@ -14393,6 +14521,7 @@ function RosterListPage() {
           onStint={(row) => setTableEdit({ kind: "stint", id: row.id, name: row.name, on: row.on })}
           onDates={(row, on, off) => setDates(row, { key: row.swing }, on, off)}
           onRange={addRange}
+          onDeleteRange={deleteRange}
           onBlank={(p, s) => setTableEdit({ kind: "add", name: p.name, rank: p.rank, crew: s.crew,
             on: s.on, off: s.off, key: s.on + "|" + s.off })} />
       )}
