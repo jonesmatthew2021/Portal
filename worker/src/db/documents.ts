@@ -40,6 +40,9 @@ export const OPMS_FOLDER = "opms/spreadsheet";
 // training matrix standing against it, so only the latest is kept, same as the
 // other office documents.
 export const SHIFT_ALLOCATION_FOLDER = "roster/shift-allocation";
+// The office's travel roster — who is on which swing, and the days they sign
+// on and off. One is kept, the latest.
+export const CREW_ROSTER_FOLDER = "roster/crew-roster";
 
 /**
  * The categories the portal keeps exactly one file of.
@@ -79,6 +82,11 @@ export const SINGLE_FILE_CATEGORIES: Record<
   "validity-matrix": {
     folder: VALIDITY_FOLDER,
     label: "validity periods matrix",
+    required: false,
+  },
+  "crew-roster": {
+    folder: CREW_ROSTER_FOLDER,
+    label: "crew roster",
     required: false,
   },
   "opms-sheet": {

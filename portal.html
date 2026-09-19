@@ -820,6 +820,8 @@ function withStoredFiles(store, items) {
     // The skills matrix's companion — how long each item stays valid. Read with
     // it where one is on file; the portal runs without it.
     validityMatrix: pick("validity-matrix")[0] || null,
+    // The office's travel roster — who is on which swing.
+    crewRoster: pick("crew-roster")[0] || null,
     // The latest spreadsheet exported from OPMS. One is kept, like the others.
     opmsSheet: pick("opms-sheet")[0] || null,
     // The office's shift allocation guideline — how many holders of certain
@@ -847,6 +849,10 @@ function withoutStoredFiles(store) {
     certificates: [],
     certSheet: null,
     trainingMatrix: null,
+    crewRoster: null,
+    // The roster as read off that workbook, so every device shows the same
+    // swings without opening the spreadsheet again.
+    rosterPlan: null,
     skillsMatrix: null,
     validityMatrix: null,
     opmsSheet: null,
@@ -11128,6 +11134,15 @@ const MATRIX_CARDS = [
   blurb: "What the crew are required to hold: the items, who each one applies to, the shift allocations, and anything else to abide by.",
   logAction: "Skills matrix uploaded",
   required: true
+},
+{
+  key: "roster",
+  category: "crew-roster",
+  noun: "crew roster",
+  title: "Crew roster",
+  blurb: "Who is on which swing, and the days they sign on and off.",
+  logAction: "Crew roster uploaded",
+  required: false
 }];
 
 
@@ -11136,12 +11151,14 @@ const MATRIX_CARDS = [
 // card is which document.
 const matrixRecords = (portal) => ({
   training: portal.trainingMatrix,
-  skills: portal.skillsMatrix
+  skills: portal.skillsMatrix,
+  roster: portal.crewRoster
 });
 
 const matrixSetters = (portal) => ({
   training: portal.setTrainingMatrix,
-  skills: portal.setSkillsMatrix
+  skills: portal.setSkillsMatrix,
+  roster: portal.setCrewRoster
 });
 
 // Where the bar in the progress window stands at each step of a matrix run. A
@@ -13420,9 +13437,249 @@ function PartSwing({ swing, lastDay, offSwing, fullName, positionOf, onBring }) 
 
 }
 
-/* The Roster. Empty until the office's roster spreadsheet goes in. */
+/* The office's crew roster workbook, read as the portal keeps it.
+ *
+ * The sheet that matters is Swings: one row per person per swing — the crew
+ * they are on, their rank, their name, the day they sign on and the day they
+ * sign off. Dates come out of Excel as a count of days, which is turned back
+ * into a date here. Everything else in the workbook is the same story told
+ * another way, so it is left where it is.
+ */
+const EXCEL_EPOCH_DAYS = 25569;
+function excelDate(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 20000 || n > 80000) {
+    return /^\d{4}-\d{2}-\d{2}/.test(String(v || "")) ? String(v).slice(0, 10) : null;
+  }
+  return new Date(Math.round((n - EXCEL_EPOCH_DAYS) * 86400000)).toISOString().slice(0, 10);
+}
+
+async function readCrewRoster(record) {
+  const XLSX = await loadXLSX();
+  const resp = await fetch(record.url);
+  if (!resp.ok) throw new Error(`The roster on file couldn't be downloaded (${resp.status}).`);
+  const wb = XLSX.read(await resp.arrayBuffer(), { type: "array" });
+  const name = wb.SheetNames.find((n) => /swing/i.test(n) && !/on board/i.test(n));
+  if (!name) throw new Error("That workbook has no Swings sheet in it.");
+  const grid = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: "" });
+
+  const head = (grid[0] || []).map((c) => String(c).trim().toUpperCase());
+  const at = (want) => head.findIndex((h) => h === want);
+  const cCrew = at("CREW"),cRank = at("RANK"),cName = at("NAME");
+  const cOn = at("SIGN ON"),cOff = at("SIGN OFF"),cDays = at("DAYS"),cNote = at("NOTES");
+  if (cName < 0 || cOn < 0 || cOff < 0) throw new Error("The Swings sheet doesn't carry the columns this reads.");
+
+  // The workbook lists the swings themselves on its own sheet — crew, sign on,
+  // sign off — and that is the spine the people hang off. Without it, each pair
+  // of dates reads as a swing of its own, and somebody who signed off three
+  // days early looks like a swing with one person on it.
+  const spine = [];
+  const boardName = wb.SheetNames.find((n) => /on board/i.test(n));
+  if (boardName) {
+    const board = XLSX.utils.sheet_to_json(wb.Sheets[boardName], { header: 1, defval: "" });
+    const bHead = (board[0] || []).map((c) => String(c).trim().toUpperCase());
+    const bCrew = bHead.indexOf("CREW"),bOn = bHead.indexOf("SIGN ON"),bOff = bHead.indexOf("SIGN OFF");
+    if (bOn >= 0 && bOff >= 0) {
+      for (const b of board.slice(1)) {
+        const on = excelDate(b[bOn]),off = excelDate(b[bOff]);
+        if (!on || !off) continue;
+        const crew = String(b[bCrew] || "").trim();
+        const had = spine.find((x) => x.on === on && x.off === off);
+        // A swing both crews have a hand in is written twice; the plain letter wins.
+        if (had) {if (crew && !crew.includes("/") && had.crew.includes("/")) had.crew = crew;continue;}
+        spine.push({ on, off, crew });
+      }
+      spine.sort((a, b) => a.on.localeCompare(b.on));
+    }
+  }
+
+  const rows = [];
+  for (const r of grid.slice(1)) {
+    const person = String(r[cName] || "").replace(/\s+/g, " ").trim();
+    const on = excelDate(r[cOn]);
+    const off = excelDate(r[cOff]);
+    if (!person || !on || !off) continue;
+    rows.push({
+      crew: String(r[cCrew] || "").trim(),
+      rank: String(r[cRank] || "").trim(),
+      name: person,
+      on, off,
+      days: Number(r[cDays]) || Math.round((new Date(off) - new Date(on)) / 86400000),
+      note: cNote >= 0 ? String(r[cNote] || "").trim() : ""
+    });
+  }
+  if (!rows.length) throw new Error("Nothing on the Swings sheet could be read as a swing.");
+  return { at: todayISO(), filename: record.filename, rows, spine };
+}
+
+/* The swings the roster describes: each sign-on and sign-off pair is one
+   swing, and everybody sharing that pair is on it. */
+function rosterSwings(plan) {
+  const spine = (plan && Array.isArray(plan.spine) ? plan.spine : []).filter((s) => s.on && s.off);
+  if (spine.length) {
+    // Everybody goes on the swing their days sit inside — or the one they
+    // overlap most, where the dates were changed for them.
+    const swings = spine.map((s) => ({ on: s.on, off: s.off, crew: s.crew || "", people: [] }));
+    (plan.rows || []).forEach((r) => {
+      let best = null,most = 0;
+      for (const s of swings) {
+        const from = r.on > s.on ? r.on : s.on;
+        const to = r.off < s.off ? r.off : s.off;
+        const days = Math.round((new Date(to) - new Date(from)) / 86400000);
+        if (days > most) {most = days;best = s;}
+      }
+      if (best) best.people.push(r);
+    });
+    return swings.
+    filter((s) => s.people.length).
+    map((s) => ({
+      ...s,
+      people: s.people.sort((a, b) => rosterRankAt(a.rank) - rosterRankAt(b.rank) || a.name.localeCompare(b.name))
+    }));
+  }
+
+  const byRun = new Map();
+  (plan && plan.rows ? plan.rows : []).forEach((r) => {
+    const key = `${r.on}|${r.off}`;
+    if (!byRun.has(key)) byRun.set(key, { on: r.on, off: r.off, crews: new Set(), people: [] });
+    const run = byRun.get(key);
+    if (r.crew) run.crews.add(r.crew);
+    run.people.push(r);
+  });
+  // A swing takes the crew letter most of its people carry, and its people are
+  // listed the way the vessel reads them: bridge, engine room, then the rest.
+  return [...byRun.values()].
+  map((run) => ({
+    ...run,
+    crew: [...run.crews].sort((a, b) => run.people.filter((p) => p.crew === b).length - run.people.filter((p) => p.crew === a).length)[0] || "",
+    people: run.people.slice().sort((a, b) => rosterRankAt(a.rank) - rosterRankAt(b.rank) || a.name.localeCompare(b.name))
+  })).
+  sort((a, b) => a.on.localeCompare(b.on) || a.off.localeCompare(b.off));
+}
+
+const ROSTER_RANKS = ["MASTER", "CHIEF OFFICER", "SECOND OFFICER", "CHIEF ENGINEER", "FIRST ENGINEER", "JUNIOR ENGINEER", "GPH", "COOK"];
+const rosterRankAt = (rank) => {
+  const up = String(rank || "").toUpperCase().trim();
+  const i = ROSTER_RANKS.findIndex((r) => up === r || up.startsWith(r));
+  return i < 0 ? ROSTER_RANKS.length : i;
+};
+
+/* The Roster: the office's travel roster, swing by swing. */
 function RosterListPage() {
-  return /*#__PURE__*/React.createElement(SectionHead, { title: "Roster" });
+  const { crewRoster, rosterPlan, setRosterPlan, log, role } = usePortal();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const asked = useRef(false);
+
+  const read = async (why) => {
+    if (!crewRoster || !crewRoster.url || busy) return;
+    setBusy(true);setErr("");
+    try {
+      const plan = await readCrewRoster(crewRoster);
+      setRosterPlan(plan);
+      if (why === "pressed") log("Roster", "Roster read from the spreadsheet", `${crewRoster.filename} · ${plan.rows.length} swing entries`);
+    } catch (e) {
+      setErr(e.message || String(e));
+    }
+    setBusy(false);
+  };
+
+  // Read once when the workbook on file is newer than what was read from it.
+  React.useEffect(() => {
+    if (asked.current || !crewRoster || !crewRoster.url) return;
+    if (rosterPlan && rosterPlan.filename === crewRoster.filename) return;
+    asked.current = true;
+    read("opened");
+  }, [crewRoster, rosterPlan]);
+
+  const swings = useMemo(() => rosterSwings(rosterPlan), [rosterPlan]);
+  const today = todayISO();
+  const onNow = swings.filter((s) => s.on <= today && today < s.off);
+  const coming = swings.filter((s) => s.on > today);
+  const gone = swings.filter((s) => s.off <= today);
+  const [showPast, setShowPast] = useState(false);
+  const shown = showPast ? swings : [...onNow, ...coming];
+
+  if (!crewRoster) {
+    return (/*#__PURE__*/
+      React.createElement(React.Fragment, null, /*#__PURE__*/
+      React.createElement(SectionHead, { title: "Roster" }), /*#__PURE__*/
+      React.createElement(Empty, null, "No crew roster is on file. Upload it under Required Documents For Upload.")
+      ));
+
+  }
+
+  return (/*#__PURE__*/
+    React.createElement(React.Fragment, null, /*#__PURE__*/
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" } }, /*#__PURE__*/
+    React.createElement(SectionHead, { title: "Roster",
+      meta: rosterPlan ? `${swings.length} swings · ${crewRoster.filename}` : crewRoster.filename }), /*#__PURE__*/
+    React.createElement("span", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+    gone.length > 0 && /*#__PURE__*/
+    React.createElement(Button, { variant: "quiet", onClick: () => setShowPast(!showPast) },
+    showPast ? "Hide the swings gone by" : `Show the ${gone.length} gone by`
+    ), /*#__PURE__*/
+
+    React.createElement(Button, { variant: "quiet", disabled: busy, onClick: () => read("pressed") },
+    busy ? "Reading…" : "Read the roster again"
+    )
+    )
+    ),
+
+    err && /*#__PURE__*/
+    React.createElement("div", { style: { background: T.panel, border: `1px solid ${T.rule}`, borderLeft: `4px solid ${T.bRed}`,
+        borderRadius: 2, padding: "12px 15px", marginBottom: 12, fontFamily: T.body, fontSize: 13, color: T.text } },
+    err
+    ),
+
+
+    !rosterPlan && !err && /*#__PURE__*/React.createElement(Empty, null, busy ? "Reading the roster…" : "The roster hasn't been read yet."),
+
+    shown.map((s) => {
+      const here = s.on <= today && today < s.off;
+      const byRank = [];
+      s.people.forEach((p) => {
+        const last = byRank[byRank.length - 1];
+        if (last && last.rank === p.rank) last.people.push(p);else
+        byRank.push({ rank: p.rank, people: [p] });
+      });
+      const short = s.people.filter((p) => p.days !== s.people[0].days);
+      return (/*#__PURE__*/
+        React.createElement("div", { key: `${s.on}|${s.off}`, style: { background: T.panel, border: `1px solid ${T.rule}`,
+            borderLeft: `4px solid ${here ? T.teal : s.off <= today ? T.rule : T.accent}`,
+            borderRadius: 2, padding: "13px 15px", marginBottom: 10 } }, /*#__PURE__*/
+        React.createElement("div", { style: { display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", marginBottom: 9 } }, /*#__PURE__*/
+        React.createElement("span", { style: { fontFamily: T.display, fontSize: 15, fontWeight: 700, color: T.text } },
+        fmtDate(s.on), " \u2013 ", fmtDate(s.off)
+        ),
+        s.crew && /*#__PURE__*/React.createElement(Chip, { fg: T.accent, bg: T.accentSoft }, s.crew),
+        here && /*#__PURE__*/React.createElement(Chip, { fg: T.teal, bg: T.raised }, "On now"), /*#__PURE__*/
+        React.createElement("span", { style: { fontFamily: T.mono, fontSize: 11.5, color: T.muted } },
+        s.people.length, " crew"
+        )
+        ), /*#__PURE__*/
+        React.createElement("div", { style: { display: "flex", gap: 22, flexWrap: "wrap" } },
+        byRank.map((g) => /*#__PURE__*/
+        React.createElement("div", { key: g.rank, style: { minWidth: 170 } }, /*#__PURE__*/
+        React.createElement(Eyebrow, null, g.rank || "Other"),
+        g.people.map((p) => /*#__PURE__*/
+        React.createElement("div", { key: p.name + p.on, style: { fontFamily: T.body, fontSize: 13, color: T.text, marginTop: 4 } },
+        p.name,
+        (p.on !== s.on || p.off !== s.off || p.note) && /*#__PURE__*/
+        React.createElement("span", { style: { fontFamily: T.mono, fontSize: 10.5, color: T.bOrange, marginLeft: 6 } },
+        p.note || `${p.days} days`
+        )
+
+        )
+        )
+        )
+        )
+        )
+        ));
+
+    })
+    ));
+
 }
 
 /* The Roster on a page of its own: the same board Swing Compliance carries,
@@ -17967,6 +18224,9 @@ function CoolibahPortal({ role, onSignOut }) {
   // and the last answer the AI gave on them.
   const trainingMatrix = store.trainingMatrix || null;
   const skillsMatrix = store.skillsMatrix || null;
+  const crewRoster = store.crewRoster || null;
+  const rosterPlan = store.rosterPlan || null,setRosterPlan = put("rosterPlan");
+  const setCrewRoster = (record) => setStore((s) => ({ ...s, crewRoster: record }));
   // The validity periods ride on the skills matrix — the office folded the old
   // separate validity spreadsheet into it — so whatever skills matrix is on
   // file is also the validity periods document. The newest upload is always
@@ -18495,7 +18755,7 @@ function CoolibahPortal({ role, onSignOut }) {
 
   useFitToWidth();
 
-  const ctx = { role, admin, session: SESSION, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
+  const ctx = { role, admin, session: SESSION, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
 
   return (/*#__PURE__*/
     React.createElement(Ctx.Provider, { value: ctx }, /*#__PURE__*/
