@@ -1219,10 +1219,12 @@ const STYLES = `
 .um-timeline thead .um-tl-r3 th { top: 34px; }
 .um-timeline thead th.um-tl-crew, .um-timeline thead th.um-tl-rank, .um-timeline thead th.um-tl-name { z-index: 4; }
 .um-timeline .um-tl-crew { position: sticky; left: 0; background: ${T.panel}; z-index: 2; }
-.um-timeline .um-tl-rank { position: sticky; left: 106px; background: ${T.panel}; z-index: 2; }
-.um-timeline .um-tl-name { position: sticky; left: 206px; background: ${T.panel}; z-index: 2;
+.um-timeline .um-tl-rank { position: sticky; left: 52px; background: ${T.panel}; z-index: 2; }
+.um-timeline .um-tl-name { position: sticky; left: 152px; background: ${T.panel}; z-index: 2;
   box-shadow: inset -1px 0 0 ${T.rule}; }
 .um-timeline.um-tl-drag { user-select: none; }
+body.um-tight .um > div { padding-bottom: 10px !important; }
+body.um-tight footer { margin-top: 12px !important; }
 .um-nudge { font-family: ${T.mono}; font-size: 15px; line-height: 1; width: 26px; height: 30px;
   border: 1px solid ${T.rule}; background: ${T.panel}; color: ${T.text}; border-radius: 2px;
   cursor: pointer; flex: none; }
@@ -13754,6 +13756,7 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
   // the crew scroll inside the table and its slider stays put underneath.
   const [tallest, setTallest] = React.useState(null);
   React.useEffect(() => {
+    document.body.classList.add("um-tight");
     const fit = () => {
       const el = frame.current;
       if (!el) return;
@@ -13764,7 +13767,10 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
     };
     fit();
     window.addEventListener("resize", fit);
-    return () => window.removeEventListener("resize", fit);
+    return () => {
+      document.body.classList.remove("um-tight");
+      window.removeEventListener("resize", fit);
+    };
   }, []);
 
   const reliefNames = useMemo(
@@ -13918,7 +13924,7 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
 
   return (
     <div style={{ background: T.panel, border: "1px solid " + T.rule, borderRadius: 2,
-      padding: "13px 15px", marginBottom: 14 }}>
+      padding: "13px 15px", marginBottom: 0 }}>
       <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
         {swatch(RT_ON, "Sign on")}
         {swatch(RT_BOARD, "On board")}
@@ -13932,7 +13938,7 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
         <table>
           <thead>
             <tr className="um-tl-r1">
-              <th className="um-tl-crew" style={{ width: 106, minWidth: 106 }} />
+              <th className="um-tl-crew" style={{ width: 52, minWidth: 52 }} />
               <th className="um-tl-rank" style={{ width: 100, minWidth: 100 }} />
               <th className="um-tl-name" style={{ width: 190, minWidth: 190 }} />
               {months.map((m) => (
@@ -13946,7 +13952,7 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
               ))}
             </tr>
             <tr className="um-tl-r2">
-              <th className="um-tl-crew" rowSpan={2} style={{ ...headCell, width: 106, minWidth: 106 }}>Crew</th>
+              <th className="um-tl-crew" rowSpan={2} style={{ ...headCell, width: 52, minWidth: 52 }}>Crew</th>
               <th className="um-tl-rank" rowSpan={2} style={{ ...headCell, width: 100, minWidth: 100 }}>Rank</th>
               <th className="um-tl-name" rowSpan={2} style={{ ...headCell, width: 190, minWidth: 190 }}>Name</th>
               {days.map((d) => (
@@ -13976,14 +13982,21 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
             {blocks.map((g, gi) => (
               <React.Fragment key={g.label + gi}>
                 <tr>
-                  <td className="um-tl-crew" style={groupCell}>{g.relief ? "Relief / cover" : g.label}</td>
-                  <td className="um-tl-rank" style={groupCell}>{g.relief ? "Role covered" : ""}</td>
-                  <td className="um-tl-name" style={groupCell}>{g.relief ? "Name" : ""}</td>
+                  {g.relief ? (
+                    <>
+                      <td className="um-tl-crew" style={groupCell}>Relief</td>
+                      <td className="um-tl-rank" style={groupCell}>Role covered</td>
+                      <td className="um-tl-name" style={groupCell}>Name</td>
+                    </>
+                  ) : (
+                    <td className="um-tl-crew" colSpan={3}
+                      style={{ ...groupCell, boxShadow: "inset -1px 0 0 " + T.rule }}>{g.label}</td>
+                  )}
                   <td colSpan={days.length} style={{ background: T.raised, borderTop: "1px solid " + T.rule }} />
                 </tr>
                 {g.people.map((p) => (
                   <tr key={p.name} className="um-row">
-                    <td className="um-tl-crew" style={{ padding: "2px 5px", maxWidth: 106,
+                    <td className="um-tl-crew" style={{ padding: "2px 5px", maxWidth: 52,
                       borderTop: "1px solid " + T.rule }} />
                     <td className="um-tl-rank" style={{ fontFamily: T.mono, fontSize: 10, color: T.muted,
                       padding: "2px 5px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
