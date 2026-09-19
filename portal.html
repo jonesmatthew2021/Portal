@@ -13420,58 +13420,9 @@ function PartSwing({ swing, lastDay, offSwing, fullName, positionOf, onBring }) 
 
 }
 
-/* The Roster: the crew the vessel carries, and which rotation each one
-   belongs to. Who is onboard for a given swing is the Swing Allocation page
-   alongside it. */
-function RosterListPage({ people }) {
-  const { quals: QUALS } = usePortal();
-  const names = useMemo(() => QUALS.rows.map((r) => r[0]), [QUALS]);
-  const positions = useMemo(() => Object.fromEntries(QUALS.rows.map((r) => [r[0], r[1] || ""])), [QUALS]);
-  const fullName = (p) => p.name.includes(",") ? p.name : matchRoster(p.name, names) || p.name;
-  const positionOf = (p) => positions[fullName(p)] || p.dept || "";
-  const rankAt = (p) => {
-    const i = RANK_GROUPS.findIndex(([, re]) => re.test(positionOf(p)));
-    return i < 0 ? RANK_GROUPS.length : i;
-  };
-  const crew = people.filter((p) => p.active).
-  sort((a, b) => rankAt(a) - rankAt(b) || fullName(a).localeCompare(fullName(b)));
-
-  const th = { fontFamily: T.display, fontSize: 11, fontWeight: 700, letterSpacing: "0.09em",
-    textTransform: "uppercase", color: T.muted, textAlign: "left", padding: "8px 11px",
-    borderBottom: `2px solid ${T.rule}` };
-  const td = { fontFamily: T.body, fontSize: 13.5, color: T.text, padding: "9px 11px",
-    borderTop: `1px solid ${T.rule}` };
-
-  return (/*#__PURE__*/
-    React.createElement(React.Fragment, null, /*#__PURE__*/
-    React.createElement(SectionHead, { title: "Roster", meta: `${crew.length} crew` }), /*#__PURE__*/
-    React.createElement("div", { style: { background: T.panel, border: `1px solid ${T.rule}`, borderRadius: 2 } }, /*#__PURE__*/
-    React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } }, /*#__PURE__*/
-    React.createElement("thead", null, /*#__PURE__*/
-    React.createElement("tr", null, /*#__PURE__*/
-    React.createElement("th", { style: th }, "Crew member"), /*#__PURE__*/
-    React.createElement("th", { style: th }, "Rank"), /*#__PURE__*/
-    React.createElement("th", { style: th }, "Rotation")
-    )
-    ), /*#__PURE__*/
-    React.createElement("tbody", null,
-    crew.map((p) => /*#__PURE__*/
-    React.createElement("tr", { key: p.id, className: "um-row" }, /*#__PURE__*/
-    React.createElement("td", { style: { ...td, fontWeight: 600 } }, fullName(p)), /*#__PURE__*/
-    React.createElement("td", { style: { ...td, color: T.muted } }, positionOf(p)), /*#__PURE__*/
-    React.createElement("td", { style: { ...td, fontFamily: T.mono, fontSize: 12 } },
-    p.crew ? `Crew ${p.crew}` : "—"
-    )
-    )
-    ),
-    crew.length === 0 && /*#__PURE__*/
-    React.createElement("tr", null, /*#__PURE__*/React.createElement("td", { style: { ...td, color: T.muted }, colSpan: 3 }, "Nobody is on the roster yet."))
-
-    )
-    )
-    )
-    ));
-
+/* The Roster. Empty until the office's roster spreadsheet goes in. */
+function RosterListPage() {
+  return /*#__PURE__*/React.createElement(SectionHead, { title: "Roster" });
 }
 
 /* The Roster on a page of its own: the same board Swing Compliance carries,
@@ -17372,7 +17323,7 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
 
 
 
-    page === "roster" && /*#__PURE__*/React.createElement(RosterListPage, { people: people }),
+    page === "roster" && /*#__PURE__*/React.createElement(RosterListPage, null),
     page === "swing-allocation" && /*#__PURE__*/
     React.createElement(RosterPage, { currentUser: currentUser, people: people, setPeople: setPeople,
       overrides: overrides, swingBoard: swingBoard, setSwingBoard: setSwingBoard, log: log }),
