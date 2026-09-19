@@ -13329,7 +13329,7 @@ const RT_OFF = "#FFC000";     // sign off
 const RT_RELIEF = "#D883C9";  // relief / cover onboard
 const RT_DAYS = 84;
 
-function RosterTimeline({ plan }) {
+function RosterTimeline({ plan, admin, onStint, onBlank }) {
   const spine = (plan && plan.spine) || [];
   const rows = (plan && plan.rows) || [];
   const today = todayISO();
@@ -13386,16 +13386,19 @@ function RosterTimeline({ plan }) {
       const relief = !/^(ALPHA|BRAVO)$/.test(String(st.crew || "").trim().toUpperCase());
       if (day === st.on) {
         const changed = swing && st.on !== swing.on;
-        return { bg: changed ? T.bRed : RT_ON, word: changed ? "signs on — not the swing's day" : "signs on" };
+        return { bg: changed ? T.bRed : RT_ON, word: changed ? "signs on — not the swing's day" : "signs on", row: st };
       }
       if (day === st.off) {
         const changed = swing && st.off !== swing.off;
-        return { bg: changed ? T.bRed : RT_OFF, word: changed ? "signs off — not the swing's day" : "signs off" };
+        return { bg: changed ? T.bRed : RT_OFF, word: changed ? "signs off — not the swing's day" : "signs off", row: st };
       }
-      return { bg: relief ? RT_RELIEF : RT_BOARD, word: relief ? "onboard — relief / cover" : "onboard" };
+      return { bg: relief ? RT_RELIEF : RT_BOARD, word: relief ? "onboard — relief / cover" : "onboard", row: st };
     }
     return null;
   };
+
+  // The swing a blank day belongs to, for putting somebody on it with a press.
+  const swingForDay = (d) => spine.find((s) => s.on <= d && d < s.off) || null;
 
   const months = useMemo(() => {
     const out = [];
@@ -13415,7 +13418,6 @@ function RosterTimeline({ plan }) {
     </span>
   );
 
-  const cellW = 13;
   return (
     <div style={{ background: T.panel, border: "1px solid " + T.rule, borderRadius: 2,
       padding: "13px 15px", marginBottom: 14 }}>
@@ -13434,11 +13436,16 @@ function RosterTimeline({ plan }) {
       </div>
 
       <div className="um-scroll">
-        <table style={{ borderCollapse: "collapse" }}>
+        <table style={{ borderCollapse: "collapse", width: "100%", tableLayout: "fixed" }}>
+          <colgroup>
+            <col style={{ width: 190 }} />
+            <col style={{ width: 118 }} />
+            {days.map((d) => <col key={d} />)}
+          </colgroup>
           <thead>
             <tr>
-              <th style={{ minWidth: 168 }} />
-              <th style={{ minWidth: 104 }} />
+              <th />
+              <th />
               {months.map((m) => (
                 <th key={m.label} colSpan={m.n} style={{ fontFamily: T.display, fontSize: 10.5,
                   fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: T.accent,
@@ -13455,8 +13462,8 @@ function RosterTimeline({ plan }) {
                 textTransform: "uppercase", color: T.muted, textAlign: "left", padding: "3px 5px" }}>Rank</th>
               {days.map((d) => (
                 <th key={d} className={d === today ? "um-daygrid-today" : ""}
-                  style={{ width: cellW, minWidth: cellW, fontFamily: T.mono, fontSize: 8,
-                    color: T.muted, padding: "1px 0", fontWeight: 400 }} title={fmtDate(d)}>
+                  style={{ fontFamily: T.mono, fontSize: 9, color: T.muted, padding: "2px 0",
+                    fontWeight: 400, overflow: "hidden" }} title={fmtDate(d)}>
                   {d.slice(8)}
                 </th>
               ))}
@@ -13474,16 +13481,25 @@ function RosterTimeline({ plan }) {
                 </tr>
                 {g.people.map((p) => (
                   <tr key={p.name} className="um-row">
-                    <td style={{ fontFamily: T.body, fontSize: 12, fontWeight: 600, color: T.text,
-                      padding: "2px 5px", whiteSpace: "nowrap", borderTop: "1px solid " + T.rule }}>{p.name}</td>
-                    <td style={{ fontFamily: T.mono, fontSize: 10, color: T.muted, padding: "2px 5px",
-                      whiteSpace: "nowrap", borderTop: "1px solid " + T.rule }}>{p.rank}</td>
+                    <td style={{ fontFamily: T.body, fontSize: 12.5, fontWeight: 600, color: T.text,
+                      padding: "3px 5px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                      borderTop: "1px solid " + T.rule }}>{p.name}</td>
+                    <td style={{ fontFamily: T.mono, fontSize: 10, color: T.muted, padding: "3px 5px",
+                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                      borderTop: "1px solid " + T.rule }}>{p.rank}</td>
                     {days.map((d) => {
                       const c = cellFor(p, d);
+                      const blankSwing = admin && !c ? swingForDay(d) : null;
+                      const already = blankSwing && p.stints.some((st) =>
+                        (st.swing && st.swing === swingKeyOf(blankSwing)) || (st.on < blankSwing.off && st.off > blankSwing.on));
+                      const press = admin && (c ? () => onStint(c.row) : blankSwing && !already ? () => onBlank(p, blankSwing) : null);
                       return (
                         <td key={d} className={d === today ? "um-daygrid-today" : ""}
-                          title={c ? p.name + " · " + fmtDate(d) + " · " + c.word : undefined}
-                          style={{ width: cellW, minWidth: cellW, height: 19, padding: 0,
+                          onClick={press || undefined}
+                          title={c ? p.name + " · " + fmtDate(d) + " · " + c.word
+                            : press ? "Put " + p.name + " on " + fmtDate(blankSwing.on) + " – " + fmtDate(blankSwing.off) : undefined}
+                          style={{ height: 24, padding: 0,
+                            cursor: press ? "pointer" : undefined,
                             background: c ? c.bg : "transparent",
                             borderTop: "1px solid " + T.rule,
                             borderLeft: "1px solid " + (c ? "rgba(255,255,255,0.5)" : T.hatchBg) }} />
@@ -13511,6 +13527,8 @@ function RosterListPage() {
   const [addingTo, setAddingTo] = useState(null);
   const [addName, setAddName] = useState("");
   const [showPast, setShowPast] = useState(false);
+  const [showSwings, setShowSwings] = useState(false);
+  const [tableEdit, setTableEdit] = useState(null);
   const asked = useRef(false);
 
   const names = useMemo(() => QUALS.rows.map((r) => r[0]), [QUALS]);
@@ -13570,6 +13588,17 @@ function RosterListPage() {
     setOpenPerson(null);
   };
 
+  // Somebody pressed onto a swing straight from the table.
+  const addNamed = (t) => {
+    change((p) => {
+      p.rows = [...p.rows, {
+        id: "r" + Date.now(),
+        crew: t.crew, rank: t.rank, name: t.name,
+        on: t.on, off: t.off, days: daysBetween(t.on, t.off), note: "", swing: t.key,
+      }];
+    }, t.name + " onto the swing", fmtDate(t.on) + " – " + fmtDate(t.off));
+  };
+
   const addPerson = (s) => {
     const name = addName;
     if (!name) return;
@@ -13614,7 +13643,12 @@ function RosterListPage() {
                 : (rosterPlan.filename || ""))
             : (crewRoster ? crewRoster.filename : "")} />
         <span style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
-          {gone.length > 0 && (
+          {rosterPlan && (
+            <Button variant={showSwings ? "ghost" : "quiet"} onClick={() => setShowSwings(!showSwings)}>
+              {showSwings ? "Hide the swing lists" : "Work on the swings"}
+            </Button>
+          )}
+          {showSwings && gone.length > 0 && (
             <Button variant="quiet" onClick={() => setShowPast(!showPast)}>
               {showPast ? "Hide the swings gone by" : "Show the " + gone.length + " gone by"}
             </Button>
@@ -13645,9 +13679,58 @@ function RosterListPage() {
 
       {!rosterPlan && !err && <Empty>{busy ? "Reading the roster…" : "The roster hasn't been loaded yet."}</Empty>}
 
-      {rosterPlan && <RosterTimeline plan={rosterPlan} />}
+      {rosterPlan && (
+        <RosterTimeline plan={rosterPlan} admin={admin}
+          onStint={(row) => setTableEdit({ kind: "stint", id: row.id, name: row.name, on: row.on })}
+          onBlank={(p, s) => setTableEdit({ kind: "add", name: p.name, rank: p.rank, crew: s.crew,
+            on: s.on, off: s.off, key: s.on + "|" + s.off })} />
+      )}
 
-      {shown.map((s) => {
+      {admin && tableEdit && (() => {
+        const rows = (rosterPlan && rosterPlan.rows) || [];
+        const row = tableEdit.kind === "stint"
+          ? rows.find((r) => (tableEdit.id ? r.id === tableEdit.id : r.name === tableEdit.name && r.on === tableEdit.on)) || null
+          : null;
+        if (tableEdit.kind === "stint" && !row) return null;
+        return (
+          <div style={{ position: "fixed", left: "50%", top: 90, transform: "translateX(-50%)", zIndex: 80,
+            background: T.panel, border: "1px solid " + T.rule, borderTop: "4px solid " + T.accent,
+            borderRadius: 3, padding: "14px 18px", boxShadow: "0 6px 24px rgba(18,41,61,0.25)",
+            width: "min(560px, 94vw)" }}>
+            {tableEdit.kind === "stint" ? (
+              <>
+                <div style={{ fontFamily: T.display, fontSize: 15, fontWeight: 700, color: T.text, marginBottom: 8 }}>
+                  {row.name}
+                </div>
+                <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+                  <Field label="Signs on">
+                    <input className="um-in" type="date" value={row.on}
+                      onChange={(e) => setDates(row, { key: row.swing }, e.target.value, row.off)} />
+                  </Field>
+                  <Field label="Signs off">
+                    <input className="um-in" type="date" value={row.off}
+                      onChange={(e) => setDates(row, { key: row.swing }, row.on, e.target.value)} />
+                  </Field>
+                  <Button variant="quiet" onClick={() => { dropPerson(row, { on: row.on, off: row.off }); setTableEdit(null); }}>
+                    Off this swing
+                  </Button>
+                  <Button onClick={() => setTableEdit(null)}>Done</Button>
+                </div>
+              </>
+            ) : (
+              <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ fontFamily: T.body, fontSize: 13.5, color: T.text }}>
+                  {tableEdit.name} onto {fmtDate(tableEdit.on)} – {fmtDate(tableEdit.off)}?
+                </span>
+                <Button variant="ghost" onClick={() => { addNamed(tableEdit); setTableEdit(null); }}>Onto this swing</Button>
+                <Button variant="quiet" onClick={() => setTableEdit(null)}>Cancel</Button>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {showSwings && shown.map((s) => {
         const here = s.on <= today && today < s.off;
         const byRank = [];
         s.people.forEach((p) => {
