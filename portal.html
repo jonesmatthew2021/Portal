@@ -1225,6 +1225,12 @@ const STYLES = `
 .um-timeline.um-tl-drag { user-select: none; }
 body.um-tight .um > div { padding-bottom: 10px !important; }
 body.um-tight footer { margin-top: 12px !important; }
+.um-timeline td.um-tl-d { width: 13px; min-width: 13px; height: 22px; padding: 0;
+  border-top: 1px solid ${T.rule}; border-left: 1px solid ${T.hatchBg}; }
+.um-timeline td.um-tl-f { border-left-color: rgba(255,255,255,0.5); }
+.um-timeline.um-tl-can td.um-tl-d { cursor: cell; }
+.um-timeline.um-tl-can td.um-tl-f { cursor: pointer; }
+.um-timeline.um-tl-can td.um-tl-g { cursor: col-resize; }
 .um-nudge { font-family: ${T.mono}; font-size: 15px; line-height: 1; width: 26px; height: 30px;
   border: 1px solid ${T.rule}; background: ${T.panel}; color: ${T.text}; border-radius: 2px;
   cursor: pointer; flex: none; }
@@ -1376,7 +1382,22 @@ const tx = {
 };
 
 const daysUntil = (iso) => Math.round((new Date(iso) - new Date(TODAY)) / 86400000);
-const fmtDate = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-AU", { day: "2-digit", month: "short", year: "numeric" }).toUpperCase();
+// One formatter, built once and kept. Asking for a fresh one on every call -
+// which is what toLocaleDateString does - costs a quarter of a millisecond, and
+// the roster's twenty thousand cells feel that keenly. Each answer is
+// remembered against the day it came from, so a date already worked out is
+// never worked out twice.
+const DATE_FMT = new Intl.DateTimeFormat("en-AU", { day: "2-digit", month: "short", year: "numeric" });
+const fmtDateSeen = new Map();
+const fmtDate = (iso) => {
+  const key = String(iso);
+  const held = fmtDateSeen.get(key);
+  if (held !== undefined) return held;
+  const d = new Date(key + "T00:00:00");
+  const out = isNaN(d.getTime()) ? "INVALID DATE" : DATE_FMT.format(d).toUpperCase();
+  if (fmtDateSeen.size < 4000) fmtDateSeen.set(key, out);
+  return out;
+};
 
 const addDays = (iso, n) => {
   const d = new Date(iso + "T00:00:00");
@@ -13719,6 +13740,13 @@ const RT_OFF = "#FFC000";
 const RT_RELIEF = "#D883C9";
 const RT_CELL = 13;
 
+// A day cell carries its colour and nothing else, and the five colours in play
+// each keep one style object between them - twenty thousand fresh ones a
+// redraw was work for its own sake.
+const RT_BG = {};
+const bgOf = (hex) => RT_BG[hex] || (RT_BG[hex] = { background: hex });
+const RT_NO_DAYS = new Map();
+
 function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRange }) {
   const spine = plan && plan.spine || [];
   const rows = plan && plan.rows || [];
@@ -13827,18 +13855,6 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
     return d >= a && d <= b;
   };
 
-  const cellDown = (p, d, c, swing) => (e) => {
-    e.preventDefault();
-    if (c) setDrag({ kind: c.edge || "mid", row: c.row, from: d, at: d });else
-    setDrag({ kind: "new", person: p, anchor: d, at: d, swing });
-  };
-
-  const cellEnter = (p, d) => () => setDrag((x) => {
-    if (!x || x.at === d) return x;
-    if (x.kind === "new" && x.person.name !== p.name) return x;
-    return { ...x, at: d };
-  });
-
   /* One line per person. Whoever the office's own RELIEF / COVER list names
      sits in a Relief / cover block under the crew whose swings they cover;
      everyone else sits with their own crew. */
@@ -13876,24 +13892,36 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
     return out;
   }, [plan]);
 
-  const cellFor = (p, day) => {
-    for (const raw of p.stints) {
-      const st = effective(raw);
-      if (day < st.on || day > st.off) continue;
-      const swing = raw.swing && swingByKey.get(raw.swing) || null;
+  /* Each person's days worked out once from their own stints, rather than
+     asking the question again for every square of the table - a stint knows
+     the days it covers, so only those are walked. The first stint to claim a
+     day keeps it, which is the order the squares were read in before. */
+  const dayCells = useMemo(() => {
+    const out = new Map();
+    blocks.forEach((g) => g.people.forEach((p) => {
+      const mine = new Map();
       const relief = isRelief(p.name);
-      if (day === st.on) {
-        const changed = swing && st.on !== swing.on;
-        return { bg: changed ? T.bRed : RT_ON, word: changed ? "signs on — not the swing's day" : "signs on", row: raw, edge: "on" };
-      }
-      if (day === st.off) {
-        const changed = swing && st.off !== swing.off;
-        return { bg: changed ? T.bRed : RT_OFF, word: changed ? "signs off — not the swing's day" : "signs off", row: raw, edge: "off" };
-      }
-      return { bg: relief ? RT_RELIEF : RT_BOARD, word: relief ? "onboard — relief / cover" : "onboard", row: raw, edge: null };
-    }
-    return null;
-  };
+      p.stints.forEach((raw) => {
+        const st = effective(raw);
+        const swing = raw.swing && swingByKey.get(raw.swing) || null;
+        const onOff = swing && st.on !== swing.on;
+        const offOff = swing && st.off !== swing.off;
+        let d = st.on,guard = 0;
+        while (d <= st.off && guard++ < 900) {
+          if (!mine.has(d)) {
+            if (d === st.on) mine.set(d, { bg: onOff ? T.bRed : RT_ON, word: onOff ? "signs on — not the swing's day" : "signs on", row: raw, edge: "on" });else
+            if (d === st.off) mine.set(d, { bg: offOff ? T.bRed : RT_OFF, word: offOff ? "signs off — not the swing's day" : "signs off", row: raw, edge: "off" });else
+            mine.set(d, { bg: relief ? RT_RELIEF : RT_BOARD, word: relief ? "onboard — relief / cover" : "onboard", row: raw, edge: null });
+          }
+          d = isoShift(d, 1);
+        }
+      });
+      out.set(p.name, mine);
+    }));
+    return out;
+  }, [blocks, drag]);
+
+  const cellFor = (p, day) => (dayCells.get(p.name) || RT_NO_DAYS).get(day) || null;
 
   const swingForDay = (d) => spine.find((s) => s.on <= d && d < s.off) || null;
 
@@ -13907,6 +13935,61 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
     });
     return out;
   }, [days]);
+
+  /* One pair of handlers for the table instead of a pair on each of its
+     twenty thousand cells: the square under the pointer says which day it is,
+     and the line it sits on says whose day it is. */
+  const peopleByName = useMemo(() => {
+    const m = new Map();
+    blocks.forEach((g) => g.people.forEach((p) => m.set(p.name, p)));
+    return m;
+  }, [blocks]);
+
+  const cellUnder = (e) => {
+    const td = e.target && e.target.closest ? e.target.closest("td[data-d]") : null;
+    if (!td || !td.parentElement) return null;
+    const p = peopleByName.get(td.parentElement.getAttribute("data-p") || "");
+    return p ? { td, p, d: td.getAttribute("data-d") } : null;
+  };
+
+  const freeSwing = (p, d) => {
+    const sw = swingForDay(d);
+    if (!sw) return null;
+    const taken = p.stints.some((st) =>
+    st.swing && st.swing === swingKeyOf(sw) || st.on < sw.off && st.off > sw.on);
+    return taken ? null : sw;
+  };
+
+  const tableDown = (e) => {
+    if (!admin) return;
+    const at = cellUnder(e);
+    if (!at) return;
+    e.preventDefault();
+    const c = cellFor(at.p, at.d);
+    if (c) setDrag({ kind: c.edge || "mid", row: c.row, from: at.d, at: at.d });else
+    setDrag({ kind: "new", person: at.p, anchor: at.d, at: at.d, swing: freeSwing(at.p, at.d) });
+  };
+
+  // What a square says is written when it is pointed at, so twenty thousand
+  // sentences are never written out for the one that gets read.
+  const tableOver = (e) => {
+    const at = cellUnder(e);
+    if (!at) return;
+    const c = cellFor(at.p, at.d);
+    if (c) {
+      at.td.title = at.p.name + " · " + fmtDate(at.d) + " · " + c.word + (
+      c.edge ? " — drag to change the day" : "");
+    } else if (admin) {
+      const sw = freeSwing(at.p, at.d);
+      at.td.title = "Drag across the days to put " + at.p.name + " on" + (
+      sw ? ", or click for " + fmtDate(sw.on) + " – " + fmtDate(sw.off) : "");
+    }
+    if (drag) setDrag((x) => {
+      if (!x || x.at === at.d) return x;
+      if (x.kind === "new" && x.person.name !== at.p.name) return x;
+      return { ...x, at: at.d };
+    });
+  };
 
   const swatch = (bg, word) => /*#__PURE__*/
   React.createElement("span", { key: word, style: { display: "inline-flex", alignItems: "center", gap: 6 } }, /*#__PURE__*/
@@ -13933,9 +14016,9 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
     swatch(RT_RELIEF, "Relief / cover")
     ), /*#__PURE__*/
 
-    React.createElement("div", { className: "um-timeline" + (drag ? " um-tl-drag" : ""), ref: frame,
-      style: tallest ? { maxHeight: tallest } : undefined }, /*#__PURE__*/
-    React.createElement("table", null, /*#__PURE__*/
+    React.createElement("div", { className: "um-timeline" + (drag ? " um-tl-drag" : "") + (admin ? " um-tl-can" : ""),
+      ref: frame, style: tallest ? { maxHeight: tallest } : undefined }, /*#__PURE__*/
+    React.createElement("table", { onMouseDown: tableDown, onMouseOver: tableOver }, /*#__PURE__*/
     React.createElement("thead", null, /*#__PURE__*/
     React.createElement("tr", { className: "um-tl-r1" }, /*#__PURE__*/
     React.createElement("th", { className: "um-tl-crew", style: { width: 52, minWidth: 52 } }), /*#__PURE__*/
@@ -13994,47 +14077,36 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
 
     React.createElement("td", { colSpan: days.length, style: { background: T.raised, borderTop: "1px solid " + T.rule } })
     ),
-    g.people.map((p) => /*#__PURE__*/
-    React.createElement("tr", { key: p.name, className: "um-row" }, /*#__PURE__*/
-    React.createElement("td", { className: "um-tl-crew", style: { padding: "2px 5px", maxWidth: 52,
-        borderTop: "1px solid " + T.rule } }), /*#__PURE__*/
-    React.createElement("td", { className: "um-tl-rank", style: { fontFamily: T.mono, fontSize: 10, color: T.muted,
-        padding: "2px 5px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-        maxWidth: 100, borderTop: "1px solid " + T.rule } },
-    g.relief && roleCovered(p.name) || p.rank
-    ), /*#__PURE__*/
-    React.createElement("td", { className: "um-tl-name",
-      onClick: admin ? () => onPerson(p) : undefined,
-      title: admin ? "Open " + p.name : undefined,
-      style: { fontFamily: T.body, fontSize: 12, fontWeight: 600,
-        color: T.text, padding: "2px 5px", whiteSpace: "nowrap", overflow: "hidden",
-        textOverflow: "ellipsis", maxWidth: 190, borderTop: "1px solid " + T.rule,
-        cursor: admin ? "pointer" : undefined } }, p.name),
-    days.map((d) => {
-      const c = cellFor(p, d);
-      const blankSwing = admin && !c ? swingForDay(d) : null;
-      const already = blankSwing && p.stints.some((st) =>
-      st.swing && st.swing === swingKeyOf(blankSwing) || st.on < blankSwing.off && st.off > blankSwing.on);
-      const swept = !c && sweeping(p, d);
-      const grab = admin && c && c.edge;
+    g.people.map((p) => {
+      const mine = dayCells.get(p.name) || RT_NO_DAYS;
       return (/*#__PURE__*/
-        React.createElement("td", { key: d, className: d === today ? "um-daygrid-today" : "",
-          onMouseDown: admin ? cellDown(p, d, c, already ? null : blankSwing) : undefined,
-          onMouseEnter: drag ? cellEnter(p, d) : undefined,
-          title: c ?
-          p.name + " · " + fmtDate(d) + " · " + c.word + (c.edge ? " — drag to change the day" : "") :
-          admin ? "Drag across the days to put " + p.name + " on" + (
-          blankSwing && !already ? ", or click for " + fmtDate(blankSwing.on) + " – " + fmtDate(blankSwing.off) : "") :
-          undefined,
-          style: { width: RT_CELL, minWidth: RT_CELL, height: 22, padding: 0,
-            cursor: admin ? grab ? "col-resize" : c ? "pointer" : "cell" : undefined,
-            background: c ? c.bg : swept ? RT_ON : "transparent",
-            borderTop: "1px solid " + T.rule,
-            borderLeft: "1px solid " + (c ? "rgba(255,255,255,0.5)" : T.hatchBg) } }));
+        React.createElement("tr", { key: p.name, className: "um-row", "data-p": p.name }, /*#__PURE__*/
+        React.createElement("td", { className: "um-tl-crew", style: { padding: "2px 5px", maxWidth: 52,
+            borderTop: "1px solid " + T.rule } }), /*#__PURE__*/
+        React.createElement("td", { className: "um-tl-rank", style: { fontFamily: T.mono, fontSize: 10, color: T.muted,
+            padding: "2px 5px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            maxWidth: 100, borderTop: "1px solid " + T.rule } },
+        g.relief && roleCovered(p.name) || p.rank
+        ), /*#__PURE__*/
+        React.createElement("td", { className: "um-tl-name",
+          onClick: admin ? () => onPerson(p) : undefined,
+          title: admin ? "Open " + p.name : undefined,
+          style: { fontFamily: T.body, fontSize: 12, fontWeight: 600,
+            color: T.text, padding: "2px 5px", whiteSpace: "nowrap", overflow: "hidden",
+            textOverflow: "ellipsis", maxWidth: 190, borderTop: "1px solid " + T.rule,
+            cursor: admin ? "pointer" : undefined } }, p.name),
+        days.map((d) => {
+          const c = mine.get(d);
+          let cls = c ? c.edge ? "um-tl-d um-tl-f um-tl-g" : "um-tl-d um-tl-f" : "um-tl-d";
+          if (d === today) cls += " um-daygrid-today";
+          return (/*#__PURE__*/
+            React.createElement("td", { key: d, className: cls, "data-d": d,
+              style: c ? bgOf(c.bg) : !c && sweeping(p, d) ? bgOf(RT_ON) : undefined }));
+
+        })
+        ));
 
     })
-    )
-    )
     )
     )
     )
