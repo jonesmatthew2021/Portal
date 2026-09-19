@@ -1209,6 +1209,13 @@ const STYLES = `
 .um-nav::-webkit-scrollbar-thumb { background: ${T.rule}; }
 .um-g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .um-swing3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+/* The roster timeline: the one other thing beside the crew matrix that
+   scrolls sideways, with the names pinned while the months slide under them. */
+.um-timeline { overflow-x: auto; border: 1px solid ${T.rule}; border-radius: 2px; }
+.um-timeline table { border-collapse: collapse; }
+.um-timeline .um-tl-name { position: sticky; left: 0; background: ${T.panel}; z-index: 2; }
+.um-timeline .um-tl-rank { position: sticky; left: 190px; background: ${T.panel}; z-index: 2;
+  box-shadow: inset -1px 0 0 ${T.rule}; }
 .um-daygrid { border-collapse: collapse; width: 100%; }
 .um-daygrid th, .um-daygrid td { border: 1px solid ${T.rule}; padding: 6px 8px; font-family: ${T.mono}; font-size: 11px; color: ${T.muted}; text-align: center; }
 .um-daygrid th { background: ${T.raised}; }
@@ -13520,7 +13527,25 @@ async function readCrewRoster(record) {
   }
   if (!rows.length) throw new Error("Nothing on the Swings sheet could be read as a swing.");
   rows.forEach((r, i) => {r.id = "r" + (i + 1);r.swing = bestSwingKey(r, spine);});
-  return { at: todayISO(), filename: record.filename, rows, spine };
+
+  // Who the office calls relief or cover, off the Crew Roster sheet's own
+  // RELIEF / COVER rows — names are matched whole, so a bare "JACK" in that
+  // block never drags a Jack somebody-else out of his crew.
+  const relief = [];
+  const gridName = wb.SheetNames.find((n) => /crew roster/i.test(n));
+  if (gridName) {
+    const cr = XLSX.utils.sheet_to_json(wb.Sheets[gridName], { header: 1, defval: "" });
+    for (const r of cr) {
+      const a = String(r[0] || "").replace(/\s+/g, " ").trim().toUpperCase();
+      if (!/^RELIEF/.test(a)) continue;
+      const rank = String(r[1] || "").replace(/\s+/g, " ").trim().toUpperCase();
+      const who = String(r[2] || "").replace(/\s+/g, " ").trim().toUpperCase();
+      if (!who || rank === "RANK" || /^ROLE|^WHOSE|^\d+$/.test(rank) || /^WHOSE|^\d+$/.test(who)) continue;
+      relief.push({ name: who, rank });
+    }
+  }
+
+  return { at: todayISO(), filename: record.filename, rows, spine, relief };
 }
 
 /* The roster laid out swing by swing: the workbook's swings, each carrying
@@ -13583,20 +13608,24 @@ function RosterPersonDays({ row, swing, onDates, onDrop, onClose }) {
 }
 
 /* The roster drawn the way the office's own sheet draws it: crew down the
-   side, days across the top, and colour saying the rest — the sign-on day,
-   the days onboard, the sign-off day, and red where somebody's own dates
-   differ from the swing's. Twelve weeks show at a time and the arrows walk
-   the window a swing at a time, so nothing runs off the side of the screen. */
-const RT_ON = "#41B8D5"; // sign on
-const RT_BOARD = "#92D050"; // onboard
-const RT_OFF = "#FFC000"; // sign off
-const RT_RELIEF = "#D883C9"; // relief / cover onboard
-const RT_DAYS = 84;
+   side, every day of the roster across the top, and colour saying the rest —
+   the sign-on day, the days onboard, the sign-off day, red where somebody's
+   own dates differ from the swing's, violet a relief or cover stint. Relief
+   sits in a block of its own under the crew it covers, as the sheet has it.
+   The table scrolls through the months with the names pinned, opens on
+   today, and is where the roster is worked: press a blank square to offer
+   somebody onto that swing, press a coloured one to open their days. */
+const RT_ON = "#41B8D5";
+const RT_BOARD = "#92D050";
+const RT_OFF = "#FFC000";
+const RT_RELIEF = "#D883C9";
+const RT_CELL = 13;
 
 function RosterTimeline({ plan, admin, onStint, onBlank }) {
   const spine = plan && plan.spine || [];
   const rows = plan && plan.rows || [];
   const today = todayISO();
+  const frame = useRef(null);
 
   const swingByKey = useMemo(() => {
     const m = new Map();
@@ -13604,50 +13633,75 @@ function RosterTimeline({ plan, admin, onStint, onBlank }) {
     return m;
   }, [plan]);
 
-  // The window opens on the swing that is on.
-  const [from, setFrom] = useState(() => {
-    const here = spine.find((s) => s.on <= today && today < s.off);
-    return here ? here.on : spine[0] ? spine[0].on : today;
-  });
+  // Every day the roster covers, first sign-on to last sign-off.
   const days = useMemo(() => {
+    if (!spine.length && !rows.length) return [];
+    let a = null,b = null;
+    [...spine, ...rows].forEach((r) => {
+      if (!a || r.on < a) a = r.on;
+      if (!b || r.off > b) b = r.off;
+    });
     const out = [];
-    for (let i = 0; i < RT_DAYS; i++) out.push(isoShift(from, i));
+    for (let d = a; d <= b; d = isoShift(d, 1)) out.push(d);
     return out;
-  }, [from]);
+  }, [plan]);
 
-  // One line per person, carrying every stint of theirs, grouped the way the
-  // sheet groups them: Alpha, Bravo, and whatever else the roster calls a crew.
-  const groups = useMemo(() => {
+  // Opens with today in the second week of view, not at September's far end.
+  React.useEffect(() => {
+    const el = frame.current;
+    if (!el || !days.length) return;
+    const at = days.indexOf(today);
+    if (at > 0) el.scrollLeft = Math.max(0, (at - 7) * RT_CELL);
+  }, [days.length]);
+
+  const reliefNames = useMemo(
+    () => new Set((plan && plan.relief || []).map((r) => String(r.name).toUpperCase())),
+    [plan]
+  );
+  const isRelief = (name) => reliefNames.has(String(name || "").replace(/\s+/g, " ").trim().toUpperCase());
+
+  /* One line per person. Whoever the office's own RELIEF / COVER list names
+     sits in a Relief / cover block under the crew whose swings they cover;
+     everyone else sits with their own crew. */
+  const blocks = useMemo(() => {
     const people = new Map();
     rows.forEach((r) => {
-      const key = r.name;
-      if (!people.has(key)) people.set(key, { name: r.name, rank: r.rank, tally: {}, stints: [] });
-      const p = people.get(key);
+      if (!people.has(r.name)) people.set(r.name, { name: r.name, rank: r.rank, tally: {}, covers: {}, stints: [] });
+      const p = people.get(r.name);
       p.stints.push(r);
       const c = String(r.crew || "").trim().toUpperCase() || "OTHER";
       p.tally[c] = (p.tally[c] || 0) + 1;
+      const sw = r.swing && swingByKey.get(r.swing);
+      if (sw) {
+        const sc = String(sw.crew || "").trim().toUpperCase();
+        if (sc === "ALPHA" || sc === "BRAVO") p.covers[sc] = (p.covers[sc] || 0) + 1;
+      }
       if (rosterRankAt(r.rank) < rosterRankAt(p.rank)) p.rank = r.rank;
     });
-    const list = [...people.values()].map((p) => ({
-      ...p,
-      crew: Object.keys(p.tally).sort((a, b) => p.tally[b] - p.tally[a])[0] || "OTHER"
-    }));
-    const order = (c) => c === "ALPHA" ? 0 : c === "BRAVO" ? 2 : 1;
-    const heads = [...new Set(list.map((p) => p.crew))].sort((a, b) => order(a) - order(b) || a.localeCompare(b));
-    return heads.map((crew) => ({
-      crew,
-      people: list.filter((p) => p.crew === crew).
-      sort((a, b) => rosterRankAt(a.rank) - rosterRankAt(b.rank) || a.name.localeCompare(b.name))
-    }));
+    const list = [...people.values()].map((p) => {
+      const crews = Object.keys(p.tally).sort((a, b) => p.tally[b] - p.tally[a]);
+      const covered = Object.keys(p.covers).sort((a, b) => p.covers[b] - p.covers[a])[0] || "ALPHA";
+      return { ...p, crew: crews[0] || "OTHER", coverOnly: isRelief(p.name), covered };
+    });
+    const byRank = (a, b) => rosterRankAt(a.rank) - rosterRankAt(b.rank) || a.name.localeCompare(b.name);
+    const out = [];
+    ["ALPHA", "BRAVO"].forEach((crew) => {
+      const own = list.filter((p) => !p.coverOnly && p.crew === crew).sort(byRank);
+      const cover = list.filter((p) => p.coverOnly && p.covered === crew).sort(byRank);
+      if (own.length) out.push({ label: crew === "ALPHA" ? "Alpha crew" : "Bravo crew", people: own });
+      if (cover.length) out.push({ label: "Relief / cover", people: cover });
+    });
+    const placed = new Set(out.flatMap((b) => b.people.map((p) => p.name)));
+    const rest = list.filter((p) => !placed.has(p.name)).sort(byRank);
+    if (rest.length) out.push({ label: "Other", people: rest });
+    return out;
   }, [plan]);
 
-  // What colour a day wears for a person: the stint decides, and a start or
-  // end that isn't the swing's own start or end goes red.
   const cellFor = (p, day) => {
     for (const st of p.stints) {
       if (day < st.on || day > st.off) continue;
       const swing = st.swing && swingByKey.get(st.swing) || null;
-      const relief = !/^(ALPHA|BRAVO)$/.test(String(st.crew || "").trim().toUpperCase());
+      const relief = isRelief(p.name);
       if (day === st.on) {
         const changed = swing && st.on !== swing.on;
         return { bg: changed ? T.bRed : RT_ON, word: changed ? "signs on — not the swing's day" : "signs on", row: st };
@@ -13661,7 +13715,6 @@ function RosterTimeline({ plan, admin, onStint, onBlank }) {
     return null;
   };
 
-  // The swing a blank day belongs to, for putting somebody on it with a press.
   const swingForDay = (d) => spine.find((s) => s.on <= d && d < s.off) || null;
 
   const months = useMemo(() => {
@@ -13682,16 +13735,13 @@ function RosterTimeline({ plan, admin, onStint, onBlank }) {
   );
 
 
+  const headCell = { fontFamily: T.display, fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
+    textTransform: "uppercase", color: T.muted, textAlign: "left", padding: "3px 5px" };
+
   return (/*#__PURE__*/
     React.createElement("div", { style: { background: T.panel, border: "1px solid " + T.rule, borderRadius: 2,
         padding: "13px 15px", marginBottom: 14 } }, /*#__PURE__*/
-    React.createElement("div", { style: { display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", marginBottom: 10 } }, /*#__PURE__*/
-    React.createElement(Button, { variant: "quiet", onClick: () => setFrom(isoShift(from, -28)) }, "\u25C0 4 weeks"), /*#__PURE__*/
-    React.createElement("span", { style: { fontFamily: T.display, fontSize: 13, fontWeight: 700, color: T.text } },
-    fmtDate(days[0]), " \u2013 ", fmtDate(days[days.length - 1])
-    ), /*#__PURE__*/
-    React.createElement(Button, { variant: "quiet", onClick: () => setFrom(isoShift(from, 28)) }, "4 weeks \u25B6"), /*#__PURE__*/
-    React.createElement("span", { style: { flex: 1 } }),
+    React.createElement("div", { style: { display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", marginBottom: 10 } },
     swatch(RT_ON, "Sign on"),
     swatch(RT_BOARD, "On board"),
     swatch(RT_OFF, "Sign off"),
@@ -13699,58 +13749,54 @@ function RosterTimeline({ plan, admin, onStint, onBlank }) {
     swatch(RT_RELIEF, "Relief / cover")
     ), /*#__PURE__*/
 
-    React.createElement("div", { className: "um-scroll" }, /*#__PURE__*/
-    React.createElement("table", { style: { borderCollapse: "collapse", width: "100%", tableLayout: "fixed" } }, /*#__PURE__*/
-    React.createElement("colgroup", null, /*#__PURE__*/
-    React.createElement("col", { style: { width: 190 } }), /*#__PURE__*/
-    React.createElement("col", { style: { width: 118 } }),
-    days.map((d) => /*#__PURE__*/React.createElement("col", { key: d }))
-    ), /*#__PURE__*/
+    React.createElement("div", { className: "um-timeline", ref: frame }, /*#__PURE__*/
+    React.createElement("table", null, /*#__PURE__*/
     React.createElement("thead", null, /*#__PURE__*/
     React.createElement("tr", null, /*#__PURE__*/
-    React.createElement("th", null), /*#__PURE__*/
-    React.createElement("th", null),
+    React.createElement("th", { className: "um-tl-name", style: { minWidth: 190 } }), /*#__PURE__*/
+    React.createElement("th", { className: "um-tl-rank", style: { minWidth: 118 } }),
     months.map((m) => /*#__PURE__*/
     React.createElement("th", { key: m.label, colSpan: m.n, style: { fontFamily: T.display, fontSize: 10.5,
         fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: T.accent,
         borderBottom: "1px solid " + T.rule, borderLeft: "1px solid " + T.rule,
-        padding: "3px 0", textAlign: "left", paddingLeft: 5 } },
+        padding: "3px 0", textAlign: "left", paddingLeft: 5, whiteSpace: "nowrap" } },
     m.label
     )
     )
     ), /*#__PURE__*/
     React.createElement("tr", null, /*#__PURE__*/
-    React.createElement("th", { style: { fontFamily: T.display, fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
-        textTransform: "uppercase", color: T.muted, textAlign: "left", padding: "3px 5px" } }, "Crew member"), /*#__PURE__*/
-    React.createElement("th", { style: { fontFamily: T.display, fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
-        textTransform: "uppercase", color: T.muted, textAlign: "left", padding: "3px 5px" } }, "Rank"),
+    React.createElement("th", { className: "um-tl-name", style: { ...headCell, minWidth: 190 } }, "Crew member"), /*#__PURE__*/
+    React.createElement("th", { className: "um-tl-rank", style: { ...headCell, minWidth: 118 } }, "Rank"),
     days.map((d) => /*#__PURE__*/
     React.createElement("th", { key: d, className: d === today ? "um-daygrid-today" : "",
-      style: { fontFamily: T.mono, fontSize: 9, color: T.muted, padding: "2px 0",
-        fontWeight: 400, overflow: "hidden" }, title: fmtDate(d) },
+      style: { width: RT_CELL, minWidth: RT_CELL, fontFamily: T.mono, fontSize: 8,
+        color: T.muted, padding: "1px 0", fontWeight: 400 }, title: fmtDate(d) },
     d.slice(8)
     )
     )
     )
     ), /*#__PURE__*/
     React.createElement("tbody", null,
-    groups.map((g) => /*#__PURE__*/
-    React.createElement(React.Fragment, { key: g.crew }, /*#__PURE__*/
+    blocks.map((g, gi) => /*#__PURE__*/
+    React.createElement(React.Fragment, { key: g.label + gi }, /*#__PURE__*/
     React.createElement("tr", null, /*#__PURE__*/
-    React.createElement("td", { colSpan: 2 + days.length, style: { fontFamily: T.display, fontSize: 10.5,
+    React.createElement("td", { className: "um-tl-name", style: { fontFamily: T.display, fontSize: 10.5,
         fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: T.accent,
-        background: T.raised, padding: "4px 5px", borderTop: "1px solid " + T.rule } },
-    g.crew === "ALPHA" ? "Alpha crew" : g.crew === "BRAVO" ? "Bravo crew" : g.crew.toLowerCase()
-    )
+        background: T.raised, padding: "4px 5px", borderTop: "1px solid " + T.rule,
+        whiteSpace: "nowrap" } },
+    g.label
+    ), /*#__PURE__*/
+    React.createElement("td", { className: "um-tl-rank", style: { background: T.raised, borderTop: "1px solid " + T.rule } }), /*#__PURE__*/
+    React.createElement("td", { colSpan: days.length, style: { background: T.raised, borderTop: "1px solid " + T.rule } })
     ),
     g.people.map((p) => /*#__PURE__*/
     React.createElement("tr", { key: p.name, className: "um-row" }, /*#__PURE__*/
-    React.createElement("td", { style: { fontFamily: T.body, fontSize: 12.5, fontWeight: 600, color: T.text,
-        padding: "3px 5px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-        borderTop: "1px solid " + T.rule } }, p.name), /*#__PURE__*/
-    React.createElement("td", { style: { fontFamily: T.mono, fontSize: 10, color: T.muted, padding: "3px 5px",
-        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-        borderTop: "1px solid " + T.rule } }, p.rank),
+    React.createElement("td", { className: "um-tl-name", style: { fontFamily: T.body, fontSize: 12, fontWeight: 600,
+        color: T.text, padding: "2px 5px", whiteSpace: "nowrap", overflow: "hidden",
+        textOverflow: "ellipsis", maxWidth: 190, borderTop: "1px solid " + T.rule } }, p.name), /*#__PURE__*/
+    React.createElement("td", { className: "um-tl-rank", style: { fontFamily: T.mono, fontSize: 10, color: T.muted,
+        padding: "2px 5px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+        maxWidth: 118, borderTop: "1px solid " + T.rule } }, p.rank),
     days.map((d) => {
       const c = cellFor(p, d);
       const blankSwing = admin && !c ? swingForDay(d) : null;
@@ -13762,7 +13808,7 @@ function RosterTimeline({ plan, admin, onStint, onBlank }) {
           onClick: press || undefined,
           title: c ? p.name + " · " + fmtDate(d) + " · " + c.word :
           press ? "Put " + p.name + " on " + fmtDate(blankSwing.on) + " – " + fmtDate(blankSwing.off) : undefined,
-          style: { height: 24, padding: 0,
+          style: { width: RT_CELL, minWidth: RT_CELL, height: 22, padding: 0,
             cursor: press ? "pointer" : undefined,
             background: c ? c.bg : "transparent",
             borderTop: "1px solid " + T.rule,
@@ -13780,18 +13826,55 @@ function RosterTimeline({ plan, admin, onStint, onBlank }) {
 
 }
 
+/* Somebody new to the roster, put straight onto a swing. */
+function RosterNewPerson({ names, positions, spine, onAdd, onClose }) {
+  const [who, setWho] = useState("");
+  const [swingKey, setSwingKey] = useState(() => {
+    const today = todayISO();
+    const here = spine.find((s) => s.on <= today && today < s.off) || spine[0];
+    return here ? here.on + "|" + here.off : "";
+  });
+  const swing = spine.find((s) => s.on + "|" + s.off === swingKey) || null;
+  return (/*#__PURE__*/
+    React.createElement("div", { style: { display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" } }, /*#__PURE__*/
+    React.createElement("div", { style: { flex: "1 1 220px" } }, /*#__PURE__*/
+    React.createElement(Field, { label: "Who" }, /*#__PURE__*/
+    React.createElement("select", { className: "um-in", value: who, onChange: (e) => setWho(e.target.value) }, /*#__PURE__*/
+    React.createElement("option", { value: "" }, "Choose\u2026"),
+    names.map((n) => /*#__PURE__*/
+    React.createElement("option", { key: n, value: n }, n, positions[n] ? " — " + positions[n] : "")
+    )
+    )
+    )
+    ), /*#__PURE__*/
+    React.createElement("div", { style: { flex: "1 1 200px" } }, /*#__PURE__*/
+    React.createElement(Field, { label: "Swing" }, /*#__PURE__*/
+    React.createElement("select", { className: "um-in", value: swingKey, onChange: (e) => setSwingKey(e.target.value) },
+    spine.map((s) => /*#__PURE__*/
+    React.createElement("option", { key: s.on + "|" + s.off, value: s.on + "|" + s.off },
+    fmtDate(s.on), " \u2013 ", fmtDate(s.off), s.crew ? " · " + s.crew : ""
+    )
+    )
+    )
+    )
+    ), /*#__PURE__*/
+    React.createElement(Button, { variant: "ghost", disabled: !who || !swing,
+      onClick: () => onAdd({ name: who, rank: rosterRankFor(positions[who] || ""), crew: swing.crew,
+        on: swing.on, off: swing.off, key: swingKey }) }, "Onto the swing"
+
+    ), /*#__PURE__*/
+    React.createElement(Button, { variant: "quiet", onClick: onClose }, "Cancel")
+    ));
+
+}
+
 /* The Roster: the portal's own, seeded from the office's workbook and changed
-   here from then on. */
+   on the table itself from then on. */
 function RosterListPage() {
   const { admin, crewRoster, rosterPlan, setRosterPlan, quals: QUALS, log } = usePortal();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [confirmLoad, setConfirmLoad] = useState(false);
-  const [openPerson, setOpenPerson] = useState(null);
-  const [addingTo, setAddingTo] = useState(null);
-  const [addName, setAddName] = useState("");
-  const [showPast, setShowPast] = useState(false);
-  const [showSwings, setShowSwings] = useState(false);
   const [tableEdit, setTableEdit] = useState(null);
   const asked = useRef(false);
 
@@ -13819,8 +13902,6 @@ function RosterListPage() {
     load("opened");
   }, [rosterPlan, crewRoster]);
 
-  /* Every change rewrites the rows whole, each carrying its own id, and marks
-     the roster as the portal's rather than the spreadsheet's. */
   const change = (mutate, what, detail) => {
     setRosterPlan((plan) => {
       if (!plan) return plan;
@@ -13841,18 +13922,16 @@ function RosterListPage() {
     if (on === row.on && off === row.off) return;
     change((p) => {
       p.rows = p.rows.map((r) => r.id === row.id ?
-      { ...r, on, off, days: daysBetween(on, off), note: "", swing: r.swing || s.key } :
+      { ...r, on, off, days: daysBetween(on, off), note: "", swing: r.swing || s && s.key || null } :
       r);
     }, row.name + "'s days changed", "signs on " + fmtDate(on) + ", off " + fmtDate(off));
   };
 
-  const dropPerson = (row, s) => {
+  const dropPerson = (row) => {
     change((p) => {p.rows = p.rows.filter((r) => r.id !== row.id);},
-    row.name + " off the swing", fmtDate(s.on) + " – " + fmtDate(s.off));
-    setOpenPerson(null);
+    row.name + " off the swing", fmtDate(row.on) + " – " + fmtDate(row.off));
   };
 
-  // Somebody pressed onto a swing straight from the table.
   const addNamed = (t) => {
     change((p) => {
       p.rows = [...p.rows, {
@@ -13861,31 +13940,6 @@ function RosterListPage() {
         on: t.on, off: t.off, days: daysBetween(t.on, t.off), note: "", swing: t.key
       }];
     }, t.name + " onto the swing", fmtDate(t.on) + " – " + fmtDate(t.off));
-  };
-
-  const addPerson = (s) => {
-    const name = addName;
-    if (!name) return;
-    change((p) => {
-      p.rows = [...p.rows, {
-        id: "r" + Date.now(),
-        crew: s.crew, rank: rosterRankFor(positions[name] || ""), name,
-        on: s.on, off: s.off, days: daysBetween(s.on, s.off), note: "", swing: s.key
-      }];
-    }, name + " onto the swing", fmtDate(s.on) + " – " + fmtDate(s.off));
-    setAddName("");setAddingTo(null);
-  };
-
-  const swings = useMemo(() => rosterSwings(rosterPlan), [rosterPlan]);
-  const today = todayISO();
-  const gone = swings.filter((s) => s.off <= today);
-  const shown = showPast ? swings : swings.filter((s) => s.off > today);
-
-  const wordsFor = (p, s) => {
-    const bits = [];
-    if (p.on !== s.on) bits.push("joins " + fmtDate(p.on));
-    if (p.off !== s.off) bits.push((p.off < s.off ? "off early " : "off late ") + fmtDate(p.off));
-    return bits.join(" · ") || p.note || "";
   };
 
   if (!crewRoster && !rosterPlan) {
@@ -13902,19 +13956,14 @@ function RosterListPage() {
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" } }, /*#__PURE__*/
     React.createElement(SectionHead, { title: "Roster",
       meta: rosterPlan ?
-      swings.length + " swings · " + (rosterPlan.edited ?
+      (rosterPlan.spine || []).length + " swings · " + (rosterPlan.edited ?
       "held on the portal · changed " + fmtDate(rosterPlan.updatedAt || rosterPlan.at) :
       rosterPlan.filename || "") :
       crewRoster ? crewRoster.filename : "" }), /*#__PURE__*/
     React.createElement("span", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "baseline" } },
-    rosterPlan && /*#__PURE__*/
-    React.createElement(Button, { variant: showSwings ? "ghost" : "quiet", onClick: () => setShowSwings(!showSwings) },
-    showSwings ? "Hide the swing lists" : "Work on the swings"
-    ),
+    admin && rosterPlan && /*#__PURE__*/
+    React.createElement(Button, { onClick: () => setTableEdit(tableEdit && tableEdit.kind === "new" ? null : { kind: "new" }) }, "Add crew member"
 
-    showSwings && gone.length > 0 && /*#__PURE__*/
-    React.createElement(Button, { variant: "quiet", onClick: () => setShowPast(!showPast) },
-    showPast ? "Hide the swings gone by" : "Show the " + gone.length + " gone by"
     ),
 
     admin && crewRoster && (confirmLoad ? /*#__PURE__*/
@@ -13960,7 +14009,11 @@ function RosterListPage() {
         React.createElement("div", { style: { position: "fixed", left: "50%", top: 90, transform: "translateX(-50%)", zIndex: 80,
             background: T.panel, border: "1px solid " + T.rule, borderTop: "4px solid " + T.accent,
             borderRadius: 3, padding: "14px 18px", boxShadow: "0 6px 24px rgba(18,41,61,0.25)",
-            width: "min(560px, 94vw)" } },
+            width: "min(620px, 94vw)" } },
+        tableEdit.kind === "new" ? /*#__PURE__*/
+        React.createElement(RosterNewPerson, { names: names, positions: positions, spine: rosterPlan && rosterPlan.spine || [],
+          onAdd: (t) => {addNamed(t);setTableEdit(null);},
+          onClose: () => setTableEdit(null) }) :
         tableEdit.kind === "stint" ? /*#__PURE__*/
         React.createElement(React.Fragment, null, /*#__PURE__*/
         React.createElement("div", { style: { fontFamily: T.display, fontSize: 15, fontWeight: 700, color: T.text, marginBottom: 8 } },
@@ -13975,7 +14028,7 @@ function RosterListPage() {
         React.createElement("input", { className: "um-in", type: "date", value: row.off,
           onChange: (e) => setDates(row, { key: row.swing }, row.on, e.target.value) })
         ), /*#__PURE__*/
-        React.createElement(Button, { variant: "quiet", onClick: () => {dropPerson(row, { on: row.on, off: row.off });setTableEdit(null);} }, "Off this swing"
+        React.createElement(Button, { variant: "quiet", onClick: () => {dropPerson(row);setTableEdit(null);} }, "Off this swing"
 
         ), /*#__PURE__*/
         React.createElement(Button, { onClick: () => setTableEdit(null) }, "Done")
@@ -13992,96 +14045,7 @@ function RosterListPage() {
 
         ));
 
-    })(),
-
-    showSwings && shown.map((s) => {
-      const here = s.on <= today && today < s.off;
-      const byRank = [];
-      s.people.forEach((p) => {
-        const last = byRank[byRank.length - 1];
-        if (last && last.rank === p.rank) last.people.push(p);else
-        byRank.push({ rank: p.rank, people: [p] });
-      });
-      const onSwing = new Set(s.people.map((p) => matchRoster(p.name, names) || p.name));
-      const candidates = names.filter((n) => !onSwing.has(n));
-      return (/*#__PURE__*/
-        React.createElement("div", { key: s.key, style: { background: T.panel, border: "1px solid " + T.rule,
-            borderLeft: "4px solid " + (here ? T.teal : s.off <= today ? T.rule : T.accent),
-            borderRadius: 2, padding: "13px 15px", marginBottom: 10 } }, /*#__PURE__*/
-        React.createElement("div", { style: { display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", marginBottom: 9 } }, /*#__PURE__*/
-        React.createElement("span", { style: { fontFamily: T.display, fontSize: 15, fontWeight: 700, color: T.text } },
-        fmtDate(s.on), " \u2013 ", fmtDate(s.off)
-        ),
-        s.crew && /*#__PURE__*/React.createElement(Chip, { fg: T.accent, bg: T.accentSoft }, s.crew),
-        here && /*#__PURE__*/React.createElement(Chip, { fg: T.teal, bg: T.raised }, "On now"), /*#__PURE__*/
-        React.createElement("span", { style: { fontFamily: T.mono, fontSize: 11.5, color: T.muted } }, s.people.length, " crew"), /*#__PURE__*/
-        React.createElement("span", { style: { flex: 1 } }),
-        admin && /*#__PURE__*/
-        React.createElement(Button, { variant: "quiet", onClick: () => {setAddingTo(addingTo === s.key ? null : s.key);setAddName("");} }, "Add crew member"
-
-        )
-
-        ),
-
-        admin && addingTo === s.key && /*#__PURE__*/
-        React.createElement("div", { style: { display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap",
-            background: T.raised, border: "1px solid " + T.rule, borderRadius: 3,
-            padding: "10px 12px", marginBottom: 10 } }, /*#__PURE__*/
-        React.createElement("div", { style: { flex: "1 1 260px", maxWidth: 340 } }, /*#__PURE__*/
-        React.createElement(Field, { label: "Who" }, /*#__PURE__*/
-        React.createElement("select", { className: "um-in", value: addName, onChange: (e) => setAddName(e.target.value) }, /*#__PURE__*/
-        React.createElement("option", { value: "" }, "Choose\u2026"),
-        candidates.map((n) => /*#__PURE__*/
-        React.createElement("option", { key: n, value: n }, n, positions[n] ? " — " + positions[n] : "")
-        )
-        )
-        )
-        ), /*#__PURE__*/
-        React.createElement(Button, { variant: "ghost", disabled: !addName, onClick: () => addPerson(s) }, "Onto this swing"
-
-        ), /*#__PURE__*/
-        React.createElement(Button, { variant: "quiet", onClick: () => setAddingTo(null) }, "Cancel")
-        ),
-
-
-        s.people.length === 0 && /*#__PURE__*/
-        React.createElement("div", { style: { fontFamily: T.body, fontSize: 13, color: T.muted } }, "Nobody signed on yet."), /*#__PURE__*/
-
-
-        React.createElement("div", { style: { display: "flex", gap: 22, flexWrap: "wrap" } },
-        byRank.map((g) => /*#__PURE__*/
-        React.createElement("div", { key: g.rank, style: { minWidth: 190 } }, /*#__PURE__*/
-        React.createElement(Eyebrow, null, g.rank || "Other"),
-        g.people.map((p) => /*#__PURE__*/
-        React.createElement("div", { key: p.id || p.name + p.on, style: { marginTop: 4 } },
-        admin ? /*#__PURE__*/
-        React.createElement("a", { onClick: () => setOpenPerson(openPerson === p.id ? null : p.id),
-          style: { cursor: "pointer", fontFamily: T.body, fontSize: 13, color: T.text,
-            textDecoration: openPerson === p.id ? "underline" : "none", textUnderlineOffset: 3 } },
-        p.name
-        ) : /*#__PURE__*/
-
-        React.createElement("span", { style: { fontFamily: T.body, fontSize: 13, color: T.text } }, p.name),
-
-        wordsFor(p, s) && /*#__PURE__*/
-        React.createElement("span", { style: { fontFamily: T.mono, fontSize: 10.5, color: T.bOrange, marginLeft: 6 } },
-        wordsFor(p, s)
-        ),
-
-        admin && openPerson === p.id && /*#__PURE__*/
-        React.createElement(RosterPersonDays, { row: p, swing: s,
-          onDates: (on, off) => setDates(p, s, on, off),
-          onDrop: () => dropPerson(p, s),
-          onClose: () => setOpenPerson(null) })
-
-        )
-        )
-        )
-        )
-        )
-        ));
-
-    })
+    })()
     ));
 
 }
@@ -17891,7 +17855,6 @@ function CrewCertificateUpload() {
    them and the page that is rendered can't disagree about what exists. */
 const ADMIN_PAGES = [
 { id: "today", label: "Today" },
-{ id: "roster", label: "Roster" },
 { id: "swing-allocation", label: "Swing Allocation" },
 { id: "required-docs", label: "Required Documents For Upload" },
 { id: "checker", label: "Certification Checker" },
@@ -17984,7 +17947,6 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
 
 
 
-    page === "roster" && /*#__PURE__*/React.createElement(RosterListPage, null),
     page === "swing-allocation" && /*#__PURE__*/
     React.createElement(RosterPage, { currentUser: currentUser, people: people, setPeople: setPeople,
       overrides: overrides, swingBoard: swingBoard, setSwingBoard: setSwingBoard, log: log }),
@@ -19088,6 +19050,7 @@ function CoolibahPortal({ role, onSignOut }) {
   { id: "correspondence", label: "Partnership Correspondence" },
   { id: "handover", label: "Handover Notes" },
   { id: "training", label: "Crew Matrix" },
+  { id: "crew-roster", label: "Roster" },
   { id: "documentation", label: "Documentation" },
   { id: "upload-certs", label: "Upload Crew Certificates" },
   { id: "suggestions", label: "Crew Suggestions" },
@@ -19118,6 +19081,7 @@ function CoolibahPortal({ role, onSignOut }) {
     handover: /*#__PURE__*/React.createElement(HandoverNotes, { notes: notes, setNotes: setNotes, log: log }),
     correspondence: /*#__PURE__*/React.createElement(PartnershipHub, { data: correspondence, setData: setCorrespondence, currentUser: currentUser, log: log, docs: docs, addDoc: addDoc, removeDoc: removeDoc, pwData: pwCorrespondence, setPwData: setPwCorrespondence }),
     training: /*#__PURE__*/React.createElement(TrainingMatrix, null),
+    "crew-roster": /*#__PURE__*/React.createElement(RosterListPage, null),
 
     documentation: /*#__PURE__*/React.createElement(DocumentationHub, { docs: docs, addDoc: addDoc, removeDoc: removeDoc, currentUser: currentUser,
       people: people, setPeople: setPeople, overrides: overrides, setOverrides: setOverrides, log: log }),
