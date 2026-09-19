@@ -6,3 +6,9 @@ documents/
 
 # Built from preview.html by tools/build-fast-preview.mjs - never edited by hand.
 portal.html
+
+# Built from source/index.html by tools/build-preview.mjs - never edited by hand.
+preview.html
+
+# The offline preview's crew snapshot: real crew data, not source code.
+tools/preview/data.json

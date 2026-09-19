@@ -50,7 +50,7 @@ from `.claude/launch.json`:
 
 | Preview | What it is | Address |
 |---|---|---|
-| `portal-preview` | The page on its own with a built-in snapshot of the data (rev 342). Fastest way to see a front-end change. Reloads itself when `preview.html` changes. | http://localhost:8787 |
+| `portal-preview` | The page on its own with a built-in snapshot of the data (rev 342). Fastest way to see a front-end change. Reloads itself when `preview.html` is rebuilt. | http://localhost:8787 |
 | `portal-worker` | The **whole** portal, backend included, running locally on wrangler — sign-in, uploads, checkers, SharePoint if you give it the secret. | http://localhost:8788 |
 | `crewcomp-web` | Chris's FIT TO SAIL web app (needs its backend running — double-click **Start FIT TO SAIL preview.bat**). | http://localhost:5173 |
 
@@ -86,6 +86,34 @@ npm run --prefix worker deploy
 ```
 
 `worker/DEPLOY.md` has the full runbook.
+
+## Editing the portal, and the checks that guard it
+
+**`source/index.html` is the portal, and the only file to edit.**
+`preview.html`, `portal.html` and `worker/assets/index.html` are all built
+from it and will overwrite anything typed into them.
+
+    npm --prefix worker run build     build all three
+    npm --prefix worker run check     the safety net (a few seconds)
+    npm --prefix worker run deploy    checks, builds, then ships
+
+Deploy runs the checks first and refuses to ship if any fail. The checks are:
+
+| Check | What it would catch |
+|---|---|
+| The portal compiles | A typo that breaks the page outright |
+| Everything the portal calls exists | Something removed or renamed while another part still used it |
+| preview.html is in step | Somebody edited the built file instead of the source |
+| The worker's types are clean | A wrong shape passed around in the back end |
+| The worker's rules answer correctly | A certificate landing in the wrong matrix column |
+
+The rule tests live in `worker/tests/rules.test.ts`, one per rule that has
+actually gone wrong before. Add to them whenever something breaks: that is
+how the net gets tighter instead of staying the same size.
+
+The offline preview's crew snapshot is `tools/preview/data.json`. It holds
+real crew data, so it is kept out of git — a fresh clone builds a preview that
+opens empty until that file is copied across by hand.
 
 ## 4. Keeping the two devices in step
 
