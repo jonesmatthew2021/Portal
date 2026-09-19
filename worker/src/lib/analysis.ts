@@ -566,7 +566,10 @@ export async function equivalences(): Promise<Equivalence[]> {
 // round — they tell no ticket from another.
 const EQ_NOISE = new Set(["certificate", "of", "competency", "coc", "the", "a", "and"]);
 const eqWords = (s: string) =>
-  s.toLowerCase().normalize("NFKD").split(/[^a-z0-9]+/).filter((w) => w && !EQ_NOISE.has(w));
+  s.toLowerCase().normalize("NFKD")
+    // "500GT" on the sheet and "500 GT" on a certificate are the same words.
+    .replace(/([0-9])(?=[a-z])/g, "$1 ").replace(/([a-z])(?=[0-9])/g, "$1 ")
+    .split(/[^a-z0-9]+/).filter((w) => w && !EQ_NOISE.has(w));
 
 /** The column the equivalence page re-homes this title to, or null. An entry
  * only fires when its whole name appears in the title, and the longest name
@@ -596,6 +599,15 @@ export function codeFor(
   if (!reading) return null;
   return (
     equivalentCode(reading.certificateTitle, table) ||
+    // Some tickets print a bare "Certificate of Competency" and put the
+    // capacity elsewhere on the page - the reader keeps that in its notes,
+    // so the notes get a say when the title alone names nothing.
+    equivalentCode(
+      reading.certificateTitle && reading.notes
+        ? `${reading.certificateTitle} ${reading.notes}`
+        : reading.notes,
+      table,
+    ) ||
     (reading.codeConfidence !== "low" ? reading.qualCode || null : null)
   );
 }
