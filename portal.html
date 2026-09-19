@@ -13548,6 +13548,79 @@ async function readCrewRoster(record) {
   return { at: todayISO(), filename: record.filename, rows, spine, relief };
 }
 
+/* The roster written back into the workbook on file, and only into it.
+ *
+ * The Swings sheet is rebuilt from the portal's roster — every stint a row,
+ * the dates as Excel keeps them — and every other sheet, colour and formula
+ * in the workbook is left byte for byte as it was. The DAYS column becomes
+ * plain numbers, so the calc chain is dropped and Excel told to work the
+ * formulas out afresh when it next opens the file.
+ */
+const rosterColAt = (i) => {
+  let n = i + 1,s = "";
+  while (n) {s = String.fromCharCode(65 + (n - 1) % 26) + s;n = Math.floor((n - 1) / 26);}
+  return s;
+};
+const rosterXmlSafe = (v) => String(v == null ? "" : v).
+replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+async function saveRosterWorkbook(buf, plan) {
+  if (!zipCapable()) throw new Error("This browser can't rewrite the workbook. Chrome, Edge, Firefox or Safari can. Nothing was saved.");
+  const entries = readZip(buf);
+  const wbPart = partOf(entries, "xl/workbook.xml");
+  const relsPart = partOf(entries, "xl/_rels/workbook.xml.rels");
+  if (!wbPart || !relsPart) throw new Error("The roster on file is not laid out like a .xlsx inside. Nothing was saved.");
+  const workbookXml = await partText(wbPart);
+  const relsXml = await partText(relsPart);
+  const date1904 = /date1904="(1|true)"/.test(workbookXml);
+
+  const sheets = [...workbookXml.matchAll(/<sheet[^>]*name="([^"]+)"[^>]*r:id="([^"]+)"/g)].
+  map((m) => ({ name: m[1], rid: m[2] }));
+  const swingsSheet = sheets.find((s) => /swing/i.test(s.name) && !/on board/i.test(s.name));
+  if (!swingsSheet) throw new Error("The workbook has no Swings sheet to save into. Nothing was saved.");
+  const rel = relsXml.match(new RegExp('Id="' + swingsSheet.rid + '"[^>]*Target="([^"]+)"'));
+  if (!rel) throw new Error("The Swings sheet couldn't be placed inside the workbook. Nothing was saved.");
+  const path = "xl/" + rel[1].replace(/^\/+/, "").replace(/^xl\//, "");
+  const sheetPart = partOf(entries, path);
+  if (!sheetPart) throw new Error("The Swings sheet is missing from the workbook. Nothing was saved.");
+  const oldXml = await partText(sheetPart);
+
+  // The dates keep the sheet's own date dress, sampled from a cell that has it.
+  const styled = oldXml.match(/<c r="D[2-9]\d*" s="(\d+)"[^>]*><v>/);
+  const dateStyle = styled ? styled[1] : null;
+  const epoch = date1904 ? "1904-01-01" : "1899-12-30";
+  const serial = (d) => daysBetween(epoch, d);
+
+  const rows = (plan.rows || []).slice().sort((a, b) =>
+  a.on.localeCompare(b.on) || String(a.crew || "").localeCompare(String(b.crew || "")) ||
+  rosterRankAt(a.rank) - rosterRankAt(b.rank) || a.name.localeCompare(b.name));
+  const head = ["CREW", "RANK", "NAME", "SIGN ON", "SIGN OFF", "DAYS", "WHERE THIS CAME FROM", "NOTES"];
+  const str = (ref, v) => v === "" || v == null ? "" :
+  '<c r="' + ref + '" t="inlineStr"><is><t xml:space="preserve">' + rosterXmlSafe(v) + "</t></is></c>";
+  const num = (ref, v, s) => '<c r="' + ref + '"' + (s ? ' s="' + s + '"' : "") + "><v>" + v + "</v></c>";
+
+  let data = '<row r="1">' + head.map((h, i) => str(rosterColAt(i) + "1", h)).join("") + "</row>";
+  rows.forEach((r, i) => {
+    const n = i + 2;
+    data += '<row r="' + n + '">' +
+    str("A" + n, r.crew || "") + str("B" + n, r.rank || "") + str("C" + n, r.name || "") +
+    num("D" + n, serial(r.on), dateStyle) + num("E" + n, serial(r.off), dateStyle) +
+    num("F" + n, r.days || daysBetween(r.on, r.off), null) +
+    str("G" + n, "Crew portal") + str("H" + n, r.note || "") +
+    "</row>";
+  });
+
+  let xml = /<sheetData\/>/.test(oldXml) ?
+  oldXml.replace(/<sheetData\/>/, "<sheetData>" + data + "</sheetData>") :
+  oldXml.replace(/<sheetData>[\s\S]*?<\/sheetData>/, "<sheetData>" + data + "</sheetData>");
+  xml = xml.replace(/<dimension[^>]*\/>/, '<dimension ref="A1:H' + (rows.length + 1) + '"/>');
+
+  await setPartText(sheetPart, xml);
+  await dropCalcChain(entries);
+  await setPartText(wbPart, recalcOnOpen(workbookXml));
+  return writeZip(entries);
+}
+
 /* The roster laid out swing by swing: the workbook's swings, each carrying
    whoever is signed onto it. A swing with nobody on it yet still shows, so
    crew can be put onto it. */
@@ -13621,7 +13694,7 @@ const RT_OFF = "#FFC000";
 const RT_RELIEF = "#D883C9";
 const RT_CELL = 13;
 
-function RosterTimeline({ plan, admin, onStint, onBlank }) {
+function RosterTimeline({ plan, admin, onStint, onBlank, onPerson }) {
   const spine = plan && plan.spine || [];
   const rows = plan && plan.rows || [];
   const today = todayISO();
@@ -13791,9 +13864,13 @@ function RosterTimeline({ plan, admin, onStint, onBlank }) {
     ),
     g.people.map((p) => /*#__PURE__*/
     React.createElement("tr", { key: p.name, className: "um-row" }, /*#__PURE__*/
-    React.createElement("td", { className: "um-tl-name", style: { fontFamily: T.body, fontSize: 12, fontWeight: 600,
+    React.createElement("td", { className: "um-tl-name",
+      onClick: admin ? () => onPerson(p) : undefined,
+      title: admin ? "Open " + p.name : undefined,
+      style: { fontFamily: T.body, fontSize: 12, fontWeight: 600,
         color: T.text, padding: "2px 5px", whiteSpace: "nowrap", overflow: "hidden",
-        textOverflow: "ellipsis", maxWidth: 190, borderTop: "1px solid " + T.rule } }, p.name), /*#__PURE__*/
+        textOverflow: "ellipsis", maxWidth: 190, borderTop: "1px solid " + T.rule,
+        cursor: admin ? "pointer" : undefined } }, p.name), /*#__PURE__*/
     React.createElement("td", { className: "um-tl-rank", style: { fontFamily: T.mono, fontSize: 10, color: T.muted,
         padding: "2px 5px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
         maxWidth: 118, borderTop: "1px solid " + T.rule } }, p.rank),
@@ -13826,20 +13903,24 @@ function RosterTimeline({ plan, admin, onStint, onBlank }) {
 
 }
 
-/* Somebody new to the roster, put straight onto a swing. */
+/* Somebody new to the roster, put straight onto a swing — chosen off the crew
+   list, or typed in for a relief hand the matrix doesn't carry. */
 function RosterNewPerson({ names, positions, spine, onAdd, onClose }) {
   const [who, setWho] = useState("");
+  const [typed, setTyped] = useState("");
+  const [rank, setRank] = useState("GPH");
   const [swingKey, setSwingKey] = useState(() => {
     const today = todayISO();
     const here = spine.find((s) => s.on <= today && today < s.off) || spine[0];
     return here ? here.on + "|" + here.off : "";
   });
   const swing = spine.find((s) => s.on + "|" + s.off === swingKey) || null;
+  const name = typed.trim() ? canonicalName(typed.trim()) : who;
   return (/*#__PURE__*/
     React.createElement("div", { style: { display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" } }, /*#__PURE__*/
-    React.createElement("div", { style: { flex: "1 1 220px" } }, /*#__PURE__*/
+    React.createElement("div", { style: { flex: "1 1 200px" } }, /*#__PURE__*/
     React.createElement(Field, { label: "Who" }, /*#__PURE__*/
-    React.createElement("select", { className: "um-in", value: who, onChange: (e) => setWho(e.target.value) }, /*#__PURE__*/
+    React.createElement("select", { className: "um-in", value: who, onChange: (e) => {setWho(e.target.value);setTyped("");} }, /*#__PURE__*/
     React.createElement("option", { value: "" }, "Choose\u2026"),
     names.map((n) => /*#__PURE__*/
     React.createElement("option", { key: n, value: n }, n, positions[n] ? " — " + positions[n] : "")
@@ -13847,6 +13928,21 @@ function RosterNewPerson({ names, positions, spine, onAdd, onClose }) {
     )
     )
     ), /*#__PURE__*/
+    React.createElement("div", { style: { flex: "1 1 170px" } }, /*#__PURE__*/
+    React.createElement(Field, { label: "Or type a name" }, /*#__PURE__*/
+    React.createElement("input", { className: "um-in", value: typed, placeholder: "First name and surname",
+      onChange: (e) => {setTyped(e.target.value);if (e.target.value.trim()) setWho("");} })
+    )
+    ),
+    typed.trim() !== "" && /*#__PURE__*/
+    React.createElement("div", { style: { flex: "0 1 170px" } }, /*#__PURE__*/
+    React.createElement(Field, { label: "Rank" }, /*#__PURE__*/
+    React.createElement("select", { className: "um-in", value: rank, onChange: (e) => setRank(e.target.value) },
+    ROSTER_RANKS.map((r) => /*#__PURE__*/React.createElement("option", { key: r, value: r }, r))
+    )
+    )
+    ), /*#__PURE__*/
+
     React.createElement("div", { style: { flex: "1 1 200px" } }, /*#__PURE__*/
     React.createElement(Field, { label: "Swing" }, /*#__PURE__*/
     React.createElement("select", { className: "um-in", value: swingKey, onChange: (e) => setSwingKey(e.target.value) },
@@ -13858,9 +13954,9 @@ function RosterNewPerson({ names, positions, spine, onAdd, onClose }) {
     )
     )
     ), /*#__PURE__*/
-    React.createElement(Button, { variant: "ghost", disabled: !who || !swing,
-      onClick: () => onAdd({ name: who, rank: rosterRankFor(positions[who] || ""), crew: swing.crew,
-        on: swing.on, off: swing.off, key: swingKey }) }, "Onto the swing"
+    React.createElement(Button, { variant: "ghost", disabled: !name || !swing,
+      onClick: () => onAdd({ name, rank: typed.trim() ? rank : rosterRankFor(positions[who] || ""),
+        crew: swing.crew, on: swing.on, off: swing.off, key: swingKey }) }, "Onto the swing"
 
     ), /*#__PURE__*/
     React.createElement(Button, { variant: "quiet", onClick: onClose }, "Cancel")
@@ -13871,7 +13967,8 @@ function RosterNewPerson({ names, positions, spine, onAdd, onClose }) {
 /* The Roster: the portal's own, seeded from the office's workbook and changed
    on the table itself from then on. */
 function RosterListPage() {
-  const { admin, crewRoster, rosterPlan, setRosterPlan, quals: QUALS, log } = usePortal();
+  const { admin, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, quals: QUALS, log, role } = usePortal();
+  const [savingRoster, setSavingRoster] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [confirmLoad, setConfirmLoad] = useState(false);
@@ -13932,6 +14029,32 @@ function RosterListPage() {
     row.name + " off the swing", fmtDate(row.on) + " – " + fmtDate(row.off));
   };
 
+  const removePerson = (name) => {
+    change((p) => {p.rows = p.rows.filter((r) => r.name !== name);},
+    name + " removed from the roster");
+  };
+
+  // Everything as it stands, written into the workbook and filed back to
+  // SharePoint - the same file, replaced, with every other sheet untouched.
+  const saveRoster = async () => {
+    if (!crewRoster || !crewRoster.url || !rosterPlan || savingRoster) return;
+    setSavingRoster(true);setErr("");
+    try {
+      const resp = await fetch(crewRoster.url);
+      if (!resp.ok) throw new Error("The roster workbook couldn't be downloaded (" + resp.status + "). Nothing was saved.");
+      const blob = await saveRosterWorkbook(await resp.arrayBuffer(), rosterPlan);
+      const file = new File([blob], crewRoster.filename, { type: XLSX_MIME });
+      const up = await uploadSingleDocument(file, "crew-roster",
+      { uploadedBy: role, filedOn: todayISO(), session: SESSION }, "replace");
+      if (up.record) setCrewRoster(up.record);
+      setRosterPlan((p) => p ? { ...p, edited: false, filename: crewRoster.filename, savedAt: todayISO() } : p);
+      log("Roster", "Roster saved to the spreadsheet", crewRoster.filename);
+    } catch (e) {
+      setErr(e.message || String(e));
+    }
+    setSavingRoster(false);
+  };
+
   const addNamed = (t) => {
     change((p) => {
       p.rows = [...p.rows, {
@@ -13961,6 +14084,11 @@ function RosterListPage() {
       rosterPlan.filename || "") :
       crewRoster ? crewRoster.filename : "" }), /*#__PURE__*/
     React.createElement("span", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "baseline" } },
+    admin && rosterPlan && crewRoster && /*#__PURE__*/
+    React.createElement(Button, { disabled: savingRoster || !rosterPlan.edited, onClick: saveRoster },
+    savingRoster ? "Saving…" : "Save roster"
+    ),
+
     admin && rosterPlan && /*#__PURE__*/
     React.createElement(Button, { onClick: () => setTableEdit(tableEdit && tableEdit.kind === "new" ? null : { kind: "new" }) }, "Add crew member"
 
@@ -13994,6 +14122,7 @@ function RosterListPage() {
 
     rosterPlan && /*#__PURE__*/
     React.createElement(RosterTimeline, { plan: rosterPlan, admin: admin,
+      onPerson: (p) => setTableEdit({ kind: "person", name: p.name }),
       onStint: (row) => setTableEdit({ kind: "stint", id: row.id, name: row.name, on: row.on }),
       onBlank: (p, s) => setTableEdit({ kind: "add", name: p.name, rank: p.rank, crew: s.crew,
         on: s.on, off: s.off, key: s.on + "|" + s.off }) }),
@@ -14010,6 +14139,18 @@ function RosterListPage() {
             background: T.panel, border: "1px solid " + T.rule, borderTop: "4px solid " + T.accent,
             borderRadius: 3, padding: "14px 18px", boxShadow: "0 6px 24px rgba(18,41,61,0.25)",
             width: "min(620px, 94vw)" } },
+        tableEdit.kind === "person" ? /*#__PURE__*/
+        React.createElement("div", { style: { display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" } }, /*#__PURE__*/
+        React.createElement("span", { style: { fontFamily: T.display, fontSize: 15, fontWeight: 700, color: T.text } },
+        tableEdit.name
+        ), /*#__PURE__*/
+        React.createElement("span", { style: { flex: 1 } }), /*#__PURE__*/
+        React.createElement(Button, { variant: "quiet",
+          onClick: () => {removePerson(tableEdit.name);setTableEdit(null);} }, "Remove from the roster"
+
+        ), /*#__PURE__*/
+        React.createElement(Button, { onClick: () => setTableEdit(null) }, "Close")
+        ) :
         tableEdit.kind === "new" ? /*#__PURE__*/
         React.createElement(RosterNewPerson, { names: names, positions: positions, spine: rosterPlan && rosterPlan.spine || [],
           onAdd: (t) => {addNamed(t);setTableEdit(null);},
