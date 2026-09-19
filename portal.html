@@ -9826,7 +9826,19 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
       settled.forEach((s) => {
         const r = rowAt.get(String(s.person || "").trim().toUpperCase());
         const c = colAt.get(s.code);
-        if (r === undefined || c === undefined || !s.value) return;
+        if (r === undefined || c === undefined) return;
+        // A cell taken back: the certificate that filled it answers to another
+        // column now, so the guess it left behind comes off the matrix and out
+        // of the workbook alike.
+        if (s.clear) {
+          if (String(rows[r][3][c] == null ? "" : rows[r][3][c]).trim() !== "") {
+            applied++;
+            rows[r][3][c] = "";
+            only.add(String(s.person).trim().toUpperCase() + "|" + s.code);
+          }
+          return;
+        }
+        if (!s.value) return;
         if (String(rows[r][3][c] == null ? "" : rows[r][3][c]).trim() !== s.value) applied++;
         rows[r][3][c] = s.value;
         only.add(`${String(s.person).trim().toUpperCase()}|${s.code}`);

@@ -636,6 +636,7 @@ async function compare(matrix: Matrix, sheet: { filename?: string; rows?: { name
 
   const readings = certs.map((row) => ({ row, reading: held.get(readingKey(row)) || null }));
   const eqTable = await equivalences();
+  const rehomed: { person: string | null; old: string; expiry: string | null }[] = [];
 
   const cols = matrix.cols || [];
   // Keyed upper case, the same way the rest of the codebase matches matrix
@@ -670,6 +671,15 @@ async function compare(matrix: Matrix, sheet: { filename?: string; rows?: { name
     // list beats a model inferring it from a scan. The model's code is only used
     // where nobody said, and only when it was sure.
     const code = codeFor(row, reading, eqTable);
+
+    // The model's own guess, remembered where the equivalence page overruled
+    // it - the cell that guess once filled may still be sitting on the matrix.
+    const guess = reading.codeConfidence !== "low" ? (reading.qualCode || "").trim().toUpperCase() : "";
+    if (!row.qualCode && guess && code && guess !== code.trim().toUpperCase() && colAt.has(guess)) {
+      const typedOld = isDate(row.expiresOn) ? normDate(row.expiresOn!) : null;
+      rehomed.push({ person: row.person, old: guess, expiry: typedOld || reading.expiresOn || null });
+    }
+
     if (!code || !colAt.has(code.trim().toUpperCase())) {
       notes.push({
         kind: "no-code",
@@ -744,7 +754,7 @@ async function compare(matrix: Matrix, sheet: { filename?: string; rows?: { name
   // where the matrix disagrees; this is the whole account, so a spreadsheet
   // can be brought up to what the certificates say even in the cells where
   // the crew matrix already agrees with them.
-  const settled: { person: string; code: string; value: string }[] = [];
+  const settled: { person: string; code: string; value: string; clear?: boolean }[] = [];
 
   for (const [key, { row, reading }] of claim) {
     const code = key.split("::")[1];
@@ -993,6 +1003,26 @@ async function compare(matrix: Matrix, sheet: { filename?: string; rows?: { name
       if (isDate(v) && !covered.has(`${at}:${col}`)) uncertified++;
     });
   });
+
+  // Cells this comparison once filled under the model's guess, taken back now
+  // the equivalence page homes those certificates somewhere else: only where
+  // nothing else claims the column, the person's own tagging doesn't, and the
+  // cell still carries exactly the date that certificate put there - a figure
+  // the office wrote itself is never touched.
+  for (const r of rehomed) {
+    if (!r.person || !r.expiry) continue;
+    const personKey = r.person.trim().toUpperCase();
+    if (claim.has(`${personKey}::${r.old}`)) continue;
+    const at = rowAt.get(personKey);
+    const col = colAt.get(r.old);
+    if (at === undefined || col === undefined) continue;
+    if (covered.has(`${at}:${col}`)) continue;
+    const matrixRow = matrix.rows[at];
+    const cell = String((matrixRow[3] && matrixRow[3][col]) || "").trim();
+    if (cell !== r.expiry) continue;
+    covered.add(`${at}:${col}`);
+    settled.push({ person: matrixRow[0], code: r.old, value: "", clear: true });
+  }
 
   const read = readings.filter((r) => r.reading).length;
 
