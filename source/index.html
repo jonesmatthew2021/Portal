@@ -947,8 +947,11 @@ const STYLES = `
 .um-swing3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
 /* The roster timeline: the one other thing beside the crew matrix that
    scrolls sideways, with the names pinned while the months slide under them. */
-.um-timeline { overflow-x: auto; border: 1px solid ${T.rule}; border-radius: 2px; }
+.um-timeline { overflow: auto; max-height: calc(100vh - 230px); min-height: 280px; border: 1px solid ${T.rule}; border-radius: 2px; }
 .um-timeline table { border-collapse: collapse; }
+.um-timeline thead th { position: sticky; top: 0; background: ${T.panel}; z-index: 3; }
+.um-timeline thead tr + tr th { top: 22px; }
+.um-timeline thead th.um-tl-name, .um-timeline thead th.um-tl-rank { z-index: 4; }
 .um-timeline .um-tl-name { position: sticky; left: 0; background: ${T.panel}; z-index: 2; }
 .um-timeline .um-tl-rank { position: sticky; left: 190px; background: ${T.panel}; z-index: 2;
   box-shadow: inset -1px 0 0 ${T.rule}; }
@@ -13475,6 +13478,23 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson }) {
     if (at > 0) el.scrollLeft = Math.max(0, (at - 7) * RT_CELL);
   }, [days.length]);
 
+  // The table ends at the bottom of the window, so the page never scrolls -
+  // the crew scroll inside the table and its slider stays put underneath.
+  const [tallest, setTallest] = React.useState(null);
+  React.useEffect(() => {
+    const fit = () => {
+      const el = frame.current;
+      if (!el) return;
+      const box = el.getBoundingClientRect();
+      const top = box.top + window.scrollY;
+      const below = document.body.scrollHeight - (box.bottom + window.scrollY);
+      setTallest(Math.max(280, window.innerHeight - top - below));
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, []);
+
   const reliefNames = useMemo(
     () => new Set(((plan && plan.relief) || []).map((r) => String(r.name).toUpperCase())),
     [plan],
@@ -13570,7 +13590,7 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson }) {
         {swatch(RT_RELIEF, "Relief / cover")}
       </div>
 
-      <div className="um-timeline" ref={frame}>
+      <div className="um-timeline" ref={frame} style={tallest ? { maxHeight: tallest } : undefined}>
         <table>
           <thead>
             <tr>
@@ -13580,7 +13600,8 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson }) {
                 <th key={m.label} colSpan={m.n} style={{ fontFamily: T.display, fontSize: 10.5,
                   fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: T.accent,
                   borderBottom: "1px solid " + T.rule, borderLeft: "1px solid " + T.rule,
-                  padding: "3px 0", textAlign: "left", paddingLeft: 5, whiteSpace: "nowrap" }}>
+                  height: 22, boxSizing: "border-box", padding: "3px 0",
+                  textAlign: "left", paddingLeft: 5, whiteSpace: "nowrap" }}>
                   {m.label}
                 </th>
               ))}
@@ -13593,6 +13614,9 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson }) {
                   style={{ width: RT_CELL, minWidth: RT_CELL, fontFamily: T.mono, fontSize: 8,
                     color: T.muted, padding: "1px 0", fontWeight: 400 }} title={fmtDate(d)}>
                   {d.slice(8)}
+                  <div style={{ fontSize: 7.5, lineHeight: "8px", paddingBottom: 1 }}>
+                    {"SMTWTFS"[new Date(d + "T00:00:00").getDay()]}
+                  </div>
                 </th>
               ))}
             </tr>
