@@ -13497,7 +13497,11 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
     return m;
   }, [plan]);
 
-  // Every day the roster covers, first sign-on to last sign-off.
+  // Every day the roster covers, first sign-on to last sign-off, and never
+  // further out than a year from today. The workbook is written further ahead
+  // than that, but those months are not being worked to yet. The days beyond
+  // the year are only hidden - the swings themselves are untouched, and go
+  // back to the spreadsheet whole when the roster is saved.
   const days = useMemo(() => {
     if (!spine.length && !rows.length) return [];
     let a = null, b = null;
@@ -13505,6 +13509,9 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
       if (!a || r.on < a) a = r.on;
       if (!b || r.off > b) b = r.off;
     });
+    const stop = isoShift(today, 365);
+    if (b > stop) b = stop;
+    if (!a || !b || a > b) return [];
     const out = [];
     for (let d = a; d <= b; d = isoShift(d, 1)) out.push(d);
     return out;
