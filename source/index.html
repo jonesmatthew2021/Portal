@@ -962,6 +962,7 @@ body.um-tight footer { margin-top: 12px !important; }
 .um-timeline .um-tl-col { background-image: linear-gradient(rgba(18,41,61,0.17), rgba(18,41,61,0.17)); }
 .um-timeline th.um-tl-col { background-image: linear-gradient(rgba(46,106,142,0.20), rgba(46,106,142,0.20));
   color: ${T.accent}; font-weight: 700; }
+.um-timeline td.um-tl-rankwide, .um-timeline th.um-tl-rankwide { left: 0; }
 .um-timeline .um-tl-col-a { box-shadow: inset 2px 0 0 ${T.accent}; }
 .um-timeline .um-tl-col-z { box-shadow: inset -2px 0 0 ${T.accent}; }
 .um-timeline .um-tl-col-a.um-tl-col-z { box-shadow: inset 2px 0 0 ${T.accent}, inset -2px 0 0 ${T.accent}; }
@@ -11588,7 +11589,7 @@ const RT_BG = {};
 const bgOf = (hex) => RT_BG[hex] || (RT_BG[hex] = { background: hex });
 const RT_NO_DAYS = new Map();
 
-function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRange, onDeleteRange }) {
+function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRange, onDeleteRange, rankFor }) {
   const spine = (plan && plan.spine) || [];
   const rows = (plan && plan.rows) || [];
   const today = todayISO();
@@ -11762,10 +11763,21 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
       }
       if (rosterRankAt(r.rank) < rosterRankAt(p.rank)) p.rank = r.rank;
     });
+    // The Swings sheet leaves a rank out here and there - it says "(not
+    // stated)" against one hand today. The crew matrix knows everyone's
+    // position, so it answers where the sheet doesn't. A rank the office did
+    // write is never overruled, and the fill-in happens here rather than at
+    // the drawing, so the line sorts among its own rank as well as reading as
+    // one.
+    const vague = (r) => {
+      const t = String(r || "").trim();
+      return !t || /^\(.*\)$/.test(t) || /not stated|unknown|tbc|tba|n\/a/i.test(t);
+    };
     const list = [...people.values()].map((p) => {
       const crews = Object.keys(p.tally).sort((a, b) => p.tally[b] - p.tally[a]);
       const covered = Object.keys(p.covers).sort((a, b) => p.covers[b] - p.covers[a])[0] || "ALPHA";
-      return { ...p, crew: crews[0] || "OTHER", coverOnly: isRelief(p.name), covered };
+      const rank = vague(p.rank) && rankFor ? (rankFor(p.name) || p.rank) : p.rank;
+      return { ...p, rank, crew: crews[0] || "OTHER", coverOnly: isRelief(p.name), covered };
     });
     const byRank = (a, b) => rosterRankAt(a.rank) - rosterRankAt(b.rank) || a.name.localeCompare(b.name);
     const out = [];
@@ -11861,8 +11873,9 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
     for (let i = sel.i0; i <= sel.i1; i++) {
       const tr = root.querySelector('tr[data-i="' + i + '"]');
       if (!tr) continue;
+      const lead = tr.cells.length - days.length;
       for (let k = sel.k0; k <= sel.k1; k++) {
-        const td = tr.cells[k + 3];
+        const td = tr.cells[lead + k];
         if (td) td.classList.add("um-tl-p");
       }
     }
@@ -11895,8 +11908,9 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
     if (!body) return;
     for (const tr of body.rows) {
       if (!tr.hasAttribute("data-i")) continue;
+      const lead = tr.cells.length - days.length;
       for (let k = sel.k0; k <= sel.k1; k++) {
-        const td = tr.cells[k + 3];
+        const td = tr.cells[lead + k];
         if (td) mark(td, k);
       }
     }
@@ -12092,8 +12106,8 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
               ))}
             </tr>
             <tr className="um-tl-r2" onMouseDown={headDown} onMouseOver={headOver}>
-              <th className="um-tl-crew" rowSpan={2} style={{ ...headCell, width: 52, minWidth: 52 }}>Crew</th>
-              <th className="um-tl-rank" rowSpan={2} style={{ ...headCell, width: 100, minWidth: 100 }}>Rank</th>
+              <th className="um-tl-rank um-tl-rankwide" colSpan={2} rowSpan={2}
+                style={{ ...headCell, width: 152, minWidth: 152 }}>Rank</th>
               <th className="um-tl-name" rowSpan={2} style={{ ...headCell, width: 190, minWidth: 190 }}>Name</th>
               {days.map((d, k) => (
                 <th key={d} data-k={k} className={d === today ? "um-daygrid-today" : ""}
@@ -12138,11 +12152,10 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
                   const mine = dayCells.get(p.name) || RT_NO_DAYS;
                   return (
                   <tr key={p.name} className="um-row" data-p={p.name} data-i={flatAt.get(p.name)}>
-                    <td className="um-tl-crew" style={{ padding: "2px 5px", maxWidth: 52,
-                      borderTop: "1px solid " + T.rule }} />
-                    <td className="um-tl-rank" style={{ fontFamily: T.mono, fontSize: 10, color: T.muted,
+                    <td className="um-tl-rank um-tl-rankwide" colSpan={2}
+                      style={{ fontFamily: T.mono, fontSize: 10, color: T.muted,
                       padding: "2px 5px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                      maxWidth: 100, borderTop: "1px solid " + T.rule }}>
+                      maxWidth: 152, borderTop: "1px solid " + T.rule }}>
                       {(g.relief && roleCovered(p.name)) || p.rank}
                     </td>
                     <td className="um-tl-name"
@@ -12247,6 +12260,27 @@ function RosterListPage() {
 
   const names = useMemo(() => QUALS.rows.map((r) => r[0]), [QUALS]);
   const positions = useMemo(() => Object.fromEntries(QUALS.rows.map((r) => [r[0], r[1] || ""])), [QUALS]);
+
+  /* The crew matrix writes a name the other way about - "KEELEY, Finn" where
+     the roster says "FINN KEELEY" - so the two are matched on the words they
+     share rather than letter for letter. Two words must agree before anyone
+     is called a match, and where two people on the matrix fit equally well
+     nobody is chosen: a rank guessed wrong is worse than a rank left blank. */
+  const matrixRank = useMemo(() => {
+    const wordsOf = (t) => String(t || "").toUpperCase().split(/[^A-Z]+/).filter(Boolean);
+    const held = QUALS.rows.map((r) => ({ words: wordsOf(r[0]), position: r[1] || "" }));
+    return (who) => {
+      const want = new Set(wordsOf(who));
+      let best = null, tied = false;
+      for (const one of held) {
+        const shared = one.words.filter((w) => want.has(w)).length;
+        if (shared < 2) continue;
+        if (!best || shared > best.shared) { best = { shared, position: one.position }; tied = false; }
+        else if (shared === best.shared) tied = true;
+      }
+      return best && !tied ? rosterRankFor(best.position) : "";
+    };
+  }, [QUALS]);
 
   const load = async (why) => {
     if (!crewRoster || !crewRoster.url || busy) return;
@@ -12436,6 +12470,7 @@ function RosterListPage() {
           onDates={(row, on, off) => setDates(row, { key: row.swing }, on, off)}
           onRange={addRange}
           onDeleteRange={deleteRange}
+          rankFor={matrixRank}
           onBlank={(p, s) => setTableEdit({ kind: "add", name: p.name, rank: p.rank, crew: s.crew,
             on: s.on, off: s.off, key: s.on + "|" + s.off })} />
       )}
