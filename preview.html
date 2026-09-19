@@ -1211,7 +1211,7 @@ const STYLES = `
 .um-swing3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
 /* The roster timeline: the one other thing beside the crew matrix that
    scrolls sideways, with the names pinned while the months slide under them. */
-.um-timeline { overflow: auto; max-height: calc(100vh - 230px); min-height: 280px; border: 1px solid ${T.rule}; border-radius: 2px; }
+.um-timeline { overflow: auto; max-height: calc(100vh - 230px); min-height: 150px; border: 1px solid ${T.rule}; border-radius: 2px; }
 .um-timeline table { border-collapse: collapse; }
 .um-timeline thead th { position: sticky; background: ${T.panel}; z-index: 3; }
 .um-timeline thead .um-tl-r1 th { top: 0; }
@@ -13785,19 +13785,60 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
   const [tallest, setTallest] = React.useState(null);
   React.useEffect(() => {
     document.body.classList.add("um-tight");
+    let pending = 0;
     const fit = () => {
       const el = frame.current;
       if (!el) return;
       const box = el.getBoundingClientRect();
-      const top = box.top + window.scrollY;
-      const below = document.body.scrollHeight - (box.bottom + window.scrollY);
-      setTallest(Math.max(280, window.innerHeight - top - below));
+      // What has to sit under the table - the gap down to the footer, the
+      // footer itself, and the page's own padding beneath it - is measured off
+      // those three pieces. Measuring it off the height of the page instead
+      // looks right and isn't: once the page is shorter than the screen, the
+      // page counts the empty window as part of itself, and the sum comes back
+      // saying the table should be exactly the size it already is. That is why
+      // it sat still through a zoom.
+      let below = 40;
+      const foot = document.querySelector("footer");
+      if (foot) {
+        const fb = foot.getBoundingClientRect();
+        const cont = foot.parentElement;
+        const pad = cont ? cont.getBoundingClientRect().bottom - fb.bottom : 0;
+        below = (fb.top - box.bottom) + fb.height + Math.max(0, pad);
+      }
+      const want = Math.max(150, Math.round(window.innerHeight - (box.top + window.scrollY) - below));
+      setTallest((was) => (was !== null && Math.abs(was - want) <= 1 ? was : want));
     };
-    fit();
-    window.addEventListener("resize", fit);
+    // Zoom changes the size of the window in the units the page is laid out in,
+    // so it arrives as a resize; the viewport and the page itself are watched
+    // too, for the zooms and reflows that come by another road.
+    //
+    // The wait is kept on a timer rather than on the next drawn frame. A tab
+    // sitting in the background is never drawn, so a frame booked there is
+    // never called back - and the booking left standing would swallow every
+    // later change. Zoom on a tab you have stepped away from and come back to,
+    // and the table would have sat the whole thing out.
+    let late = 0;
+    const soon = () => {
+      clearTimeout(pending);
+      clearTimeout(late);
+      // Twice: once the moment it settles, and again after, since a zoom can
+      // reflow in stages and the second look costs nothing when it agrees.
+      pending = setTimeout(fit, 60);
+      late = setTimeout(fit, 320);
+    };
+    soon();
+    window.addEventListener("resize", soon);
+    const seen = window.visualViewport;
+    if (seen) { seen.addEventListener("resize", soon); seen.addEventListener("scroll", soon); }
+    const watch = new ResizeObserver(soon);
+    watch.observe(document.documentElement);
     return () => {
       document.body.classList.remove("um-tight");
-      window.removeEventListener("resize", fit);
+      window.removeEventListener("resize", soon);
+      if (seen) { seen.removeEventListener("resize", soon); seen.removeEventListener("scroll", soon); }
+      watch.disconnect();
+      clearTimeout(pending);
+      clearTimeout(late);
     };
   }, []);
 
