@@ -1220,7 +1220,7 @@ const STYLES = `
 .um-timeline thead th.um-tl-crew, .um-timeline thead th.um-tl-rank, .um-timeline thead th.um-tl-name { z-index: 4; }
 .um-timeline .um-tl-crew { position: sticky; left: 0; background: ${T.panel}; z-index: 2; }
 .um-timeline .um-tl-rank { position: sticky; left: 106px; background: ${T.panel}; z-index: 2; }
-.um-timeline .um-tl-name { position: sticky; left: 234px; background: ${T.panel}; z-index: 2;
+.um-timeline .um-tl-name { position: sticky; left: 206px; background: ${T.panel}; z-index: 2;
   box-shadow: inset -1px 0 0 ${T.rule}; }
 .um-timeline.um-tl-drag { user-select: none; }
 .um-nudge { font-family: ${T.mono}; font-size: 15px; line-height: 1; width: 26px; height: 30px;
@@ -13933,7 +13933,7 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
           <thead>
             <tr className="um-tl-r1">
               <th className="um-tl-crew" style={{ width: 106, minWidth: 106 }} />
-              <th className="um-tl-rank" style={{ width: 128, minWidth: 128 }} />
+              <th className="um-tl-rank" style={{ width: 100, minWidth: 100 }} />
               <th className="um-tl-name" style={{ width: 190, minWidth: 190 }} />
               {months.map((m) => (
                 <th key={m.label} colSpan={m.n} style={{ fontFamily: T.display, fontSize: 10.5,
@@ -13947,7 +13947,7 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
             </tr>
             <tr className="um-tl-r2">
               <th className="um-tl-crew" rowSpan={2} style={{ ...headCell, width: 106, minWidth: 106 }}>Crew</th>
-              <th className="um-tl-rank" rowSpan={2} style={{ ...headCell, width: 128, minWidth: 128 }}>Rank</th>
+              <th className="um-tl-rank" rowSpan={2} style={{ ...headCell, width: 100, minWidth: 100 }}>Rank</th>
               <th className="um-tl-name" rowSpan={2} style={{ ...headCell, width: 190, minWidth: 190 }}>Name</th>
               {days.map((d) => (
                 <th key={d} className={d === today ? "um-daygrid-today" : ""}
@@ -13983,15 +13983,11 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
                 </tr>
                 {g.people.map((p) => (
                   <tr key={p.name} className="um-row">
-                    <td className="um-tl-crew" style={{ fontFamily: T.mono, fontSize: 9.5, color: T.muted,
-                      letterSpacing: "0.06em", textTransform: "uppercase", padding: "2px 5px", whiteSpace: "nowrap",
-                      overflow: "hidden", textOverflow: "ellipsis", maxWidth: 106,
-                      borderTop: "1px solid " + T.rule }}>
-                      {g.relief ? "Relief / cover" : p.crew}
-                    </td>
+                    <td className="um-tl-crew" style={{ padding: "2px 5px", maxWidth: 106,
+                      borderTop: "1px solid " + T.rule }} />
                     <td className="um-tl-rank" style={{ fontFamily: T.mono, fontSize: 10, color: T.muted,
                       padding: "2px 5px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                      maxWidth: 128, borderTop: "1px solid " + T.rule }}>
+                      maxWidth: 100, borderTop: "1px solid " + T.rule }}>
                       {(g.relief && roleCovered(p.name)) || p.rank}
                     </td>
                     <td className="um-tl-name"
