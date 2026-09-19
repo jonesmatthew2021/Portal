@@ -1469,7 +1469,7 @@ export default async (req: Request) => {
         const already = (await matrixStore().get(matrixReadingKey(which, row.id), {
           type: "json",
         })) as MatrixReading | null;
-        if (already) return Response.json({ which, cached: true, ...already });
+        if (already) return Response.json({ ...already, which, cached: true });
       }
 
       const job = await startMatrixReadJob({ which, text, force });

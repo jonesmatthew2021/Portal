@@ -258,7 +258,7 @@ export async function readMatrixOnce(which: string, text: string | null, force: 
 
   if (!force) {
     const already = (await store.get(key, { type: "json" })) as MatrixReading | null;
-    if (already) return { which, cached: true, ...already };
+    if (already) return { ...already, which, cached: true };
   }
 
   const { block, trimmed } = await contentFor(row, text);
@@ -333,7 +333,7 @@ not lapsing, say so with neverExpires rather than inventing a period for it.`;
   };
 
   await store.setJSON(key, held);
-  return { which, cached: false, ...held };
+  return { ...held, which, cached: false };
 }
 
 /**

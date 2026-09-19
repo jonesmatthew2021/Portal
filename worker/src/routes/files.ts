@@ -540,7 +540,7 @@ export default async (req: Request) => {
       return Response.json({ error: "One of the photos couldn't be read. Take it again." }, { status: 400 });
     }
     const base = (field(form, "pagesName") || "certificate").replace(/\.pdf$/i, "");
-    file = new File([pdf as BlobPart], `${base}.pdf`, { type: "application/pdf" });
+    file = new File([pdf], `${base}.pdf`, { type: "application/pdf" });
   }
 
   if (!(file instanceof File) || file.size === 0) {
