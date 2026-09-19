@@ -586,9 +586,6 @@ function withoutStoredFiles(store) {
     certSheet: null,
     trainingMatrix: null,
     crewRoster: null,
-    // The roster as read off that workbook, so every device shows the same
-    // swings without opening the spreadsheet again.
-    rosterPlan: null,
     skillsMatrix: null,
     validityMatrix: null,
     opmsSheet: null,
@@ -13175,11 +13172,11 @@ function PartSwing({ swing, lastDay, offSwing, fullName, positionOf, onBring }) 
 
 /* The office's crew roster workbook, read as the portal keeps it.
  *
- * The sheet that matters is Swings: one row per person per swing — the crew
- * they are on, their rank, their name, the day they sign on and the day they
- * sign off. Dates come out of Excel as a count of days, which is turned back
- * into a date here. Everything else in the workbook is the same story told
- * another way, so it is left where it is.
+ * The workbook seeds the roster; from then on the roster is the portal's own,
+ * changed here with buttons and shared like everything else. The sheet that
+ * matters when loading is Swings — one row per person per swing — and the
+ * workbook's own On board each swing sheet gives the swings themselves.
+ * Dates come out of Excel as a count of days, turned back into dates here.
  */
 const EXCEL_EPOCH_DAYS = 25569;
 function excelDate(v) {
@@ -13190,10 +13187,26 @@ function excelDate(v) {
   return new Date(Math.round((n - EXCEL_EPOCH_DAYS) * 86400000)).toISOString().slice(0, 10);
 }
 
+const swingKeyOf = (s) => s.on + "|" + s.off;
+const daysBetween = (on, off) => Math.round((new Date(off) - new Date(on)) / 86400000);
+
+// The swing a person's days sit inside — or the one they overlap most, where
+// the dates were changed for them.
+function bestSwingKey(r, spine) {
+  let best = null, most = 0;
+  for (const s of spine) {
+    const from = r.on > s.on ? r.on : s.on;
+    const to = r.off < s.off ? r.off : s.off;
+    const days = daysBetween(from, to);
+    if (days > most) { most = days; best = s; }
+  }
+  return best ? swingKeyOf(best) : null;
+}
+
 async function readCrewRoster(record) {
   const XLSX = await loadXLSX();
   const resp = await fetch(record.url);
-  if (!resp.ok) throw new Error(`The roster on file couldn't be downloaded (${resp.status}).`);
+  if (!resp.ok) throw new Error("The roster on file couldn't be downloaded (" + resp.status + ").");
   const wb = XLSX.read(await resp.arrayBuffer(), { type: "array" });
   const name = wb.SheetNames.find((n) => /swing/i.test(n) && !/on board/i.test(n));
   if (!name) throw new Error("That workbook has no Swings sheet in it.");
@@ -13202,13 +13215,10 @@ async function readCrewRoster(record) {
   const head = (grid[0] || []).map((c) => String(c).trim().toUpperCase());
   const at = (want) => head.findIndex((h) => h === want);
   const cCrew = at("CREW"), cRank = at("RANK"), cName = at("NAME");
-  const cOn = at("SIGN ON"), cOff = at("SIGN OFF"), cDays = at("DAYS"), cNote = at("NOTES");
+  const cOn = at("SIGN ON"), cOff = at("SIGN OFF"), cNote = at("NOTES");
   if (cName < 0 || cOn < 0 || cOff < 0) throw new Error("The Swings sheet doesn't carry the columns this reads.");
 
-  // The workbook lists the swings themselves on its own sheet — crew, sign on,
-  // sign off — and that is the spine the people hang off. Without it, each pair
-  // of dates reads as a swing of its own, and somebody who signed off three
-  // days early looks like a swing with one person on it.
+  // The swings themselves, off the workbook's own sheet.
   const spine = [];
   const boardName = wb.SheetNames.find((n) => /on board/i.test(n));
   if (boardName) {
@@ -13240,57 +13250,29 @@ async function readCrewRoster(record) {
       rank: String(r[cRank] || "").trim(),
       name: person,
       on, off,
-      days: Number(r[cDays]) || Math.round((new Date(off) - new Date(on)) / 86400000),
+      days: daysBetween(on, off),
       note: cNote >= 0 ? String(r[cNote] || "").trim() : "",
     });
   }
   if (!rows.length) throw new Error("Nothing on the Swings sheet could be read as a swing.");
+  rows.forEach((r, i) => { r.id = "r" + (i + 1); r.swing = bestSwingKey(r, spine); });
   return { at: todayISO(), filename: record.filename, rows, spine };
 }
 
-/* The swings the roster describes: each sign-on and sign-off pair is one
-   swing, and everybody sharing that pair is on it. */
+/* The roster laid out swing by swing: the workbook's swings, each carrying
+   whoever is signed onto it. A swing with nobody on it yet still shows, so
+   crew can be put onto it. */
 function rosterSwings(plan) {
   const spine = (plan && Array.isArray(plan.spine) ? plan.spine : []).filter((s) => s.on && s.off);
-  if (spine.length) {
-    // Everybody goes on the swing their days sit inside — or the one they
-    // overlap most, where the dates were changed for them.
-    const swings = spine.map((s) => ({ on: s.on, off: s.off, crew: s.crew || "", people: [] }));
-    (plan.rows || []).forEach((r) => {
-      let best = null, most = 0;
-      for (const s of swings) {
-        const from = r.on > s.on ? r.on : s.on;
-        const to = r.off < s.off ? r.off : s.off;
-        const days = Math.round((new Date(to) - new Date(from)) / 86400000);
-        if (days > most) { most = days; best = s; }
-      }
-      if (best) best.people.push(r);
-    });
-    return swings
-      .filter((s) => s.people.length)
-      .map((s) => ({
-        ...s,
-        people: s.people.sort((a, b) => rosterRankAt(a.rank) - rosterRankAt(b.rank) || a.name.localeCompare(b.name)),
-      }));
-  }
-
-  const byRun = new Map();
-  (plan && plan.rows ? plan.rows : []).forEach((r) => {
-    const key = `${r.on}|${r.off}`;
-    if (!byRun.has(key)) byRun.set(key, { on: r.on, off: r.off, crews: new Set(), people: [] });
-    const run = byRun.get(key);
-    if (r.crew) run.crews.add(r.crew);
-    run.people.push(r);
+  const rows = (plan && plan.rows) || [];
+  const swings = spine.map((s) => ({ on: s.on, off: s.off, crew: s.crew || "", key: swingKeyOf(s), people: [] }));
+  const byKey = new Map(swings.map((s) => [s.key, s]));
+  rows.forEach((r) => {
+    const home = (r.swing && byKey.get(r.swing)) || (byKey.get(bestSwingKey(r, spine)) || null);
+    if (home) home.people.push(r);
   });
-  // A swing takes the crew letter most of its people carry, and its people are
-  // listed the way the vessel reads them: bridge, engine room, then the rest.
-  return [...byRun.values()]
-    .map((run) => ({
-      ...run,
-      crew: [...run.crews].sort((a, b) => run.people.filter((p) => p.crew === b).length - run.people.filter((p) => p.crew === a).length)[0] || "",
-      people: run.people.slice().sort((a, b) => rosterRankAt(a.rank) - rosterRankAt(b.rank) || a.name.localeCompare(b.name)),
-    }))
-    .sort((a, b) => a.on.localeCompare(b.on) || a.off.localeCompare(b.off));
+  swings.forEach((s) => s.people.sort((a, b) => rosterRankAt(a.rank) - rosterRankAt(b.rank) || a.name.localeCompare(b.name)));
+  return swings;
 }
 
 const ROSTER_RANKS = ["MASTER", "CHIEF OFFICER", "SECOND OFFICER", "CHIEF ENGINEER", "FIRST ENGINEER", "JUNIOR ENGINEER", "GPH", "COOK"];
@@ -13300,43 +13282,138 @@ const rosterRankAt = (rank) => {
   return i < 0 ? ROSTER_RANKS.length : i;
 };
 
-/* The Roster: the office's travel roster, swing by swing. */
+// The roster's own word for a matrix position, so somebody added from the
+// crew list lands under the right heading.
+function rosterRankFor(position) {
+  const p = String(position || "").toUpperCase();
+  if (/CHIEF ENGINEER|ENGINEER CLASS 1/.test(p)) return "CHIEF ENGINEER";
+  if (/FIRST ENGINEER|1ST ENG/.test(p)) return "FIRST ENGINEER";
+  if (/ASSISTANT ENGINEER|JUNIOR ENGINEER/.test(p)) return "JUNIOR ENGINEER";
+  if (/CHIEF OFFICER|CHIEF MATE/.test(p)) return "CHIEF OFFICER";
+  if (/SECOND (MATE|OFFICER)/.test(p)) return "SECOND OFFICER";
+  if (/MASTER/.test(p)) return "MASTER";
+  if (/GPH|GENERAL PURPOSE/.test(p)) return "GPH";
+  if (/COOK|CHEF/.test(p)) return "COOK";
+  return String(position || "").toUpperCase() || "OTHER";
+}
+
+/* One person's days on a swing, edited in place. A date applies the moment it
+   is picked, the same way the swing day grid works. */
+function RosterPersonDays({ row, swing, onDates, onDrop, onClose }) {
+  return (
+    <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap",
+      background: T.raised, border: "1px solid " + T.rule, borderRadius: 3, padding: "9px 11px",
+      margin: "6px 0 4px" }}>
+      <Field label="Signs on">
+        <input className="um-in" type="date" value={row.on}
+          onChange={(e) => onDates(e.target.value, row.off)} />
+      </Field>
+      <Field label="Signs off">
+        <input className="um-in" type="date" value={row.off}
+          onChange={(e) => onDates(row.on, e.target.value)} />
+      </Field>
+      <Button variant="quiet" onClick={onDrop}>Off this swing</Button>
+      <Button variant="quiet" onClick={onClose}>Done</Button>
+    </div>
+  );
+}
+
+/* The Roster: the portal's own, seeded from the office's workbook and changed
+   here from then on. */
 function RosterListPage() {
-  const { crewRoster, rosterPlan, setRosterPlan, log, role } = usePortal();
+  const { admin, crewRoster, rosterPlan, setRosterPlan, quals: QUALS, log } = usePortal();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [confirmLoad, setConfirmLoad] = useState(false);
+  const [openPerson, setOpenPerson] = useState(null);
+  const [addingTo, setAddingTo] = useState(null);
+  const [addName, setAddName] = useState("");
+  const [showPast, setShowPast] = useState(false);
   const asked = useRef(false);
 
-  const read = async (why) => {
+  const names = useMemo(() => QUALS.rows.map((r) => r[0]), [QUALS]);
+  const positions = useMemo(() => Object.fromEntries(QUALS.rows.map((r) => [r[0], r[1] || ""])), [QUALS]);
+
+  const load = async (why) => {
     if (!crewRoster || !crewRoster.url || busy) return;
     setBusy(true); setErr("");
     try {
       const plan = await readCrewRoster(crewRoster);
       setRosterPlan(plan);
-      if (why === "pressed") log("Roster", "Roster read from the spreadsheet", `${crewRoster.filename} · ${plan.rows.length} swing entries`);
+      if (why === "pressed") log("Roster", "Roster loaded from the spreadsheet", crewRoster.filename + " · " + plan.rows.length + " swing entries");
     } catch (e) {
       setErr(e.message || String(e));
     }
     setBusy(false);
   };
 
-  // Read once when the workbook on file is newer than what was read from it.
+  // The workbook seeds the roster exactly once — a roster already held is
+  // never overwritten without the button below being pressed.
   React.useEffect(() => {
-    if (asked.current || !crewRoster || !crewRoster.url) return;
-    if (rosterPlan && rosterPlan.filename === crewRoster.filename) return;
+    if (asked.current || rosterPlan || !crewRoster || !crewRoster.url) return;
     asked.current = true;
-    read("opened");
-  }, [crewRoster, rosterPlan]);
+    load("opened");
+  }, [rosterPlan, crewRoster]);
+
+  /* Every change rewrites the rows whole, each carrying its own id, and marks
+     the roster as the portal's rather than the spreadsheet's. */
+  const change = (mutate, what, detail) => {
+    setRosterPlan((plan) => {
+      if (!plan) return plan;
+      const next = {
+        ...plan,
+        rows: (plan.rows || []).map((r, i) => (r.id ? r : { ...r, id: "r" + (i + 1) })),
+        edited: true,
+        updatedAt: todayISO(),
+      };
+      mutate(next);
+      return next;
+    });
+    if (what) log("Roster", what, detail || "");
+  };
+
+  const setDates = (row, s, on, off) => {
+    if (!on || !off || off <= on) return;
+    if (on === row.on && off === row.off) return;
+    change((p) => {
+      p.rows = p.rows.map((r) => (r.id === row.id
+        ? { ...r, on, off, days: daysBetween(on, off), note: "", swing: r.swing || s.key }
+        : r));
+    }, row.name + "'s days changed", "signs on " + fmtDate(on) + ", off " + fmtDate(off));
+  };
+
+  const dropPerson = (row, s) => {
+    change((p) => { p.rows = p.rows.filter((r) => r.id !== row.id); },
+      row.name + " off the swing", fmtDate(s.on) + " – " + fmtDate(s.off));
+    setOpenPerson(null);
+  };
+
+  const addPerson = (s) => {
+    const name = addName;
+    if (!name) return;
+    change((p) => {
+      p.rows = [...p.rows, {
+        id: "r" + Date.now(),
+        crew: s.crew, rank: rosterRankFor(positions[name] || ""), name,
+        on: s.on, off: s.off, days: daysBetween(s.on, s.off), note: "", swing: s.key,
+      }];
+    }, name + " onto the swing", fmtDate(s.on) + " – " + fmtDate(s.off));
+    setAddName(""); setAddingTo(null);
+  };
 
   const swings = useMemo(() => rosterSwings(rosterPlan), [rosterPlan]);
   const today = todayISO();
-  const onNow = swings.filter((s) => s.on <= today && today < s.off);
-  const coming = swings.filter((s) => s.on > today);
   const gone = swings.filter((s) => s.off <= today);
-  const [showPast, setShowPast] = useState(false);
-  const shown = showPast ? swings : [...onNow, ...coming];
+  const shown = showPast ? swings : swings.filter((s) => s.off > today);
 
-  if (!crewRoster) {
+  const wordsFor = (p, s) => {
+    const bits = [];
+    if (p.on !== s.on) bits.push("joins " + fmtDate(p.on));
+    if (p.off !== s.off) bits.push((p.off < s.off ? "off early " : "off late ") + fmtDate(p.off));
+    return bits.join(" · ") || p.note || "";
+  };
+
+  if (!crewRoster && !rosterPlan) {
     return (
       <>
         <SectionHead title="Roster" />
@@ -13349,27 +13426,42 @@ function RosterListPage() {
     <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
         <SectionHead title="Roster"
-          meta={rosterPlan ? `${swings.length} swings · ${crewRoster.filename}` : crewRoster.filename} />
-        <span style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          meta={rosterPlan
+            ? swings.length + " swings · " + (rosterPlan.edited
+                ? "held on the portal · changed " + fmtDate(rosterPlan.updatedAt || rosterPlan.at)
+                : (rosterPlan.filename || ""))
+            : (crewRoster ? crewRoster.filename : "")} />
+        <span style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
           {gone.length > 0 && (
             <Button variant="quiet" onClick={() => setShowPast(!showPast)}>
-              {showPast ? "Hide the swings gone by" : `Show the ${gone.length} gone by`}
+              {showPast ? "Hide the swings gone by" : "Show the " + gone.length + " gone by"}
             </Button>
           )}
-          <Button variant="quiet" disabled={busy} onClick={() => read("pressed")}>
-            {busy ? "Reading…" : "Read the roster again"}
-          </Button>
+          {admin && crewRoster && (confirmLoad ? (
+            <>
+              <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.bRed }}>
+                Replace the roster and every change made here with the spreadsheet?
+              </span>
+              <Button onClick={() => { setConfirmLoad(false); load("pressed"); }}>Replace it</Button>
+              <Button variant="quiet" onClick={() => setConfirmLoad(false)}>Keep as is</Button>
+            </>
+          ) : (
+            <Button variant="quiet" disabled={busy}
+              onClick={() => (rosterPlan && rosterPlan.edited ? setConfirmLoad(true) : load("pressed"))}>
+              {busy ? "Reading…" : "Load from the spreadsheet"}
+            </Button>
+          ))}
         </span>
       </div>
 
       {err && (
-        <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderLeft: `4px solid ${T.bRed}`,
+        <div style={{ background: T.panel, border: "1px solid " + T.rule, borderLeft: "4px solid " + T.bRed,
           borderRadius: 2, padding: "12px 15px", marginBottom: 12, fontFamily: T.body, fontSize: 13, color: T.text }}>
           {err}
         </div>
       )}
 
-      {!rosterPlan && !err && <Empty>{busy ? "Reading the roster…" : "The roster hasn't been read yet."}</Empty>}
+      {!rosterPlan && !err && <Empty>{busy ? "Reading the roster…" : "The roster hasn't been loaded yet."}</Empty>}
 
       {shown.map((s) => {
         const here = s.on <= today && today < s.off;
@@ -13379,10 +13471,11 @@ function RosterListPage() {
           if (last && last.rank === p.rank) last.people.push(p);
           else byRank.push({ rank: p.rank, people: [p] });
         });
-        const short = s.people.filter((p) => p.days !== s.people[0].days);
+        const onSwing = new Set(s.people.map((p) => matchRoster(p.name, names) || p.name));
+        const candidates = names.filter((n) => !onSwing.has(n));
         return (
-          <div key={`${s.on}|${s.off}`} style={{ background: T.panel, border: `1px solid ${T.rule}`,
-            borderLeft: `4px solid ${here ? T.teal : s.off <= today ? T.rule : T.accent}`,
+          <div key={s.key} style={{ background: T.panel, border: "1px solid " + T.rule,
+            borderLeft: "4px solid " + (here ? T.teal : s.off <= today ? T.rule : T.accent),
             borderRadius: 2, padding: "13px 15px", marginBottom: 10 }}>
             <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", marginBottom: 9 }}>
               <span style={{ fontFamily: T.display, fontSize: 15, fontWeight: 700, color: T.text }}>
@@ -13390,21 +13483,65 @@ function RosterListPage() {
               </span>
               {s.crew && <Chip fg={T.accent} bg={T.accentSoft}>{s.crew}</Chip>}
               {here && <Chip fg={T.teal} bg={T.raised}>On now</Chip>}
-              <span style={{ fontFamily: T.mono, fontSize: 11.5, color: T.muted }}>
-                {s.people.length} crew
-              </span>
+              <span style={{ fontFamily: T.mono, fontSize: 11.5, color: T.muted }}>{s.people.length} crew</span>
+              <span style={{ flex: 1 }} />
+              {admin && (
+                <Button variant="quiet" onClick={() => { setAddingTo(addingTo === s.key ? null : s.key); setAddName(""); }}>
+                  Add crew member
+                </Button>
+              )}
             </div>
+
+            {admin && addingTo === s.key && (
+              <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap",
+                background: T.raised, border: "1px solid " + T.rule, borderRadius: 3,
+                padding: "10px 12px", marginBottom: 10 }}>
+                <div style={{ flex: "1 1 260px", maxWidth: 340 }}>
+                  <Field label="Who">
+                    <select className="um-in" value={addName} onChange={(e) => setAddName(e.target.value)}>
+                      <option value="">Choose…</option>
+                      {candidates.map((n) => (
+                        <option key={n} value={n}>{n}{positions[n] ? " — " + positions[n] : ""}</option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+                <Button variant="ghost" disabled={!addName} onClick={() => addPerson(s)}>
+                  Onto this swing
+                </Button>
+                <Button variant="quiet" onClick={() => setAddingTo(null)}>Cancel</Button>
+              </div>
+            )}
+
+            {s.people.length === 0 && (
+              <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted }}>Nobody signed on yet.</div>
+            )}
+
             <div style={{ display: "flex", gap: 22, flexWrap: "wrap" }}>
               {byRank.map((g) => (
-                <div key={g.rank} style={{ minWidth: 170 }}>
+                <div key={g.rank} style={{ minWidth: 190 }}>
                   <Eyebrow>{g.rank || "Other"}</Eyebrow>
                   {g.people.map((p) => (
-                    <div key={p.name + p.on} style={{ fontFamily: T.body, fontSize: 13, color: T.text, marginTop: 4 }}>
-                      {p.name}
-                      {(p.on !== s.on || p.off !== s.off || p.note) && (
+                    <div key={p.id || p.name + p.on} style={{ marginTop: 4 }}>
+                      {admin ? (
+                        <a onClick={() => setOpenPerson(openPerson === p.id ? null : p.id)}
+                          style={{ cursor: "pointer", fontFamily: T.body, fontSize: 13, color: T.text,
+                            textDecoration: openPerson === p.id ? "underline" : "none", textUnderlineOffset: 3 }}>
+                          {p.name}
+                        </a>
+                      ) : (
+                        <span style={{ fontFamily: T.body, fontSize: 13, color: T.text }}>{p.name}</span>
+                      )}
+                      {wordsFor(p, s) && (
                         <span style={{ fontFamily: T.mono, fontSize: 10.5, color: T.bOrange, marginLeft: 6 }}>
-                          {p.note || `${p.days} days`}
+                          {wordsFor(p, s)}
                         </span>
+                      )}
+                      {admin && openPerson === p.id && (
+                        <RosterPersonDays row={p} swing={s}
+                          onDates={(on, off) => setDates(p, s, on, off)}
+                          onDrop={() => dropPerson(p, s)}
+                          onClose={() => setOpenPerson(null)} />
                       )}
                     </div>
                   ))}
