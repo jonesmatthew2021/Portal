@@ -1233,6 +1233,13 @@ body.um-tight footer { margin-top: 12px !important; }
 .um-timeline.um-tl-can td.um-tl-g { cursor: col-resize; }
 .um-timeline td.um-tl-p { box-shadow: inset 0 0 0 1px rgba(46,106,142,0.85);
   background-image: linear-gradient(rgba(46,106,142,0.34), rgba(46,106,142,0.34)); }
+.um-timeline .um-tl-col { background-image: linear-gradient(rgba(18,41,61,0.17), rgba(18,41,61,0.17)); }
+.um-timeline th.um-tl-col { background-image: linear-gradient(rgba(46,106,142,0.20), rgba(46,106,142,0.20));
+  color: ${T.accent}; font-weight: 700; }
+.um-timeline .um-tl-col-a { box-shadow: inset 2px 0 0 ${T.accent}; }
+.um-timeline .um-tl-col-z { box-shadow: inset -2px 0 0 ${T.accent}; }
+.um-timeline .um-tl-col-a.um-tl-col-z { box-shadow: inset 2px 0 0 ${T.accent}, inset -2px 0 0 ${T.accent}; }
+.um-timeline.um-tl-can thead th[data-k] { cursor: pointer; }
 .um-nudge { font-family: ${T.mono}; font-size: 15px; line-height: 1; width: 26px; height: 30px;
   border: 1px solid ${T.rule}; background: ${T.panel}; color: ${T.text}; border-radius: 2px;
   cursor: pointer; flex: none; }
@@ -14029,6 +14036,68 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
     }
   };
 
+  /* A run of days marked out down the page, to follow a column by eye. It is
+     a guide and nothing else - it holds nothing and deletes nothing. Like the
+     picked block, it is laid on the squares themselves, since drawing the
+     table again for every day the hand passes over is not something a hand
+     can wait for. */
+  const ruled = useRef(null);
+  const ruling = useRef(null);
+
+  const paintCols = (sel) => {
+    const root = frame.current;
+    if (!root) return;
+    root.querySelectorAll(".um-tl-col, .um-tl-col-a, .um-tl-col-z")
+      .forEach((el) => el.classList.remove("um-tl-col", "um-tl-col-a", "um-tl-col-z"));
+    if (!sel) return;
+    const mark = (el, k) => {
+      el.classList.add("um-tl-col");
+      if (k === sel.k0) el.classList.add("um-tl-col-a");
+      if (k === sel.k1) el.classList.add("um-tl-col-z");
+    };
+    root.querySelectorAll("th[data-k]").forEach((th) => {
+      const k = Number(th.getAttribute("data-k"));
+      if (k >= sel.k0 && k <= sel.k1) mark(th, k);
+    });
+    const body = root.querySelector("table tbody");
+    if (!body) return;
+    for (const tr of body.rows) {
+      if (!tr.hasAttribute("data-i")) continue;
+      for (let k = sel.k0; k <= sel.k1; k++) {
+        const td = tr.cells[k + 3];
+        if (td) mark(td, k);
+      }
+    }
+  };
+
+  const headDown = (e) => {
+    const th = e.target && e.target.closest ? e.target.closest("th[data-k]") : null;
+    if (!th) return;
+    e.preventDefault();
+    const k = Number(th.getAttribute("data-k"));
+    if (isNaN(k)) return;
+    // The same single day pressed again puts the guide away.
+    const had = ruled.current;
+    if (had && had.k0 === k && had.k1 === k) {
+      ruled.current = null;
+      paintCols(null);
+      return;
+    }
+    ruling.current = { k0: k, k };
+    paintCols({ k0: k, k1: k });
+  };
+
+  const headOver = (e) => {
+    const r = ruling.current;
+    if (!r) return;
+    const th = e.target && e.target.closest ? e.target.closest("th[data-k]") : null;
+    if (!th) return;
+    const k = Number(th.getAttribute("data-k"));
+    if (isNaN(k) || k === r.k) return;
+    r.k = k;
+    paintCols({ k0: Math.min(r.k0, k), k1: Math.max(r.k0, k) });
+  };
+
   const spread = (s) => ({
     i0: Math.min(s.i0, s.i), i1: Math.max(s.i0, s.i),
     k0: Math.min(s.k0, s.k), k1: Math.max(s.k0, s.k),
@@ -14036,6 +14105,11 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
 
   React.useEffect(() => {
     const up = () => {
+      const r = ruling.current;
+      if (r) {
+        ruling.current = null;
+        ruled.current = { k0: Math.min(r.k0, r.k), k1: Math.max(r.k0, r.k) };
+      }
       const s = picking.current;
       if (!s) return;
       picking.current = null;
@@ -14049,6 +14123,7 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
       paintPick(picked.current);
     };
     const key = (e) => {
+      if (e.key === "Escape" && ruled.current) { ruled.current = null; paintCols(null); }
       const sel = picked.current;
       if (!sel) return;
       if (e.key === "Escape") { picked.current = null; paintPick(null); return; }
@@ -14184,24 +14259,24 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
                 </th>
               ))}
             </tr>
-            <tr className="um-tl-r2">
+            <tr className="um-tl-r2" onMouseDown={headDown} onMouseOver={headOver}>
               <th className="um-tl-crew" rowSpan={2} style={{ ...headCell, width: 52, minWidth: 52 }}>Crew</th>
               <th className="um-tl-rank" rowSpan={2} style={{ ...headCell, width: 100, minWidth: 100 }}>Rank</th>
               <th className="um-tl-name" rowSpan={2} style={{ ...headCell, width: 190, minWidth: 190 }}>Name</th>
-              {days.map((d) => (
-                <th key={d} className={d === today ? "um-daygrid-today" : ""}
+              {days.map((d, k) => (
+                <th key={d} data-k={k} className={d === today ? "um-daygrid-today" : ""}
                   style={{ width: RT_CELL, minWidth: RT_CELL, height: 12, fontFamily: T.mono, fontSize: 8,
                     color: T.muted, padding: 0, fontWeight: 400, lineHeight: "12px" }} title={fmtDate(d)}>
                   {Number(d.slice(8))}
                 </th>
               ))}
             </tr>
-            <tr className="um-tl-r3">
-              {days.map((d) => {
+            <tr className="um-tl-r3" onMouseDown={headDown} onMouseOver={headOver}>
+              {days.map((d, k) => {
                 const wd = new Date(d + "T00:00:00").getDay();
                 const end = wd === 0 || wd === 6;
                 return (
-                  <th key={d} className={d === today ? "um-daygrid-today" : ""}
+                  <th key={d} data-k={k} className={d === today ? "um-daygrid-today" : ""}
                     style={{ width: RT_CELL, minWidth: RT_CELL, height: 12, fontFamily: T.mono, fontSize: 8,
                       color: end ? T.accent : T.muted, padding: 0, fontWeight: end ? 700 : 400,
                       lineHeight: "12px", borderBottom: "1px solid " + T.rule }} title={fmtDate(d)}>
