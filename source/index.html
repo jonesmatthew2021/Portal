@@ -11420,6 +11420,9 @@ async function readCrewRoster(record) {
   const at = (want) => head.findIndex((h) => h === want);
   const cCrew = at("CREW"), cRank = at("RANK"), cName = at("NAME");
   const cOn = at("SIGN ON"), cOff = at("SIGN OFF"), cNote = at("NOTES");
+  // Who a relief hand is standing in for. Its own column rather than a note,
+  // so it is still plain in ten years to anyone who opens the workbook.
+  const cCover = at("COVERING FOR");
   if (cName < 0 || cOn < 0 || cOff < 0) throw new Error("The Swings sheet doesn't carry the columns this reads.");
 
   // The swings themselves, off the workbook's own sheet.
@@ -11456,6 +11459,7 @@ async function readCrewRoster(record) {
       on, off,
       days: daysBetween(on, off),
       note: cNote >= 0 ? String(r[cNote] || "").trim() : "",
+      covers: cCover >= 0 ? String(r[cCover] || "").replace(/\s+/g, " ").trim() : "",
     });
   }
   if (!rows.length) throw new Error("Nothing on the Swings sheet could be read as a swing.");
@@ -11527,7 +11531,7 @@ async function saveRosterWorkbook(buf, plan) {
   const rows = (plan.rows || []).slice().sort((a, b) =>
     a.on.localeCompare(b.on) || String(a.crew || "").localeCompare(String(b.crew || ""))
     || rosterRankAt(a.rank) - rosterRankAt(b.rank) || a.name.localeCompare(b.name));
-  const head = ["CREW", "RANK", "NAME", "SIGN ON", "SIGN OFF", "DAYS", "WHERE THIS CAME FROM", "NOTES"];
+  const head = ["CREW", "RANK", "NAME", "SIGN ON", "SIGN OFF", "DAYS", "WHERE THIS CAME FROM", "NOTES", "COVERING FOR"];
   const str = (ref, v) => (v === "" || v == null) ? ""
     : '<c r="' + ref + '" t="inlineStr"><is><t xml:space="preserve">' + rosterXmlSafe(v) + "</t></is></c>";
   const num = (ref, v, s) => '<c r="' + ref + '"' + (s ? ' s="' + s + '"' : "") + "><v>" + v + "</v></c>";
@@ -11540,13 +11544,14 @@ async function saveRosterWorkbook(buf, plan) {
       + num("D" + n, serial(r.on), dateStyle) + num("E" + n, serial(r.off), dateStyle)
       + num("F" + n, r.days || daysBetween(r.on, r.off), null)
       + str("G" + n, "Crew portal") + str("H" + n, r.note || "")
+      + str("I" + n, r.covers || "")
       + "</row>";
   });
 
   let xml = /<sheetData\/>/.test(oldXml)
     ? oldXml.replace(/<sheetData\/>/, "<sheetData>" + data + "</sheetData>")
     : oldXml.replace(/<sheetData>[\s\S]*?<\/sheetData>/, "<sheetData>" + data + "</sheetData>");
-  xml = xml.replace(/<dimension[^>]*\/>/, '<dimension ref="A1:H' + (rows.length + 1) + '"/>');
+  xml = xml.replace(/<dimension[^>]*\/>/, '<dimension ref="A1:I' + (rows.length + 1) + '"/>');
 
   await setPartText(sheetPart, xml);
 
@@ -11919,14 +11924,32 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
     () => new Set(((plan && plan.relief) || []).map((r) => String(r.name).toUpperCase())),
     [plan],
   );
-  const isRelief = (name) => reliefNames.has(String(name || "").replace(/\s+/g, " ").trim().toUpperCase());
+  /* Who is standing in for whom, off the roster's own rows. The office's
+     RELIEF / COVER list says so for the hands it knows; anybody put on here to
+     cover somebody says so themselves, and is read as relief the same way. */
+  const coverFor = useMemo(() => {
+    const m = new Map();
+    rows.forEach((r) => { if (r.covers) m.set(r.name, r.covers); });
+    return m;
+  }, [plan]);
+  const rankOfPerson = useMemo(() => {
+    const m = new Map();
+    rows.forEach((r) => { if (r.rank && !m.has(r.name)) m.set(r.name, r.rank); });
+    return m;
+  }, [plan]);
+  const isRelief = (name) => reliefNames.has(String(name || "").replace(/\s+/g, " ").trim().toUpperCase())
+    || coverFor.has(name);
 
   // The role the office's own RELIEF / COVER list says they are standing in for.
   const reliefRole = useMemo(
     () => new Map(((plan && plan.relief) || []).map((r) => [String(r.name).toUpperCase(), r.rank || ""])),
     [plan],
   );
-  const roleCovered = (name) => reliefRole.get(String(name || "").replace(/\s+/g, " ").trim().toUpperCase()) || "";
+  const roleCovered = (name) => {
+    const standingIn = coverFor.get(name);
+    if (standingIn) return rankOfPerson.get(standingIn) || "";
+    return reliefRole.get(String(name || "").replace(/\s+/g, " ").trim().toUpperCase()) || "";
+  };
 
   /* Take hold of the day a person signs on or off and pull it along the
      table, or sweep across empty days to put someone on for just those days.
@@ -12418,10 +12441,123 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
 
 /* Somebody new to the roster, put straight onto a swing — chosen off the crew
    list, or typed in for a relief hand the matrix doesn't carry. */
-function RosterNewPerson({ names, positions, spine, onAdd, onClose }) {
+/* Where the roster is short a hand.
+ *
+ * A gap is a day when a crew has fewer of a rank aboard than that crew
+ * usually carries. "Usually" is the roster's own answer, not a number typed
+ * in somewhere: for each crew and rank, the commonest daily strength across
+ * all of that crew's swings. A rank the crew mostly does without is therefore
+ * not missing when it is absent, and one that is always two is short the day
+ * it is one.
+ *
+ * Only swings still to come are looked at - a gap in a swing already sailed
+ * is history, not work.
+ */
+function rosterGaps(plan) {
+  const spine = (plan && plan.spine) || [];
+  const rows = (plan && plan.rows) || [];
+  if (!spine.length || !rows.length) return [];
+  const today = todayISO();
+
+  const rankOf = (r) => String(r.rank || "").replace(/\s+/g, " ").trim().toUpperCase() || "(no rank)";
+  const crewKey = (sp) => String(sp.crew || "").trim().toUpperCase();
+
+  // Which crew each hand belongs to, by the weight of their own days.
+  const weight = new Map();
+  rows.forEach((r) => {
+    const c = String(r.crew || "").trim().toUpperCase();
+    if (c !== "ALPHA" && c !== "BRAVO") return;
+    if (!weight.has(r.name)) weight.set(r.name, {});
+    const t = weight.get(r.name);
+    t[c] = (t[c] || 0) + 1;
+  });
+  const crewOf = new Map();
+  weight.forEach((t, name) => crewOf.set(name, Object.keys(t).sort((a, b) => t[b] - t[a])[0]));
+
+  const ranks = [...new Set(rows.map(rankOf))];
+  const aboardOn = (d) => rows.filter((r) => r.on <= d && d <= r.off);
+  const countOn = (d) => {
+    const c = {};
+    ranks.forEach((k) => { c[k] = 0; });
+    aboardOn(d).forEach((r) => { c[rankOf(r)] = (c[rankOf(r)] || 0) + 1; });
+    return c;
+  };
+
+  // Every day of every swing, counted once and kept.
+  const daysOf = (sp) => {
+    const out = [];
+    let d = sp.on, guard = 0;
+    while (d <= sp.off && guard++ < 900) { out.push(d); d = isoShift(d, 1); }
+    return out;
+  };
+  const seen = new Map();
+  spine.forEach((sp) => daysOf(sp).forEach((d) => { if (!seen.has(d)) seen.set(d, countOn(d)); }));
+
+  // What each crew usually carries: the commonest daily strength per rank.
+  const spread = new Map();
+  spine.forEach((sp) => {
+    const crew = crewKey(sp);
+    if (crew !== "ALPHA" && crew !== "BRAVO") return;
+    daysOf(sp).forEach((d) => {
+      const c = seen.get(d) || {};
+      ranks.forEach((k) => {
+        const key = crew + "|" + k;
+        if (!spread.has(key)) spread.set(key, {});
+        const t = spread.get(key);
+        const n = c[k] || 0;
+        t[n] = (t[n] || 0) + 1;
+      });
+    });
+  });
+  const usual = new Map();
+  spread.forEach((t, key) => {
+    const best = Object.keys(t).map(Number).sort((a, b) => t[b] - t[a] || b - a)[0];
+    usual.set(key, best || 0);
+  });
+
+  // Who is standing in for whom, so an absence with cover reads differently.
+  const coversWho = new Map();
+  rows.forEach((r) => { if (r.covers) coversWho.set(r.name, r.covers); });
+
+  const found = [];
+  spine.filter((sp) => sp.off > today).sort((a, b) => a.on.localeCompare(b.on)).forEach((sp) => {
+    const crew = crewKey(sp);
+    if (crew !== "ALPHA" && crew !== "BRAVO") return;
+    const days = daysOf(sp);
+    ranks.forEach((k) => {
+      const want = usual.get(crew + "|" + k) || 0;
+      if (!want) return;
+      // Contiguous runs of days short of that strength.
+      let run = null;
+      const close = () => {
+        if (!run) return;
+        // Who of this crew, at this rank, is not aboard on the first short day.
+        const there = new Set(aboardOn(run.from).map((r) => r.name));
+        const away = [...new Set(rows.filter((r) => rankOf(r) === k && crewOf.get(r.name) === crew)
+          .map((r) => r.name))].filter((nm) => !there.has(nm));
+        const helped = away.filter((nm) => [...coversWho.entries()].some(([who, forWhom]) =>
+          forWhom === nm && there.has(who)));
+        found.push({ ...run, crew, rank: k, want, swing: sp, away, helped });
+        run = null;
+      };
+      days.forEach((d) => {
+        const have = (seen.get(d) || {})[k] || 0;
+        if (have < want) {
+          if (run && run.have === have) run.to = d;
+          else { close(); run = { from: d, to: d, have }; }
+        } else close();
+      });
+      close();
+    });
+  });
+  return found;
+}
+
+function RosterNewPerson({ names, positions, spine, onRoster, onAdd, onClose }) {
   const [who, setWho] = useState("");
   const [typed, setTyped] = useState("");
   const [rank, setRank] = useState("GPH");
+  const [covers, setCovers] = useState("");
   const [swingKey, setSwingKey] = useState(() => {
     const today = todayISO();
     const here = spine.find((s) => s.on <= today && today < s.off) || spine[0];
@@ -12457,6 +12593,16 @@ function RosterNewPerson({ names, positions, spine, onAdd, onClose }) {
         </div>
       )}
       <div style={{ flex: "1 1 200px" }}>
+        <Field label="Covering for">
+          <select className="um-in" value={covers} onChange={(e) => setCovers(e.target.value)}>
+            <option value="">Nobody — a swing of their own</option>
+            {(onRoster || []).filter((p) => p.name !== name).map((p) => (
+              <option key={p.name} value={p.name}>{p.name}</option>
+            ))}
+          </select>
+        </Field>
+      </div>
+      <div style={{ flex: "1 1 200px" }}>
         <Field label="Swing">
           <select className="um-in" value={swingKey} onChange={(e) => setSwingKey(e.target.value)}>
             {spine.map((s) => (
@@ -12469,7 +12615,7 @@ function RosterNewPerson({ names, positions, spine, onAdd, onClose }) {
       </div>
       <Button variant="ghost" disabled={!name || !swing}
         onClick={() => onAdd({ name, rank: typed.trim() ? rank : rosterRankFor(positions[who] || ""),
-          crew: swing.crew, on: swing.on, off: swing.off, key: swingKey })}>
+          crew: swing.crew, on: swing.on, off: swing.off, key: swingKey, covers })}>
         Onto the swing
       </Button>
       <Button variant="quiet" onClick={onClose}>Cancel</Button>
@@ -12587,8 +12733,11 @@ function RosterListPage() {
   const addRange = (p, on, off) => {
     const s = ((rosterPlan && rosterPlan.spine) || []).find((x) => x.on <= on && on < x.off) || null;
     change((plan) => {
+      // Days swept out for a hand already standing in for somebody are still
+      // days standing in for them, so the marking comes along.
+      const standingIn = (plan.rows.find((r) => r.name === p.name && r.covers) || {}).covers || "";
       plan.rows = [...plan.rows, {
-        id: "r" + Date.now(), source: "portal",
+        id: "r" + Date.now(), source: "portal", covers: standingIn,
         crew: (s && s.crew) || p.crew || "", rank: p.rank, name: p.name,
         on, off, days: daysBetween(on, off), note: "", swing: s ? swingKeyOf(s) : null,
       }];
@@ -12683,7 +12832,7 @@ function RosterListPage() {
     change((p) => {
       p.rows = [...p.rows, {
         id: "r" + Date.now(), source: "portal",
-        crew: t.crew, rank: t.rank, name: t.name,
+        crew: t.crew, rank: t.rank, name: t.name, covers: t.covers || "",
         on: t.on, off: t.off, days: daysBetween(t.on, t.off), note: "", swing: t.key,
       }];
     }, t.name + " onto the swing", fmtDate(t.on) + " – " + fmtDate(t.off));
@@ -12724,6 +12873,12 @@ function RosterListPage() {
               Move or remove crew
             </Button>
           )}
+          {rosterPlan && (
+            <Button variant="quiet"
+              onClick={() => setTableEdit(tableEdit && tableEdit.kind === "gaps" ? null : { kind: "gaps" })}>
+              Find gaps
+            </Button>
+          )}
           {admin && crewRoster && (confirmLoad ? (
             <>
               <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.bRed }}>
@@ -12762,7 +12917,7 @@ function RosterListPage() {
             on: s.on, off: s.off, key: s.on + "|" + s.off })} />
       )}
 
-      {admin && tableEdit && (() => {
+      {(admin || (tableEdit && tableEdit.kind === "gaps")) && tableEdit && (() => {
         const rows = (rosterPlan && rosterPlan.rows) || [];
         const row = tableEdit.kind === "stint"
           ? rows.find((r) => (tableEdit.id ? r.id === tableEdit.id : r.name === tableEdit.name && r.on === tableEdit.on)) || null
@@ -12773,7 +12928,39 @@ function RosterListPage() {
             background: T.panel, border: "1px solid " + T.rule, borderTop: "4px solid " + T.accent,
             borderRadius: 3, padding: "14px 18px", boxShadow: "0 6px 24px rgba(18,41,61,0.25)",
             width: "min(620px, 94vw)" }}>
-            {tableEdit.kind === "pick" ? (
+            {tableEdit.kind === "gaps" ? (() => {
+              const gaps = rosterGaps(rosterPlan);
+              return (
+                <>
+                  <div style={{ fontFamily: T.display, fontSize: 15, fontWeight: 700, color: T.text, marginBottom: 4 }}>
+                    {gaps.length ? gaps.length + " gap" + (gaps.length === 1 ? "" : "s") + " on the roster" : "No gaps on the roster"}
+                  </div>
+                  <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, marginBottom: 12 }}>
+                    A day a crew is short of a rank it usually carries, swings still to come only.
+                  </div>
+                  <div style={{ maxHeight: "46vh", overflowY: "auto", marginBottom: 12 }}>
+                    {gaps.map((g, i) => (
+                      <div key={i} style={{ fontFamily: T.body, fontSize: 13, color: T.text,
+                        padding: "7px 0", borderTop: i ? "1px solid " + T.rule : "none", lineHeight: 1.6 }}>
+                        <span style={{ fontWeight: 700 }}>
+                          {g.from === g.to ? fmtDate(g.from) : fmtDate(g.from) + " – " + fmtDate(g.to)}
+                        </span>
+                        {" · " + (g.crew === "ALPHA" ? "Alpha" : "Bravo") + " · "}
+                        <span style={{ fontFamily: T.mono, fontSize: 11.5 }}>{g.rank}</span>
+                        {" — " + g.have + " aboard where " + g.want + " is usual."}
+                        {g.away.length > 0 && (
+                          <span style={{ color: T.muted }}>
+                            {" Away: " + g.away.join(", ") + "."}
+                            {g.helped.length > 0 && " Covered: " + g.helped.join(", ") + "."}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <Button onClick={() => setTableEdit(null)}>Close</Button>
+                </>
+              );
+            })() : tableEdit.kind === "pick" ? (
               <>
                 <div style={{ fontFamily: T.display, fontSize: 15, fontWeight: 700, color: T.text, marginBottom: 10 }}>
                   Move or remove crew
@@ -12835,6 +13022,7 @@ function RosterListPage() {
               );
             })() : tableEdit.kind === "new" ? (
               <RosterNewPerson names={names} positions={positions} spine={(rosterPlan && rosterPlan.spine) || []}
+                onRoster={onRoster}
                 onAdd={(t) => { addNamed(t); setTableEdit(null); }}
                 onClose={() => setTableEdit(null)} />
             ) : tableEdit.kind === "stint" ? (
