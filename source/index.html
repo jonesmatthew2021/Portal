@@ -2257,6 +2257,18 @@ function skillsRequirementsFrom(XLSX, wb) {
   });
   if (codesAt < 0 || best < 3) return null;
   const codes = grid[codesAt].map((c) => String(c).trim().toUpperCase());
+
+  /* Every item the sheet names, with the title printed under it - the office's
+     own list of what this vessel tracks. The portal's matrix columns are held
+     against this: an item the office has dropped is one the portal is still
+     asking for, and one it has added is one the portal has never heard of. */
+  const under = grid[codesAt + 1] || [];
+  const items = [];
+  codes.forEach((code, i) => {
+    if (!/^[A-Z]{2,4}-\d+/.test(code) || items.some((x) => x.code === code)) return;
+    items.push({ code, title: String(under[i] || "").replace(/\s+/g, " ").trim() || code });
+  });
+
   const positions = [];
   for (const r of grid.slice(codesAt + 1)) {
     const position = String(r[0] || "").replace(/\s+/g, " ").trim();
@@ -2267,7 +2279,7 @@ function skillsRequirementsFrom(XLSX, wb) {
     });
     if (need.length) positions.push({ position, need });
   }
-  return positions.length ? positions : null;
+  return positions.length || items.length ? { positions, items } : null;
 }
 
 /* Which of those positions a crew member's own position answers to, and what
@@ -2398,9 +2410,13 @@ async function storeEquivalences(record, cols, onRequirements) {
     }
     if (rows.length) await analyse({ action: "equivalences", rows });
     if (onRequirements) {
-      const positions = skillsRequirementsFrom(XLSX, wb);
+      const read = skillsRequirementsFrom(XLSX, wb);
+      const positions = (read && read.positions) || null;
+      const items = (read && read.items) || [];
       const covers = coversFrom(XLSX, wb, cols);
-      if (positions || covers.length) onRequirements({ at: todayISO(), positions: positions || [], covers });
+      if (positions || covers.length || items.length) {
+        onRequirements({ at: todayISO(), positions: positions || [], items, covers });
+      }
     }
   } catch (e) {
     // The equivalence page failing to read must never stop a run.
@@ -3808,10 +3824,12 @@ function TrainingMatrix() {
         const resp = await fetch(validityMatrix.url);
         if (!resp.ok) return;
         const wb = XLSX.read(await resp.arrayBuffer(), { type: "array" });
-        const positions = skillsRequirementsFrom(XLSX, wb);
+        const read = skillsRequirementsFrom(XLSX, wb);
+        const positions = (read && read.positions) || null;
+        const items = (read && read.items) || [];
         const covers = coversFrom(XLSX, wb, QUALS.cols);
         if (positions || covers.length) {
-          setSkillsRequirements({ at: todayISO(), from, positions: positions || [], covers });
+          setSkillsRequirements({ at: todayISO(), from, positions: positions || [], items, covers });
         }
       } catch (e) {}
     })();
@@ -13293,6 +13311,7 @@ function UpdateDocumentation() {
   const { admin, lastDocUpdate, setLastDocUpdate, log } = usePortal();
   const [step, setStep] = useState("");          // "" when nothing is running
   const [found, setFound] = useState(null);      // whose folders the sync saw
+  const [asking, setAsking] = useState(false);   // items the skills matrix has gained or lost
   const [err, setErr] = useState("");
   const matrixRun = useRef(null);
   const going = useRef(false);
@@ -13322,6 +13341,11 @@ function UpdateDocumentation() {
 
       setStep("Reading the certificates and updating the matrix");
       if (matrixRun.current) await matrixRun.current();
+
+      // The skills matrix has been re-read by now, so the portal's own columns
+      // can be held against it and anything that has changed put to whoever
+      // pressed the button.
+      if (asked) setAsking(true);
 
       const at = new Date().toISOString();
       setLastDocUpdate(at);
@@ -13371,7 +13395,161 @@ function UpdateDocumentation() {
       <UpdateTrainingMatrixInPlace chrome={false} onRunner={(fn) => { matrixRun.current = fn; }} />
 
       {found && <SyncPeople found={found} onClose={() => setFound(null)} />}
+      {asking && <MatrixItems onClose={() => setAsking(false)} />}
     </>
+  );
+}
+
+/* What the office tracks, held against what the portal asks for.
+ *
+ * The skills matrix is the office's list of what this vessel needs. When they
+ * take an item off it, the portal goes on asking every crew member for it, and
+ * the column sits on the matrix with everybody's dates in it looking like
+ * something that still matters - Corporate Safety Induction did exactly that.
+ * When they add one, the portal has never heard of it and nobody is asked at
+ * all, which is the worse way round.
+ *
+ * So the two lists are held against each other after every read, and the
+ * difference is put to management. Nothing goes on or comes off by itself: an
+ * item coming off takes a column and everybody's dates in it with it, and that
+ * is not something to do to somebody quietly.
+ */
+function MatrixItems({ onClose }) {
+  const { admin, quals: QUALS, setQuals, skillsRequirements, certificates, log } = usePortal();
+  const [dropping, setDropping] = useState("");
+  const [done, setDone] = useState([]);
+
+  const sheet = (skillsRequirements && skillsRequirements.items) || [];
+  const sheetHas = new Set(sheet.map((x) => x.code));
+  const portalHas = new Set(QUALS.cols.map((c) => String(c[0]).trim().toUpperCase()));
+
+  // On the portal, off the office's list.
+  const dropped = QUALS.cols
+    .filter((c) => !sheetHas.has(String(c[0]).trim().toUpperCase()) && !done.includes(c[0]));
+  // On the office's list, never on the portal.
+  const fresh = sheet.filter((x) => !portalHas.has(x.code) && !done.includes(x.code));
+
+  // How many crew have something written in a column, so the cost of taking it
+  // off is on the screen before the question is answered rather than after.
+  const heldIn = (code) => {
+    const i = QUALS.cols.findIndex((c) => c[0] === code);
+    if (i < 0) return 0;
+    return QUALS.rows.filter((r) => String((r[3] || [])[i] || "").trim() !== "").length;
+  };
+  const scansFor = (code) => (certificates || [])
+    .filter((c) => String(c.qualCode || "").trim().toUpperCase() === String(code).trim().toUpperCase());
+
+  const takeOff = (code) => {
+    const i = QUALS.cols.findIndex((c) => c[0] === code);
+    if (i < 0) return;
+    const title = QUALS.cols[i][1];
+    const dates = heldIn(code);
+    const scans = scansFor(code);
+    setQuals((q) => ({
+      cols: (q.cols || []).filter((_, n) => n !== i),
+      rows: (q.rows || []).map((r) => [r[0], r[1], r[2], (r[3] || []).filter((_, n) => n !== i)]),
+    }));
+    // The scans stay where they are. A certificate is evidence of something a
+    // person did, and the office deciding it no longer tracks the item is not
+    // a reason to take their evidence away - it is simply no longer asked for.
+    log("Admin", code + " taken off the matrix",
+      title + " · " + dates + " date" + (dates === 1 ? "" : "s") + " came off with it"
+      + (scans.length ? " · " + scans.length + " scan" + (scans.length === 1 ? "" : "s") + " left on file" : ""));
+    setDone((d) => [...d, code]);
+    setDropping("");
+  };
+
+  /* Which heading a new item sits under: the one its neighbours sit under.
+     Codes are grouped by their prefix - every PI- is a Project Induction - so
+     a column already on the matrix with the same prefix says where this one
+     belongs without anybody having to write the list down twice. */
+  const groupFor = (code) => {
+    const pre = String(code).split("-")[0].toUpperCase();
+    const near = QUALS.cols.find((c) => String(c[0]).split("-")[0].toUpperCase() === pre);
+    return near ? near[2] : "Other";
+  };
+
+  const takeOn = (item) => {
+    setQuals((q) => ({
+      cols: [...(q.cols || []), [item.code, item.title, groupFor(item.code)]],
+      rows: (q.rows || []).map((r) => [r[0], r[1], r[2], [...(r[3] || []), ""]]),
+    }));
+    log("Admin", item.code + " added to the matrix", item.title + " · nobody has a date against it yet");
+    setDone((d) => [...d, item.code]);
+  };
+
+  if (!admin) return null;
+  if (!dropped.length && !fresh.length) return null;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(22,50,74,0.45)", zIndex: 75,
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ background: T.panel, border: "1px solid " + T.rule, borderTop: "4px solid " + T.accent,
+        borderRadius: 3, padding: "20px 24px", width: "min(680px, 94vw)", maxHeight: "82vh", overflowY: "auto" }}>
+        <Eyebrow color={T.accent}>The skills matrix and the portal do not track the same items</Eyebrow>
+        <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, margin: "8px 0 14px", lineHeight: 1.6 }}>
+          Nothing has been changed. Each one is yours to answer.
+        </div>
+
+        {dropped.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontFamily: T.display, fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 4 }}>
+              On the portal, no longer on the skills matrix
+            </div>
+            {dropped.map((c) => {
+              const dates = heldIn(c[0]);
+              const scans = scansFor(c[0]).length;
+              return (
+                <div key={c[0]} style={{ padding: "9px 0", borderTop: "1px solid " + T.rule }}>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ fontFamily: T.mono, fontSize: 11, color: T.accent, minWidth: 46 }}>{c[0]}</span>
+                    <span style={{ fontFamily: T.body, fontSize: 13.5, fontWeight: 600, color: T.text, flex: 1 }}>{c[1]}</span>
+                    {dropping !== c[0] && (
+                      <Button variant="quiet" onClick={() => setDropping(c[0])}>Take off the portal</Button>
+                    )}
+                  </div>
+                  {dropping === c[0] && (
+                    <div style={{ marginTop: 8, padding: "10px 12px", background: T.bRedBg,
+                      border: "1px solid " + T.bRed, borderRadius: 2 }}>
+                      <div style={{ fontFamily: T.body, fontSize: 13, color: T.text, lineHeight: 1.7, marginBottom: 10 }}>
+                        Take {c[0]} off the matrix for everybody? The column goes, and{" "}
+                        {dates === 0 ? "nobody has a date in it" : dates + " crew " + (dates === 1 ? "has a date" : "have dates") + " in it that go with it"}.
+                        {scans > 0 && <> The {scans} {scans === 1 ? "scan" : "scans"} on file {scans === 1 ? "stays" : "stay"} where {scans === 1 ? "it is" : "they are"} — the office no longer asking for an item is not a reason to lose the evidence.</>}
+                        {" "}The column stays in the office's own spreadsheet until they take it out there.
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <Button variant="solid" onClick={() => takeOff(c[0])}>Yes, take it off</Button>
+                        <Button variant="quiet" onClick={() => setDropping("")}>No</Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {fresh.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontFamily: T.display, fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 4 }}>
+              On the skills matrix, not yet on the portal
+            </div>
+            {fresh.map((x) => (
+              <div key={x.code} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
+                padding: "9px 0", borderTop: "1px solid " + T.rule }}>
+                <span style={{ fontFamily: T.mono, fontSize: 11, color: T.accent, minWidth: 46 }}>{x.code}</span>
+                <span style={{ fontFamily: T.body, fontSize: 13.5, fontWeight: 600, color: T.text, flex: 1 }}>{x.title}</span>
+                <Button variant="quiet" onClick={() => takeOn(x)}>Add to the portal</Button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <Button onClick={onClose}>Close</Button>
+        </div>
+      </div>
+    </div>
   );
 }
 
