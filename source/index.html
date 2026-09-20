@@ -7246,13 +7246,65 @@ const AU_ISSUER = new RegExp([
   "worksafe", "safework", "st john", "surf life saving", "royal life saving",
   "maritime safety queensland", "australian maritime college", "\\bamc\\b",
   "mineral resources", "\\bminres\\b", "\\bmrl\\b", "united marine", "helm connect",
+  // How an Australian company writes its own name, and the numbers only an
+  // Australian company has. "Link Resources Training Pty Ltd" named nothing
+  // on the list above and was called foreign for it - and that is how most
+  // of the training providers in the country write themselves.
+  "\\bpty\\.?\\s*l\\.?t\\.?d\\.?\\b", "\\bpty\\b", "\\babn\\b", "\\bacn\\b",
+  "registered training organisation", "nationally recognised",
 ].join("|"), "i");
 
-// The issuer to flag a line with — the issuer as read, where it doesn't read
-// as Australian; null where it does, or where none has been read.
-const foreignIssuerOf = (d) => {
+/* A unit of competency out of the national training packages - RIIWHS204E,
+   HLTAID011, SITXFSA005. The code is the qualification: it exists on
+   training.gov.au and nowhere else, so a certificate carrying one was issued
+   in Australia to an Australian standard, whatever the provider is called. */
+const AU_UNIT = /\\b(?:RII|HLT|SIT|TLI|CPC|UEE|MEM|PUA|BSB|AHC|AUR|CHC|ICT|MSM|SIS|CUA|FSK|AVI|MAR|CUV|DEF|NWP|RGR)[A-Z]{0,5}\\d{3,5}[A-Z]?\\b/i;
+
+/* Another country's maritime authority, or the country itself, named outright.
+
+   This list is the whole of the test now, and it used to be the other way
+   round: anything that did not name something Australian was called foreign.
+   On this vessel that flagged 234 certificates and every one of them was
+   wrong - Tiller Academy, Veritas, SeaWays, Kangaroo Training Institute,
+   Mandurah Safety & Training Services are all Australian and not one of them
+   says so in its name. A provider is under no obligation to put the country
+   in the title, so its absence says nothing at all, and a flag that is wrong
+   every time it appears teaches everyone to read past it.
+
+   Naming a foreign authority is evidence; not naming Australia is not. So the
+   portal only speaks where it has the first. Missing a foreign ticket is a
+   worse failure than the old noise in one way and a better one in another -
+   it leaves the question to the person reading the certificate, where a wrong
+   flag took it away from them. */
+const FOREIGN_ISSUER = new RegExp([
+  "philippines", "philippine", "\\bmarina\\b",
+  "\\bindia\\b", "indian", "directorate general of shipping",
+  "indonesia", "ukrain", "russia", "poland", "polish", "romania", "sri lanka",
+  "myanmar", "burma", "banglades", "pakistan", "nepal", "\\bchina\\b", "chinese",
+  "singapore", "malaysia", "thailand", "vietnam", "\\bkorea", "\\bjapan\\b",
+  "panama", "liberia", "marshall island", "\\bmalta\\b", "cyprus", "bahamas",
+  "vanuatu", "\\bfiji\\b", "papua new guinea", "\\bpng\\b",
+  "maritime new zealand", "new zealand", "\\bsamsa\\b", "south africa",
+  "maritime and coastguard agency", "maritime & coastguard agency", "\\bmca\\b",
+  "united kingdom", "isle of man", "gibraltar", "bermuda",
+  "norway", "norwegian", "denmark", "danish", "netherlands", "dutch",
+  "germany", "german", "greece", "hellenic", "turkey", "turkish", "croatia",
+  "\\begypt", "\\bmyanma",
+].join("|"), "i");
+
+/* The issuer to flag a line with: the issuer as read, where it names another
+   country's authority and nothing Australian. Null everywhere else, including
+   where no issuer has been read.
+
+   A certificate naming both - "Australian Maritime Safety Authority / UK
+   Maritime & Coastguard Agency" - is an Australian one that mentions the
+   other, so Australia has the last word. */
+const foreignIssuerOf = (d, title) => {
   const issuer = d && d.issuer ? String(d.issuer).trim() : "";
-  return issuer && !AU_ISSUER.test(issuer) ? issuer : null;
+  if (!issuer) return null;
+  const words = [issuer, title, d && d.title, d && d.certificateTitle].filter(Boolean).join(" ");
+  if (AU_ISSUER.test(words) || AU_UNIT.test(words)) return null;
+  return FOREIGN_ISSUER.test(issuer) ? issuer : null;
 };
 
 /* The renewal loop. A red item looks the same whether it is being ignored or
@@ -7388,7 +7440,7 @@ function CertChecker() {
       row,
       items: QUALS.cols
         .map((c, i) => ({ code: c[0], title: c[1], group: c[2], value: row[3][i], band: bandFor(row[3][i]) }))
-        .map((x) => ({ ...x, foreignIssuer: foreignIssuerOf(certDateFor(certDates, row[0], x.code)) }))
+        .map((x) => ({ ...x, foreignIssuer: foreignIssuerOf(certDateFor(certDates, row[0], x.code), x.title) }))
         .filter((x) => x.foreignIssuer),
     }))
     .filter((x) => x.items.length)
@@ -7521,7 +7573,7 @@ function CertChecker() {
                 {gaps.map((x) => {
                   const d = certDateFor(certDates, row[0], x.code);
                   const validity = validityFor(x);
-                  const from = foreignIssuerOf(d);
+                  const from = foreignIssuerOf(d, x.title);
                   return (
                   <div key={x.code} style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap",
                     padding: "4px 0 4px 4px", borderBottom: `1px solid ${T.rule}`,
@@ -7531,7 +7583,7 @@ function CertChecker() {
                     <span style={{ fontFamily: T.body, fontSize: 13, color: T.text, flex: 1, minWidth: 180 }}>
                       {x.title}
                       {from && (
-                        <span title={`Issued by ${from} — doesn't read as an Australian authority`}
+                        <span title={`Issued by ${from} — reads as another country's authority, not an Australian one`}
                           style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 700, background: T.panel,
                             color: T.violet, border: `1px solid ${T.violet}`, borderRadius: 2,
                             padding: "1px 6px", marginLeft: 8, whiteSpace: "nowrap" }}>
