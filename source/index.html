@@ -11613,6 +11613,160 @@ async function saveRosterWorkbook(buf, plan) {
     }
   }
 
+  /* The Crew Roster sheet: the wall chart, a day to a column.
+   *
+   * It was left as the office first drew it - names down the side, days across
+   * the top, and every square between them empty. A picture of nothing, going
+   * further out of date with every change.
+   *
+   * It is drawn from the roster now, and drawn as DATA rather than as colour.
+   * Each square carries a letter saying what that day is, so the sheet can be
+   * read years from now by anyone or anything that opens it, with no way of
+   * knowing what a shade of green was once meant to signify:
+   *
+   *     O  signs on      X  on board      F  signs off      R  relief or cover
+   *
+   * The colours are laid on top for a person reading it at a glance, and are
+   * the workbook's own - the office had already defined them, so nothing is
+   * added to the file's palette. A key is written at the foot of the sheet,
+   * saying what the letters mean and where the record of truth lives, so the
+   * sheet explains itself without this note or anybody who remembers it.
+   *
+   * The first four rows are the office's own - title, months, day numbers,
+   * weekday letters - and are left exactly as they are. Which day each column
+   * stands for is read from the sheet itself, off the span written in E1, so
+   * if the office ever redraws the chart the roster follows it rather than
+   * writing over the top of a chart it has misread. If that line cannot be
+   * read, the grid is left alone and the rest of the save still stands. */
+  const gridSheet = sheets.find((sh) => /crew roster/i.test(sh.name));
+  if (gridSheet) {
+    const gRel = relsXml.match(new RegExp('Id="' + gridSheet.rid + '"[^>]*Target="([^"]+)"'));
+    const gPath = gRel ? "xl/" + gRel[1].replace(/^\/+/, "").replace(/^xl\//, "") : null;
+    const gPart = gPath ? partOf(entries, gPath) : null;
+    if (gPart) {
+      const gOld = await partText(gPart);
+
+      // Which day the first day column stands for, off the sheet's own header.
+      const sstPart = partOf(entries, "xl/sharedStrings.xml");
+      const sst = sstPart
+        ? [...(await partText(sstPart)).matchAll(/<si>([\s\S]*?)<\/si>/g)]
+            .map((m) => [...m[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((x) => x[1]).join(""))
+        : [];
+      const spanCell = gOld.match(/<c r="E1"[^>]*t="s"[^>]*><v>(\d+)<\/v><\/c>/);
+      const spanText = spanCell ? sst[Number(spanCell[1])] || "" : "";
+      const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+      const span = spanText.match(/(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{4})/);
+      const monthAt = span ? MONTHS.indexOf(span[2].slice(0, 3).toLowerCase()) : -1;
+
+      if (span && monthAt >= 0) {
+        const pad = (v) => String(v).padStart(2, "0");
+        const gridFrom = span[3] + "-" + pad(monthAt + 1) + "-" + pad(span[1]);
+        const FIRST_DAY_COL = 5;                       // column E
+        const lastCol = 491;                           // the chart's last day column
+        const colFor = (d) => FIRST_DAY_COL + daysBetween(gridFrom, d);
+
+        // The workbook's own colours, already in its palette.
+        const ON_STYLE = "5", BOARD_STYLE = "4", OFF_STYLE = "6", CHANGED_STYLE = "7", RELIEF_STYLE = "10";
+        const mark = (ref, v, st) =>
+          '<c r="' + ref + '" s="' + st + '" t="inlineStr"><is><t>' + v + "</t></is></c>";
+        const plain = (ref, v, st) => (v === "" || v == null) ? ""
+          : '<c r="' + ref + '"' + (st ? ' s="' + st + '"' : "")
+            + ' t="inlineStr"><is><t xml:space="preserve">' + rosterXmlSafe(v) + "</t></is></c>";
+
+        // Who stands where, reckoned the way the roster page reckons it.
+        const reliefNames = new Set(((plan.relief) || []).map((r) => String(r.name).toUpperCase()));
+        const roleOf = new Map(((plan.relief) || []).map((r) => [String(r.name).toUpperCase(), r.rank || ""]));
+        const isRelief = (nm) => reliefNames.has(String(nm || "").replace(/\s+/g, " ").trim().toUpperCase());
+        const swingOn = (d) => (plan.spine || []).find((sp) => sp.on <= d && d < sp.off) || null;
+
+        const folk = new Map();
+        rows.forEach((r) => {
+          if (!folk.has(r.name)) folk.set(r.name, { name: r.name, rank: r.rank, tally: {}, covers: {}, stints: [] });
+          const p = folk.get(r.name);
+          p.stints.push(r);
+          const c = String(r.crew || "").trim().toUpperCase() || "OTHER";
+          p.tally[c] = (p.tally[c] || 0) + 1;
+          const sp = swingOn(r.on);
+          const sc = sp ? String(sp.crew || "").trim().toUpperCase() : "";
+          if (sc === "ALPHA" || sc === "BRAVO") p.covers[sc] = (p.covers[sc] || 0) + 1;
+          if (rosterRankAt(r.rank) < rosterRankAt(p.rank)) p.rank = r.rank;
+        });
+        const all = [...folk.values()].map((p) => ({
+          ...p,
+          crew: Object.keys(p.tally).sort((a, b) => p.tally[b] - p.tally[a])[0] || "OTHER",
+          covered: Object.keys(p.covers).sort((a, b) => p.covers[b] - p.covers[a])[0] || "ALPHA",
+          cover: isRelief(p.name),
+        }));
+        const byRank = (a, b) => rosterRankAt(a.rank) - rosterRankAt(b.rank) || a.name.localeCompare(b.name);
+
+        const blocks = [];
+        ["ALPHA", "BRAVO"].forEach((crew) => {
+          const own = all.filter((p) => !p.cover && p.crew === crew).sort(byRank);
+          const cover = all.filter((p) => p.cover && p.covered === crew).sort(byRank);
+          if (own.length) blocks.push({ head: crew + " CREW", relief: false, people: own });
+          if (cover.length) blocks.push({ head: "RELIEF / COVER", relief: true, people: cover });
+        });
+        const placed = new Set(blocks.flatMap((b) => b.people.map((p) => p.name)));
+        const rest = all.filter((p) => !placed.has(p.name)).sort(byRank);
+        if (rest.length) blocks.push({ head: "OTHER", relief: false, people: rest });
+
+        // The office's own first four rows, kept exactly as they are.
+        const head4 = [...gOld.matchAll(/<row[^>]*r="(\d+)"[^>]*>[\s\S]*?<\/row>/g)]
+          .filter((m) => Number(m[1]) <= 4).map((m) => m[0]).join("");
+
+        let n = 4;
+        let body = "";
+        blocks.forEach((b) => {
+          n++;
+          body += '<row r="' + n + '">'
+            + plain("A" + n, b.head, "15")
+            + (b.relief ? plain("B" + n, "ROLE COVERED", "15") + plain("C" + n, "NAME", "15") : "")
+            + "</row>";
+          b.people.forEach((p) => {
+            n++;
+            let cells = plain("A" + n, b.relief ? "RELIEF / COVER" : p.crew, "16")
+              + plain("B" + n, (b.relief ? (roleOf.get(p.name.toUpperCase()) || p.rank) : p.rank) || "", "16")
+              + plain("C" + n, p.name, "34");
+            const done = new Set();
+            p.stints.forEach((st) => {
+              const sp = st.swing ? (plan.spine || []).find((x) => swingKeyOf(x) === st.swing) : swingOn(st.on);
+              let d = st.on, guard = 0;
+              while (d <= st.off && guard++ < 900) {
+                const col = colFor(d);
+                if (col >= FIRST_DAY_COL && col <= lastCol && !done.has(col)) {
+                  done.add(col);
+                  const ref = rosterColAt(col - 1) + n;
+                  if (d === st.on) cells += mark(ref, "O", sp && st.on !== sp.on ? CHANGED_STYLE : ON_STYLE);
+                  else if (d === st.off) cells += mark(ref, "F", sp && st.off !== sp.off ? CHANGED_STYLE : OFF_STYLE);
+                  else cells += mark(ref, b.relief ? "R" : "X", b.relief ? RELIEF_STYLE : BOARD_STYLE);
+                }
+                d = isoShift(d, 1);
+              }
+            });
+            body += '<row r="' + n + '">' + cells + "</row>";
+          });
+        });
+
+        // A key, so the sheet says what it means without anybody to explain it.
+        const key = [
+          "KEY - written by the crew portal, " + todayISO(),
+          "O = signs on.  X = on board.  F = signs off.  R = relief or cover on board.",
+          "A sign on or off shown in red is not that swing's own changeover day.",
+          "The Swings sheet is the record: it carries every name with exact sign on and sign off dates.",
+          "This chart is drawn from it, so the two cannot disagree. Both are rewritten together when the roster is saved.",
+        ];
+        n++;
+        key.forEach((line) => { n++; body += '<row r="' + n + '">' + plain("A" + n, line, null) + "</row>"; });
+
+        let gXml = /<sheetData\/>/.test(gOld)
+          ? gOld.replace(/<sheetData\/>/, "<sheetData>" + head4 + body + "</sheetData>")
+          : gOld.replace(/<sheetData>[\s\S]*?<\/sheetData>/, "<sheetData>" + head4 + body + "</sheetData>");
+        gXml = gXml.replace(/<dimension[^>]*\/>/, '<dimension ref="A1:RW' + n + '"/>');
+        await setPartText(gPart, gXml);
+      }
+    }
+  }
+
   await dropCalcChain(entries);
   await setPartText(wbPart, recalcOnOpen(workbookXml));
   return writeZip(entries);
