@@ -12008,12 +12008,21 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
     ["ALPHA", "BRAVO"].forEach((crew) => {
       const own = list.filter((p) => !p.coverOnly && p.crew === crew).sort(byRank);
       const cover = list.filter((p) => p.coverOnly && p.covered === crew).sort(byRank);
-      if (own.length) out.push({ label: crew === "ALPHA" ? "Alpha crew" : "Bravo crew", people: own });
-      if (cover.length) out.push({ label: "Relief / cover", people: cover, relief: true });
+      if (own.length) out.push({ label: crew === "ALPHA" ? "Alpha crew" : "Bravo crew", people: own, of: crew });
+      if (cover.length) out.push({ label: "Relief / cover", people: cover, relief: true, of: crew });
     });
     const placed = new Set(out.flatMap((b) => b.people.map((p) => p.name)));
     const rest = list.filter((p) => !placed.has(p.name)).sort(byRank);
-    if (rest.length) out.push({ label: "Other", people: rest });
+    if (rest.length) out.push({ label: "Other", people: rest, of: "OTHER" });
+
+    /* Each crew counts from one, and the relief standing in for that crew
+       carries on from where the crew left off - so the last number against a
+       team is how many hands it has aboard, cover included. */
+    const counted = {};
+    out.forEach((b) => {
+      const key = b.of || "OTHER";
+      b.people = b.people.map((p) => ({ ...p, no: (counted[key] = (counted[key] || 0) + 1) }));
+    });
     return out;
   }, [plan]);
 
@@ -12361,11 +12370,8 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
               <React.Fragment key={g.label + gi}>
                 <tr>
                   {g.relief ? (
-                    <>
-                      <td className="um-tl-crew" style={groupCell}>Relief</td>
-                      <td className="um-tl-rank" style={groupCell}>Role covered</td>
-                      <td className="um-tl-name" style={groupCell}>Name</td>
-                    </>
+                    <td className="um-tl-crew" colSpan={3}
+                      style={{ ...groupCell, boxShadow: "inset -1px 0 0 " + T.rule }}>Relief / cover</td>
                   ) : (
                     <td className="um-tl-crew" colSpan={3}
                       style={{ ...groupCell, boxShadow: "inset -1px 0 0 " + T.rule }}>{g.label}</td>
@@ -12380,7 +12386,7 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
                       style={{ fontFamily: T.mono, fontSize: 10, color: T.muted,
                       padding: "2px 5px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                       maxWidth: 152, borderTop: "1px solid " + T.rule }}>
-                      {(g.relief && roleCovered(p.name)) || p.rank}
+                      {p.no}. {(g.relief && roleCovered(p.name)) || p.rank}
                     </td>
                     <td className="um-tl-name"
                       onClick={admin ? () => onPerson(p) : undefined}
