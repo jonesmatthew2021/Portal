@@ -1,7 +1,10 @@
 import { eq, and, isNull } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
-import { CERT_ROOT, SINGLE_FILE_CATEGORIES, fileStore, safeName, tokenForOpmsFolder } from "../db/documents.js";
+import {
+  CERT_ROOT, SINGLE_FILE_CATEGORIES, fileStore, safeName,
+  tokenForOpmsFolder, personForOpmsFolder, opmsFolderName,
+} from "../db/documents.js";
 import { todayThere } from "../lib/analysis.js";
 import { getStore } from "../compat/blobs.js";
 
@@ -49,14 +52,11 @@ const EXT_TYPES: Record<string, string> = {
 const typeFor = (name: string) =>
   EXT_TYPES[(name.split(".").pop() || "").toLowerCase()] || "application/octet-stream";
 
-// "patwardhan-anand" reads back as "Patwardhan Anand" — a guess for the
-// listing, and the certificate reading pass settles the real name later.
-const personFrom = (folder: string) =>
-  folder
-    .split(/[-_]+/)
-    .filter(Boolean)
-    .map((w) => w[0].toUpperCase() + w.slice(1))
-    .join(" ");
+// The one form the portal writes a name in, worked out from the token:
+// "patwardhan-anand" reads back as "PATWARDHAN, Anand", which is how the crew
+// matrix writes it, so the two lists can be held against each other without a
+// lookup table standing between them.
+const personFrom = (folder: string) => opmsFolderName(folder);
 
 type Found = { key: string; size?: number };
 
@@ -95,7 +95,7 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
   const folks = new Map<string, string>();
   for (const f of opmsListing.blobs) {
     const who = /^opms\/([^/]+ - OPMS)\//i.exec(f.key);
-    if (who) folks.set(tokenForOpmsFolder(who[1]), personFrom(tokenForOpmsFolder(who[1])));
+    if (who) folks.set(tokenForOpmsFolder(who[1]), personForOpmsFolder(who[1]));
   }
 
   for (const f of opmsListing.blobs) {
@@ -106,7 +106,7 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
     const name = safeName(f.key.split("/").pop() || "").toLowerCase();
     const twin = (rowsByToken.get(token) || []).some((r) => r.name === name && r.size === (f.size ?? -2));
     if (twin) continue;
-    newCertificates.push({ key: f.key, folder: token, person: personFrom(token), size: f.size });
+    newCertificates.push({ key: f.key, folder: token, person: personForOpmsFolder(m[1]), size: f.size });
   }
 
   // The office drops the crew qualification expiry spreadsheet loose in OPMS

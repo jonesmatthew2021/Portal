@@ -4425,7 +4425,15 @@ function canonicalName(raw) {
   } else {
     const parts = s.split(" ");
     if (parts.length === 1) return word(parts[0]);
-    last = parts[parts.length - 1]; firsts = parts.slice(0, -1).join(" ");
+    /* Which half is the surname, where no comma says so. A word in capitals is
+       the surname wherever it has been put - that is how the office writes
+       them, and it is the only thing in "Evgeny EVDOKIMOV" that says which way
+       round it goes. Failing that the last word is taken, which is how a name
+       is written in English more often than not. The worker reads a folder name
+       by the same rule, so both halves of the portal land on the one form. */
+    const shouted = parts.findIndex((w) => w.length > 1 && w === w.toUpperCase() && /[A-Z]/.test(w));
+    const at = shouted >= 0 ? shouted : parts.length - 1;
+    last = parts[at]; firsts = parts.filter((_, i) => i !== at).join(" ");
   }
   const first = firsts.split(" ").filter(Boolean).map(word).join(" ");
   return first ? `${last.toUpperCase()}, ${first}` : last.toUpperCase();

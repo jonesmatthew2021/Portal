@@ -158,6 +158,8 @@ const REMOVED_ROOT = "removed";
  * and the nicknames the folders were made with. Anyone not in the table gets
  * "<First name> - OPMS", which is the convention for everyone new.
  */
+import { canonicalPersonName } from "./person-name.js";
+
 export const OPMS_FOLDER_NAMES: Record<string, string> = {
   "asange-kyle": "Kyle",
   "athihe-savio": "Savio",
@@ -201,14 +203,26 @@ export const OPMS_FOLDER_NAMES: Record<string, string> = {
   "wright-andrew": "Andrew",
 };
 
-/** The person token's OPMS folder name — from the table, or first-name-cased
- * off the token (tokens read surname-first, so the first name is last). */
+/**
+ * The person's OPMS folder name: LASTNAME, First.
+ *
+ * The office named these folders for the person rather than for the record -
+ * "Kyle", "PK", "Con", "Zac" - and the portal kept the crew as the matrix
+ * writes them. Holding the two together took a lookup table and a fair
+ * amount of guessing, and it still put the same man on the screen twice the
+ * day somebody new arrived, once to be added and once to be removed.
+ *
+ * One form everywhere ends that. The table below stays only to read the
+ * folders the office has not renamed yet; nothing new is ever written under
+ * a nickname again.
+ */
 export function opmsFolderName(token: string) {
-  const named = OPMS_FOLDER_NAMES[token];
-  if (named) return named;
   const parts = (token || "").split("-").filter(Boolean);
-  const first = parts[parts.length - 1] || token || "unnamed";
-  return first[0].toUpperCase() + first.slice(1);
+  if (!parts.length) return "UNNAMED";
+  const cased = (w: string) => w[0].toUpperCase() + w.slice(1).toLowerCase();
+  const surname = parts[0].toUpperCase();
+  const first = parts.slice(1).map(cased).join(" ");
+  return first ? `${surname}, ${first}` : surname;
 }
 
 /** Where this person's certificates are written: their OPMS folder. */
@@ -218,11 +232,30 @@ const TOKEN_BY_OPMS_NAME: Record<string, string> = Object.fromEntries(
   Object.entries(OPMS_FOLDER_NAMES).map(([t, n]) => [n.toLowerCase(), t]),
 );
 
-/** The person token an OPMS folder belongs to — the table backwards, or a
- * fresh token for somebody new (Evgeny - OPMS becomes evgeny). */
+/** Whether a folder name says who it belongs to on its own - "EVDOKIMOV,
+ * Evgeny" does, "Kyle" does not. */
+const readsAsAName = (name: string) =>
+  name.includes(",") || name.trim().split(/\s+/).filter(Boolean).length > 1;
+
+/**
+ * The person token an OPMS folder belongs to.
+ *
+ * A folder named the standard way says outright whose it is, and is taken at
+ * its word. One still carrying a nickname is looked up in the old table, and
+ * anything else becomes a token of its own - which is how somebody new turns
+ * up to be asked about rather than quietly filed against the wrong person.
+ */
 export function tokenForOpmsFolder(folderName: string) {
   const name = folderName.replace(/\s*-\s*OPMS\s*$/i, "").trim();
+  if (readsAsAName(name)) return certFolderFor(canonicalPersonName(name));
   return TOKEN_BY_OPMS_NAME[name.toLowerCase()] ?? certFolderFor(name);
+}
+
+/** Whose folder this is, written the one way the portal writes names. */
+export function personForOpmsFolder(folderName: string) {
+  const name = folderName.replace(/\s*-\s*OPMS\s*$/i, "").trim();
+  if (readsAsAName(name)) return canonicalPersonName(name);
+  return opmsFolderName(tokenForOpmsFolder(folderName));
 }
 
 export function certFolderFor(person: string) {
