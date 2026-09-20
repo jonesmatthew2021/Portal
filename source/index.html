@@ -2302,12 +2302,29 @@ async function storeEquivalences(record, cols, onRequirements) {
     };
     const seen = new Set();
     const rows = [];
+    /* The sheet answers two different questions with the same two columns.
+       Where what is accepted is a certificate by name - "QLE-03 Master
+       <500GT" - it is telling the portal which column that certificate
+       belongs in. Where what is accepted is a matrix column in its own right
+       - "QL-15 is met by QL-14" - it is telling it that holding the one
+       answers for the other, which is a different thing and was being thrown
+       away. Both are kept now. */
+    const covers = [];
+    const pairs = new Set();
     for (const r of grid) {
       const wanted = part(r[1]);
       const held = part(r[2]);
       if (!wanted || !held) continue;
       if (!colCodes.has(wanted.code)) continue; // must land on a matrix column
-      if (colCodes.has(held.code)) continue;    // a matrix item already has its home
+      if (colCodes.has(held.code)) {
+        // A column standing in for another column: holding it answers for it.
+        const key = wanted.code + "<" + held.code;
+        if (wanted.code !== held.code && !pairs.has(key)) {
+          pairs.add(key);
+          covers.push({ need: wanted.code, met: held.code });
+        }
+        continue;
+      }
       if (seen.has(held.code)) continue;        // the first row is the most senior column
       seen.add(held.code);
       rows.push({ held: held.title, code: wanted.code });
@@ -2315,7 +2332,7 @@ async function storeEquivalences(record, cols, onRequirements) {
     if (rows.length) await analyse({ action: "equivalences", rows });
     if (onRequirements) {
       const positions = skillsRequirementsFrom(XLSX, wb);
-      if (positions) onRequirements({ at: todayISO(), positions });
+      if (positions || covers.length) onRequirements({ at: todayISO(), positions: positions || [], covers });
     }
   } catch (e) {
     // The equivalence page failing to read must never stop a run.
@@ -3725,6 +3742,27 @@ function TrainingMatrix() {
     });
     return m;
   }, [QUALS, skillsRequirements]);
+
+  /* Which other columns answer for a requirement, off the office's own
+     equivalence page: "if you do not hold QL-15, QL-14 is accepted". A
+     requirement is not missing where the crew member holds something the
+     office says stands in for it. */
+  const metBy = useMemo(() => {
+    const m = new Map();
+    ((skillsRequirements && skillsRequirements.covers) || []).forEach((c) => {
+      if (!m.has(c.need)) m.set(c.need, []);
+      m.get(c.need).push(c.met);
+    });
+    return m;
+  }, [skillsRequirements]);
+  const colAt = useMemo(
+    () => new Map(QUALS.cols.map((c, i) => [String(c[0]).trim().toUpperCase(), i])),
+    [QUALS],
+  );
+  const standsIn = (row, code) => (metBy.get(code) || []).some((alt) => {
+    const at = colAt.get(alt);
+    return at !== undefined && String((row[3] || [])[at] || "").trim() !== "";
+  });
   const [report, setReport] = useState(null);
   // The scan behind a pressed cell, opened in the same viewer the checker uses.
   const [cellScan, setCellScan] = useState(null);
@@ -4004,7 +4042,9 @@ function TrainingMatrix() {
                     <td key={i} style={{ padding: "2px", borderBottom: `1px solid ${T.rule}`, textAlign: "center",
                       background: isPicked ? T.raised : "transparent" }}>
                       <Cell value={r[3][i]}
-                        missing={!String(r[3][i] || "").trim() && (needByPosition.get(r[1] || "") || new Set()).has(QUALS.cols[i][0])}
+                        missing={!String(r[3][i] || "").trim()
+                          && (needByPosition.get(r[1] || "") || new Set()).has(QUALS.cols[i][0])
+                          && !standsIn(r, String(QUALS.cols[i][0]).trim().toUpperCase())}
                         onOpen={url ? () => setCellScan({ url, person: r[0], code: QUALS.cols[i][0], title: QUALS.cols[i][1] }) : undefined} />
                     </td>
                     );
