@@ -9451,7 +9451,7 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
   const {
     quals: QUALS, setQuals, trainingMatrix, setTrainingMatrix,
     refileCertificates, setMatrixUpdated, validityMatrix, log, role,
-    setSkillsRequirements,
+    setSkillsRequirements, filledFromCert, setFilledFromCert,
   } = usePortal();
 
   const [run, setRun] = useState(null);   // null | { phase, read, total } | { phase: "failed", message }
@@ -9582,6 +9582,27 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
       const settled = res.settled || [];
       const derived = (res.summary || {}).derived || 0;
 
+      /* A certificate deleted from the library takes the date it put on the
+       * matrix with it.
+       *
+       * Only the cells the portal filled from a certificate are touched. Most
+       * of the matrix came in on the office's own spreadsheet and has never had
+       * a certificate behind it at all - treating those as abandoned would
+       * empty the sheet. The note kept against each filled cell is what tells
+       * the two apart.
+       *
+       * It runs with the settled dates rather than after them, so the workbook
+       * is written once and the cell that was cleared and the cell that was
+       * filled go in together. */
+      const backed = new Set(res.claimed || []);
+      const wasFilled = filledFromCert || {};
+      const orphans = Object.keys(wasFilled).filter((k) => !backed.has(k));
+      orphans.forEach((k) => {
+        const cut = k.indexOf("::");
+        if (cut < 0) return;
+        settled.push({ person: k.slice(0, cut), code: k.slice(cut + 2), value: "", clear: true });
+      });
+
       // The settled dates, laid over the crew matrix, and the exact cells they
       // belong to — the write is narrowed to those cells and no others.
       const rowAt = new Map(QUALS.rows.map((r, i) => [String(r[0]).trim().toUpperCase(), i]));
@@ -9611,10 +9632,40 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
       });
       const next = { cols: QUALS.cols, rows };
 
+      /* The note of which cells the portal itself filled from a certificate.
+         Only a cell a certificate actually put a date in goes down here - not
+         every cell a certificate merely touches. A certificate whose scan gave
+         no date leaves the office spreadsheet’s own date in place, and writing
+         that cell down would mean deleting the certificate later wiped a date
+         the portal never put there. The orphans drop out, having just been
+         cleared. */
+      const noteNow = { ...wasFilled };
+      orphans.forEach((k) => { delete noteNow[k]; });
+      settled.forEach((x) => {
+        if (x.clear || !x.value) return;
+        noteNow[String(x.person).trim().toUpperCase() + "::" + String(x.code).trim().toUpperCase()] = true;
+      });
+      setFilledFromCert(noteNow);
+
       if (!only.size) {
         setDone({ nothing: true, read: progress.read, total: progress.total, refiled: moved.length, validityProblem });
         setRun(null);
         return;
+      }
+
+      /* The crew matrix first, and the workbook after.
+       *
+       * The matrix is the portal’s own record of what the certificates say;
+       * the workbook is the office’s file. Writing the matrix only once the
+       * workbook had been written meant a library that could not be reached -
+       * a rename, a permission, a Graph outage - left the portal showing dates
+       * it already knew were wrong, and a run that cleared a certificate’s date
+       * did nothing at all. The two can be out of step for an hour; the portal
+       * being knowingly wrong is worse. */
+      const on = todayISO();
+      if (applied) {
+        setQuals(next);
+        setMatrixUpdated(on);
       }
 
       // The workbook itself, updated in place — only the settled cells.
@@ -9622,14 +9673,6 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
       const resp = await fetch(trainingMatrix.url);
       if (!resp.ok) throw new Error(`The training matrix on file couldn't be downloaded (${resp.status}). Nothing was changed.`);
       const { blob, report } = await updateFiledWorkbook(await resp.arrayBuffer(), next, only);
-
-      // The crew matrix keeps step with what the certificates settled, so the
-      // certification screens and the workbook stay the same account.
-      const on = todayISO();
-      if (applied) {
-        setQuals(next);
-        setMatrixUpdated(on);
-      }
 
       if (!blob) {
         setDone({ report, unchanged: true, read: progress.read, total: progress.total,
@@ -9668,10 +9711,11 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
 
       log("Admin", "Updated the training matrix from the certificates",
         `${named} · ${report.written} ${report.written === 1 ? "cell" : "cells"} changed on "${report.sheet}"`
+        + (orphans.length ? ` · ${orphans.length} cleared, their certificates gone from the library` : "")
         + (renamed ? "" : " · the name was left as it was"));
       setDone({ report, filename: named, download: URL.createObjectURL(file), failed,
         read: progress.read, total: progress.total, settled: only.size, derived,
-        refiled: moved.length, validityProblem });
+        orphans: orphans.length, refiled: moved.length, validityProblem });
       setRun(null);
     } catch (e) {
       const message = e.message || String(e);
@@ -9751,6 +9795,7 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
               ? "None of them settles an expiry date for anyone on the crew matrix yet, so the training matrix was left exactly as it is."
               : `${done.settled} ${done.settled === 1 ? "expiry was" : "expiries were"} settled by the certificates.`}
             {done.derived > 0 && ` ${done.derived} of those ${done.derived === 1 ? "was" : "were"} worked out from the issue date and the validity periods matrix — certificates that print an issue date but no expiry.`}
+            {done.orphans > 0 && ` ${done.orphans} ${done.orphans === 1 ? "date was" : "dates were"} cleared: the certificate behind ${done.orphans === 1 ? "it is" : "them are"} no longer in the library.`}
             {done.refiled > 0 && ` ${done.refiled} ${done.refiled === 1 ? "certificate was" : "certificates were"} filed under the wrong crew member and ${done.refiled === 1 ? "has" : "have"} been moved.`}
             {" "}The OPMS spreadsheet was not touched.
           </div>
@@ -18680,6 +18725,12 @@ function CoolibahPortal({ role, onSignOut }) {
   // is half-typed rather than working swings out from nonsense.
   // When the documentation was last brought up to date, by hand or on the hour.
   const lastDocUpdate = store.lastDocUpdate || null, setLastDocUpdate = put("lastDocUpdate");
+  /* Which cells on the crew matrix were filled from a certificate rather than
+     coming in on the office's spreadsheet. Held so a certificate being deleted
+     can take its date with it: without it the portal cannot tell a date it put
+     there itself from one the office typed, and clearing the wrong ones would
+     empty most of the matrix. */
+  const filledFromCert = store.filledFromCert || {}, setFilledFromCert = put("filledFromCert");
   /* Which OPMS folder belongs to whom, where the name alone doesn't say.
      The office names its folders for the person, not for the record - "PK",
      "Con", "Zac", "Chris" - and the portal keeps the crew as the matrix writes
@@ -19485,7 +19536,7 @@ function CoolibahPortal({ role, onSignOut }) {
     return { ok: true, gone };
   };
 
-  const ctx = { role, admin, session: SESSION, removeCrew, writeCrewToWorkbooks, lastDocUpdate, setLastDocUpdate, folderNames, setFolderNames, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
+  const ctx = { role, admin, session: SESSION, removeCrew, writeCrewToWorkbooks, lastDocUpdate, setLastDocUpdate, folderNames, setFolderNames, filledFromCert, setFilledFromCert, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
 
   return (
     <Ctx.Provider value={ctx}>

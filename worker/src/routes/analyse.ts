@@ -1032,6 +1032,14 @@ async function compare(matrix: Matrix, sheet: { filename?: string; rows?: { name
     items,
     notes,
     settled,
+    /* Every cell a certificate on file still stands behind, person and code.
+       The portal keeps its own note of which cells it filled from a
+       certificate; holding that against this list is how it learns that a
+       certificate has been deleted and the date it put there has nothing left
+       under it. Said outright rather than inferred from the settled list,
+       because a cell the certificates agree with settles nothing and would
+       otherwise read as abandoned. */
+    claimed: [...claim.keys()],
     summary: {
       certificates: certs.length,
       read,
