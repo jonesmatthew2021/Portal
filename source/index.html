@@ -2219,13 +2219,18 @@ function ticketStandingFor(row, QUALS) {
       + ` ${want.expects}, so this is a bigger job than the ticket covers.`,
   };
 
-  if (top > want.upto) return {
-    ...base, way: "higher", strong: false, label: "Holds a higher ticket than the position",
-    note: `Works as ${position} and holds ${list(mine)}. The position is normally held against`
-      + ` ${want.expects}, so the matrix only asks this person for the ${position} items -`
-      + ` what the higher ticket carries is not tracked here.`,
-  };
+  /* A bigger ticket than the job asks for is not a finding and is not marked.
+     A Master standing a Chief Officer's watch is ordinary, allowed, and none
+     of the matrix's business: it asks that person for the Chief Officer's
+     items, which is right, and the rest of what the ticket carries is not
+     tracked here because nothing on this vessel needs it to be. Marking it
+     put seven names in violet for a state of affairs nobody has to do anything
+     about, which is how a colour that ought to mean "look at this" comes to
+     mean nothing at all.
 
+     Working ABOVE the ticket held is still marked, and still strongly. That
+     one is not allowed, and a page that stayed quiet about it would be worse
+     than no page. */
   return null;
 }
 
@@ -4039,7 +4044,7 @@ function TrainingMatrix() {
             position and ticket line up the button would filter to nothing. */}
         {offTicket.length > 0 && (
           <Button variant={only === "ticket" ? "solid" : "quiet"}
-            title="Crew whose ticket is not the one their position is normally held against"
+            title="Crew filling a job the ticket on the matrix does not cover"
             onClick={() => setOnly(only === "ticket" ? "all" : "ticket")}>
             Position differs from ticket · {offTicket.length}
           </Button>
@@ -4067,15 +4072,11 @@ function TrainingMatrix() {
           borderRadius: 2, padding: "11px 13px", marginBottom: 16 }}>
           <div style={{ marginBottom: 5 }}><Eyebrow color={T.violet}>Position and ticket</Eyebrow></div>
           <div style={{ fontFamily: T.body, fontSize: 13, color: T.text, lineHeight: 1.65 }}>
-            {offTicket.length} of {QUALS.rows.length} crew work in a position their certificate of competency
-            is not the usual one for{offTicketStrong > 0
-              ? `, and ${offTicketStrong} of those are filling a job the ticket on the matrix does not cover`
-              : " — each of them holds a bigger ticket than the position asks for"}.
-            Their names are marked in violet below: a filled dot where the ticket does not reach the position,
-            an outlined one where it goes past it. What the matrix asks of somebody is worked out from their
-            position, so the items the other ticket carries are not tracked here. Press a name to read which
-            ticket it is. Whether a person may fill a position is the office's call on the vessel's manning
-            approval — this only says the two do not line up.
+            {offTicket.length} of {QUALS.rows.length} crew are filling a job the ticket on the matrix does
+            not cover. Their names are marked in violet below. What the matrix asks of somebody is worked out
+            from their position, so a ticket that does not reach the position is read against the wrong set of
+            requirements. Press a name to read which ticket it is. Whether a person may fill a position is the
+            office's call on the vessel's manning approval — this only says the two do not line up.
           </div>
         </div>
       )}
@@ -4147,11 +4148,12 @@ function TrainingMatrix() {
                           whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r[0]}</div>
                         {/* The column is 184px and the names already run out of it,
                             so the mark is a dot rather than a word - which ticket
-                            it is, and what it means, is in the panel and on hover. */}
+                            it is, and what it means, is in the panel and on hover.
+                            Only a ticket that does not reach the position is marked,
+                            so there is one kind of dot and it is always filled. */}
                         {stand && (
                           <span aria-label={stand.label} style={{ flex: "0 0 auto", width: 8, height: 8,
-                            borderRadius: "50%", border: `1.5px solid ${T.violet}`,
-                            background: stand.strong ? T.violet : T.panel }} />
+                            borderRadius: "50%", border: `1.5px solid ${T.violet}`, background: T.violet }} />
                         )}
                       </div>
                     </button>
@@ -9603,6 +9605,10 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
 
   runner.current = () => (running ? Promise.resolve() : go());
 
+  // With no button of its own on the page, what the run has to say has nowhere
+  // to sit, so it is shown over the page and closed when it has been read.
+  const floating = !chrome && !!(err || done);
+
   return (
     <div style={{ width: run || err || done ? "100%" : "auto" }}>
       <div style={{ display: chrome ? "flex" : "none", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -9636,6 +9642,15 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
           onClose={() => setRun(null)}
         />
       )}
+
+      {/* Driven from Update documentation at the top of the page, the answer
+          has nowhere of its own to sit, so it comes up over the page and is
+          closed when it has been read. On Required Documents, where the button
+          is, it stays under the button as it always did. */}
+      <div style={floating ? { position: "fixed", inset: 0, background: "rgba(22,50,74,0.45)", zIndex: 80,
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 20 } : undefined}>
+      <div style={floating ? { background: T.panel, border: `1px solid ${T.rule}`, borderRadius: 3,
+        padding: "4px 18px 16px", width: "min(640px, 94vw)", maxHeight: "82vh", overflowY: "auto" } : undefined}>
 
       {err && (
         <div style={{ fontFamily: T.body, fontSize: 13, color: T.bRed, lineHeight: 1.6, marginTop: 8 }}>
@@ -9686,6 +9701,14 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
           )}
         </div>
       )}
+
+      {floating && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+          <Button onClick={() => { setDone(null); setErr(""); }}>Close</Button>
+        </div>
+      )}
+      </div>
+      </div>
     </div>
   );
 }
@@ -13291,11 +13314,9 @@ function UpdateDocumentation() {
       </div>
 
       {/* The run itself lives here, with its button left off - the one at the
-          top is what presses it, and its progress window is the same one the
-          Required Documents page shows. */}
-      <div style={{ position: "absolute", left: 0, right: 0 }}>
-        <UpdateTrainingMatrixInPlace chrome={false} onRunner={(fn) => { matrixRun.current = fn; }} />
-      </div>
+          top is what presses it. Its progress window and its answer both come
+          up over the page and are closed when they have been read. */}
+      <UpdateTrainingMatrixInPlace chrome={false} onRunner={(fn) => { matrixRun.current = fn; }} />
 
       {found && <SyncPeople found={found} onClose={() => setFound(null)} />}
     </>
