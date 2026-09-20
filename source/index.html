@@ -1214,9 +1214,16 @@ const SWING_LOOKAHEAD = 5;
 function swingWithDates(k, dates) {
   const base = swingAt(k);
   const d = (dates || {})[k];
-  if (!d || !d.flyOut || !d.flyHome || d.flyHome <= d.flyOut) return base;
+  if (!d) return base;
+  // Allocations taken from the roster say whose swing it is as well as when.
+  // The pattern alternates A and B for ever; the roster knows when that slipped.
+  const crew = d.crew === "A" || d.crew === "B" ? d.crew : base.crew;
+  if (!d.flyOut || !d.flyHome || d.flyHome <= d.flyOut) {
+    return crew === base.crew ? base : { ...base, crew };
+  }
   return {
     ...base,
+    crew,
     flyOut: d.flyOut,
     start: addDays(d.flyOut, 1),
     end: addDays(d.flyHome, -1),
@@ -10682,7 +10689,7 @@ function FoldSection({ title, meta, tone = T.accent, children, boxRef, right }) 
   );
 }
 
-function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, onAdhoc, cardsOnly, compact }) {
+function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, cardsOnly, compact }) {
   const [rosterShown, setRosterShown] = useState(false);
   const { shiftAnalysis: heldShift } = usePortal();
   const { quals: QUALS, swingDates, setSwingDates, log, certDates, swingBoard, swingBoards } = usePortal();
@@ -10928,7 +10935,6 @@ function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, on
           </span>
           <span style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {(given || half || bust) && <Button variant="quiet" onClick={() => usePattern(k)}>Use the pattern</Button>}
-            {onAdhoc && <Button variant="solid" onClick={() => { setAt(k); onAdhoc(k); }}>Adhoc changes</Button>}
             <Button variant={on ? "ghost" : "quiet"} onClick={() => setAt(k)}>
               {on ? "Shown below" : "Show below"}
             </Button>
@@ -12555,11 +12561,157 @@ function RosterListPage() {
    the same six swings the compliance cards do — the live board for the swing
    on now, a coming swing's own board for any other, so ad hoc changes land on
    that swing only. */
+/* The swing cards, filled in from the roster when somebody asks for it.
+ *
+ * Nothing here happens by itself. The roster is the office's working document
+ * and moves all day; the allocations are what the compliance checks are read
+ * against, so they follow the roster only when management says so, and say so
+ * knowing it will overwrite what is there.
+ */
+function GenerateAllocations({ people, log }) {
+  const { rosterPlan, swingDates, setSwingDates, swingBoards, setSwingBoards,
+    quals: QUALS, admin } = usePortal();
+  const [asking, setAsking] = useState(false);
+  const [work, setWork] = useState(null);
+  const names = useMemo(() => QUALS.rows.map((r) => r[0]), [QUALS]);
+
+  const spine = (rosterPlan && rosterPlan.spine) || [];
+  const ready = admin && spine.length > 0;
+
+  const run = async () => {
+    setAsking(false);
+    const rows = (rosterPlan && rosterPlan.rows) || [];
+    const k0 = currentSwingIndex();
+    const ks = Array.from({ length: SWING_LOOKAHEAD + 1 }, (_, i) => k0 + i);
+
+    /* The roster names a person the way the office writes them; the crew list
+       names them its own way. Both are matched against the crew matrix, which
+       is the one list they are both trying to be, and anybody the matrix
+       cannot place is reported rather than guessed at. */
+    const byMatrix = new Map();
+    people.forEach((p) => { const m = matchRoster(p.name, names); if (m) byMatrix.set(m, p); });
+    const personFor = (who) => { const m = matchRoster(who, names); return m ? byMatrix.get(m) || null : null; };
+
+    const dates = { ...(swingDates || {}) };
+    const boards = { ...(swingBoards || {}) };
+    const strangers = new Set();
+    let placed = 0, matchedSwings = 0;
+
+    for (let i = 0; i < ks.length; i++) {
+      const k = ks[i];
+      setWork({ pct: Math.round((i / (ks.length + 1)) * 100), note: "Swing " + (i + 1) + " of " + ks.length });
+      await new Promise((r) => setTimeout(r, 90));
+
+      // The roster swing sharing the most days with this one.
+      const base = swingAt(k);
+      let best = null;
+      for (const sp of spine) {
+        const from = sp.on > base.flyOut ? sp.on : base.flyOut;
+        const to = sp.off < base.flyHome ? sp.off : base.flyHome;
+        if (to <= from) continue;
+        const shared = daysBetween(from, to);
+        if (!best || shared > best.shared) best = { sp, shared };
+      }
+      if (!best) continue;
+      const sp = best.sp;
+      matchedSwings++;
+
+      const letter = /ALPHA/i.test(sp.crew || "") ? "A" : /BRAVO/i.test(sp.crew || "") ? "B" : null;
+      dates[k] = { flyOut: sp.on, flyHome: sp.off, ...(letter ? { crew: letter } : {}) };
+
+      const side = {}, windows = {};
+      const aboard = new Set();
+      for (const r of rows) {
+        if (!(r.on < sp.off && r.off > sp.on)) continue;
+        const who = personFor(r.name);
+        if (!who) { strangers.add(r.name); continue; }
+        side[who.id] = "on";
+        aboard.add(who.id);
+        // On for part of the swing only - joined late, home early, filling in.
+        if (r.on > sp.on || r.off < sp.off) windows[who.id] = { from: r.on, to: r.off };
+        placed++;
+      }
+      people.forEach((p) => { if (p.active && !aboard.has(p.id)) side[p.id] = "off"; });
+      boards[k] = { ...(boards[k] || {}), side, window: windows, shift: (boards[k] || {}).shift || {} };
+    }
+
+    setWork({ pct: 100, note: "Saving" });
+    await new Promise((r) => setTimeout(r, 140));
+    setSwingDates(dates);
+    setSwingBoards(boards);
+    log("Swing Allocation", "Allocations generated from the roster",
+      matchedSwings + " swings · " + placed + " placements"
+      + (strangers.size ? " · " + strangers.size + " not on the crew list" : ""));
+    setWork({ done: true, pct: 100, swings: matchedSwings, placed, strangers: [...strangers] });
+  };
+
+  if (!admin) return null;
+  const panel = {
+    position: "fixed", left: "50%", top: 120, transform: "translateX(-50%)", zIndex: 90,
+    background: T.panel, border: "1px solid " + T.rule, borderTop: "4px solid " + T.accent,
+    borderRadius: 3, padding: "16px 20px", boxShadow: "0 6px 24px rgba(18,41,61,0.25)",
+    width: "min(560px, 94vw)",
+  };
+
+  return (
+    <>
+      <Button disabled={!ready || !!work} onClick={() => setAsking(true)}>
+        {work && !work.done ? "Working…" : "Generate latest allocations"}
+      </Button>
+
+      {asking && (
+        <div style={panel}>
+          <div style={{ fontFamily: T.display, fontSize: 15, fontWeight: 700, color: T.bRed, marginBottom: 8 }}>
+            Warning
+          </div>
+          <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.text, marginBottom: 14, lineHeight: 1.6 }}>
+            This will possibly alter swing allocations. Do you want to proceed?
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button variant="solid" onClick={run}>Yes</Button>
+            <Button variant="quiet" onClick={() => setAsking(false)}>No</Button>
+          </div>
+        </div>
+      )}
+
+      {work && (
+        <div style={panel}>
+          <div style={{ fontFamily: T.display, fontSize: 15, fontWeight: 700, color: T.text, marginBottom: 10 }}>
+            {work.done ? "Allocations generated" : "Generating allocations"}
+          </div>
+          {!work.done && (
+            <>
+              <div style={{ fontFamily: T.mono, fontSize: 26, color: T.accent, marginBottom: 6 }}>
+                {work.pct}%
+              </div>
+              <div style={{ height: 6, background: T.raised, borderRadius: 3, overflow: "hidden", marginBottom: 10 }}>
+                <div style={{ width: work.pct + "%", height: "100%", background: T.accent, transition: "width .2s" }} />
+              </div>
+              <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted }}>{work.note}</div>
+            </>
+          )}
+          {work.done && (
+            <>
+              <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.text, lineHeight: 1.7, marginBottom: 12 }}>
+                {work.swings} swing{work.swings === 1 ? "" : "s"} taken from the roster,
+                {" "}{work.placed} place{work.placed === 1 ? "" : "s"} filled.
+                {work.strangers.length > 0 && (
+                  <> Not on the crew list, so left out: {work.strangers.join(", ")}.</>
+                )}
+              </div>
+              <Button onClick={() => setWork(null)}>Close</Button>
+            </>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 function RosterPage({ currentUser, people, setPeople, overrides, swingBoard, setSwingBoard, log }) {
   const { swingArchive } = usePortal();
   const k0 = currentSwingIndex();
   const [at, setAt] = useState(k0);
-  const [swingOpen, setSwingOpen] = useState(false);
   const [archived, setArchived] = useState(null);
   const boardRef = useRef(null);
   // Swings gone by, newest first — the record of each as it stood when it
@@ -12567,10 +12719,12 @@ function RosterPage({ currentUser, people, setPeople, overrides, swingBoard, set
   const past = Object.values(swingArchive || {}).filter((a) => a && a.k < k0).sort((a, b) => b.k - a.k);
   return (
     <>
-      <SectionHead title="Swing Allocation" />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+        <SectionHead title="Swing Allocation" />
+        <GenerateAllocations people={people} log={log} />
+      </div>
       <SwingCompliance cardsOnly people={people} overrides={overrides} at={at} setAt={setAt}
-        onOpenSwing={() => { if (boardRef.current) boardRef.current.scrollIntoView({ behavior: "smooth", block: "start" }); }}
-        onAdhoc={() => setSwingOpen(true)} />
+        onOpenSwing={() => { if (boardRef.current) boardRef.current.scrollIntoView({ behavior: "smooth", block: "start" }); }} />
       {past.length > 0 && (
         <div style={{ marginBottom: 18 }}>
           <div style={{ marginBottom: 8 }}>
@@ -12591,10 +12745,6 @@ function RosterPage({ currentUser, people, setPeople, overrides, swingBoard, set
           viewSwing={at} overrides={overrides}
           onShowNow={() => setAt(k0)} />
       </div>
-      {swingOpen && (
-        <SwingDayGrid k={at} people={people} board={swingBoard} setBoard={setSwingBoard}
-          overrides={overrides} log={log} onClose={() => setSwingOpen(false)} />
-      )}
       {archived && (
         <SwingDayGrid snapshot={archived} people={people} onClose={() => setArchived(null)} />
       )}
