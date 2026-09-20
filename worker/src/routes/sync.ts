@@ -81,11 +81,11 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
   // is left alone rather than taken on twice.
   await tick(20, "Walking the OPMS person folders");
   const opmsListing = await store.list({ prefix: "opms/" });
-  const rowsByToken = new Map<string, { name: string; size: number }[]>();
+  const rowsByToken = new Map<string, { id: string; key: string; name: string; size: number }[]>();
   rows.forEach((r) => {
     if (r.removedAt) return;
     const list = rowsByToken.get(r.folder || "") || [];
-    list.push({ name: (r.filename || "").toLowerCase(), size: r.sizeBytes ?? -1 });
+    list.push({ id: r.id, key: r.blobKey, name: (r.filename || "").toLowerCase(), size: r.sizeBytes ?? -1 });
     rowsByToken.set(r.folder || "", list);
   });
   /* Whose folders the office keeps, whether or not anything in them is new.
@@ -98,14 +98,30 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
     if (who) folks.set(tokenForOpmsFolder(who[1]), personForOpmsFolder(who[1]));
   }
 
+  /* A certificate that has moved rather than arrived.
+   *
+   * The office renaming a folder, or clearing the library and putting
+   * everything back, gives the same file a new address. On name and size
+   * against the same person it is the same certificate, so it is not taken on
+   * twice - but the books have to be re-pointed at where it actually is, or
+   * the record goes on naming a file that is no longer there and the scan
+   * stops opening. */
+  const moved: { id: string; from: string; to: string }[] = [];
+
   for (const f of opmsListing.blobs) {
     if (known.has(f.key)) continue;
     const m = /^opms\/([^/]+ - OPMS)\//i.exec(f.key);
     if (!m) continue;
     const token = tokenForOpmsFolder(m[1]);
     const name = safeName(f.key.split("/").pop() || "").toLowerCase();
-    const twin = (rowsByToken.get(token) || []).some((r) => r.name === name && r.size === (f.size ?? -2));
-    if (twin) continue;
+    const twin = (rowsByToken.get(token) || [])
+      .find((r) => r.name === name && r.size === (f.size ?? -2));
+    if (twin) {
+      if (twin.key !== f.key && !moved.some((x) => x.id === twin.id)) {
+        moved.push({ id: twin.id, from: twin.key, to: f.key });
+      }
+      continue;
+    }
     newCertificates.push({ key: f.key, folder: token, person: personForOpmsFolder(m[1]), size: f.size });
   }
 
@@ -150,13 +166,14 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
   for (const def of Object.values(SINGLE_FILE_CATEGORIES)) {
     (await store.list({ prefix: def.folder + "/" })).blobs.forEach((f) => seen.add(f.key));
   }
+  const followed = new Set(moved.map((m) => m.from));
   const missing = rows
     .filter((r) => !r.removedAt && scannedPrefixes.some((p) => r.blobKey.startsWith(p)))
-    .filter((r) => !seen.has(r.blobKey))
+    .filter((r) => !seen.has(r.blobKey) && !followed.has(r.blobKey))
     .map((r) => ({ id: r.id, key: r.blobKey, filename: r.filename, category: r.category }));
 
   const people = [...folks.entries()].map(([folder, name]) => ({ folder, name })).sort((a, b) => a.name.localeCompare(b.name));
-  return { newCertificates, singles, strays, missing, trainingSheet, people };
+  return { newCertificates, singles, strays, missing, moved, trainingSheet, people };
 }
 
 /** What the last applied sync did — shown on the SharePoint page. */
@@ -243,6 +260,16 @@ async function apply(
   tick: (pct: number, word: string) => Promise<void> = async () => {},
 ) {
   const today = todayThere();
+
+  /* Files that turned up under a new address first, before anything is taken
+     on: the office renaming a folder, or clearing the library and putting it
+     all back, moves every file it holds. The record follows the file. Done
+     before the registering so a certificate cannot be filed twice - once at
+     its new address and once still pointing at the old one. */
+  for (const m of result.moved) {
+    await db.update(documents).set({ blobKey: m.to }).where(eq(documents.id, m.id));
+  }
+
   const registered: { id: string; key: string; person: string }[] = [];
   let taken = 0;
   for (const c of result.newCertificates) {
@@ -319,6 +346,8 @@ async function apply(
     adopted: sheetTaken ? [...adopted, { category: "training-matrix", key: sheetTaken.key }] : adopted,
     strays: result.strays,
     missing: result.missing,
+    // Files that turned up somewhere else, with the books now pointing at them.
+    followed: result.moved.length,
     // Whose folders SharePoint keeps. The portal compares this with its own
     // crew list and asks; nobody is added or taken off out here.
     people: result.people,
