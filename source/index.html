@@ -3779,7 +3779,9 @@ const MX_COL_W = 64;
 
 function TrainingMatrix() {
   const { quals: QUALS, setQuals, log, matrixUpdated, certSheet, certificates, certDates,
-    skillsRequirements, setSkillsRequirements, validityMatrix } = usePortal();
+    skillsRequirements, setSkillsRequirements, validityMatrix, removeCrew, admin, rosterPlan } = usePortal();
+  // Taking a crew member off, asked for here and answered here.
+  const [leaving, setLeaving] = useState(null);
 
   // The requirements come off the skills matrix workbook. Read here once when
   // nothing is held yet, so the page doesn't wait on an update run.
@@ -3969,6 +3971,51 @@ function TrainingMatrix() {
   return (
     <div>
       <SectionHead title="Crew Matrix" />
+
+      {admin && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 13, alignItems: "center" }}>
+          <Field label="Take a crew member off the portal">
+            <select className="um-in" value={leaving ? leaving.name : ""}
+              onChange={(e) => setLeaving(e.target.value ? { name: e.target.value } : null)}>
+              <option value="">Choose…</option>
+              {QUALS.rows.map((r) => (
+                <option key={r[0]} value={r[0]}>{r[0]}{r[1] ? " — " + r[1] : ""}</option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      )}
+
+      {admin && leaving && (() => {
+        const held = (certificates || []).filter((c) =>
+          String(c.person || "").toUpperCase().replace(/[^A-Z]/g, "")
+          === leaving.name.toUpperCase().replace(/[^A-Z]/g, "")).length;
+        const swings = ((rosterPlan && rosterPlan.rows) || []).filter((r) =>
+          String(r.name || "").toUpperCase().replace(/[^A-Z]/g, "")
+          === leaving.name.toUpperCase().replace(/[^A-Z]/g, "")).length;
+        return (
+          <div style={{ position: "fixed", left: "50%", top: 110, transform: "translateX(-50%)", zIndex: 90,
+            background: T.panel, border: "1px solid " + T.rule, borderTop: "4px solid " + T.bRed,
+            borderRadius: 3, padding: "16px 20px", boxShadow: "0 6px 24px rgba(18,41,61,0.25)",
+            width: "min(620px, 94vw)" }}>
+            <div style={{ fontFamily: T.display, fontSize: 15, fontWeight: 700, color: T.bRed, marginBottom: 8 }}>
+              Take {leaving.name} off the portal?
+            </div>
+            <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.text, lineHeight: 1.7, marginBottom: 14 }}>
+              They come off the crew matrix{swings ? ", off " + swings + " swing" + (swings === 1 ? "" : "s") + " on the roster" : ""},
+              off the crew list the swing board is built from, and their one-off swing changes and renewal notes go with them.
+              {held > 0 && <> Their {held} certificate{held === 1 ? "" : "s"} {held === 1 ? "is" : "are"} archived, not destroyed — the Admin tab can fetch {held === 1 ? "it" : "them"} back.</>}
+              {swings > 0 && <> Press Save roster on the Roster tab afterwards to write the swings back to the spreadsheet.</>}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Button variant="solid" onClick={() => { removeCrew(leaving.name); setLeaving(null); }}>
+                Yes, take them off
+              </Button>
+              <Button variant="quiet" onClick={() => setLeaving(null)}>No</Button>
+            </div>
+          </div>
+        );
+      })()}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 13 }}>
         {chip("expired or within " + RED_DAYS + " days", T.bRed, tally.red, "red")}
@@ -18380,7 +18427,102 @@ function CoolibahPortal({ role, onSignOut }) {
 
   useFitToWidth();
 
-  const ctx = { role, admin, session: SESSION, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
+  /* Taking a crew member off the portal, everywhere at once.
+   *
+   * A person is written down in more places than anyone holds in their head:
+   * the crew matrix, the roster's swings, the crew list the swing board is
+   * built from, the one-off changes against their name, the renewal notes,
+   * and their certificates. Left to be done by hand, some of it is always
+   * missed, and the portal goes on half-believing in somebody who has gone.
+   *
+   * Their certificates are archived rather than destroyed - the same removal
+   * the Admin tab can undo - because a person leaving is not a reason to burn
+   * the evidence they were ever qualified.
+   *
+   * Whoever calls this has already asked. It does not ask again. */
+  const removeCrew = (name) => {
+    const want = String(name || "").trim();
+    if (!want) return { ok: false };
+    const same = (n) => String(n || "").toUpperCase().replace(/[^A-Z]/g, "")
+      === want.toUpperCase().replace(/[^A-Z]/g, "");
+
+    const gone = { matrix: 0, swings: 0, crewList: 0, certificates: 0 };
+
+    // The crew matrix.
+    setQuals((q) => {
+      const rows = (q.rows || []).filter((r) => !same(r[0]));
+      gone.matrix = (q.rows || []).length - rows.length;
+      return { ...q, rows };
+    });
+
+    // The roster's swings.
+    setRosterPlan((plan) => {
+      if (!plan) return plan;
+      const rows = (plan.rows || []).filter((r) => !same(r.name));
+      gone.swings = (plan.rows || []).length - rows.length;
+      if (!gone.swings) return plan;
+      return { ...plan, rows, edited: true, updatedAt: todayISO() };
+    });
+
+    /* The crew list, and everything keyed to the person it holds. Written
+       through the portal's own setters rather than straight into the store,
+       because those are what mark a slice as changed - written straight in,
+       the person would go from the screen and be back on the next load. */
+    const leaving = (people || []).filter((p) => same(p.name));
+    if (leaving.length) {
+      gone.crewList = leaving.length;
+      const ids = new Set(leaving.map((p) => p.id));
+      setPeople((list) => (list || []).filter((p) => !ids.has(p.id)));
+      setOverrides((held) => {
+        const next = { ...(held || {}) };
+        Object.keys(next).forEach((k) => { if (ids.has(String(k).split(":")[0])) delete next[k]; });
+        return next;
+      });
+      setSwingBoards((held) => {
+        const next = {};
+        Object.entries(held || {}).forEach(([k, board]) => {
+          const side = { ...(board.side || {}) };
+          const shift = { ...(board.shift || {}) };
+          const window = { ...(board.window || {}) };
+          ids.forEach((id) => { delete side[id]; delete shift[id]; delete window[id]; });
+          next[k] = { ...board, side, shift, window };
+        });
+        return next;
+      });
+      setSwingBoard((board) => {
+        const side = { ...((board || {}).side || {}) };
+        const shift = { ...((board || {}).shift || {}) };
+        const window = { ...((board || {}).window || {}) };
+        ids.forEach((id) => { delete side[id]; delete shift[id]; delete window[id]; });
+        return { ...(board || {}), side, shift, window };
+      });
+    }
+
+    // The notes kept against their name.
+    const strip = (held) => {
+      const next = { ...(held || {}) };
+      Object.keys(next).forEach((k) => { if (same(k.split("::")[0]) || same(k.split("|")[0])) delete next[k]; });
+      return next;
+    };
+    setRenewalMarks(strip(renewalMarks));
+    setOpmsMarks(strip(opmsMarks));
+
+    // Their certificates, archived where they can be fetched back.
+    const theirs = (certificates || []).filter((c) => same(c.person));
+    gone.certificates = theirs.length;
+    theirs.forEach((c) => deleteStoredFile(c, currentUser));
+    setStore((st) => ({ ...st, certificates: (st.certificates || []).filter((c) => !same(c.person)) }));
+
+    log("Admin", want + " taken off the portal",
+      [gone.matrix ? "matrix row" : null,
+        gone.swings ? gone.swings + " swing entries" : null,
+        gone.crewList ? "crew list" : null,
+        gone.certificates ? gone.certificates + " certificates archived" : null]
+        .filter(Boolean).join(" · ") || "nothing was held against the name");
+    return { ok: true, gone };
+  };
+
+  const ctx = { role, admin, session: SESSION, removeCrew, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
 
   return (
     <Ctx.Provider value={ctx}>
