@@ -12288,13 +12288,37 @@ function RosterListPage() {
     };
   }, [QUALS]);
 
+  /* Reading the spreadsheet again takes the office's word for everything it
+     has to say - but a hand put on here that the spreadsheet has never heard
+     of is not something it has anything to say about, and used to be lost.
+     Those stay. They are only gone when somebody takes them off, which is
+     what Remove from the roster is for.
+
+     A hand the spreadsheet does know is left to the spreadsheet: it is the
+     office's document, and on those it has the last word. Saving the roster
+     writes everyone into it, so after a save there is nothing left to carry. */
   const load = async (why) => {
     if (!crewRoster || !crewRoster.url || busy) return;
     setBusy(true); setErr("");
     try {
       const plan = await readCrewRoster(crewRoster);
+      const held = (rosterPlan && rosterPlan.rows) || [];
+      const inSheet = new Set(plan.rows.map((r) => r.name));
+      const ours = held.filter((r) => r.source === "portal" && !inSheet.has(r.name));
+      if (ours.length) {
+        plan.rows = [...plan.rows, ...ours];
+        plan.rows.forEach((r, i) => { if (!r.id) r.id = "r" + (i + 1); });
+        plan.spine = plan.spine || [];
+        plan.edited = true;
+        plan.updatedAt = todayISO();
+      }
       setRosterPlan(plan);
-      if (why === "pressed") log("Roster", "Roster loaded from the spreadsheet", crewRoster.filename + " · " + plan.rows.length + " swing entries");
+      const kept = new Set(ours.map((r) => r.name));
+      if (why === "pressed") {
+        log("Roster", "Roster loaded from the spreadsheet",
+          crewRoster.filename + " · " + plan.rows.length + " swing entries"
+          + (kept.size ? " · kept " + [...kept].join(", ") + ", added here" : ""));
+      }
     } catch (e) {
       setErr(e.message || String(e));
     }
@@ -12340,7 +12364,7 @@ function RosterListPage() {
     const s = ((rosterPlan && rosterPlan.spine) || []).find((x) => x.on <= on && on < x.off) || null;
     change((plan) => {
       plan.rows = [...plan.rows, {
-        id: "r" + Date.now(),
+        id: "r" + Date.now(), source: "portal",
         crew: (s && s.crew) || p.crew || "", rank: p.rank, name: p.name,
         on, off, days: daysBetween(on, off), note: "", swing: s ? swingKeyOf(s) : null,
       }];
@@ -12434,7 +12458,7 @@ function RosterListPage() {
   const addNamed = (t) => {
     change((p) => {
       p.rows = [...p.rows, {
-        id: "r" + Date.now(),
+        id: "r" + Date.now(), source: "portal",
         crew: t.crew, rank: t.rank, name: t.name,
         on: t.on, off: t.off, days: daysBetween(t.on, t.off), note: "", swing: t.key,
       }];
@@ -12479,7 +12503,7 @@ function RosterListPage() {
           {admin && crewRoster && (confirmLoad ? (
             <>
               <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.bRed }}>
-                Replace the roster and every change made here with the spreadsheet?
+                Replace the roster with the spreadsheet? Crew added here are kept; other changes are not.
               </span>
               <Button onClick={() => { setConfirmLoad(false); load("pressed"); }}>Replace it</Button>
               <Button variant="quiet" onClick={() => setConfirmLoad(false)}>Keep as is</Button>
