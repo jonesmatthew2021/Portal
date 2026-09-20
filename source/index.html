@@ -13003,10 +13003,10 @@ function SyncPeople({ found, onClose }) {
   const { admin, quals: QUALS, rosterPlan, removeCrew, writeCrewToWorkbooks,
     folderNames, setFolderNames, setQuals, setRosterPlan, log } = usePortal();
   const [gone, setGone] = useState("");
-  const [joining, setJoining] = useState(null);
-  const [named, setNamed] = useState("");
-  const [rank, setRank] = useState("");
-  const [swingKey, setSwingKey] = useState("");
+  // What the portal proposes for each folder it does not know, as it stands
+  // on the screen: filled in first, edited where it is wrong, confirmed in one
+  // press. Forty people typed in one at a time is how a job gets left undone.
+  const [draft, setDraft] = useState({});
   const [done, setDone] = useState([]);
   const [filed, setFiled] = useState([]);
 
@@ -13025,6 +13025,8 @@ function SyncPeople({ found, onClose }) {
     const held = new Set(words(a));
     return words(b).filter((w) => held.has(w)).length;
   };
+  const sameName = (a, b) =>
+    String(a || "").toUpperCase().replace(/[^A-Z]/g, "") === String(b || "").toUpperCase().replace(/[^A-Z]/g, "");
 
   const onPortal = QUALS.rows.map((r) => r[0]);
 
@@ -13088,19 +13090,60 @@ function SyncPeople({ found, onClose }) {
   const strangers = (found || []).filter((p) => !pairing.has(p.folder) && !done.includes(p.folder));
 
   const spine = (rosterPlan && rosterPlan.spine) || [];
-  const swing = spine.find((sp) => swingKeyOf(sp) === swingKey) || null;
+
+  /* The rank the portal can work out for itself.
+   *
+   * The roster is the one place that already says what somebody is: it carries
+   * a rank against every name on it. The roster keeps a short list in capitals
+   * and the matrix keeps the office's certificate titles, so the two are matched
+   * through the same rule the roster page uses to go the other way.
+   *
+   * Where the roster has never heard of them, nothing is proposed. A rank
+   * guessed off a certificate would be wrong often enough to matter - half the
+   * GPHs on this vessel hold a master's ticket of one size or another - and a
+   * wrong rank quietly changes what the matrix asks of somebody. */
+  const rosterRank = (name) => {
+    const rows = (rosterPlan && rosterPlan.rows) || [];
+    const hit = rows.find((r) => sameName(r.name, name));
+    if (!hit || !hit.rank) return "";
+    const want = String(hit.rank).toUpperCase();
+    return allPositions.find((p) => rosterRankFor(p) === want) || "";
+  };
+  const rosterSwing = (name) => {
+    const rows = (rosterPlan && rosterPlan.rows) || [];
+    const hit = rows.find((r) => sameName(r.name, name));
+    if (hit && hit.swing) return hit.swing;
+    const today = todayISO();
+    const here = spine.find((sp) => sp.on <= today && today < sp.off) || spine[0];
+    return here ? swingKeyOf(here) : "";
+  };
+
+  const proposed = (p) => {
+    const name = canonicalName(p.name);
+    return { name, rank: rosterRank(name), swing: rosterSwing(name) };
+  };
+  const entry = (p) => draft[p.folder] || proposed(p);
+  /* Seeded from what was proposed the first time a box is touched. Merging into
+     an empty draft instead threw away the name and the swing the moment a rank
+     was picked, and the row went quietly dead - the boxes still read right,
+     because a React input handed undefined keeps whatever the browser has, and
+     nothing happened when the button was pressed. */
+  const setEntry = (p, change) =>
+    setDraft((d) => ({ ...d, [p.folder]: { ...(d[p.folder] || proposed(p)), ...change } }));
 
   /* Somebody the office holds and the portal does not: a row on the crew
      matrix, and a place on a swing when the roster is loaded and one is
      chosen. Their certificates come across on the sync itself. */
-  const takeOn = () => {
-    const name = named.trim();
-    const position = rank.trim();
+  const takeOn = (p) => {
+    const row = entry(p);
+    const name = String(row.name || "").trim();
+    const position = String(row.rank || "").trim();
+    const swing = spine.find((sp) => swingKeyOf(sp) === row.swing) || null;
     if (!name || !position) return;
 
-    const row = [name, position, "", (QUALS.cols || []).map(() => "")];
-    const rows = [...(QUALS.rows || []), row];
-    setQuals((q) => ({ ...q, rows: [...(q.rows || []), row] }));
+    const matrixRow = [name, position, "", (QUALS.cols || []).map(() => "")];
+    const rows = [...(QUALS.rows || []), matrixRow];
+    setQuals((q) => ({ ...q, rows: [...(q.rows || []), matrixRow] }));
 
     let plannedAfter = rosterPlan;
     if (swing) {
@@ -13121,13 +13164,13 @@ function SyncPeople({ found, onClose }) {
     }
 
     // The folder they came out of is theirs from now on, whatever it is called.
-    setFolderNames({ ...(folderNames || {}), [joining.folder]: name });
+    setFolderNames({ ...(folderNames || {}), [p.folder]: name });
 
     log("SharePoint", name + " taken onto the portal",
       position + (swing ? " · " + fmtDate(swing.on) + " – " + fmtDate(swing.off) : " · no swing yet"));
 
     // The office's spreadsheets follow, and what they managed is said here.
-    const folder = joining.folder;
+    const folder = p.folder;
     setFiled((f) => [...f, { folder, name, word: "Putting them on the spreadsheets…" }]);
     // The roster workbook is only rewritten where a swing was actually chosen;
     // rewriting it to say exactly what it already said is a upload for nothing.
@@ -13137,7 +13180,6 @@ function SyncPeople({ found, onClose }) {
       .catch((e) => setFiled((f) => f.map((x) => x.folder === folder
         ? { ...x, ok: false, word: String((e && e.message) || e) } : x)));
     setDone((d) => [...d, folder]);
-    setJoining(null);
   };
 
   const takeOff = (name) => {
@@ -13199,63 +13241,34 @@ function SyncPeople({ found, onClose }) {
             <div style={{ fontFamily: T.display, fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 4 }}>
               In SharePoint, not on the portal
             </div>
-            {strangers.map((p) => (
-              <div key={p.folder} style={{ padding: "9px 0", borderTop: "1px solid " + T.rule }}>
-                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                  <span style={{ fontFamily: T.body, fontSize: 13.5, fontWeight: 600, color: T.text, flex: 1 }}>
-                    {p.name}
-                  </span>
-                  {/* The office's folder for somebody already on the portal.
-                      Said once, and the portal knows it from then on. */}
-                  {!(joining && joining.folder === p.folder) && (
-                    <select className="um-in" style={{ maxWidth: 210 }} value=""
-                      onChange={(e) => {
-                        if (!e.target.value) return;
-                        setFolderNames({ ...(folderNames || {}), [p.folder]: e.target.value });
-                        log("SharePoint", "The folder " + p.name + " is " + e.target.value,
-                          "paired once, and remembered");
-                      }}>
-                      <option value="">Already on the portal as…</option>
-                      {/* Everybody, not just whoever is still unspoken for: a
-                          pairing put on the wrong person has to be movable, and
-                          picking somebody who already has a folder simply hands
-                          them this one and puts the other folder back in the
-                          list, where it can be seen and answered. */}
-                      {onPortal.map((n) => (
-                        <option key={n} value={n}>{n}{spokenFor.has(n) ? " — already paired" : ""}</option>
-                      ))}
-                    </select>
-                  )}
-                  {!(joining && joining.folder === p.folder) && (
-                    <Button variant="quiet"
-                      onClick={() => {
-                        setJoining(p); setNamed(canonicalName(p.name)); setRank("");
-                        setSwingKey(spine.length ? swingKeyOf(spine[0]) : "");
-                      }}>
-                      Take onto the portal
-                    </Button>
-                  )}
-                </div>
-                {joining && joining.folder === p.folder && (
-                  <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginTop: 8 }}>
-                    {/* A folder is named however whoever made it typed it, so which
-                        part is the surname is a guess. It is put up to be corrected. */}
-                    <div style={{ flex: "1 1 200px" }}>
-                      <Field label="Name, as the matrix should read it">
-                        <input className="um-in" value={named} onChange={(e) => setNamed(e.target.value)} />
+            {/* Every folder the portal does not know, on the screen at once with
+                what it proposes already in the boxes. Forty people asked about
+                one at a time, each behind a button, is a job nobody finishes. */}
+            {strangers.map((p) => {
+              const row = entry(p);
+              const surnameKnown = String(row.name || "").includes(",");
+              return (
+                <div key={p.folder} style={{ padding: "10px 0", borderTop: "1px solid " + T.rule }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                    <div style={{ flex: "1 1 210px" }}>
+                      <Field label={"Name · folder " + p.folder}>
+                        <input className="um-in" value={row.name}
+                          onChange={(e) => setEntry(p, { name: e.target.value })} />
                       </Field>
                     </div>
-                    <div style={{ flex: "1 1 200px" }}>
+                    <div style={{ flex: "1 1 190px" }}>
                       <Field label="Rank, as the matrix words it">
-                        <select className="um-in" value={rank} onChange={(e) => setRank(e.target.value)}>
+                        <select className="um-in" value={row.rank}
+                          onChange={(e) => setEntry(p, { rank: e.target.value })}>
                           <option value="">Choose…</option>
-                          {allPositions.map((p) => <option key={p} value={p}>{p}</option>)}
+                          {allPositions.map((x) => <option key={x} value={x}>{x}</option>)}
                         </select>
                       </Field>
                     </div>
-                    <div style={{ flex: "1 1 220px" }}>
+                    <div style={{ flex: "1 1 200px" }}>
                       <Field label="Swing">
-                        <select className="um-in" value={swingKey} onChange={(e) => setSwingKey(e.target.value)}>
+                        <select className="um-in" value={row.swing}
+                          onChange={(e) => setEntry(p, { swing: e.target.value })}>
                           <option value="">No swing yet</option>
                           {spine.map((sp) => (
                             <option key={swingKeyOf(sp)} value={swingKeyOf(sp)}>
@@ -13265,14 +13278,54 @@ function SyncPeople({ found, onClose }) {
                         </select>
                       </Field>
                     </div>
-                    <Button variant="ghost" disabled={!named.trim() || !rank.trim()} onClick={takeOn}>
-                      Take them on
+                    <Button variant="ghost" disabled={!String(row.name || "").trim() || !String(row.rank || "").trim()}
+                      onClick={() => takeOn(p)}>
+                      Take on
                     </Button>
-                    <Button variant="quiet" onClick={() => setJoining(null)}>Cancel</Button>
                   </div>
-                )}
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
+                    {/* The office's folder for somebody already on the portal.
+                        Said once, and the portal knows it from then on. */}
+                    <select className="um-in" style={{ maxWidth: 230, fontSize: 11 }} value=""
+                      onChange={(e) => {
+                        if (!e.target.value) return;
+                        setFolderNames({ ...(folderNames || {}), [p.folder]: e.target.value });
+                        log("SharePoint", "The folder " + p.name + " is " + e.target.value,
+                          "paired once, and remembered");
+                      }}>
+                      <option value="">…or they are already on the portal as</option>
+                      {onPortal.map((n) => (
+                        <option key={n} value={n}>{n}{spokenFor.has(n) ? " — already paired" : ""}</option>
+                      ))}
+                    </select>
+                    {!surnameKnown && (
+                      <span style={{ fontFamily: T.body, fontSize: 12, color: T.bOrange }}>
+                        The folder gives one word, so the portal doesn't know the surname — write the full name in.
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* The whole list at once, once the boxes read right. */}
+            {strangers.length > 1 && (
+              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
+                marginTop: 12, paddingTop: 10, borderTop: "1px solid " + T.rule }}>
+                <Button variant="solid"
+                  disabled={!strangers.some((p) => String(entry(p).name || "").trim() && String(entry(p).rank || "").trim())}
+                  onClick={() => strangers.forEach((p) => {
+                    const row = entry(p);
+                    if (String(row.name || "").trim() && String(row.rank || "").trim()) takeOn(p);
+                  })}>
+                  Take on everyone above
+                </Button>
+                <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted }}>
+                  {strangers.filter((p) => String(entry(p).rank || "").trim()).length} of {strangers.length} have a rank
+                  {strangers.some((p) => !String(entry(p).rank || "").trim()) && " — the rest are left until one is picked"}
+                </span>
               </div>
-            ))}
+            )}
           </div>
         )}
 
