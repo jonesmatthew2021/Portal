@@ -103,11 +103,11 @@ SHAREPOINT_LIBRARY = "Documents"
 SHAREPOINT_ROOT = "United Operations Team/Crew Portal"
 SHAREPOINT_MAP = """
 {
-  "certification/spreadsheet/": "United Operations Team/OPMS Documents/Crew Certificates Spreadsheet/",
+  "certification/spreadsheet/": "United Operations Team/Crew Portal/Crew Certificates Spreadsheet/",
   "certification/": "United Operations Team/Crew Certificate Verifications/",
-  "matrices/": "United Operations Team/Matrix/",
+  "matrices/": "United Operations Team/Crew Portal/Matrix/",
   "opms/": "United Operations Team/OPMS Documents/",
-  "roster/": "United Operations Team/Crew Roster/",
+  "roster/": "United Operations Team/Crew Portal/Crew Roster/",
   "notes/": "United Operations Team/Handover Notes/"
 }
 """

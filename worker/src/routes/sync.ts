@@ -170,7 +170,7 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
   const missing = rows
     .filter((r) => !r.removedAt && scannedPrefixes.some((p) => r.blobKey.startsWith(p)))
     .filter((r) => !seen.has(r.blobKey) && !followed.has(r.blobKey))
-    .map((r) => ({ id: r.id, key: r.blobKey, filename: r.filename, category: r.category }));
+    .map((r) => ({ id: r.id, key: r.blobKey, filename: r.filename, category: r.category, checksum: r.checksum }));
 
   const people = [...folks.entries()].map(([folder, name]) => ({ folder, name })).sort((a, b) => a.name.localeCompare(b.name));
   return { newCertificates, singles, strays, missing, moved, trainingSheet, people };
@@ -270,6 +270,45 @@ async function apply(
     await db.update(documents).set({ blobKey: m.to }).where(eq(documents.id, m.id));
   }
 
+  /* A file deleted in SharePoint comes off the portal's books.
+   *
+   * SharePoint holds the documents; the portal holds an account of them. The
+   * two saying different things is the whole problem - a certificate deleted
+   * from the library went on being listed here, openable from a link that led
+   * nowhere, and a crew member who had been taken off still had their papers
+   * on the screen. Whoever deleted the file meant it to be gone.
+   *
+   * The row is marked removed rather than destroyed, which is what the Admin
+   * tab restores from, so a deletion made by mistake in the library is undone
+   * on the portal in one press. The bytes are not touched: there are none
+   * left to touch.
+   *
+   * The listing having failed is not the same as the files having gone. A
+   * Graph error throws out of the survey long before this, so reaching here
+   * at all means the library answered and the file was genuinely not in it. */
+  let mirrored = 0;
+  if (result.missing.length) {
+    const at = new Date();
+    const readings = getStore({ name: "certificate-readings", consistency: "strong" });
+    for (const m of result.missing) {
+      await db
+        .update(documents)
+        .set({ removedAt: at, removedBy: "SharePoint sync" })
+        .where(eq(documents.id, m.id));
+      /* And what the portal read off the file goes with it. The reading holds
+         the expiry, the issuer and the name printed on the certificate - it is
+         not the document, but it is out of the document, and a deletion that
+         left it sitting here would be the portal quietly keeping its own copy
+         of what the library had been told to forget. */
+      try {
+        await readings.delete("r1/" + (m.checksum || m.id) + ".json");
+      } catch (e) {
+        // A reading that was never made, or already gone. Nothing to undo.
+      }
+      mirrored++;
+    }
+  }
+
   const registered: { id: string; key: string; person: string }[] = [];
   let taken = 0;
   for (const c of result.newCertificates) {
@@ -348,6 +387,8 @@ async function apply(
     missing: result.missing,
     // Files that turned up somewhere else, with the books now pointing at them.
     followed: result.moved.length,
+    // And files the library no longer holds, now off the books as well.
+    mirrored,
     // Whose folders SharePoint keeps. The portal compares this with its own
     // crew list and asks; nobody is added or taken off out here.
     people: result.people,
