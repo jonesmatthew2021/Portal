@@ -88,6 +88,16 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
     list.push({ name: (r.filename || "").toLowerCase(), size: r.sizeBytes ?? -1 });
     rowsByToken.set(r.folder || "", list);
   });
+  /* Whose folders the office keeps, whether or not anything in them is new.
+     A folder is how SharePoint says a person is on the strength; the portal
+     compares this against its own crew list, and asks about the difference
+     rather than acting on it. */
+  const folks = new Map<string, string>();
+  for (const f of opmsListing.blobs) {
+    const who = /^opms\/([^/]+ - OPMS)\//i.exec(f.key);
+    if (who) folks.set(tokenForOpmsFolder(who[1]), personFrom(tokenForOpmsFolder(who[1])));
+  }
+
   for (const f of opmsListing.blobs) {
     if (known.has(f.key)) continue;
     const m = /^opms\/([^/]+ - OPMS)\//i.exec(f.key);
@@ -145,7 +155,8 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
     .filter((r) => !seen.has(r.blobKey))
     .map((r) => ({ id: r.id, key: r.blobKey, filename: r.filename, category: r.category }));
 
-  return { newCertificates, singles, strays, missing, trainingSheet };
+  const people = [...folks.entries()].map(([folder, name]) => ({ folder, name })).sort((a, b) => a.name.localeCompare(b.name));
+  return { newCertificates, singles, strays, missing, trainingSheet, people };
 }
 
 /** What the last applied sync did — shown on the SharePoint page. */
@@ -308,6 +319,9 @@ async function apply(
     adopted: sheetTaken ? [...adopted, { category: "training-matrix", key: sheetTaken.key }] : adopted,
     strays: result.strays,
     missing: result.missing,
+    // Whose folders SharePoint keeps. The portal compares this with its own
+    // crew list and asks; nobody is added or taken off out here.
+    people: result.people,
     leftAlone: Object.entries(result.singles)
       .filter(([, s]) => s.found.length && !s.adoptable)
       .map(([category, s]) => ({

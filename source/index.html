@@ -8509,7 +8509,7 @@ function recalcOnOpen(xml) {
  * run writes in what the certificates settle without dragging the rest of the
  * matrix over whatever else the workbook says.
  */
-async function updateFiledWorkbook(buf, quals, only = null) {
+async function updateFiledWorkbook(buf, quals, only = null, blank = null) {
   const entries = readZip(buf);
 
   const wbPart = partOf(entries, "xl/workbook.xml");
@@ -8607,7 +8607,7 @@ async function updateFiledWorkbook(buf, quals, only = null) {
 
   const report = {
     sheet: target.name, written: 0, formulas: 0,
-    addedRows: [], skippedRows: [], skippedCols: missingCols,
+    addedRows: [], skippedRows: [], clearedRows: [], skippedCols: missingCols,
   };
 
   // The value a cell should end up holding, in the shape that column uses. A
@@ -8646,6 +8646,31 @@ async function updateFiledWorkbook(buf, quals, only = null) {
       report.written++;
     });
   });
+
+  /* Anyone taken off the portal: their row is emptied - the name, the rank,
+     the SAM number and every date on it - rather than lifted out of the sheet.
+     The same reason rows are only ever added on the end holds here: taking a
+     row out moves every row under it out from under the formulas, the print
+     ranges and the conditional formatting that point at them. The line is left
+     blank where they were, for whoever next opens the workbook to close up. */
+  if (blank && blank.size) {
+    const everyCol = new Set([NAME_COL, POS_COL, SAM_COL]);
+    colForCode.forEach((at) => everyCol.add(at));
+    const order = [...everyCol].sort((a, b) => a - b);
+    blank.forEach((who) => {
+      const row = rowForName.get(String(who).trim().toUpperCase());
+      if (!row) return;
+      let emptied = 0;
+      order.forEach((at) => {
+        const existing = cellAt(row, at);
+        if (!existing || says(existing).trim() === "") return;
+        if (existing.hasFormula) report.formulas++;
+        putCell(row, at, `${letterOf(at)}${row.num}`, existing.s, { kind: "blank" });
+        emptied++;
+      });
+      if (emptied) { report.written += emptied; report.clearedRows.push(who); }
+    });
+  }
 
   // Anyone on the matrix the workbook has never had a row for. A row can only
   // go on the end — putting one in the middle would move every row under it out
@@ -11663,6 +11688,24 @@ const rosterColAt = (i) => {
 const rosterXmlSafe = (v) => String(v == null ? "" : v)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+/* The roster as it stands, written into the office's workbook and filed back
+ * to SharePoint - the same file, replaced, with every other sheet untouched.
+ *
+ * It is here rather than on the Roster page because the Roster page is not the
+ * only thing that changes the roster: taking a crew member off the portal
+ * changes it too, and the workbook has to follow either way.
+ */
+async function fileRosterWorkbook(crewRoster, plan, role) {
+  if (!crewRoster || !crewRoster.url || !plan) return null;
+  const resp = await fetch(crewRoster.url);
+  if (!resp.ok) throw new Error("The roster workbook couldn't be downloaded (" + resp.status + "). Nothing was saved.");
+  const blob = await saveRosterWorkbook(await resp.arrayBuffer(), plan);
+  const file = new File([blob], crewRoster.filename, { type: XLSX_MIME });
+  const up = await uploadSingleDocument(file, "crew-roster",
+    { uploadedBy: role, filedOn: todayISO(), session: SESSION }, "replace");
+  return up.record || null;
+}
+
 async function saveRosterWorkbook(buf, plan) {
   if (!zipCapable()) throw new Error("This browser can't rewrite the workbook. Chrome, Edge, Firefox or Safari can. Nothing was saved.");
   const entries = readZip(buf);
@@ -12785,6 +12828,197 @@ function RosterNewPerson({ names, positions, spine, onRoster, onAdd, onClose }) 
   );
 }
 
+/* Who SharePoint says is on the strength, held against the portal's own crew
+ * list after a sync.
+ *
+ * The office puts a person on and takes a person off by making and deleting a
+ * folder. The portal does not take that as an instruction on its own - a
+ * folder can go missing for reasons that have nothing to do with a person
+ * leaving - so the difference is put to whoever ran the sync, and the answer
+ * is theirs. Nothing here happens on its own.
+ */
+function SyncPeople({ found, onClose }) {
+  const { admin, quals: QUALS, rosterPlan, removeCrew, setQuals, setRosterPlan, log } = usePortal();
+  const [gone, setGone] = useState("");
+  const [joining, setJoining] = useState(null);
+  const [named, setNamed] = useState("");
+  const [rank, setRank] = useState("GPH");
+  const [swingKey, setSwingKey] = useState("");
+  const [done, setDone] = useState([]);
+
+  const words = (t) => String(t || "").toUpperCase().split(/[^A-Z]+/).filter(Boolean);
+  const alike = (a, b) => {
+    const held = new Set(words(a));
+    const shared = words(b).filter((w) => held.has(w)).length;
+    return shared >= 2;
+  };
+
+  const onPortal = QUALS.rows.map((r) => r[0]);
+  const inFolders = (found || []).map((p) => p.name);
+
+  /* On the portal's books, with no folder in SharePoint any more.
+   *
+   * A listing that comes back short - Graph throttling a request, a folder
+   * renamed, the library reorganised - would otherwise read as most of the
+   * crew leaving at once, and the panel would sit there offering to take them
+   * all off. A third of the crew unaccounted for is a listing that went wrong,
+   * not a crew change, so the removals are held back and the reason is said
+   * instead. One or two missing is the thing this is for.
+   */
+  const unmatched = onPortal.filter((n) => !inFolders.some((f) => alike(n, f)));
+  const tooMany = onPortal.length >= 6 && unmatched.length > onPortal.length / 3;
+  const leftBehind = tooMany ? [] : unmatched.filter((n) => !done.includes(n));
+  // A folder in SharePoint, with no row on the portal.
+  const strangers = (found || []).filter((p) => !onPortal.some((n) => alike(n, p.name)) && !done.includes(p.folder));
+
+  const spine = (rosterPlan && rosterPlan.spine) || [];
+  const swing = spine.find((sp) => swingKeyOf(sp) === swingKey) || null;
+
+  /* Somebody the office holds and the portal does not: a row on the crew
+     matrix, and a place on a swing when the roster is loaded and one is
+     chosen. Their certificates come across on the sync itself. */
+  const takeOn = () => {
+    const name = named.trim();
+    if (!name) return;
+    setQuals((q) => ({ ...q, rows: [...(q.rows || []), [name, rank, "", (q.cols || []).map(() => "")]] }));
+    if (swing) {
+      setRosterPlan((plan) => !plan ? plan : ({
+        ...plan,
+        rows: [...(plan.rows || []), {
+          id: "r" + Date.now(), source: "portal", covers: "",
+          crew: swing.crew || "", rank, name,
+          on: swing.on, off: swing.off, days: daysBetween(swing.on, swing.off),
+          note: "", swing: swingKeyOf(swing),
+        }],
+        edited: true, updatedAt: todayISO(),
+      }));
+    }
+    log("SharePoint", name + " taken onto the portal",
+      rank + (swing ? " · " + fmtDate(swing.on) + " – " + fmtDate(swing.off) : " · no swing yet"));
+    setDone((d) => [...d, joining.folder]);
+    setJoining(null);
+  };
+
+  const takeOff = (name) => {
+    removeCrew(name);
+    setDone((d) => [...d, name]);
+    setGone("");
+  };
+
+  if (!admin) return null;
+  if (!leftBehind.length && !strangers.length && !tooMany) return null;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(22,50,74,0.45)", zIndex: 70,
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ background: T.panel, border: "1px solid " + T.rule, borderTop: "4px solid " + T.accent,
+        borderRadius: 3, padding: "20px 24px", width: "min(660px, 94vw)", maxHeight: "82vh", overflowY: "auto" }}>
+        <Eyebrow color={T.accent}>SharePoint and the portal do not hold the same crew</Eyebrow>
+        <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, margin: "8px 0 14px", lineHeight: 1.6 }}>
+          Nothing has been changed. Each one is yours to answer.
+        </div>
+
+        {tooMany && (
+          <div style={{ fontFamily: T.body, fontSize: 13, color: T.bRed, lineHeight: 1.7,
+            padding: "10px 12px", background: T.bRedBg, borderRadius: 2, marginBottom: 16 }}>
+            {unmatched.length} of the {onPortal.length} crew on the portal have no folder in SharePoint.
+            That reads as the listing coming back short rather than that many people leaving, so nobody
+            is offered for removal here. Run the sync again, and if it says the same, the folders are
+            worth a look.
+          </div>
+        )}
+
+        {leftBehind.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontFamily: T.display, fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 4 }}>
+              On the portal, no folder in SharePoint
+            </div>
+            {leftBehind.map((n) => (
+              <div key={n} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
+                padding: "9px 0", borderTop: "1px solid " + T.rule }}>
+                <span style={{ fontFamily: T.body, fontSize: 13.5, fontWeight: 600, color: T.text, flex: 1 }}>{n}</span>
+                {gone === n ? (
+                  <>
+                    <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.bRed }}>
+                      Take them off the portal entirely?
+                    </span>
+                    <Button variant="solid" onClick={() => takeOff(n)}>Yes</Button>
+                    <Button variant="quiet" onClick={() => setGone("")}>No</Button>
+                  </>
+                ) : (
+                  <Button variant="quiet" onClick={() => setGone(n)}>Take off the portal</Button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {strangers.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontFamily: T.display, fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 4 }}>
+              In SharePoint, not on the portal
+            </div>
+            {strangers.map((p) => (
+              <div key={p.folder} style={{ padding: "9px 0", borderTop: "1px solid " + T.rule }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={{ fontFamily: T.body, fontSize: 13.5, fontWeight: 600, color: T.text, flex: 1 }}>
+                    {canonicalName(p.name)}
+                  </span>
+                  {!(joining && joining.folder === p.folder) && (
+                    <Button variant="quiet"
+                      onClick={() => {
+                        setJoining(p); setNamed(canonicalName(p.name)); setRank("GPH");
+                        setSwingKey(spine.length ? swingKeyOf(spine[0]) : "");
+                      }}>
+                      Take onto the portal
+                    </Button>
+                  )}
+                </div>
+                {joining && joining.folder === p.folder && (
+                  <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginTop: 8 }}>
+                    {/* A folder is named however whoever made it typed it, so which
+                        part is the surname is a guess. It is put up to be corrected. */}
+                    <div style={{ flex: "1 1 200px" }}>
+                      <Field label="Name, as the matrix should read it">
+                        <input className="um-in" value={named} onChange={(e) => setNamed(e.target.value)} />
+                      </Field>
+                    </div>
+                    <div style={{ flex: "1 1 170px" }}>
+                      <Field label="Rank">
+                        <select className="um-in" value={rank} onChange={(e) => setRank(e.target.value)}>
+                          {ROSTER_RANKS.map((r) => <option key={r} value={r}>{r}</option>)}
+                        </select>
+                      </Field>
+                    </div>
+                    <div style={{ flex: "1 1 220px" }}>
+                      <Field label="Swing">
+                        <select className="um-in" value={swingKey} onChange={(e) => setSwingKey(e.target.value)}>
+                          <option value="">No swing yet</option>
+                          {spine.map((sp) => (
+                            <option key={swingKeyOf(sp)} value={swingKeyOf(sp)}>
+                              {fmtDate(sp.on)} – {fmtDate(sp.off)}{sp.crew ? " · " + sp.crew : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                    </div>
+                    <Button variant="ghost" disabled={!named.trim()} onClick={takeOn}>Take them on</Button>
+                    <Button variant="quiet" onClick={() => setJoining(null)}>Cancel</Button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <Button onClick={onClose}>Close</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* The Roster: the portal's own, seeded from the office's workbook and changed
    on the table itself from then on. */
 function RosterListPage() {
@@ -12975,13 +13209,8 @@ function RosterListPage() {
     if (!crewRoster || !crewRoster.url || !rosterPlan || savingRoster) return;
     setSavingRoster(true); setErr("");
     try {
-      const resp = await fetch(crewRoster.url);
-      if (!resp.ok) throw new Error("The roster workbook couldn't be downloaded (" + resp.status + "). Nothing was saved.");
-      const blob = await saveRosterWorkbook(await resp.arrayBuffer(), rosterPlan);
-      const file = new File([blob], crewRoster.filename, { type: XLSX_MIME });
-      const up = await uploadSingleDocument(file, "crew-roster",
-        { uploadedBy: role, filedOn: todayISO(), session: SESSION }, "replace");
-      if (up.record) setCrewRoster(up.record);
+      const record = await fileRosterWorkbook(crewRoster, rosterPlan, role);
+      if (record) setCrewRoster(record);
       setRosterPlan((p) => (p ? { ...p, edited: false, filename: crewRoster.filename, savedAt: todayISO() } : p));
       log("Roster", "Roster saved to the spreadsheet", crewRoster.filename);
     } catch (e) {
@@ -16733,8 +16962,10 @@ function SharePointPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncOut, setSyncOut] = useState(null);
   const [prog, setProg] = useState(null);
+  // Whose folders the last sync found, held until the difference is answered.
+  const [peopleSeen, setPeopleSeen] = useState(null);
   const syncNow = async () => {
-    setSyncing(true); setSyncOut(null); setProg({ pct: 0, word: "Asking the portal to read the folders" });
+    setSyncing(true); setSyncOut(null); setPeopleSeen(null); setProg({ pct: 0, word: "Asking the portal to read the folders" });
     // While the sync request is held open, the worker writes its progress down
     // and this poll reads the percentage back for the window.
     const poll = setInterval(async () => {
@@ -16748,6 +16979,7 @@ function SharePointPage() {
       const out = await r.json();
       if (!r.ok) throw new Error(out.error || `The sync failed (${r.status}).`);
       setSyncOut(out);
+      if (out && Array.isArray(out.people)) setPeopleSeen(out.people);
       await load(path);
     } catch (e) { setSyncOut({ error: String(e.message || e) }); }
     clearInterval(poll);
@@ -16833,6 +17065,10 @@ function SharePointPage() {
             )}
           </div>
         </div>
+      )}
+
+      {peopleSeen && !syncing && !syncOut && (
+        <SyncPeople found={peopleSeen} onClose={() => setPeopleSeen(null)} />
       )}
 
       {/* Where we are */}
@@ -18440,6 +18676,64 @@ function CoolibahPortal({ role, onSignOut }) {
    * the evidence they were ever qualified.
    *
    * Whoever calls this has already asked. It does not ask again. */
+  /* The two workbooks the office keeps, brought into line with a removal
+   * without anyone having to remember to press anything.
+   *
+   * The roster workbook is rewritten from the plan, so the person is simply
+   * not in it. The training matrix is a cell-by-cell document with formulas
+   * and print ranges pointing at fixed rows, so their row is emptied rather
+   * than lifted out - the line stays, with nothing on it.
+   *
+   * It runs after the removal rather than as part of it: a workbook that
+   * cannot be reached is a reason to say so, not a reason to leave a person
+   * half-removed from the portal.
+   */
+  const writeRemovalToWorkbooks = async (want, plan) => {
+    const trouble = [];
+    const written = [];
+
+    if (crewRoster && crewRoster.url && plan) {
+      try {
+        const record = await fileRosterWorkbook(crewRoster, plan, role);
+        if (record) setCrewRoster(record);
+        setRosterPlan((p) => (p ? { ...p, edited: false, filename: crewRoster.filename, savedAt: todayISO() } : p));
+        written.push("the roster workbook rewritten");
+      } catch (e) {
+        trouble.push("the roster workbook: " + (e.message || String(e)));
+      }
+    }
+
+    if (trainingMatrix && trainingMatrix.url && /\.xls[xm]$/i.test(trainingMatrix.filename || "") && zipCapable()) {
+      try {
+        const resp = await fetch(trainingMatrix.url);
+        if (!resp.ok) throw new Error("it couldn't be downloaded (" + resp.status + ")");
+        // Nothing is being written from the matrix here, so the write is
+        // narrowed to no cells at all and the clearing is the whole of it.
+        const { blob } = await updateFiledWorkbook(
+          await resp.arrayBuffer(), quals, new Set(), new Set([want]));
+        if (blob) {
+          const file = new File([blob], trainingMatrix.filename, { type: XLSX_MIME });
+          const up = await uploadSingleDocument(file, "training-matrix",
+            { uploadedBy: role, filedOn: todayISO(), session: SESSION }, "replace");
+          if (up.record) setTrainingMatrix(up.record);
+          written.push("their row emptied on the training matrix");
+        } else {
+          written.push("the training matrix had no row of theirs to empty");
+        }
+      } catch (e) {
+        trouble.push("the training matrix workbook: " + (e.message || String(e)));
+      }
+    }
+
+    // What was actually done, said plainly. A workbook nobody has filed on the
+    // portal is neither a success nor a failure, and is not reported as either.
+    if (!trouble.length && !written.length) return;
+    log("Admin", trouble.length
+      ? "The spreadsheets could not be brought into line with " + want + " coming off"
+      : "The spreadsheets brought into line with " + want + " coming off",
+      [...written, ...trouble].join(" · "));
+  };
+
   const removeCrew = (name) => {
     const want = String(name || "").trim();
     if (!want) return { ok: false };
@@ -18455,13 +18749,16 @@ function CoolibahPortal({ role, onSignOut }) {
       return { ...q, rows };
     });
 
-    // The roster's swings.
+    // The roster's swings. The plan as it will stand is kept hold of, because
+    // it is what the workbook has to be written from a moment later.
+    let plannedAfter = rosterPlan;
     setRosterPlan((plan) => {
       if (!plan) return plan;
       const rows = (plan.rows || []).filter((r) => !same(r.name));
       gone.swings = (plan.rows || []).length - rows.length;
       if (!gone.swings) return plan;
-      return { ...plan, rows, edited: true, updatedAt: todayISO() };
+      plannedAfter = { ...plan, rows, edited: true, updatedAt: todayISO() };
+      return plannedAfter;
     });
 
     /* The crew list, and everything keyed to the person it holds. Written
@@ -18519,6 +18816,9 @@ function CoolibahPortal({ role, onSignOut }) {
         gone.crewList ? "crew list" : null,
         gone.certificates ? gone.certificates + " certificates archived" : null]
         .filter(Boolean).join(" · ") || "nothing was held against the name");
+
+    // The office's spreadsheets follow, on their own, in the background.
+    writeRemovalToWorkbooks(want, plannedAfter).catch(() => {});
     return { ok: true, gone };
   };
 
