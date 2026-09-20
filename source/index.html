@@ -12900,7 +12900,7 @@ function RosterNewPerson({ names, positions, spine, onRoster, onAdd, onClose }) 
  */
 function SyncPeople({ found, onClose }) {
   const { admin, quals: QUALS, rosterPlan, removeCrew, writeCrewToWorkbooks,
-    setQuals, setRosterPlan, log } = usePortal();
+    folderNames, setFolderNames, setQuals, setRosterPlan, log } = usePortal();
   const [gone, setGone] = useState("");
   const [joining, setJoining] = useState(null);
   const [named, setNamed] = useState("");
@@ -12920,14 +12920,56 @@ function SyncPeople({ found, onClose }) {
   );
 
   const words = (t) => String(t || "").toUpperCase().split(/[^A-Z]+/).filter(Boolean);
-  const alike = (a, b) => {
+  const inCommon = (a, b) => {
     const held = new Set(words(a));
-    const shared = words(b).filter((w) => held.has(w)).length;
-    return shared >= 2;
+    return words(b).filter((w) => held.has(w)).length;
   };
 
   const onPortal = QUALS.rows.map((r) => r[0]);
-  const inFolders = (found || []).map((p) => p.name);
+
+  /* Which folder belongs to whom, worked out once.
+   *
+   * A folder is named however the office names it. Most are a first name -
+   * "Kyle", "Travis" - some are a nickname no rule would ever get to from the
+   * crew list ("PK" for Preetham Kumar), and some are a surname. So the pairing
+   * is taken in three passes, each surer than the one under it:
+   *
+   *   1. what somebody has already said outright, and been remembered;
+   *   2. two names in common, which is a match nobody would argue with;
+   *   3. a folder named with one word, where exactly one crew member answers
+   *      to it - "Evgeny" can only be EVDOKIMOV, Evgeny.
+   *
+   * A name already spoken for is out of the running for the rest, and where
+   * one word answers for two people - "Evans" - nothing is taken and the
+   * question is put instead. The portal guessing wrong here would file a man's
+   * certificates against somebody else.
+   */
+  const pairing = useMemo(() => {
+    const out = new Map();
+    const taken = new Set();
+    const list = found || [];
+    const claim = (folder, who) => { out.set(folder, who); taken.add(who); };
+
+    list.forEach((p) => {
+      const said = (folderNames || {})[p.folder];
+      if (said && onPortal.includes(said) && !taken.has(said)) claim(p.folder, said);
+    });
+    list.forEach((p) => {
+      if (out.has(p.folder)) return;
+      const hits = onPortal.filter((n) => !taken.has(n) && inCommon(n, p.name) >= 2);
+      if (hits.length === 1) claim(p.folder, hits[0]);
+    });
+    list.forEach((p) => {
+      if (out.has(p.folder)) return;
+      const w = words(p.name);
+      if (w.length !== 1) return;
+      const hits = onPortal.filter((n) => !taken.has(n) && words(n).includes(w[0]));
+      if (hits.length === 1) claim(p.folder, hits[0]);
+    });
+    return out;
+  }, [found, QUALS, folderNames]);
+
+  const spokenFor = new Set(pairing.values());
 
   /* On the portal's books, with no folder in SharePoint any more.
    *
@@ -12938,11 +12980,11 @@ function SyncPeople({ found, onClose }) {
    * not a crew change, so the removals are held back and the reason is said
    * instead. One or two missing is the thing this is for.
    */
-  const unmatched = onPortal.filter((n) => !inFolders.some((f) => alike(n, f)));
+  const unmatched = onPortal.filter((n) => !spokenFor.has(n));
   const tooMany = onPortal.length >= 6 && unmatched.length > onPortal.length / 3;
   const leftBehind = tooMany ? [] : unmatched.filter((n) => !done.includes(n));
-  // A folder in SharePoint, with no row on the portal.
-  const strangers = (found || []).filter((p) => !onPortal.some((n) => alike(n, p.name)) && !done.includes(p.folder));
+  // A folder in SharePoint that answers to nobody on the portal.
+  const strangers = (found || []).filter((p) => !pairing.has(p.folder) && !done.includes(p.folder));
 
   const spine = (rosterPlan && rosterPlan.spine) || [];
   const swing = spine.find((sp) => swingKeyOf(sp) === swingKey) || null;
@@ -12976,6 +13018,9 @@ function SyncPeople({ found, onClose }) {
         return plannedAfter;
       });
     }
+
+    // The folder they came out of is theirs from now on, whatever it is called.
+    setFolderNames({ ...(folderNames || {}), [joining.folder]: name });
 
     log("SharePoint", name + " taken onto the portal",
       position + (swing ? " · " + fmtDate(swing.on) + " – " + fmtDate(swing.off) : " · no swing yet"));
@@ -13057,8 +13102,29 @@ function SyncPeople({ found, onClose }) {
               <div key={p.folder} style={{ padding: "9px 0", borderTop: "1px solid " + T.rule }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                   <span style={{ fontFamily: T.body, fontSize: 13.5, fontWeight: 600, color: T.text, flex: 1 }}>
-                    {canonicalName(p.name)}
+                    {p.name}
                   </span>
+                  {/* The office's folder for somebody already on the portal.
+                      Said once, and the portal knows it from then on. */}
+                  {!(joining && joining.folder === p.folder) && (
+                    <select className="um-in" style={{ maxWidth: 210 }} value=""
+                      onChange={(e) => {
+                        if (!e.target.value) return;
+                        setFolderNames({ ...(folderNames || {}), [p.folder]: e.target.value });
+                        log("SharePoint", "The folder " + p.name + " is " + e.target.value,
+                          "paired once, and remembered");
+                      }}>
+                      <option value="">Already on the portal as…</option>
+                      {/* Everybody, not just whoever is still unspoken for: a
+                          pairing put on the wrong person has to be movable, and
+                          picking somebody who already has a folder simply hands
+                          them this one and puts the other folder back in the
+                          list, where it can be seen and answered. */}
+                      {onPortal.map((n) => (
+                        <option key={n} value={n}>{n}{spokenFor.has(n) ? " — already paired" : ""}</option>
+                      ))}
+                    </select>
+                  )}
                   {!(joining && joining.folder === p.folder) && (
                     <Button variant="quiet"
                       onClick={() => {
@@ -18259,6 +18325,12 @@ function CoolibahPortal({ role, onSignOut }) {
   // is half-typed rather than working swings out from nonsense.
   // When the documentation was last brought up to date, by hand or on the hour.
   const lastDocUpdate = store.lastDocUpdate || null, setLastDocUpdate = put("lastDocUpdate");
+  /* Which OPMS folder belongs to whom, where the name alone doesn't say.
+     The office names its folders for the person, not for the record - "PK",
+     "Con", "Zac", "Chris" - and the portal keeps the crew as the matrix writes
+     them. Rather than make the office rename forty folders, the pairing is
+     written down here the once, the first time anybody is asked. */
+  const folderNames = store.folderNames || {}, setFolderNames = put("folderNames");
   const rosterPattern = { ...ROSTER_DEFAULTS, ...(store.rosterPattern || {}) };
   const setRosterPattern = put("rosterPattern");
   ROSTER_ANCHOR = /^\d{4}-\d{2}-\d{2}$/.test(rosterPattern.anchor || "")
@@ -19058,7 +19130,7 @@ function CoolibahPortal({ role, onSignOut }) {
     return { ok: true, gone };
   };
 
-  const ctx = { role, admin, session: SESSION, removeCrew, writeCrewToWorkbooks, lastDocUpdate, setLastDocUpdate, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
+  const ctx = { role, admin, session: SESSION, removeCrew, writeCrewToWorkbooks, lastDocUpdate, setLastDocUpdate, folderNames, setFolderNames, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
 
   return (
     <Ctx.Provider value={ctx}>
