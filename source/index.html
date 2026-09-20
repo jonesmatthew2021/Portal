@@ -8182,6 +8182,95 @@ const archiveMB = (n) => `${(n / (1024 * 1024)).toFixed(1)} MB`;
  * the portal that can run for a minute, and a button that looks stuck for a
  * minute is a button people press again. It counts as it goes instead.
  */
+/* Start again: everything the portal read out of a document, put back to
+ * nothing.
+ *
+ * The portal's screens are built out of the library's documents - the crew
+ * matrix out of the crew qualification workbook, the roster out of the roster
+ * workbook, the requirements out of the skills matrix, the dates out of the
+ * certificates. Clearing the library one document at a time gets there in the
+ * end, but somebody starting the filing over wants one press, not forty.
+ *
+ * It takes nothing out of SharePoint. The library is the store and stays
+ * exactly as it is; this empties the portal's account of it, and the next
+ * update reads it all back in from whatever is actually there. That is the
+ * point - it is how you find out what the library really holds, rather than
+ * what the portal remembers being told a fortnight ago.
+ *
+ * What it keeps: the history, so there is still a record of what was done, and
+ * the sign-ins. Everything else that came out of a document goes.
+ */
+function StartAgain() {
+  const {
+    log, admin, quals: QUALS, setQuals, setRosterPlan, setSkillsRequirements,
+    setCertAnalysis, setMatrixAnalysis, setMatrixUpdated, setFilledFromCert,
+    setRenewalMarks, setOpmsMarks, setOpmsAnalysis, setShiftAnalysis,
+    certificates, clearMatrixAuto,
+  } = usePortal();
+  const [asking, setAsking] = useState(false);
+  const [done, setDone] = useState(false);
+
+  if (!admin) return null;
+
+  const rows = (QUALS.rows || []).length;
+  const dated = (QUALS.rows || []).reduce(
+    (n, r) => n + (r[3] || []).filter((v) => String(v || "").trim() !== "").length, 0);
+
+  const go = () => {
+    setQuals({ cols: [], rows: [] });
+    setRosterPlan(null);
+    setSkillsRequirements(null);
+    setCertAnalysis(null);
+    setMatrixAnalysis(null);
+    setOpmsAnalysis(null);
+    setShiftAnalysis(null);
+    setMatrixUpdated("");
+    setFilledFromCert({});
+    setRenewalMarks({});
+    setOpmsMarks({});
+    // Anything still reading gets no say in what the matrix holds afterwards.
+    if (clearMatrixAuto) clearMatrixAuto();
+    log("Admin", "The portal was started again",
+      rows + " crew and " + dated + " dates cleared — nothing was taken out of SharePoint");
+    setAsking(false);
+    setDone(true);
+  };
+
+  return (
+    <div style={{ marginTop: 26, paddingTop: 18, borderTop: `1px solid ${T.rule}` }}>
+      <Eyebrow color={T.bRed}>Start again</Eyebrow>
+      <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.text, lineHeight: 1.7, margin: "8px 0 12px",
+        maxWidth: 680 }}>
+        Empties everything the portal read out of the library — the crew matrix, the roster, the
+        requirements and every date against a name — and leaves SharePoint exactly as it is.
+        Press Update documentation afterwards and the portal reads back in whatever the library
+        actually holds, from nothing.
+      </div>
+      {done ? (
+        <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.teal }}>
+          Cleared. Press Update documentation to read the library back in.
+        </div>
+      ) : asking ? (
+        <div style={{ background: T.bRedBg, border: `1px solid ${T.bRed}`, borderRadius: 2,
+          padding: "13px 15px", maxWidth: 680 }}>
+          <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.text, lineHeight: 1.7, marginBottom: 12 }}>
+            Clear {rows} crew and {dated} {dated === 1 ? "date" : "dates"} off the portal?
+            {certificates && certificates.length > 0 && <> The {certificates.length} {certificates.length === 1 ? "certificate" : "certificates"} on file {certificates.length === 1 ? "stays" : "stay"} where {certificates.length === 1 ? "it is" : "they are"} and {certificates.length === 1 ? "is" : "are"} read again on the next update.</>}
+            {" "}Nothing is taken out of SharePoint, and nothing is written into the office's
+            spreadsheet until the next update settles a date.
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button variant="solid" onClick={go}>Yes, start again</Button>
+            <Button variant="quiet" onClick={() => setAsking(false)}>No</Button>
+          </div>
+        </div>
+      ) : (
+        <Button variant="quiet" onClick={() => setAsking(true)}>Start again</Button>
+      )}
+    </div>
+  );
+}
+
 function DownloadEverything({ log }) {
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState(null);
@@ -16818,6 +16907,7 @@ function RequiredDocuments() {
           </div>
         </div>
         <UpdateTrainingMatrixInPlace label="Update the spreadsheet" />
+        <StartAgain />
       </div>
 
       <div style={{ background: T.panel, border: `1px solid ${T.rule}`,
@@ -19168,7 +19258,13 @@ function CoolibahPortal({ role, onSignOut }) {
       const { next, applied } = applyDifferences(matrixAutoInputs.current.quals, fromCerts);
 
       if (applied.length) {
-        setQuals(next);
+        /* Against the matrix as it stands at this moment, not the one this run
+           started from - it is minutes long, and Start again may have emptied
+           the matrix while it read. Writing the snapshot back would put forty
+           crew and a thousand dates straight back on a portal somebody had
+           just cleared, which is a thing you would press twice and blame
+           yourself for. */
+        setQuals((q) => ((q.rows || []).length ? next : q));
         setMatrixUpdated(todayISO());
         log("Crew Matrix",
           origin === "certificates"
