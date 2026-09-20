@@ -8677,7 +8677,11 @@ async function updateFiledWorkbook(buf, quals, only = null, blank = null) {
   // from under the formulas and the print ranges that point at them — so it is
   // only done where the crew are the last thing on the sheet. A totals line, a
   // note, anything at all under them and the rows are left to be added by hand.
-  const placed = inScope
+  /* Where the crew end on the sheet. It is read off everybody the matrix
+     knows, not off the people this particular write concerns - a write that
+     concerns one newcomer and nobody else would otherwise find no crew rows at
+     all and leave them off the workbook. */
+  const placed = quals.rows
     .map((p) => rowForName.get(String(p[0]).trim().toUpperCase()))
     .filter(Boolean);
   if (report.skippedRows.length && placed.length) {
@@ -12838,13 +12842,25 @@ function RosterNewPerson({ names, positions, spine, onRoster, onAdd, onClose }) 
  * is theirs. Nothing here happens on its own.
  */
 function SyncPeople({ found, onClose }) {
-  const { admin, quals: QUALS, rosterPlan, removeCrew, setQuals, setRosterPlan, log } = usePortal();
+  const { admin, quals: QUALS, rosterPlan, removeCrew, writeCrewToWorkbooks,
+    setQuals, setRosterPlan, log } = usePortal();
   const [gone, setGone] = useState("");
   const [joining, setJoining] = useState(null);
   const [named, setNamed] = useState("");
-  const [rank, setRank] = useState("GPH");
+  const [rank, setRank] = useState("");
   const [swingKey, setSwingKey] = useState("");
   const [done, setDone] = useState([]);
+  const [filed, setFiled] = useState([]);
+
+  /* What the matrix calls the jobs, in the office's own words - "Master",
+     "Chief Officer - Unlimited", "Assistant Engineer". The roster keeps a
+     shorter list of its own, and writing one of those into the matrix puts a
+     person under a heading nobody else is under, so the matrix's own wording
+     is what is asked for here and the roster rank is worked out from it. */
+  const allPositions = useMemo(
+    () => Array.from(new Set(QUALS.rows.map((r) => String(r[1] || "").trim()).filter(Boolean))).sort(),
+    [QUALS],
+  );
 
   const words = (t) => String(t || "").toUpperCase().split(/[^A-Z]+/).filter(Boolean);
   const alike = (a, b) => {
@@ -12879,23 +12895,45 @@ function SyncPeople({ found, onClose }) {
      chosen. Their certificates come across on the sync itself. */
   const takeOn = () => {
     const name = named.trim();
-    if (!name) return;
-    setQuals((q) => ({ ...q, rows: [...(q.rows || []), [name, rank, "", (q.cols || []).map(() => "")]] }));
+    const position = rank.trim();
+    if (!name || !position) return;
+
+    const row = [name, position, "", (QUALS.cols || []).map(() => "")];
+    const rows = [...(QUALS.rows || []), row];
+    setQuals((q) => ({ ...q, rows: [...(q.rows || []), row] }));
+
+    let plannedAfter = rosterPlan;
     if (swing) {
-      setRosterPlan((plan) => !plan ? plan : ({
-        ...plan,
-        rows: [...(plan.rows || []), {
-          id: "r" + Date.now(), source: "portal", covers: "",
-          crew: swing.crew || "", rank, name,
-          on: swing.on, off: swing.off, days: daysBetween(swing.on, swing.off),
-          note: "", swing: swingKeyOf(swing),
-        }],
-        edited: true, updatedAt: todayISO(),
-      }));
+      setRosterPlan((plan) => {
+        if (!plan) return plan;
+        plannedAfter = {
+          ...plan,
+          rows: [...(plan.rows || []), {
+            id: "r" + Date.now(), source: "portal", covers: "",
+            crew: swing.crew || "", rank: rosterRankFor(position), name,
+            on: swing.on, off: swing.off, days: daysBetween(swing.on, swing.off),
+            note: "", swing: swingKeyOf(swing),
+          }],
+          edited: true, updatedAt: todayISO(),
+        };
+        return plannedAfter;
+      });
     }
+
     log("SharePoint", name + " taken onto the portal",
-      rank + (swing ? " · " + fmtDate(swing.on) + " – " + fmtDate(swing.off) : " · no swing yet"));
-    setDone((d) => [...d, joining.folder]);
+      position + (swing ? " · " + fmtDate(swing.on) + " – " + fmtDate(swing.off) : " · no swing yet"));
+
+    // The office's spreadsheets follow, and what they managed is said here.
+    const folder = joining.folder;
+    setFiled((f) => [...f, { folder, name, word: "Putting them on the spreadsheets…" }]);
+    // The roster workbook is only rewritten where a swing was actually chosen;
+    // rewriting it to say exactly what it already said is a upload for nothing.
+    writeCrewToWorkbooks({ want: name, plan: swing ? plannedAfter : null, rows, leaving: false })
+      .then((r) => setFiled((f) => f.map((x) => x.folder === folder
+        ? { ...x, ok: r && r.ok, word: (r && r.said) || "nothing was written" } : x)))
+      .catch((e) => setFiled((f) => f.map((x) => x.folder === folder
+        ? { ...x, ok: false, word: String((e && e.message) || e) } : x)));
+    setDone((d) => [...d, folder]);
     setJoining(null);
   };
 
@@ -12906,7 +12944,7 @@ function SyncPeople({ found, onClose }) {
   };
 
   if (!admin) return null;
-  if (!leftBehind.length && !strangers.length && !tooMany) return null;
+  if (!leftBehind.length && !strangers.length && !tooMany && !filed.length) return null;
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(22,50,74,0.45)", zIndex: 70,
@@ -12967,7 +13005,7 @@ function SyncPeople({ found, onClose }) {
                   {!(joining && joining.folder === p.folder) && (
                     <Button variant="quiet"
                       onClick={() => {
-                        setJoining(p); setNamed(canonicalName(p.name)); setRank("GPH");
+                        setJoining(p); setNamed(canonicalName(p.name)); setRank("");
                         setSwingKey(spine.length ? swingKeyOf(spine[0]) : "");
                       }}>
                       Take onto the portal
@@ -12983,10 +13021,11 @@ function SyncPeople({ found, onClose }) {
                         <input className="um-in" value={named} onChange={(e) => setNamed(e.target.value)} />
                       </Field>
                     </div>
-                    <div style={{ flex: "1 1 170px" }}>
-                      <Field label="Rank">
+                    <div style={{ flex: "1 1 200px" }}>
+                      <Field label="Rank, as the matrix words it">
                         <select className="um-in" value={rank} onChange={(e) => setRank(e.target.value)}>
-                          {ROSTER_RANKS.map((r) => <option key={r} value={r}>{r}</option>)}
+                          <option value="">Choose…</option>
+                          {allPositions.map((p) => <option key={p} value={p}>{p}</option>)}
                         </select>
                       </Field>
                     </div>
@@ -13002,10 +13041,30 @@ function SyncPeople({ found, onClose }) {
                         </select>
                       </Field>
                     </div>
-                    <Button variant="ghost" disabled={!named.trim()} onClick={takeOn}>Take them on</Button>
+                    <Button variant="ghost" disabled={!named.trim() || !rank.trim()} onClick={takeOn}>
+                      Take them on
+                    </Button>
                     <Button variant="quiet" onClick={() => setJoining(null)}>Cancel</Button>
                   </div>
                 )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {filed.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontFamily: T.display, fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 4 }}>
+              Taken on
+            </div>
+            {filed.map((f) => (
+              <div key={f.folder} style={{ padding: "9px 0", borderTop: "1px solid " + T.rule }}>
+                <div style={{ fontFamily: T.body, fontSize: 13.5, fontWeight: 600, color: T.text }}>{f.name}</div>
+                <div style={{ fontFamily: T.body, fontSize: 12.5, lineHeight: 1.6,
+                  color: f.ok === false ? T.bRed : T.muted }}>
+                  {f.word}
+                  {f.ok === false && <> — their dates go in when Update the spreadsheet is next pressed.</>}
+                </div>
               </div>
             ))}
           </div>
@@ -18676,19 +18735,25 @@ function CoolibahPortal({ role, onSignOut }) {
    * the evidence they were ever qualified.
    *
    * Whoever calls this has already asked. It does not ask again. */
-  /* The two workbooks the office keeps, brought into line with a removal
+  /* The two workbooks the office keeps, brought into line with a crew change
    * without anyone having to remember to press anything.
    *
-   * The roster workbook is rewritten from the plan, so the person is simply
-   * not in it. The training matrix is a cell-by-cell document with formulas
-   * and print ranges pointing at fixed rows, so their row is emptied rather
-   * than lifted out - the line stays, with nothing on it.
+   * The roster workbook is rewritten from the plan either way, so it simply
+   * says what the portal says. The training matrix is a cell-by-cell document
+   * with formulas and print ranges pointing at fixed rows, so a person coming
+   * off has their row emptied rather than lifted out - the line stays, with
+   * nothing on it - and a person going on gets a row on the end, under the
+   * last of the crew, formatted like the row above it.
    *
-   * It runs after the removal rather than as part of it: a workbook that
-   * cannot be reached is a reason to say so, not a reason to leave a person
-   * half-removed from the portal.
+   * Their dates are not written here. Those come off their certificates, which
+   * is the long read behind Update the spreadsheet; this puts the person on the
+   * sheet so the next run has a row to fill.
+   *
+   * It runs after the change rather than as part of it: a workbook that cannot
+   * be reached is a reason to say so, not a reason to leave a person half on or
+   * half off the portal.
    */
-  const writeRemovalToWorkbooks = async (want, plan) => {
+  const writeCrewToWorkbooks = async ({ want, plan, rows, leaving }) => {
     const trouble = [];
     const written = [];
 
@@ -18707,18 +18772,27 @@ function CoolibahPortal({ role, onSignOut }) {
       try {
         const resp = await fetch(trainingMatrix.url);
         if (!resp.ok) throw new Error("it couldn't be downloaded (" + resp.status + ")");
-        // Nothing is being written from the matrix here, so the write is
-        // narrowed to no cells at all and the clearing is the whole of it.
+        /* Coming off: no cells are written and the emptying is the whole of it.
+           Going on: the write is narrowed to their cells alone, which is what
+           tells the workbook there is a row of theirs to put on the end. */
+        const sheet = { cols: quals.cols, rows: rows || quals.rows };
+        const only = leaving
+          ? new Set()
+          : new Set(sheet.cols.map((c) => String(want).trim().toUpperCase() + "|" + c[0]));
         const { blob } = await updateFiledWorkbook(
-          await resp.arrayBuffer(), quals, new Set(), new Set([want]));
+          await resp.arrayBuffer(), sheet, only, leaving ? new Set([want]) : null);
         if (blob) {
           const file = new File([blob], trainingMatrix.filename, { type: XLSX_MIME });
           const up = await uploadSingleDocument(file, "training-matrix",
             { uploadedBy: role, filedOn: todayISO(), session: SESSION }, "replace");
           if (up.record) setTrainingMatrix(up.record);
-          written.push("their row emptied on the training matrix");
+          written.push(leaving
+            ? "their row emptied on the training matrix"
+            : "a row put on the end of the training matrix for them");
         } else {
-          written.push("the training matrix had no row of theirs to empty");
+          written.push(leaving
+            ? "the training matrix had no row of theirs to empty"
+            : "the training matrix couldn't take a row on the end, so add one by hand");
         }
       } catch (e) {
         trouble.push("the training matrix workbook: " + (e.message || String(e)));
@@ -18727,11 +18801,13 @@ function CoolibahPortal({ role, onSignOut }) {
 
     // What was actually done, said plainly. A workbook nobody has filed on the
     // portal is neither a success nor a failure, and is not reported as either.
-    if (!trouble.length && !written.length) return;
+    if (!trouble.length && !written.length) return { ok: true, said: "no workbook is filed on the portal to update" };
+    const what = want + (leaving ? " coming off" : " going on");
     log("Admin", trouble.length
-      ? "The spreadsheets could not be brought into line with " + want + " coming off"
-      : "The spreadsheets brought into line with " + want + " coming off",
+      ? "The spreadsheets could not be brought into line with " + what
+      : "The spreadsheets brought into line with " + what,
       [...written, ...trouble].join(" · "));
+    return { ok: !trouble.length, said: [...written, ...trouble].join(" · ") };
   };
 
   const removeCrew = (name) => {
@@ -18818,11 +18894,11 @@ function CoolibahPortal({ role, onSignOut }) {
         .filter(Boolean).join(" · ") || "nothing was held against the name");
 
     // The office's spreadsheets follow, on their own, in the background.
-    writeRemovalToWorkbooks(want, plannedAfter).catch(() => {});
+    writeCrewToWorkbooks({ want, plan: plannedAfter, leaving: true }).catch(() => {});
     return { ok: true, gone };
   };
 
-  const ctx = { role, admin, session: SESSION, removeCrew, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
+  const ctx = { role, admin, session: SESSION, removeCrew, writeCrewToWorkbooks, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
 
   return (
     <Ctx.Provider value={ctx}>
