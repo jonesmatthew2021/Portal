@@ -2285,6 +2285,34 @@ function requiredCodesFor(position, skillsRequirements) {
   return out;
 }
 
+/* The rules on the equivalence page that say one matrix column answers for
+   another - "if you do not hold QL-15, QL-14 is accepted". Read in one place,
+   because two different parts of the portal need them and one of them used to
+   rebuild the requirements without them and quietly wipe them out. */
+function coversFrom(XLSX, wb, cols) {
+  const sheetName = wb.SheetNames.find((n) => /equivalen/i.test(n));
+  if (!sheetName) return [];
+  const grid = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: "" });
+  const colCodes = new Set(cols.map((c) => String(c[0]).trim().toUpperCase()));
+  const part = (cell) => {
+    const m = String(cell || "").replace(/\s+/g, " ").trim().match(/^([A-Za-z]{2,4}-\d+[A-Za-z]?)\s+(.+)$/);
+    return m ? { code: m[1].toUpperCase(), title: m[2].trim() } : null;
+  };
+  const out = [];
+  const pairs = new Set();
+  for (const r of grid) {
+    const wanted = part(r[1]);
+    const held = part(r[2]);
+    if (!wanted || !held) continue;
+    if (!colCodes.has(wanted.code) || !colCodes.has(held.code)) continue;
+    const key = wanted.code + "<" + held.code;
+    if (wanted.code === held.code || pairs.has(key)) continue;
+    pairs.add(key);
+    out.push({ need: wanted.code, met: held.code });
+  }
+  return out;
+}
+
 async function storeEquivalences(record, cols, onRequirements) {
   try {
     if (!record || !record.url) return;
@@ -2309,22 +2337,12 @@ async function storeEquivalences(record, cols, onRequirements) {
        - "QL-15 is met by QL-14" - it is telling it that holding the one
        answers for the other, which is a different thing and was being thrown
        away. Both are kept now. */
-    const covers = [];
-    const pairs = new Set();
     for (const r of grid) {
       const wanted = part(r[1]);
       const held = part(r[2]);
       if (!wanted || !held) continue;
       if (!colCodes.has(wanted.code)) continue; // must land on a matrix column
-      if (colCodes.has(held.code)) {
-        // A column standing in for another column: holding it answers for it.
-        const key = wanted.code + "<" + held.code;
-        if (wanted.code !== held.code && !pairs.has(key)) {
-          pairs.add(key);
-          covers.push({ need: wanted.code, met: held.code });
-        }
-        continue;
-      }
+      if (colCodes.has(held.code)) continue;   // read by coversFrom, below
       if (seen.has(held.code)) continue;        // the first row is the most senior column
       seen.add(held.code);
       rows.push({ held: held.title, code: wanted.code });
@@ -2332,6 +2350,7 @@ async function storeEquivalences(record, cols, onRequirements) {
     if (rows.length) await analyse({ action: "equivalences", rows });
     if (onRequirements) {
       const positions = skillsRequirementsFrom(XLSX, wb);
+      const covers = coversFrom(XLSX, wb, cols);
       if (positions || covers.length) onRequirements({ at: todayISO(), positions: positions || [], covers });
     }
   } catch (e) {
@@ -3718,10 +3737,18 @@ function TrainingMatrix() {
 
   // The requirements come off the skills matrix workbook. Read here once when
   // nothing is held yet, so the page doesn't wait on an update run.
-  const askedForReq = useRef(false);
+  /* Read again whenever the workbook on file is a different one, and remember
+     which one the answer came from. Reading only once - on the first look, at
+     whatever the file list happened to say at that moment - meant a skills
+     matrix replaced afterwards was never read, and the requirements went on
+     describing the workbook it replaced with nothing to show they were stale. */
+  const askedForReq = useRef("");
   React.useEffect(() => {
-    if (askedForReq.current || skillsRequirements || !validityMatrix || !validityMatrix.url) return;
-    askedForReq.current = true;
+    const from = (validityMatrix && validityMatrix.id) || "";
+    if (!from || !validityMatrix.url) return;
+    if (askedForReq.current === from) return;
+    if (skillsRequirements && skillsRequirements.from === from) return;
+    askedForReq.current = from;
     (async () => {
       try {
         const XLSX = await loadXLSX();
@@ -3729,7 +3756,10 @@ function TrainingMatrix() {
         if (!resp.ok) return;
         const wb = XLSX.read(await resp.arrayBuffer(), { type: "array" });
         const positions = skillsRequirementsFrom(XLSX, wb);
-        if (positions) setSkillsRequirements({ at: todayISO(), positions });
+        const covers = coversFrom(XLSX, wb, QUALS.cols);
+        if (positions || covers.length) {
+          setSkillsRequirements({ at: todayISO(), from, positions: positions || [], covers });
+        }
       } catch (e) {}
     })();
   }, [skillsRequirements, validityMatrix]);
