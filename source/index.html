@@ -11549,6 +11549,70 @@ async function saveRosterWorkbook(buf, plan) {
   xml = xml.replace(/<dimension[^>]*\/>/, '<dimension ref="A1:H' + (rows.length + 1) + '"/>');
 
   await setPartText(sheetPart, xml);
+
+  /* "On board each swing" counts each swing's hands by rank. It is worked out
+     from the very rows written above, so the two cannot come to disagree -
+     until now it was left exactly as the office first wrote it, and went
+     quietly out of date the moment anybody was moved.
+
+     One line per crew on each swing, which is how the office writes it: a
+     swing both crews have a hand in says so on two lines. The last column,
+     which counted how many of each swing came from the four-week cycle rather
+     than the travel roster, is a note about where the workbook was first built
+     from; the roster is kept here now, so there is nothing true to put in it. */
+  const onBoard = sheets.find((sh) => /on board/i.test(sh.name));
+  if (onBoard) {
+    const obRel = relsXml.match(new RegExp('Id="' + onBoard.rid + '"[^>]*Target="([^"]+)"'));
+    const obPath = obRel ? "xl/" + obRel[1].replace(/^\/+/, "").replace(/^xl\//, "") : null;
+    const obPart = obPath ? partOf(entries, obPath) : null;
+    if (obPart) {
+      const obOld = await partText(obPart);
+      const obStyled = obOld.match(/<c r="B[2-9]\d*" s="(\d+)"[^>]*><v>/);
+      const obDate = obStyled ? obStyled[1] : dateStyle;
+
+      const BUCKETS = [
+        ["MASTER", /^MASTER/], ["C/O", /^CHIEF OFFICER/], ["2/O", /^SECOND OFFICER/],
+        ["CH ENG", /^CHIEF ENGINEER/], ["1ST ENG", /^FIRST ENGINEER/],
+        ["JNR ENG", /^JUNIOR ENGINEER/], ["GPH", /^GPH/], ["COOK", /^COOK/],
+      ];
+      const obHead = ["CREW", "SIGN ON", "SIGN OFF", ...BUCKETS.map((b) => b[0]),
+        "NO RANK", "TOTAL", "OF WHICH FROM THE CYCLE"];
+
+      const lines = [];
+      ((plan.spine || []).slice().sort((a, b) => a.on.localeCompare(b.on))).forEach((sp) => {
+        const here = rows.filter((r) => r.on < sp.off && r.off > sp.on);
+        const byCrew = new Map();
+        here.forEach((r) => {
+          const c = String(r.crew || "").trim().toUpperCase() || "OTHER";
+          if (!byCrew.has(c)) byCrew.set(c, []);
+          byCrew.get(c).push(r);
+        });
+        [...byCrew.entries()].sort((a, b) => b[1].length - a[1].length).forEach(([crew, mine]) => {
+          const counts = BUCKETS.map(([, re]) => mine.filter((r) => re.test(String(r.rank || "").toUpperCase())).length);
+          const named = counts.reduce((a, b) => a + b, 0);
+          lines.push({ crew, on: sp.on, off: sp.off, counts, none: mine.length - named, total: mine.length });
+        });
+      });
+
+      let obData = '<row r="1">' + obHead.map((h, i) => str(rosterColAt(i) + "1", h)).join("") + "</row>";
+      lines.forEach((l, i) => {
+        const n = i + 2;
+        let cells = str("A" + n, l.crew)
+          + num("B" + n, serial(l.on), obDate) + num("C" + n, serial(l.off), obDate);
+        l.counts.forEach((v, j) => { if (v) cells += num(rosterColAt(3 + j) + n, v, null); });
+        if (l.none) cells += num(rosterColAt(11) + n, l.none, null);
+        cells += num(rosterColAt(12) + n, l.total, null);
+        obData += '<row r="' + n + '">' + cells + "</row>";
+      });
+
+      let obXml = /<sheetData\/>/.test(obOld)
+        ? obOld.replace(/<sheetData\/>/, "<sheetData>" + obData + "</sheetData>")
+        : obOld.replace(/<sheetData>[\s\S]*?<\/sheetData>/, "<sheetData>" + obData + "</sheetData>");
+      obXml = obXml.replace(/<dimension[^>]*\/>/, '<dimension ref="A1:N' + (lines.length + 1) + '"/>');
+      await setPartText(obPart, obXml);
+    }
+  }
+
   await dropCalcChain(entries);
   await setPartText(wbPart, recalcOnOpen(workbookXml));
   return writeZip(entries);
