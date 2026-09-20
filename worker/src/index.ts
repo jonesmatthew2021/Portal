@@ -6,6 +6,7 @@ import users from "./routes/users.js";
 import traffic from "./routes/traffic.js";
 import sharepoint from "./routes/sharepoint.js";
 import rename from "./routes/rename.js";
+import renameFile from "./routes/rename-file.js";
 import state from "./routes/state.js";
 import files from "./routes/files.js";
 import file from "./routes/file.js";
@@ -50,6 +51,7 @@ export default {
       if (path === "/api/login-events") return await traffic(req, user!);
       if (path === "/api/sharepoint") return await sharepoint(req, user!);
       if (path === "/api/rename-person") return await rename(req, user!);
+      if (path === "/api/rename-file") return await renameFile(req, user!);
       const grantMatch = /^\/api\/users\/([^/]+)$/.exec(path);
       if (grantMatch) return await users(req, user!, decodeURIComponent(grantMatch[1]));
 

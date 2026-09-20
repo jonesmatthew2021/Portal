@@ -4252,18 +4252,25 @@ const SHIFTS = [{ id: "day", label: "Day" }, { id: "night", label: "Night" }];
 /**
  * Which side of the board somebody is on.
  *
- * Once the board has been touched it says where everybody is and nothing is
- * worked out. Until then there is nothing to go on but the pattern, so the crew
- * whose swing the calendar says is up gets shown onboard — the page opens
- * looking right on a portal nobody has set up yet, and stops following the
- * calendar the moment anybody moves somebody.
+ * The board says where everybody is, and nothing is worked out.
+ *
+ * It used to fall back on the pattern - the crew whose turn the calendar said
+ * it was got shown onboard - so a portal nobody had set up still opened
+ * looking right. That was before Generate latest allocations existed. Now the
+ * allocations are read off the roster when management asks for it, and a board
+ * that has not been generated is a board with nothing on it, not a guess: the
+ * pattern quietly moving people on and off as the weeks roll over is exactly
+ * what the allocations are supposed to stop doing.
  */
 const boardSide = (p, board) => {
   if (!p.active) return "off";
   const held = board && board.side ? board.side[p.id] : null;
-  if (held === "on" || held === "off") return held;
-  return p.crew && swingAt(currentSwingIndex()).crew === p.crew ? "on" : "off";
+  return held === "on" || held === "off" ? held : "off";
 };
+
+// Whether a swing has been allocated at all - anybody written down as onboard.
+const boardGenerated = (board) =>
+  !!board && !!board.side && Object.values(board.side).some((v) => v === "on");
 
 const boardShift = (p, board) => (board && board.shift ? board.shift[p.id] || "" : "");
 
@@ -4560,8 +4567,7 @@ function CrewRosters({ people, setPeople, board, setBoard, log, currentUser, vie
   const aheadSide = (p) => {
     if (!p.active) return "off";
     const held = (aheadHeld.side || {})[p.id];
-    if (held === "on" || held === "off") return held;
-    return swingStatusFor(p, viewSwing, overrides);
+    return held === "on" || held === "off" ? held : "off";
   };
   /* Read as at a day - Swing Compliance asks for today - somebody whose own
      days have finished, or havent started, is ashore rather than onboard.
@@ -4591,7 +4597,7 @@ function CrewRosters({ people, setPeople, board, setBoard, log, currentUser, vie
       people.forEach((p) => {
         if (!p.active) return;
         const h = (held.side || {})[p.id];
-        out.side[p.id] = h === "on" || h === "off" ? h : swingStatusFor(p, viewSwing, overrides);
+        out.side[p.id] = h === "on" || h === "off" ? h : "off";
       });
       change(out);
       const next = {};
@@ -9336,7 +9342,32 @@ function GenerateLatestMatrix({ variant = "solid", label = "Generate latest trai
  * handed back exactly as it was with only those dates changed, or left alone
  * entirely and the reason put on screen. It never comes back stripped.
  */
-function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the spreadsheet" }) {
+/* The office names the crew qualification spreadsheet for the day it was last
+   worked on. A workbook the portal has just written carries today's date on
+   the front of it, so whoever opens the folder can see at a glance how old the
+   copy in their hands is. Anything already dated has its date replaced rather
+   than another one stuck on the front. */
+function datedWorkbookName(filename, on) {
+  const stamp = String(on || todayISO()).replace(/-/g, "");
+  const name = String(filename || "CREW QUALIFICATION EXPIRY.xlsx");
+  return /^\d{8}\s*-\s*/.test(name) ? name.replace(/^\d{8}\s*-\s*/, stamp + " - ") : stamp + " - " + name;
+}
+
+/* Renaming the filed copy, and the SharePoint file behind it, in one call.
+   A failure here is worth saying and not worth losing the run over: the
+   workbook itself is written either way, and a stale name is a smaller problem
+   than a spreadsheet that never got updated. */
+async function renameFiledDocument(id, to) {
+  const r = await fetch("/api/rename-file", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id, to }),
+  });
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(out.error || ("it couldn't be renamed (" + r.status + ")"));
+  return out;
+}
+
+function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the spreadsheet", chrome = true, onRunner }) {
   const {
     quals: QUALS, setQuals, trainingMatrix, setTrainingMatrix,
     refileCertificates, setMatrixUpdated, validityMatrix, log, role,
@@ -9346,6 +9377,10 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
   const [run, setRun] = useState(null);   // null | { phase, read, total } | { phase: "failed", message }
   const [done, setDone] = useState(null);
   const [err, setErr] = useState("");
+  // The same run, handed out so Update documentation at the top of the page can
+  // drive it. One piece of work, one place it is written down.
+  const runner = useRef(null);
+  React.useEffect(() => { if (onRunner) onRunner(() => runner.current && runner.current()); }, [onRunner]);
   // The run is watched from a window over the page, like every other analysis.
   // It can be put away — the run carries on, and the line by the button still
   // says where it is up to.
@@ -9523,20 +9558,38 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
         return;
       }
 
-      const file = new File([blob], trainingMatrix.filename, { type: XLSX_MIME });
+      const named = datedWorkbookName(trainingMatrix.filename, on);
+      const file = new File([blob], named, { type: XLSX_MIME });
       let failed = "";
+      let renamed = "";
       try {
         const up = await uploadSingleDocument(
           file, "training-matrix", { uploadedBy: role, filedOn: on, session: SESSION }, "replace",
         );
-        if (up.record) setTrainingMatrix(up.record);
+        if (up.record) {
+          setTrainingMatrix(up.record);
+          // The file in SharePoint follows the name the portal filed it under.
+          if (named !== up.record.filename) {
+            try {
+              await renameFiledDocument(up.record.id, named);
+              setTrainingMatrix({ ...up.record, filename: named });
+              renamed = named;
+            } catch (e) {
+              renamed = "";
+              failed = `It was filed as ${up.record.filename}, but couldn't be renamed to ${named}: ${e.message || String(e)}`;
+            }
+          } else {
+            renamed = named;
+          }
+        }
       } catch (e) {
         failed = `It couldn't be filed on the portal: ${e.message || String(e)} The download below is still the updated workbook.`;
       }
 
       log("Admin", "Updated the training matrix from the certificates",
-        `${trainingMatrix.filename} · ${report.written} ${report.written === 1 ? "cell" : "cells"} changed on "${report.sheet}"`);
-      setDone({ report, filename: trainingMatrix.filename, download: URL.createObjectURL(file), failed,
+        `${named} · ${report.written} ${report.written === 1 ? "cell" : "cells"} changed on "${report.sheet}"`
+        + (renamed ? "" : " · the name was left as it was"));
+      setDone({ report, filename: named, download: URL.createObjectURL(file), failed,
         read: progress.read, total: progress.total, settled: only.size, derived,
         refiled: moved.length, validityProblem });
       setRun(null);
@@ -9548,9 +9601,11 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
     }
   };
 
+  runner.current = () => (running ? Promise.resolve() : go());
+
   return (
     <div style={{ width: run || err || done ? "100%" : "auto" }}>
-      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{ display: chrome ? "flex" : "none", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <Button variant={variant} onClick={go} disabled={running}>
           {running ? "Updating…" : label}
         </Button>
@@ -10908,16 +10963,15 @@ function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, ca
     /* The swing that is on is read off the live board — the same answer the
        roster below gives — so a crew change made with Switch swings, or anyone
        moved on or off by hand, is what this page checks the moment it happens.
-       A coming swing is read off its own board where one has been worked on
-       the roster below, and follows the rotation and its one-off changes for
-       anyone that board doesn't mention. */
+       A coming swing is read off its own allocation and nothing else: one
+       that has not been generated has nobody on it, which is what the page
+       then says, rather than filling it in from the rotation. */
     const live = s.k <= k0;
     const held = live ? null : (swingBoards || {})[s.k];
     const sideFor = (p) => {
       if (live) return boardSide(p, swingBoard);
       const h = held && held.side ? held.side[p.id] : null;
-      if (h === "on" || h === "off") return h;
-      return swingStatusFor(p, s.k, overrides);
+      return h === "on" || h === "off" ? h : "off";
     };
     /* Somebody put on for part of the swing only - joining late, gone home
        early, filling in for a fortnight - is onboard for their own days and
@@ -11294,18 +11348,21 @@ function SwingDayGrid({ k, people, board, setBoard, overrides, log, onClose, sna
     return i < 0 ? RANK_GROUPS.length : i;
   };
 
+  /* Read off the allocation and nowhere else. A swing nobody has generated
+     shows nobody, and says so, rather than showing whoever the calendar's
+     rotation would have had aboard. */
   const sideOf = (p) => {
     if (!p.active) return "off";
     const h = (held.side || {})[p.id];
-    if (h === "on" || h === "off") return h;
-    return looking ? swingStatusFor(p, k, overrides) : boardSide(p, board);
+    return h === "on" || h === "off" ? h : "off";
   };
+  const generated = boardGenerated(looking ? held : board);
   const shiftOf = (p) => (held.shift || {})[p.id] || "";
   const windowOf = (p) => (held.window || {})[p.id] || null;
   const outOf = (p) => (windowOf(p) || {}).from || swing.flyOut;
   const homeOf = (p) => (windowOf(p) || {}).to || swing.flyHome;
 
-  const crew = readOnly ? [] : people.filter((p) => p.active);
+  const crew = readOnly || !generated ? [] : people.filter((p) => p.active);
   const byRank = (a, b) => groupIndexOf(a.position) - groupIndexOf(b.position) || a.name.localeCompare(b.name);
   const rows = readOnly
     ? [...snapshot.rows].map((r) => ({ ...r, key: r.id })).sort(byRank)
@@ -11327,7 +11384,7 @@ function SwingDayGrid({ k, people, board, setBoard, overrides, log, onClose, sna
         people.forEach((p) => {
           if (!p.active) return;
           const h = (was.side || {})[p.id];
-          out.side[p.id] = h === "on" || h === "off" ? h : swingStatusFor(p, k, overrides);
+          out.side[p.id] = h === "on" || h === "off" ? h : "off";
         });
         change(out);
         const next = {};
@@ -13075,6 +13132,107 @@ function SyncPeople({ found, onClose }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/* Update documentation: the whole round, behind one button.
+ *
+ * Keeping the portal current used to be four jobs in four places - sync the
+ * SharePoint folders, answer who has joined or left, read the new certificates
+ * into the matrix, write the spreadsheet - and a job missed is a portal that
+ * quietly says something that stopped being true a fortnight ago. They are one
+ * press now, in the same order, from wherever you happen to be standing.
+ *
+ * It runs itself every hour when nobody has pressed it, so a portal left alone
+ * over a swing does not drift. The hourly run does the reading and the writing;
+ * it never adds or removes a crew member on its own, because that is a question
+ * for a person and it asks the next one who opens the portal.
+ */
+function UpdateDocumentation() {
+  const { admin, lastDocUpdate, setLastDocUpdate, log } = usePortal();
+  const [step, setStep] = useState("");          // "" when nothing is running
+  const [found, setFound] = useState(null);      // whose folders the sync saw
+  const [err, setErr] = useState("");
+  const matrixRun = useRef(null);
+  const going = useRef(false);
+
+  const stamp = (iso) => {
+    if (!iso) return "never";
+    const d = new Date(iso);
+    if (isNaN(d)) return "never";
+    return d.toLocaleString("en-AU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  };
+
+  /* The round itself. `asked` is false for the hourly run, which does the
+     reading and the writing and leaves the crew question for a person. */
+  const go = async (asked = true) => {
+    if (going.current) return;
+    going.current = true;
+    setErr(""); setFound(null);
+    try {
+      setStep("Reading the SharePoint folders");
+      const r = await fetch("/api/sync", { method: "POST" });
+      const out = await r.json();
+      if (!r.ok) throw new Error(out.error || ("the folders couldn't be read (" + r.status + ")"));
+
+      // Who SharePoint holds, put to whoever pressed the button. The rest of
+      // the round carries on underneath it rather than waiting on an answer.
+      if (asked && Array.isArray(out.people)) setFound(out.people);
+
+      setStep("Reading the certificates and updating the matrix");
+      if (matrixRun.current) await matrixRun.current();
+
+      const at = new Date().toISOString();
+      setLastDocUpdate(at);
+      log("Admin", asked ? "Documentation updated" : "Documentation updated on the hour",
+        (out.registered ? out.registered.length : 0) + " new certificates taken on");
+      setStep("");
+    } catch (e) {
+      setErr(e.message || String(e));
+      setStep("");
+    }
+    going.current = false;
+  };
+
+  /* Every hour, where nobody has done it by hand. The check is the clock
+     rather than a timer left running, so a portal opened after a week away
+     does its round at once instead of an hour later. */
+  React.useEffect(() => {
+    if (!admin) return undefined;
+    const HOUR = 3600000;
+    const due = () => {
+      const at = lastDocUpdate ? Date.parse(lastDocUpdate) : 0;
+      return !at || Date.now() - at > HOUR;
+    };
+    const tick = () => { if (due() && !going.current) go(false); };
+    const t = setInterval(tick, 5 * 60000);
+    const first = setTimeout(tick, 45000);
+    return () => { clearInterval(t); clearTimeout(first); };
+  }, [admin, lastDocUpdate]);
+
+  if (!admin) return null;
+
+  return (
+    <>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+        <Button variant="solid" disabled={!!step} onClick={() => go(true)}>
+          {step ? "Updating…" : "Update documentation"}
+        </Button>
+        <span style={{ fontFamily: T.mono, fontSize: 9.5, color: err ? T.bRed : T.muted,
+          letterSpacing: "0.04em", textTransform: "uppercase" }}>
+          {err ? err.slice(0, 60) : step || ("Last updated " + stamp(lastDocUpdate))}
+        </span>
+      </div>
+
+      {/* The run itself lives here, with its button left off - the one at the
+          top is what presses it, and its progress window is the same one the
+          Required Documents page shows. */}
+      <div style={{ position: "absolute", left: 0, right: 0 }}>
+        <UpdateTrainingMatrixInPlace chrome={false} onRunner={(fn) => { matrixRun.current = fn; }} />
+      </div>
+
+      {found && <SyncPeople found={found} onClose={() => setFound(null)} />}
+    </>
   );
 }
 
@@ -18099,6 +18257,8 @@ function CoolibahPortal({ role, onSignOut }) {
   // here — during render, before any child works a swing out — so the whole
   // portal follows a move at once, and falls back to the defaults while a box
   // is half-typed rather than working swings out from nonsense.
+  // When the documentation was last brought up to date, by hand or on the hour.
+  const lastDocUpdate = store.lastDocUpdate || null, setLastDocUpdate = put("lastDocUpdate");
   const rosterPattern = { ...ROSTER_DEFAULTS, ...(store.rosterPattern || {}) };
   const setRosterPattern = put("rosterPattern");
   ROSTER_ANCHOR = /^\d{4}-\d{2}-\d{2}$/.test(rosterPattern.anchor || "")
@@ -18898,7 +19058,7 @@ function CoolibahPortal({ role, onSignOut }) {
     return { ok: true, gone };
   };
 
-  const ctx = { role, admin, session: SESSION, removeCrew, writeCrewToWorkbooks, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
+  const ctx = { role, admin, session: SESSION, removeCrew, writeCrewToWorkbooks, lastDocUpdate, setLastDocUpdate, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
 
   return (
     <Ctx.Provider value={ctx}>
@@ -18929,6 +19089,7 @@ function CoolibahPortal({ role, onSignOut }) {
                   background: sync.state === "error" ? T.bRed : sync.state === "ok" ? T.teal : T.muted }} />
                 {sync.state === "ok" ? "Saved" : sync.state === "error" ? "Not saving" : "..."}
               </span>
+              <UpdateDocumentation />
               <NotifyToggle log={log} on={notifyOn} setOn={setNotifyOn} count={unreadTotal} />
               {/* Chris's FIT TO SAIL, one click away — the address comes from the
                   server with the sign-in, so the button only shows when it's set. */}
