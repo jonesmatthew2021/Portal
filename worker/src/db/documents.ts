@@ -76,9 +76,10 @@ export const SINGLE_FILE_CATEGORIES: Record<
     label: "skills matrix",
     required: true,
   },
-  // The companion to the skills matrix, and not marked required: a portal that
-  // has been running on the two matrices alone goes on working without it, and
-  // the analysis reads it as soon as one is filed.
+  // Retired. The validity periods were folded into the skills matrix by the
+  // office, and the file filed here was a copy of it that nothing read. The
+  // category stays defined so anything already filed under it still resolves
+  // and can be opened or taken down by hand; nothing offers it any more.
   "validity-matrix": {
     folder: VALIDITY_FOLDER,
     label: "validity periods matrix",

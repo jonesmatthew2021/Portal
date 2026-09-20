@@ -550,9 +550,6 @@ function withStoredFiles(store, items) {
     // The two documents the portal is required to hold at all times.
     trainingMatrix: pick("training-matrix")[0] || null,
     skillsMatrix: pick("skills-matrix")[0] || null,
-    // The skills matrix's companion — how long each item stays valid. Read with
-    // it where one is on file; the portal runs without it.
-    validityMatrix: pick("validity-matrix")[0] || null,
     // The office's travel roster — who is on which swing.
     crewRoster: pick("crew-roster")[0] || null,
     // The latest spreadsheet exported from OPMS. One is kept, like the others.
@@ -584,7 +581,6 @@ function withoutStoredFiles(store) {
     trainingMatrix: null,
     crewRoster: null,
     skillsMatrix: null,
-    validityMatrix: null,
     opmsSheet: null,
     shiftAllocation: null,
   };
@@ -10235,7 +10231,6 @@ function RemovedFiles() {
     if (it.category === "certificate-sheet") return "Crew certificates spreadsheet";
     if (it.category === "training-matrix") return "Training matrix";
     if (it.category === "skills-matrix") return "Skills matrix";
-    if (it.category === "validity-matrix") return "Validity periods matrix";
     if (it.category === "opms-sheet") return "OPMS spreadsheet";
     if (it.category === "matrix") return "Crew matrix spreadsheet";
     if (it.category === "note") return "Handover note";
@@ -17803,10 +17798,12 @@ function CoolibahPortal({ role, onSignOut }) {
   const crewRoster = store.crewRoster || null;
   const rosterPlan = store.rosterPlan || null, setRosterPlan = put("rosterPlan");
   const setCrewRoster = (record) => setStore((s) => ({ ...s, crewRoster: record }));
-  // The validity periods ride on the skills matrix — the office folded the old
-  // separate validity spreadsheet into it — so whatever skills matrix is on
-  // file is also the validity periods document. The newest upload is always
-  // the source; there is no second file to keep in step.
+  // The validity periods ride on the skills matrix - the office folded the old
+  // separate validity spreadsheet into it - so whatever skills matrix is on
+  // file is also the validity periods document. There was once a slot of its
+  // own for that spreadsheet; it held a copy of the skills matrix, nothing read
+  // it, and it is gone. The newest skills matrix is the source, and there is no
+  // second file to keep in step.
   const validityMatrix = store.skillsMatrix || null;
   const matrixAnalysis = store.matrixAnalysis || null;
   const setMatrixAnalysis = put("matrixAnalysis");
