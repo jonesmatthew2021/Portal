@@ -13369,7 +13369,11 @@ function SyncPeople({ found, onClose }) {
  * for a person and it asks the next one who opens the portal.
  */
 function UpdateDocumentation() {
-  const { admin, lastDocUpdate, setLastDocUpdate, log } = usePortal();
+  const { admin, lastDocUpdate, setLastDocUpdate, log,
+    quals: QUALS, setQuals, trainingMatrix,
+    rosterPlan, setRosterPlan, crewRoster,
+    skillsMatrix, skillsRequirements, setSkillsRequirements,
+    certificates, setCertAnalysis, setMatrixAnalysis } = usePortal();
   const [step, setStep] = useState("");          // "" when nothing is running
   const [found, setFound] = useState(null);      // whose folders the sync saw
   const [asking, setAsking] = useState(false);   // items the skills matrix has gained or lost
@@ -13403,6 +13407,41 @@ function UpdateDocumentation() {
       setStep("Reading the certificates and updating the matrix");
       if (matrixRun.current) await matrixRun.current();
 
+      /* What the library no longer holds, the portal no longer shows.
+       *
+       * SharePoint is the store. Everything on these screens was read out of a
+       * document in it: the crew matrix is the office's crew qualification
+       * workbook, the roster is the roster workbook, the requirements are the
+       * skills matrix. Deleting the documents and leaving what was read out of
+       * them on the screen is the portal keeping its own copy of something the
+       * library has been told to forget - which is the whole of what is wrong
+       * with a portal that holds its own store.
+       *
+       * So each one follows its own document. A document is only off the books
+       * when the library answered and the file was not in it, and putting the
+       * workbook back reads it all in again, so nothing here is lost that an
+       * upload does not bring back.
+       */
+      const cleared = [];
+      if (!trainingMatrix && (QUALS.rows || []).length) {
+        cleared.push("the crew matrix");
+        setQuals({ cols: [], rows: [] });
+        setCertAnalysis(null);
+        setMatrixAnalysis(null);
+      }
+      if (!crewRoster && rosterPlan) {
+        cleared.push("the roster");
+        setRosterPlan(null);
+      }
+      if (!skillsMatrix && skillsRequirements) {
+        cleared.push("the requirements");
+        setSkillsRequirements(null);
+      }
+      if (cleared.length) {
+        log("Admin", "Cleared what the library no longer holds",
+          cleared.join(", ") + " — put the workbook back and it is read in again");
+      }
+
       // The skills matrix has been re-read by now, so the portal's own columns
       // can be held against it and anything that has changed put to whoever
       // pressed the button.
@@ -13411,7 +13450,11 @@ function UpdateDocumentation() {
       const at = new Date().toISOString();
       setLastDocUpdate(at);
       log("Admin", asked ? "Documentation updated" : "Documentation updated on the hour",
-        (out.registered ? out.registered.length : 0) + " new certificates taken on");
+        [(out.registered ? out.registered.length : 0) + " new certificates taken on",
+          out.mirrored ? out.mirrored + " gone from the library and off the books" : null,
+          out.followed ? out.followed + " followed to a new folder" : null,
+          cleared.length ? cleared.join(" and ") + " cleared" : null,
+        ].filter(Boolean).join(" · "));
       setStep("");
     } catch (e) {
       setErr(e.message || String(e));
