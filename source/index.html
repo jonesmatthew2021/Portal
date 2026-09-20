@@ -2312,16 +2312,48 @@ function coversFrom(XLSX, wb, cols) {
   };
   const out = [];
   const pairs = new Set();
+  const add = (need, met) => {
+    const key = need + "<" + met;
+    if (need === met || pairs.has(key)) return;
+    pairs.add(key);
+    out.push({ need, met });
+  };
+
+  /* One column accepted in place of another, said outright: "if you do not
+     hold QL-15, QL-14 is accepted". */
   for (const r of grid) {
     const wanted = part(r[1]);
     const held = part(r[2]);
     if (!wanted || !held) continue;
     if (!colCodes.has(wanted.code) || !colCodes.has(held.code)) continue;
-    const key = wanted.code + "<" + held.code;
-    if (wanted.code === held.code || pairs.has(key)) continue;
-    pairs.add(key);
-    out.push({ need: wanted.code, met: held.code });
+    add(wanted.code, held.code);
   }
+
+  /* And the same thing said the long way round. A named ticket is often
+     accepted for more than one column - an Engineer Watchkeeper (Motor)
+     answers for the engineer's ticket AND for safety training, because the
+     one certificate covers both. The portal files that certificate under the
+     first column the sheet names, which is the senior one, and the others
+     were left looking empty: the crew member was told he was missing a
+     certificate the office had already said he did not need.
+     Where a ticket is accepted for several columns, holding the one it is
+     filed under answers for the rest. */
+  const spread = new Map();
+  for (const r of grid) {
+    const wanted = part(r[1]);
+    const held = part(r[2]);
+    if (!wanted || !held) continue;
+    if (!colCodes.has(wanted.code) || colCodes.has(held.code)) continue;
+    if (!spread.has(held.code)) spread.set(held.code, []);
+    const list = spread.get(held.code);
+    if (!list.includes(wanted.code)) list.push(wanted.code);
+  }
+  spread.forEach((list) => {
+    if (list.length < 2) return;
+    const filed = list[0];                 // where the portal puts it
+    list.slice(1).forEach((other) => add(other, filed));
+  });
+
   return out;
 }
 
