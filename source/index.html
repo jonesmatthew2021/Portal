@@ -587,18 +587,27 @@ function withoutStoredFiles(store) {
 }
 
 
-const TODAY = "2026-08-08";
-
 // Everyone filing for this vessel is on Western Australian time, so "today" is
 // the day it is there rather than whatever UTC has reached.
 const VESSEL_TZ = "Australia/Perth";
 
-// The real date, as YYYY-MM-DD. TODAY above is the day the portal's figures were
-// taken off the spreadsheet — every expiry is measured against it and it must not
-// drift. This is for things that happen while the portal is open: a file added
-// now was added today, whatever date the figures were compiled on.
-// en-CA formats as YYYY-MM-DD, which is the shape everything here stores.
+// The real date, as YYYY-MM-DD. en-CA formats it that way, which is the shape
+// everything here stores.
 const todayISO = () => new Intl.DateTimeFormat("en-CA", { timeZone: VESSEL_TZ }).format(new Date());
+
+/* The day every expiry is measured against.
+ *
+ * This was once pinned to the day the figures were first taken off the
+ * spreadsheet, on the reasoning that the figures were compiled then and should
+ * be read as they stood. That reasoning does not survive contact with what the
+ * portal is for: a certificate expires on its own date, not on the date
+ * somebody typed it in. Pinned, the whole board read as though it were still
+ * that morning - a ticket that ran out weeks ago still showed days in hand,
+ * and the error grew by one day, every day, in the direction of saying the
+ * crew were covered when they were not.
+ *
+ * It is the real day now, in the vessel's own time. */
+const TODAY = todayISO();
 
 // Crew qualification expiry, imported from 20260808 - CREW QUALIFICATION EXPIRY.xlsx
 // cols: [code, title, group]   rows: [name, position, SAM #, [values...]]
@@ -1150,9 +1159,7 @@ function swingAt(k) {
   };
 }
 
-// Which swing a date falls in. The calendar moves with the real day in Perth —
-// TODAY is the day the spreadsheet figures were compiled and is only for
-// reading expiries, not for saying whose turn it is to be onboard.
+// Which swing a date falls in, by the real day in Perth.
 function currentSwingIndex(iso = todayISO()) {
   const days = Math.round((new Date(iso) - new Date(ROSTER_ANCHOR)) / 86400000);
   return Math.floor(days / CYCLE);
@@ -2018,7 +2025,17 @@ function daysTo(iso) {
   return Math.round((new Date(iso) - new Date(TODAY)) / 86400000);
 }
 
-// Expired or within 30 days red, 30-60 orange, 60-90 yellow, beyond 90 green.
+/* How long a certificate has left, in three bands, and the only place the
+   numbers are written down. Everything that shows a certificate's standing -
+   the matrix, the reports, a person's own page - reads them from here, so the
+   colours cannot come to mean different things on different pages.
+
+   Red covers expired as well as expiring: an item that ran out last year and
+   one that runs out next month are both work to be done now. */
+const RED_DAYS = 90;      // expired, or expiring within this many days
+const AMBER_DAYS = 180;   // expiring within this many days
+
+// Expired or within 90 days red, 90-180 orange, beyond 180 green.
 function bandFor(v) {
   if (!v) return null;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) {
@@ -2033,9 +2050,8 @@ function bandFor(v) {
     return { key: "unknown", fg: T.muted, bg: T.raised, text: "?" };
   }
   const d = daysTo(v);
-  if (d <= 30) return { key: "red", fg: T.bRed, bg: T.bRedBg, days: d, date: v };
-  if (d <= 60) return { key: "orange", fg: T.bOrange, bg: T.bOrangeBg, days: d, date: v };
-  if (d <= 90) return { key: "yellow", fg: T.bYellow, bg: T.bYellowBg, days: d, date: v };
+  if (d <= RED_DAYS) return { key: "red", fg: T.bRed, bg: T.bRedBg, days: d, date: v };
+  if (d <= AMBER_DAYS) return { key: "orange", fg: T.bOrange, bg: T.bOrangeBg, days: d, date: v };
   return { key: "green", fg: T.bGreen, bg: T.bGreenBg, days: d, date: v };
 }
 
@@ -3371,13 +3387,13 @@ function CrewReport({ onClose }) {
     .map((r) => ({ row: r, items: itemsFor(r, QUALS) }))
     .filter((x) => x.items.length > 0);
 
-  const soonOf = (items) => items.filter((x) => x.band.date && daysTo(x.band.date) <= 90);
+  const soonOf = (items) => items.filter((x) => x.band.date && daysTo(x.band.date) <= RED_DAYS);
   const total = crew.reduce((n, a) => n + a.items.length, 0);
   const due = crew.reduce((n, a) => n + soonOf(a.items).length, 0);
   const expired = crew.reduce((n, a) => n + a.items.filter((i) => i.band.date && daysTo(i.band.date) < 0).length, 0);
 
   const heading = "Crew Report - every item on the matrix";
-  const standfirst = `${VESSEL.name} ${VESSEL.nameAccent} · as at ${fmtDate(TODAY)} · ${crew.length} crew · ${total} items · ${due} due within 90 days${expired ? ` · ${expired} already expired` : ""}`;
+  const standfirst = `${VESSEL.name} ${VESSEL.nameAccent} · as at ${fmtDate(TODAY)} · ${crew.length} crew · ${total} items · ${due} due within ${RED_DAYS} days${expired ? ` · ${expired} already expired` : ""}`;
 
   // Each person's line on the report says the same as their line on the table:
   // how much they hold, how much of it is a problem today, and — because the
@@ -3439,10 +3455,10 @@ function IndividualReport({ onClose }) {
   const [who, setWho] = useState("");
   const row = QUALS.rows.find((r) => r[0] === who);
   const items = row ? itemsFor(row, QUALS) : [];
-  const soon = items.filter((x) => (x.band.date && daysTo(x.band.date) <= 90) || x.band.key === "not");
+  const soon = items.filter((x) => (x.band.date && daysTo(x.band.date) <= RED_DAYS) || x.band.key === "not");
 
   const standfirst = row
-    ? `${row[1]} · ${row[2]} · as at ${fmtDate(TODAY)} · ${items.length} items held · ${soon.length ? `${soon.length} due within 90 days or not held` : "nothing due within 90 days"}`
+    ? `${row[1]} · ${row[2]} · as at ${fmtDate(TODAY)} · ${items.length} items held · ${soon.length ? `${soon.length} due within ${RED_DAYS} days or not held` : `nothing due within ${RED_DAYS} days`}`
     : "";
 
   const asPDF = () => {
@@ -3540,7 +3556,8 @@ function MatrixPerson({ row, onClose }) {
 
   const dated = (test) => items.filter((x) => x.band.date && test(daysTo(x.band.date)));
   const expired = dated((d) => d < 0);
-  const soon = dated((d) => d >= 0 && d <= 90);
+  const soon = dated((d) => d >= 0 && d <= RED_DAYS);
+  const later = dated((d) => d > RED_DAYS && d <= AMBER_DAYS);
   const notHeld = items.filter((x) => x.band.key === "not");
   const unconfirmed = items.filter((x) => x.band.key === "unknown");
   // A blank cell means the item was never asked of this position, so it is
@@ -3552,7 +3569,7 @@ function MatrixPerson({ row, onClose }) {
   // again in its own category below, which is the point - this is the shortlist,
   // not a separate set of facts.
   const attention = items.filter(
-    (x) => (x.band.date && daysTo(x.band.date) <= 90) || x.band.key === "not",
+    (x) => (x.band.date && daysTo(x.band.date) <= AMBER_DAYS) || x.band.key === "not",
   );
 
   const standfirst = `${row[1]} · ${row[2]} · as at ${fmtDate(TODAY)} · ${items.length} item${items.length === 1 ? "" : "s"} held`
@@ -3612,7 +3629,7 @@ function MatrixPerson({ row, onClose }) {
 
   return (
     <div style={{ background: T.panel, border: `1px solid ${T.rule}`,
-      borderLeft: `3px solid ${expired.length + notHeld.length ? T.bRed : soon.length ? T.bOrange : T.teal}`,
+      borderLeft: `3px solid ${expired.length + notHeld.length + soon.length ? T.bRed : later.length ? T.bOrange : T.teal}`,
       borderRadius: 2, padding: "14px 15px", marginTop: 18 }}>
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline",
@@ -3631,9 +3648,10 @@ function MatrixPerson({ row, onClose }) {
       <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 14 }}>
         {expired.length > 0 && <Chip fg={T.bRed} bg={T.bRedBg}>{expired.length} expired</Chip>}
         {notHeld.length > 0 && <Chip fg={T.bRed} bg={T.bRedBg}>{notHeld.length} not held</Chip>}
-        {soon.length > 0 && <Chip fg={T.bOrange} bg={T.bOrangeBg}>{soon.length} within 90 days</Chip>}
+        {soon.length > 0 && <Chip fg={T.bRed} bg={T.bRedBg}>{soon.length} within {RED_DAYS} days</Chip>}
+        {later.length > 0 && <Chip fg={T.bOrange} bg={T.bOrangeBg}>{later.length} within {AMBER_DAYS} days</Chip>}
         {unconfirmed.length > 0 && <Chip fg={T.muted} bg={T.raised}>{unconfirmed.length} unconfirmed</Chip>}
-        {expired.length + notHeld.length + soon.length + unconfirmed.length === 0 && items.length > 0 && (
+        {expired.length + notHeld.length + soon.length + later.length + unconfirmed.length === 0 && items.length > 0 && (
           <Chip fg={T.green} bg={T.bGreenBg}>Everything in date</Chip>
         )}
       </div>
@@ -3874,7 +3892,7 @@ function TrainingMatrix() {
     return colIdxAll.some((i) => {
       const b = bandFor(r[3][i]);
       return b && (only === "attention"
-        ? ["red", "orange", "yellow", "not"].includes(b.key)
+        ? ["red", "orange", "not"].includes(b.key)
         : b.key === only);
     });
   });
@@ -3887,7 +3905,7 @@ function TrainingMatrix() {
   // panel rather than leaving a name on screen that the table no longer shows.
   const pickedRow = rows.find((r) => keyOf(r) === picked) || null;
 
-  const tally = { red: 0, orange: 0, yellow: 0, green: 0 };
+  const tally = { red: 0, orange: 0, green: 0 };
   QUALS.rows.forEach((r) => r[3].forEach((v) => {
     const b = bandFor(v);
     if (b && tally[b.key] !== undefined) tally[b.key]++;
@@ -3921,10 +3939,9 @@ function TrainingMatrix() {
       <SectionHead title="Crew Matrix" />
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 13 }}>
-        {chip("expired or within 30 days", T.bRed, tally.red, "red")}
-        {chip("30-60 days", T.bOrange, tally.orange, "orange")}
-        {chip("60-90 days", T.bYellow, tally.yellow, "yellow")}
-        {chip("beyond 90 days", T.bGreen, tally.green, "green")}
+        {chip("expired or within " + RED_DAYS + " days", T.bRed, tally.red, "red")}
+        {chip(RED_DAYS + "-" + AMBER_DAYS + " days", T.bOrange, tally.orange, "orange")}
+        {chip("beyond " + AMBER_DAYS + " days", T.bGreen, tally.green, "green")}
       </div>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 20 }}>
@@ -4094,8 +4111,9 @@ function TrainingMatrix() {
       )}
 
       <div style={{ display: "flex", gap: 18, marginTop: 22, flexWrap: "wrap" }}>
-        {[["Expired or within 30 days", T.bRed], ["30 to 60 days", T.bOrange],
-          ["60 to 90 days", T.bYellow], ["More than 90 days", T.bGreen]].map(([l, c]) => (
+        {[["Expired or within " + RED_DAYS + " days", T.bRed],
+          [RED_DAYS + " to " + AMBER_DAYS + " days", T.bOrange],
+          ["More than " + AMBER_DAYS + " days", T.bGreen]].map(([l, c]) => (
           <span key={l} style={{ display: "flex", gap: 8, alignItems: "center", fontFamily: T.body, fontSize: 13, color: T.muted }}>
             <span style={{ width: 11, height: 11, background: c, borderRadius: 2 }} /> {l}
           </span>
@@ -15907,7 +15925,7 @@ function TodayScreen({ go }) {
         } else if (b.date) {
           const d = daysTo(b.date);
           if (d < 0) items.push({ person: r[0], position: r[1], code, title, kind: "expired", urgency: -d + 10000, say: `expired ${Math.abs(d)} days ago` });
-          else if (d <= 30) items.push({ person: r[0], position: r[1], code, title, kind: "soon", urgency: 30 - d, say: `${d} days left` });
+          else if (d <= RED_DAYS) items.push({ person: r[0], position: r[1], code, title, kind: "soon", urgency: RED_DAYS - d, say: `${d} days left` });
         }
       });
     });
