@@ -14126,38 +14126,30 @@ function FileNames({ onClose }) {
       const expires = c.readExpires || c.expiresOn || "";
       const want = houseFileName(c.person, code, title, expires, c.filename);
       if (!want || want === c.filename) return;
-      out.push({ id: c.id, person: c.person, was: c.filename, will: want, folder: null });
+      out.push({ id: c.id, person: c.person, was: c.filename, will: want });
     });
     return out;
   }, [certificates, QUALS]);
 
-  /* A crew folder named anything other than the person's own name. Every file
-     in it moves together, or the folder is left as it is. */
-  const folders = useMemo(() => {
-    const seen = new Map();
-    (certificates || []).forEach((c) => {
-      if (!c.id || !c.key) return;
-      const at = folderOfKey(c.key);
-      // One level under the OPMS root is a crew folder, suffix or no suffix.
-      if (!/^opms\/[^/]+$/i.test(at)) return;
-      const want = houseFolderName(c.person);
-      if (!want) return;
-      const now = at.split("/").pop();
-      if (now === want) return;
-      const root = at.slice(0, at.length - now.length);
-      const key = at;
-      if (!seen.has(key)) seen.set(key, { at, now, will: want, root, files: [] });
-      seen.get(key).files.push(c);
-    });
-    return [...seen.values()].filter((f) => !done.includes("folder:" + f.at));
-  }, [certificates, done]);
+  /* Folders are the office's to name.
+   *
+   * The portal used to offer to rename them, and taking the offer moved every
+   * file in the folder to a folder named after the person. Where the library
+   * had never used that name it did not rename anything - it made a second
+   * folder and left the first one standing, half full. The library ended up
+   * with more folders than crew and no way to tell which was current.
+   *
+   * So the portal renames files, where it finds them, and nothing else. A
+   * folder that wants renaming is renamed in SharePoint by hand, and the next
+   * round of the library follows it there.
+   */
 
   const rename = async (row) => {
     setBusy(row.id);
     try {
       const r = await fetch("/api/rename-file", {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id: row.id, to: row.will, ...(row.folder ? { toFolder: row.folder } : null) }),
+        body: JSON.stringify({ id: row.id, to: row.will }),
       });
       const out = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(out.error || ("it couldn't be renamed (" + r.status + ")"));
@@ -14196,33 +14188,6 @@ function FileNames({ onClose }) {
     setRun((r) => ({ ...r, now: "", stopped: true }));
     log("Admin", "Certificates renamed to the house style",
       done + " renamed" + (failed ? " · " + failed + " left alone" : ""));
-  };
-
-  /* "as" is who the folder is becoming, where that is not yet what the
-     certificates inside say. Putting a crew member's name right moves his
-     folder in the same press, and the files have to go into it under the new
-     name rather than the one that was wrong. */
-  const renameFolder = async (f, as) => {
-    setBusy("folder:" + f.at);
-    let failed = 0;
-    for (const c of f.files) {
-      const code = c.readCode || c.qualCode || "";
-      const title = c.readTitle || (QUALS.cols.find((x) => x[0] === code) || [])[1] || "";
-      const expires = c.readExpires || c.expiresOn || "";
-      const want = (code && houseFileName(as || c.person, code, title, expires, c.filename)) || c.filename;
-      try {
-        const r = await fetch("/api/rename-file", {
-          method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ id: c.id, to: want, toFolder: f.root + f.will }),
-        });
-        if (!r.ok) failed++;
-      } catch (e) { failed++; }
-    }
-    log("Admin", "Folder renamed: " + f.now + " to " + f.will,
-      f.files.length + " file" + (f.files.length === 1 ? "" : "s") + " moved"
-      + (failed ? " · " + failed + " could not be moved and are still in the old folder" : ""));
-    setDone((d) => [...d, "folder:" + f.at]);
-    setBusy("");
   };
 
   /* Crew the matrix knows only by a first name.
@@ -14271,35 +14236,26 @@ function FileNames({ onClose }) {
       .filter((x) => !done.includes("crew:" + x.was));
   }, [QUALS, certificates, people, rosterPlan, done]);
 
-  /* Putting the name right and moving his folder are one press. Doing one
-     without the other leaves the matrix asking under a name the library has
-     never heard of, which is the state this is here to get out of. */
-  const fixName = async (x) => {
+  /* The name on the portal, and nothing in the library.
+   *
+   * His certificates stay in whatever folder the office has them in. What
+   * changes is that the portal now knows the folder holds Kachin Sittiyos, so
+   * his dates reach his row on the matrix - which is the whole of what was
+   * wrong. The folder can be renamed in SharePoint whenever somebody gets to
+   * it, and the portal will follow it there without being told. */
+  const fixName = (x) => {
     const now = canonicalName(asName[x.was] == null ? x.will : asName[x.was]);
     if (!now || !now.includes(",")) {
       setTrouble((t) => ({ ...t, ["crew:" + x.was]: "That needs a surname and a first name." }));
       return;
     }
-    setBusy("crew:" + x.was);
-    const letters = (n) => String(n || "").toUpperCase().replace(/[^A-Z]/g, "");
-    const mine = (certificates || []).filter((c) => c.key && letters(c.person) === letters(x.was));
-    if (mine.length) {
-      const at = folderOfKey(mine[0].key);
-      const here = at.split("/").pop();
-      const will = houseFolderName(now);
-      if (/^opms\/[^/]+$/i.test(at) && will && here !== will) {
-        await renameFolder({ at, now: here, will, root: at.slice(0, at.length - here.length),
-          files: mine }, now);
-      }
-    }
     renameCrew(x.was, now);
     setDone((d) => [...d, "crew:" + x.was]);
-    setBusy("");
   };
 
   const waiting = proposals.filter((p) => !done.includes(p.id));
   if (!admin) return null;
-  if (!waiting.length && !folders.length && !crew.length) return null;
+  if (!waiting.length && !crew.length) return null;
 
   const row = { padding: "9px 0", borderTop: "1px solid " + T.rule };
 
@@ -14310,7 +14266,7 @@ function FileNames({ onClose }) {
         borderRadius: 3, padding: "20px 24px", width: "min(760px, 94vw)", maxHeight: "82vh", overflowY: "auto" }}>
         <Eyebrow color={T.accent}>Names that are not the house style</Eyebrow>
         <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, margin: "8px 0 14px", lineHeight: 1.6 }}>
-          Nothing has been changed. A rename moves the file in SharePoint as well as on the portal.
+          Nothing has been changed. A rename renames the file in SharePoint, where it sits — folders are left alone.
         </div>
 
         {crew.length > 0 && (
@@ -14331,10 +14287,7 @@ function FileNames({ onClose }) {
                     style={{ flex: 1, minWidth: 190, fontFamily: T.mono, fontSize: 12.5,
                       padding: "5px 8px", borderRadius: 2, border: "1px solid " + T.rule,
                       background: T.raised, color: T.text }} />
-                  <Button variant="solid" disabled={busy === "crew:" + x.was}
-                    onClick={() => fixName(x)}>
-                    {busy === "crew:" + x.was ? "Putting right…" : "Put right"}
-                  </Button>
+                  <Button variant="solid" onClick={() => fixName(x)}>Put right</Button>
                 </div>
                 <div style={{ fontFamily: T.body, fontSize: 12, color: T.muted, marginTop: 3 }}>
                   {x.why}{x.files ? " · " + x.files + " file" + (x.files === 1 ? "" : "s") + " move with him" : ""}
@@ -14344,27 +14297,6 @@ function FileNames({ onClose }) {
                     {trouble["crew:" + x.was]}
                   </div>
                 )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {folders.length > 0 && (
-          <div style={{ marginBottom: 18 }}>
-            <div style={{ fontFamily: T.display, fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 4 }}>
-              Folders
-            </div>
-            {folders.map((f) => (
-              <div key={f.at} style={{ ...row, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                <span style={{ fontFamily: T.mono, fontSize: 12, color: T.muted, flex: 1, minWidth: 220 }}>
-                  {f.now} <span style={{ color: T.accent }}>→ {f.will}</span>
-                </span>
-                <span style={{ fontFamily: T.body, fontSize: 12, color: T.muted }}>
-                  {f.files.length} file{f.files.length === 1 ? "" : "s"}
-                </span>
-                <Button variant="quiet" disabled={busy === "folder:" + f.at} onClick={() => renameFolder(f)}>
-                  {busy === "folder:" + f.at ? "Moving…" : "Rename the folder"}
-                </Button>
               </div>
             ))}
           </div>
@@ -14480,17 +14412,6 @@ const houseFileName = (person, code, title, expires, filename) => {
   const safe = (t) => String(t).replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, " ").trim();
   const when = /^\d{4}-\d{2}-\d{2}$/.test(String(expires || "")) ? " - " + expires : "";
   return safe(who) + " - " + safe(what) + when + ext;
-};
-
-/* The person's own name, and nothing else. The folder is already inside OPMS
-   Documents; "Kyle - OPMS" said OPMS twice and told nobody anything. */
-const houseFolderName = (person) => canonicalName(person || "") || null;
-
-/* The folder a key sits in, and the crew folder within it: the OPMS root and
-   the person's own folder under it. */
-const folderOfKey = (key) => {
-  const cut = String(key || "").lastIndexOf("/");
-  return cut < 0 ? "" : String(key).slice(0, cut);
 };
 
 /* What the office tracks, held against what the portal asks for.

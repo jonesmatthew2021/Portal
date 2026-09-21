@@ -1,7 +1,6 @@
 
 import {
   canonicaliseCertificate,
-  certFolderFor,
   fileStore,
   liveSingleFileRow,
   refileCertificate,
@@ -462,25 +461,23 @@ export async function refile(names: string[], limit = Infinity) {
     const person = holderOnMatrix(reading.holderName, names);
     if (!person) continue;
 
-    const folder = certFolderFor(person);
-    if (folder !== row.folder) {
-      if (done >= limit) { remaining++; continue; }
-      const from = row.person;
-      const updated = await refileCertificate(row, person, folder);
-      moved.push({ id: updated.id, filename: updated.filename, folder, from, to: person });
-      done++;
-      continue;
-    }
-
-    // The right folder, but the folder own wording on the row: certificates
-    // the sync took on carry the folder name as their person until a reading
-    // says whose they are, and they sit under Other on the certificates list
-    // with no rank to their name. The reading says whose they are, so the row
-    // takes the matrix name. A label, not a move - one row update, no file
-    // touched - so it does not count against the slice.
+    /* Whose certificate this is, written on the row. The file is not moved.
+     *
+     * Certificates the sync took on carry their folder's name as their person
+     * until a reading says otherwise, so they sit under Other with no rank
+     * against them; and a certificate can be in the wrong person's folder
+     * altogether. Both are the same answer now - the row is corrected and the
+     * file stays where the office filed it.
+     *
+     * It used to move the file into a folder worked out from the person's
+     * name. Where the library had never used that name, the move made the
+     * folder rather than renaming anything, so the library grew a second,
+     * near-empty folder for people who already had one. A label, not a move:
+     * one row update, no file touched, so it does not count against the slice.
+     */
     if ((row.person || "") !== person) {
       await getEnv().DB.prepare("UPDATE documents SET person = ?2 WHERE id = ?1").bind(row.id, person).run();
-      moved.push({ id: row.id, filename: row.filename, folder, from: row.person, to: person });
+      moved.push({ id: row.id, filename: row.filename, folder: row.folder || "", from: row.person, to: person });
       row.person = person;
     }
 

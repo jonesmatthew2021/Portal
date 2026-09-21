@@ -231,6 +231,23 @@ export function opmsFolderName(token: string) {
  * told nobody anything. */
 export const opmsCertPrefix = (token: string) => `opms/${opmsFolderName(token)}`;
 
+/**
+ * The folder a file is actually in, read off its own address.
+ *
+ * Not the same thing as opmsCertPrefix, which works a folder name out from the
+ * portal's token for a person. Where the library still calls the folder
+ * "Chris - OPMS" and the token says "ayers-christopher-james", those two
+ * disagree, and writing to the worked-out one does not rename the folder - it
+ * makes a second folder beside the first and leaves the file in it.
+ *
+ * So a rename uses this. The office names its own folders; the portal renames
+ * the file inside whichever folder it found it in and nothing else.
+ */
+export const blobFolder = (blobKey: string) => {
+  const cut = String(blobKey || "").lastIndexOf("/");
+  return cut > 0 ? blobKey.slice(0, cut) : "opms";
+};
+
 const TOKEN_BY_OPMS_NAME: Record<string, string> = Object.fromEntries(
   Object.entries(OPMS_FOLDER_NAMES).map(([t, n]) => [n.toLowerCase(), t]),
 );
@@ -426,11 +443,23 @@ export async function restoreDocument(row: DocumentRow) {
   const single = singleFileCategory(row.category);
 
   if (row.category === "certificate" && row.folder) {
-    // Back into the crew member own OPMS folder, which is where certificates
-    // live now - restoring to the old certification root would put the file
-    // somewhere nobody looks.
+    /* Back in with the rest of his certificates.
+     *
+     * Which folder that is, is asked of his other files rather than worked out
+     * from his name. The office still calls some of them "Chris - OPMS", and a
+     * worked-out "AYERS, Christopher James" would not be that folder - it
+     * would be a new one, holding one restored file and nothing else. The
+     * worked-out name is only used where he has nothing else on file to point
+     * at.
+     */
+    const beside = await db
+      .select({ blobKey: documents.blobKey })
+      .from(documents)
+      .where(and(eq(documents.folder, row.folder), isNull(documents.removedAt)))
+      .limit(1);
+    const home = beside[0] ? blobFolder(beside[0].blobKey) : opmsCertPrefix(row.folder);
     filename = await freeCertName(row.folder, row.filename);
-    blobKey = await moveBlob(row.blobKey, `${opmsCertPrefix(row.folder)}/${filename}`);
+    blobKey = await moveBlob(row.blobKey, `${home}/${filename}`);
   } else if (single) {
     blobKey = await moveBlob(row.blobKey, `${single.folder}/${filename}`);
   }
@@ -483,7 +512,7 @@ export async function canonicaliseCertificate(
   if (!convertible) {
     const landing = await freeCertName(row.folder!, want, row.filename);
     if (landing === row.filename
-      && `${opmsCertPrefix(row.folder || "unnamed")}/${landing}` === row.blobKey) return null;
+      && `${blobFolder(row.blobKey)}/${landing}` === row.blobKey) return null;
   }
 
   const store = fileStore();
@@ -504,7 +533,7 @@ export async function canonicaliseCertificate(
 
   async function renamed(r: DocumentRow, name: string, data: ArrayBuffer, type: string | null) {
     const filename = await freeCertName(r.folder!, name, r.filename);
-    const to = `${opmsCertPrefix(r.folder || "unnamed")}/${filename}`;
+    const to = `${blobFolder(r.blobKey)}/${filename}`;
     if (to === r.blobKey && filename === r.filename) return null;
     // Nothing is written over. The name was chosen from the portal own books,
     // and the folder can still hold a file the books do not know about - or
@@ -523,13 +552,21 @@ export async function canonicaliseCertificate(
   }
 }
 
-export async function refileCertificate(row: DocumentRow, person: string, folder: string) {
-  const filename = await freeCertName(folder, row.filename);
-  const blobKey = await moveBlob(row.blobKey, `${opmsCertPrefix(folder)}/${filename}`);
-
+/**
+ * A certificate read as somebody else's is written down as theirs. The file
+ * does not move.
+ *
+ * It used to move - into a folder worked out from the new person's name. Where
+ * the library had never used that name the move made the folder, so a
+ * certificate found in "Billy - OPMS" and read as Kachin Sittiyos's ended up
+ * alone in a new "SITTIYOS, Kachin" folder, and the library filled with empty
+ * halves of people. The office keeps its own folders; the portal keeps its own
+ * books, and the books are what the matrix reads.
+ */
+export async function refileCertificate(row: DocumentRow, person: string, _folder: string) {
   const [updated] = await db
     .update(documents)
-    .set({ person, folder, bucket: folder, blobKey, filename })
+    .set({ person })
     .where(eq(documents.id, row.id))
     .returning();
 

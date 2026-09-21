@@ -1,7 +1,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
-import { canonicaliseCertificate, certFolderFor, refileCertificate, relocateToRemovedBlob } from "../db/documents.js";
+import { canonicaliseCertificate, refileCertificate, relocateToRemovedBlob } from "../db/documents.js";
 import { holderOnMatrix, readCertificate } from "./analyse.js";
 import { codeFor, equivalences, readingKey, readingStore, type Reading } from "../lib/analysis.js";
 import { imageToPdf } from "../lib/pdf-wrap.js";
@@ -74,8 +74,10 @@ export default async (req: Request): Promise<Response> => {
 
   let current = row;
   const holder = reading.readable && reading.holderName ? holderOnMatrix(reading.holderName, names) : null;
-  if (holder && certFolderFor(holder) !== current.folder) {
-    current = await refileCertificate(current, holder, certFolderFor(holder));
+  // Whose it is, written on the row. The file stays in the folder the office
+  // put it in — see refileCertificate for why it no longer moves.
+  if (holder && (current.person || "") !== holder) {
+    current = await refileCertificate(current, holder, "");
   }
   const code = String(codeFor(current, reading, await equivalences()) || "").trim().toUpperCase();
   const title = code ? titles[code] || "" : "";
