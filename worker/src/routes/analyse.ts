@@ -756,6 +756,22 @@ async function compare(matrix: Matrix, sheet: { filename?: string; rows?: { name
   // the crew matrix already agrees with them.
   const settled: { person: string; code: string; value: string; clear?: boolean }[] = [];
 
+  /* What each certificate turned out to be, written onto its own row.
+   *
+   * The reading itself lives in a cache keyed by the file's contents, which is
+   * right for a cache - it costs nothing to rebuild from the file. But it meant
+   * the books never held a certificate's own details: which item it was for and
+   * when it ran out lived nowhere but that cache, and 1,663 certificates on the
+   * portal had a person against them and nothing else. Delete the file and the
+   * cache went with it, and nothing could work out afterwards which cell of the
+   * matrix that certificate had been holding up.
+   *
+   * So the row keeps it now. Gathered as the comparison works through the
+   * claims - it has just worked all of this out - and written in one batch at
+   * the end rather than a query per certificate. */
+  const noted: { id: string; code: string; expires: string | null; issued: string | null;
+    issuer: string | null; title: string | null }[] = [];
+
   for (const [key, { row, reading }] of claim) {
     const code = key.split("::")[1];
     const at = rowAt.get(row.person!.trim().toUpperCase())!;
@@ -778,6 +794,15 @@ async function compare(matrix: Matrix, sheet: { filename?: string; rows?: { name
       expires: expiry,
       title: reading.certificateTitle || null,
     };
+    noted.push({
+      id: row.id,
+      code,
+      expires: expiry || null,
+      issued: reading.issuedOn || null,
+      issuer: reading.issuer || null,
+      title: reading.certificateTitle || null,
+    });
+
     const base = {
       id: `cert:${row.id}:${code}`,
       person: matrixRow[0],
@@ -1026,6 +1051,37 @@ async function compare(matrix: Matrix, sheet: { filename?: string; rows?: { name
 
   const read = readings.filter((r) => r.reading).length;
 
+  /* Written down before the answer goes back.
+   *
+   * One statement per certificate, batched: D1 has no interactive transaction,
+   * and a thousand round trips would take longer than the reading did. A
+   * failure here is worth saying and not worth losing the comparison over -
+   * the answer on the screen is right either way, and the next run writes the
+   * same rows again. */
+  if (noted.length) {
+    try {
+      const at = Math.floor(Date.now() / 1000);
+      const db = getEnv().DB;
+      const size = 80;
+      for (let i = 0; i < noted.length; i += size) {
+        await db.batch(
+          noted.slice(i, i + size).map((n) =>
+            db
+              .prepare(
+                `UPDATE documents
+                    SET read_code = ?2, read_expires = ?3, read_issued = ?4,
+                        read_issuer = ?5, read_title = ?6, read_at = ?7
+                  WHERE id = ?1`,
+              )
+              .bind(n.id, n.code, n.expires, n.issued, n.issuer, n.title, at),
+          ),
+        );
+      }
+    } catch (e) {
+      // The books stay as they were; the comparison still answers.
+    }
+  }
+
   return Response.json({
     at: new Date().toISOString(),
     model: MODEL,
@@ -1040,6 +1096,7 @@ async function compare(matrix: Matrix, sheet: { filename?: string; rows?: { name
        because a cell the certificates agree with settles nothing and would
        otherwise read as abandoned. */
     claimed: [...claim.keys()],
+    noted: noted.length,
     summary: {
       certificates: certs.length,
       read,

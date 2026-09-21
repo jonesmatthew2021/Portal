@@ -33,6 +33,23 @@ CREATE TABLE IF NOT EXISTS documents (
   qual_code TEXT,
   expires_on TEXT,
   checksum TEXT,
+  -- What the portal read off the document itself, kept apart from qual_code
+  -- and expires_on, which are what a person typed against it. A person's
+  -- answer beats a reading everywhere the two are weighed, and merging them
+  -- would throw that away. Added 21 Sep 2026; existing tables got these via
+  -- ALTER TABLE documents ADD COLUMN.
+  --
+  -- These are what make the books stand on their own. Before them, which item
+  -- a certificate was for and when it ran out lived only in a reading cache
+  -- keyed by the file's contents - so a certificate deleted from SharePoint
+  -- took its own details with it, and nothing could work out afterwards which
+  -- cell of the matrix it had filled.
+  read_code TEXT,
+  read_expires TEXT,
+  read_issued TEXT,
+  read_issuer TEXT,
+  read_title TEXT,
+  read_at INTEGER,
   removed_at INTEGER,
   removed_by TEXT
 );

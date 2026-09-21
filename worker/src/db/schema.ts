@@ -54,6 +54,17 @@ export const documents = sqliteTable(
     expiresOn: text("expires_on"),
     checksum: text(),
 
+    /* What the portal read off the document, as against what somebody typed
+       against it above. Kept apart on purpose: a person's answer beats a
+       reading wherever the two are weighed, and one column holding both would
+       lose that. */
+    readCode: text("read_code"),
+    readExpires: text("read_expires"),
+    readIssued: text("read_issued"),
+    readIssuer: text("read_issuer"),
+    readTitle: text("read_title"),
+    readAt: integer("read_at", { mode: "timestamp" }),
+
     removedAt: integer("removed_at", { mode: "timestamp" }),
     removedBy: text("removed_by"),
   },
