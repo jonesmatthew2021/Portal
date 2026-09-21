@@ -2459,6 +2459,31 @@ function readExpiryRules(_grid, XLSX, wb) {
   return out;
 }
 
+/**
+ * The skills matrix read through: what each position must hold, which items
+ * the office tracks, how long each one lasts, and what stands in for what.
+ *
+ * It used to be read from an effect on the crew matrix page, which meant a new
+ * skills matrix went unnoticed until somebody happened to open that page. The
+ * round reads it on every press now, so the items are held against the office's
+ * own list at the moment the button is pushed rather than whenever a screen was
+ * last visited.
+ */
+async function readSkillsMatrix(record, cols) {
+  if (!record || !record.url) return null;
+  const XLSX = await loadXLSX();
+  const resp = await fetch(record.url);
+  if (!resp.ok) throw new Error(`The skills matrix couldn't be downloaded (${resp.status}).`);
+  const wb = XLSX.read(await resp.arrayBuffer(), { type: "array" });
+  const read = skillsRequirementsFrom(XLSX, wb);
+  const positions = (read && read.positions) || null;
+  const items = (read && read.items) || [];
+  const periods = (read && read.periods) || [];
+  const covers = coversFrom(XLSX, wb, cols || []);
+  if (!positions && !covers.length && !items.length) return null;
+  return { at: todayISO(), from: record.id || "", positions: positions || [], items, periods, covers };
+}
+
 function skillsRequirementsFrom(XLSX, wb) {
   const name = wb.SheetNames.find((n) => /skills matrix/i.test(n)) || wb.SheetNames.find((n) => /matrix/i.test(n));
   if (!name) return null;
@@ -4052,18 +4077,8 @@ function TrainingMatrix() {
     askedForReq.current = from;
     (async () => {
       try {
-        const XLSX = await loadXLSX();
-        const resp = await fetch(validityMatrix.url);
-        if (!resp.ok) return;
-        const wb = XLSX.read(await resp.arrayBuffer(), { type: "array" });
-        const read = skillsRequirementsFrom(XLSX, wb);
-        const positions = (read && read.positions) || null;
-        const items = (read && read.items) || [];
-        const periods = (read && read.periods) || [];
-        const covers = coversFrom(XLSX, wb, QUALS.cols);
-        if (positions || covers.length) {
-          setSkillsRequirements({ at: todayISO(), from, positions: positions || [], items, periods, covers });
-        }
+        const read = await readSkillsMatrix(validityMatrix, QUALS.cols);
+        if (read) setSkillsRequirements(read);
       } catch (e) {}
     })();
   }, [skillsRequirements, validityMatrix]);
@@ -13893,6 +13908,27 @@ function UpdateDocumentation() {
         if (matrixRun.current) await matrixRun.current();
       } else {
         setStep("");
+      }
+
+      /* The skills matrix, read again on every press.
+       *
+       * The items on the crew matrix are meant to be the office's list and
+       * nothing else, so the list is fetched fresh here rather than trusted
+       * from whenever a page last happened to read it. A new skills matrix
+       * dropped into the library is noticed on the next press of this button,
+       * which is the only moment anybody is watching.
+       *
+       * It failing is not worth losing the round over - the reading that is
+       * already held stands, and the comparison below is simply made against
+       * that instead. */
+      if (skillsMatrix && skillsMatrix.url) {
+        try {
+          setStep("Reading the skills matrix");
+          const read = await readSkillsMatrix(skillsMatrix, (QUALS.cols || []));
+          if (read) setSkillsRequirements(read);
+        } catch (e) {
+          // The list the portal already holds is what the items are held against.
+        }
       }
 
       /* What the library no longer holds, the portal no longer shows.
