@@ -909,7 +909,81 @@ const T = {
   mono: "'IBM Plex Mono', ui-monospace, monospace",
 };
 
-const STYLES = `
+/* The same portal after dark.
+ *
+ * Every colour on every screen comes through T, so the way to follow the
+ * machine's own light-or-dark setting is to repaint T rather than to write a
+ * second set of screens. The keys do not change and nothing that reads them
+ * has to know: 1,241 places say T.panel and carry on saying it.
+ *
+ * The palette is the roundel's, turned down rather than inverted - navy deep
+ * enough to sit behind white text, the teal wave kept, and the expiry bands
+ * lifted so red still reads as red at two in the morning without glowing. The
+ * bands matter more than anything else here: a man reads this page to find out
+ * whether his ticket is in date, and the three colours have to stay the three
+ * colours.
+ */
+const LIGHT = {
+  deep: "#F4F8FA", panel: "#FFFFFF", raised: "#E8F0F5", rule: "#CFDCE6",
+  text: "#12293D", muted: "#5D7688", accent: "#1C5C8C", accentSoft: "#DCEAF3",
+  teal: "#2FA5AC", green: "#2E8B6E", amber: "#B07A16", blue: "#1C5C8C",
+  bRed: "#C0281F", bRedBg: "#FBE4E1", bOrange: "#B85C10", bOrangeBg: "#FCEBDC",
+  bYellow: "#8A7407", bYellowBg: "#FAF3D2", bGreen: "#22705A", bGreenBg: "#DDF0E8",
+  hatchLine: "#C8D3DB", hatchBg: "#F7FAFC",
+  violet: "#6B3FA0", violetBg: "#EFE7FA",
+};
+
+const DARK = {
+  deep: "#0E1A24", panel: "#16242F", raised: "#1E3140", rule: "#2C4356",
+  text: "#E6EEF4", muted: "#9CB2C2", accent: "#5AA6DB", accentSoft: "#16344B",
+  teal: "#3FBEC6", green: "#4FC49E", amber: "#D9A43C", blue: "#5AA6DB",
+  bRed: "#FF8A7E", bRedBg: "#3A1D1A", bOrange: "#FFAE63", bOrangeBg: "#3A2916",
+  bYellow: "#DFC963", bYellowBg: "#332F18", bGreen: "#6FD9B4", bGreenBg: "#123026",
+  hatchLine: "#2C4356", hatchBg: "#132029",
+  violet: "#B392E0", violetBg: "#271F35",
+};
+
+const darkAsked = () => {
+  try {
+    return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  } catch (e) {
+    return false;
+  }
+};
+
+/* The colours are copied onto T rather than swapped for it: everything already
+   holds a reference to that one object. */
+function paint(dark) {
+  Object.assign(T, dark ? DARK : LIGHT);
+  try {
+    document.documentElement.style.colorScheme = dark ? "dark" : "light";
+  } catch (e) {}
+}
+
+/* Repainted before anything draws, so the first frame is already right rather
+   than white for a moment and then dark. */
+function useScheme() {
+  const [dark, setDark] = useState(darkAsked);
+  React.useEffect(() => {
+    let watch;
+    try {
+      watch = window.matchMedia("(prefers-color-scheme: dark)");
+    } catch (e) {
+      return undefined;
+    }
+    const answer = (e) => { paint(e.matches); setDark(e.matches); };
+    if (watch.addEventListener) watch.addEventListener("change", answer);
+    else watch.addListener(answer);
+    return () => {
+      if (watch.removeEventListener) watch.removeEventListener("change", answer);
+      else watch.removeListener(answer);
+    };
+  }, []);
+  paint(dark);
+  return dark;
+}
+
+const stylesNow = () => `
 @import url('https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
 
 .um * { box-sizing: border-box; }
@@ -18842,6 +18916,7 @@ function Roundel() {
 
 
 function SignIn({ onSignIn }) {
+  useScheme();
   const [mode, setMode] = useState(null);
   const [who, setWho] = useState(null);   // the account waiting on a password
   const [pw, setPw] = useState("");
@@ -18866,7 +18941,7 @@ function SignIn({ onSignIn }) {
     <div className="um" style={{ background: T.deep, minHeight: "100vh", fontFamily: T.body,
       display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
       backgroundImage: `linear-gradient(180deg, ${T.raised} 0%, ${T.deep} 45%)` }}>
-      <style>{STYLES}</style>
+      <style>{stylesNow()}</style>
       <div style={{ width: "100%", maxWidth: 380 }}>
         <div style={{ textAlign: "center", marginBottom: 20 }}>
           <div style={{ display: "inline-block", marginBottom: 13 }}><Roundel /></div>
@@ -19007,6 +19082,7 @@ function useRemembered(key, initial, ok) {
 }
 
 function CoolibahPortal({ role, onSignOut }) {
+  useScheme();
   const [tab, setTab] = useRemembered("tab", "correspondence");
   const currentUser = role;
   const [notifyOn, setNotifyOn] = useState(false);
@@ -19959,7 +20035,7 @@ function CoolibahPortal({ role, onSignOut }) {
   return (
     <Ctx.Provider value={ctx}>
     <div className="um" style={{ background: T.deep, minHeight: "100vh", fontFamily: T.body }}>
-      <style>{STYLES}</style>
+      <style>{stylesNow()}</style>
       <div style={{ height: 3, background: `linear-gradient(90deg, ${T.accent} 0%, ${T.teal} 100%)` }} />
       <div style={{ margin: "0 auto", padding: "0 18px 44px" }}>
         <header className="um-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 24, padding: "16px 0 12px" }}>
