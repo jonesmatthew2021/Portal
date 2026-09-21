@@ -3985,9 +3985,10 @@ function TrainingMatrix() {
         const read = skillsRequirementsFrom(XLSX, wb);
         const positions = (read && read.positions) || null;
         const items = (read && read.items) || [];
+        const periods = (read && read.periods) || [];
         const covers = coversFrom(XLSX, wb, QUALS.cols);
         if (positions || covers.length) {
-          setSkillsRequirements({ at: todayISO(), from, positions: positions || [], items, covers });
+          setSkillsRequirements({ at: todayISO(), from, positions: positions || [], items, periods, covers });
         }
       } catch (e) {}
     })();
@@ -9811,6 +9812,17 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
     setRun({ phase: "reading", read: 0, total: 0 });
     let progress = { read: 0, total: 0 };
     try {
+      /* The crew matrix having no items on it is not a fault; it is a portal
+         that has just been started again. Everything below needs them - the
+         analysis is asked what each item means, and the workbook is found by
+         looking for their codes - so it is said plainly here rather than
+         thrown out as an error about the items not being included, which is
+         what came back before and read like something broken. */
+      if (!(QUALS.cols || []).length) {
+        setDone({ noItems: true, read: 0, total: 0, refiled: 0, validityProblem: "" });
+        setRun(null);
+        return;
+      }
       if (!trainingMatrix || !trainingMatrix.url) {
         throw new Error("No training matrix is filed on the portal yet. Upload it in the boxes above, and this button will keep it up to date.");
       }
@@ -10060,19 +10072,20 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
           borderLeft: `4px solid ${done.nothing || done.unchanged ? T.teal : T.accent}`, borderRadius: 2,
           padding: "13px 15px", marginTop: 12 }}>
           <Eyebrow color={done.nothing || done.unchanged ? T.teal : T.accent}>
-            {done.nothing ? "Nothing to write yet"
+            {done.noItems ? "Nothing on the matrix yet"
+              : done.nothing ? "Nothing to write yet"
               : done.unchanged ? "Spreadsheet already up to date"
               : "Spreadsheet updated"}
           </Eyebrow>
           <div style={{ fontFamily: T.body, fontSize: 14, color: T.text, lineHeight: 1.7, marginTop: 7 }}>
-            {done.read} of {done.total} {done.total === 1 ? "certificate" : "certificates"} on file were read.{" "}
+            {done.noItems ? ("The crew matrix has no items on it, so there is nothing for the certificates to be read against. Add them from the skills matrix — Update documentation offers them the moment it sees they are missing — and press this again.") : (<>{done.read} of {done.total} {done.total === 1 ? "certificate" : "certificates"} on file were read.{" "}
             {done.nothing
               ? "None of them settles an expiry date for anyone on the crew matrix yet, so the training matrix was left exactly as it is."
               : `${done.settled} ${done.settled === 1 ? "expiry was" : "expiries were"} settled by the certificates.`}
             {done.derived > 0 && ` ${done.derived} of those ${done.derived === 1 ? "was" : "were"} worked out from the issue date and the validity periods matrix — certificates that print an issue date but no expiry.`}
             {done.orphans > 0 && ` ${done.orphans} ${done.orphans === 1 ? "date was" : "dates were"} cleared: the certificate behind ${done.orphans === 1 ? "it is" : "them are"} no longer in the library.`}
             {done.refiled > 0 && ` ${done.refiled} ${done.refiled === 1 ? "certificate was" : "certificates were"} filed under the wrong crew member and ${done.refiled === 1 ? "has" : "have"} been moved.`}
-            {" "}The OPMS spreadsheet was not touched.
+            {" "}The OPMS spreadsheet was not touched.</>)}
           </div>
           {workbookNotes(done.report).map((note, i) => (
             <div key={i} style={{ fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.6, marginTop: 8 }}>
@@ -13794,8 +13807,19 @@ function UpdateDocumentation() {
       // the round carries on underneath it rather than waiting on an answer.
       if (asked && Array.isArray(out.people)) setFound(out.people);
 
-      setStep("Reading the certificates and updating the matrix");
-      if (matrixRun.current) await matrixRun.current();
+      /* The reading and the spreadsheet both need the matrix to have items on
+         it: the analysis is asked what each item means, and the workbook is
+         found by looking for its row of item codes. With no items there is
+         nothing to ask and nothing to look for, and both come back as errors
+         about the items not being included - two windows, stacked, saying the
+         same thing in a way that reads like a fault. It is not a fault; there
+         is simply nothing to do yet. */
+      if ((QUALS.cols || []).length) {
+        setStep("Reading the certificates and updating the matrix");
+        if (matrixRun.current) await matrixRun.current();
+      } else {
+        setStep("");
+      }
 
       /* What the library no longer holds, the portal no longer shows.
        *
@@ -13879,7 +13903,9 @@ function UpdateDocumentation() {
         </Button>
         <span style={{ fontFamily: T.mono, fontSize: 9.5, color: err ? T.bRed : T.muted,
           letterSpacing: "0.04em", textTransform: "uppercase" }}>
-          {err ? err.slice(0, 60) : step || ("Last updated " + stamp(lastDocUpdate))}
+          {err ? err.slice(0, 60)
+            : step
+            || (!(QUALS.cols || []).length ? "No items on the matrix yet" : "Last updated " + stamp(lastDocUpdate))}
         </span>
       </div>
 
@@ -13953,13 +13979,31 @@ function MatrixItems({ onClose }) {
     setDropping("");
   };
 
-  /* Which heading a new item sits under: the one its neighbours sit under.
-     Codes are grouped by their prefix - every PI- is a Project Induction - so
-     a column already on the matrix with the same prefix says where this one
-     belongs without anybody having to write the list down twice. */
+  /* Which heading a new item sits under.
+   *
+   * The office's own sheet says, in a Category column beside each item - "1.
+   * Qualification", "2. Vessel Specific" - so that is taken first, with the
+   * numbering it uses for ordering dropped. Failing that, a column already on
+   * the matrix with the same code prefix says where this one belongs.
+   *
+   * The neighbours alone were not enough: a portal that has just been started
+   * again has no neighbours, and every item added would have gone under
+   * "Other" - all fifty-three of them, in one heap, on the one occasion the
+   * whole matrix is being built. */
+  const categories = useMemo(() => {
+    const m = new Map();
+    (((skillsRequirements || {}).periods) || []).forEach((p) => {
+      const said = String(p.category || "").replace(/^\s*\d+[.)]?\s*/, "").trim();
+      if (p.code && said) m.set(String(p.code).toUpperCase(), said);
+    });
+    return m;
+  }, [skillsRequirements]);
+
   const groupFor = (code) => {
+    const said = categories.get(String(code).toUpperCase());
+    if (said) return said;
     const pre = String(code).split("-")[0].toUpperCase();
-    const near = QUALS.cols.find((c) => String(c[0]).split("-")[0].toUpperCase() === pre);
+    const near = (QUALS.cols || []).find((c) => String(c[0]).split("-")[0].toUpperCase() === pre);
     return near ? near[2] : "Other";
   };
 
@@ -14028,6 +14072,21 @@ function MatrixItems({ onClose }) {
             <div style={{ fontFamily: T.display, fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 4 }}>
               On the skills matrix, not yet on the portal
             </div>
+            {/* A portal that has just been started again is missing every item
+                the office tracks, and answering fifty-three buttons one at a
+                time is not answering a question - it is doing the same job
+                fifty-three times. */}
+            {fresh.length > 3 && (
+              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
+                padding: "10px 0", borderTop: "1px solid " + T.rule }}>
+                <Button variant="solid" onClick={() => fresh.forEach(takeOn)}>
+                  Add all {fresh.length} to the portal
+                </Button>
+                <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted }}>
+                  Every item the office tracks, with nobody's dates against them yet.
+                </span>
+              </div>
+            )}
             {fresh.map((x) => (
               <div key={x.code} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
                 padding: "9px 0", borderTop: "1px solid " + T.rule }}>
