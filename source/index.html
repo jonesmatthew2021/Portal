@@ -2245,6 +2245,110 @@ function ticketStandingFor(row, QUALS) {
    items marked M — plain Mandatory. An M with a footnote, "mandatory if
    applicable" and Recommended are left out, so nothing is called missing
    that the office hasn't demanded outright. */
+/**
+ * An expiry rule as the office writes it, turned into something to count with.
+ *
+ * "5 years" is a period. "No Expiry" means it never lapses - a certificate on
+ * file is the whole answer. The medical's rule is a paragraph about the
+ * practitioner's judgement rather than a period, and the certificate prints its
+ * own date anyway, so it is marked as stating its own and never calculated.
+ *
+ * "2 years or 4 years" is the MSIC, which runs either way depending on the
+ * card. The shorter is taken and the office's words kept beside it: telling a
+ * crew member their card lasts four years when it lasts two would put them
+ * ashore at a gate, and the other way round only costs a renewal reminder.
+ */
+function expiryRule(said) {
+  const text = String(said || "").replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  const low = text.toLowerCase();
+
+  if (/^no\s+expiry/.test(low)) return { never: true, said: text };
+  // A rule written as prose about somebody's judgement is not a period.
+  if (/determined by|practitioner|as required|case by case/.test(low)) {
+    return { own: true, said: text };
+  }
+
+  const found = [...low.matchAll(/(\d+)\s*(year|month)s?/g)]
+    .map((m) => Number(m[1]) * (m[2] === "year" ? 12 : 1))
+    .filter((n) => n > 0);
+  if (!found.length) return { said: text };
+
+  /* Two figures can mean two different things.
+   *
+   * "2 years or 4 years" is the MSIC, which runs either way depending on the
+   * card: two alternatives, and the shorter is taken, because telling somebody
+   * their card lasts four years when it lasts two puts them ashore at a gate
+   * while the other way round costs a renewal reminder.
+   *
+   * "2 years from last completed or if not onboard for a period of greater
+   * than 6 months" is not two periods at all. It is a period and a condition
+   * about time away from the vessel, and reading the six months as the rule
+   * would have told all forty-one crew their vessel induction lapses twice a
+   * swing. Where the sentence carries on past the figures, the first one is
+   * the rule and the rest is circumstance.
+   */
+  const bareAlternatives = /^\s*\d+\s*(?:year|month)s?\s+or\s+\d+\s*(?:year|month)s?\s*$/.test(low);
+  const months = bareAlternatives ? Math.min(...found) : found[0];
+  const other = found.filter((n) => n !== months);
+  return {
+    months,
+    said: text,
+    ...(bareAlternatives && other.length ? { alsoRuns: Math.max(...other), shorterTaken: true } : null),
+    ...(!bareAlternatives && other.length ? { alsoSays: other } : null),
+  };
+}
+
+/**
+ * The Guidance Information sheet, read as the rule book it is: one row per
+ * position per item, carrying the item's code, its name, the category it sits
+ * under, when it has to be held by, and how long it lasts.
+ *
+ * The same item appears once for every position that needs it, with the same
+ * rule each time, so the first sighting of a code is kept and the rest are
+ * passed over.
+ */
+function readExpiryRules(_grid, XLSX, wb) {
+  const name = wb.SheetNames.find((n) => /guidance information/i.test(n));
+  if (!name) return [];
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: "" });
+
+  // The header row is the one naming the columns this reads.
+  const wanted = ["certification id", "expiry"];
+  let at = -1;
+  rows.slice(0, 30).forEach((r, i) => {
+    const heads = r.map((c) => String(c).replace(/\s+/g, " ").trim().toLowerCase());
+    if (at < 0 && wanted.every((w) => heads.includes(w))) at = i;
+  });
+  if (at < 0) return [];
+
+  const head = rows[at].map((c) => String(c).replace(/\s+/g, " ").trim().toLowerCase());
+  const col = (want) => head.indexOf(want);
+  const idAt = col("certification id");
+  const expAt = col("expiry");
+  const nameAt = col("name");
+  const catAt = col("category");
+  const whenAt = col("timeframe");
+
+  const out = [];
+  const seen = new Set();
+  rows.slice(at + 1).forEach((r) => {
+    const code = String(r[idAt] || "").replace(/\s+/g, " ").trim().toUpperCase();
+    if (!/^[A-Z]{2,4}-\d+/.test(code) || seen.has(code)) return;
+    const rule = expiryRule(r[expAt]);
+    if (!rule) return;
+    seen.add(code);
+    out.push({
+      code,
+      title: nameAt >= 0 ? String(r[nameAt] || "").replace(/\s+/g, " ").trim() : "",
+      category: catAt >= 0 ? String(r[catAt] || "").replace(/\s+/g, " ").trim() : "",
+      by: whenAt >= 0 ? String(r[whenAt] || "").replace(/\s+/g, " ").trim() : "",
+      ...rule,
+    });
+  });
+  return out;
+}
+
 function skillsRequirementsFrom(XLSX, wb) {
   const name = wb.SheetNames.find((n) => /skills matrix/i.test(n)) || wb.SheetNames.find((n) => /matrix/i.test(n));
   if (!name) return null;
@@ -2269,6 +2373,24 @@ function skillsRequirementsFrom(XLSX, wb) {
     items.push({ code, title: String(under[i] || "").replace(/\s+/g, " ").trim() || code });
   });
 
+  /* How long each item lasts once it is done, off the office's own Guidance
+   * Information sheet.
+   *
+   * This is the rule book, and it had never been read. The portal used to ship
+   * the whole workbook to the model and ask it to find the periods; the sheet
+   * holding them is ninety thousand characters on its own and the text was cut
+   * off at sixty, so the model never saw most of the table and the portal ran
+   * with no periods at all. A certificate that prints an issue date but no
+   * expiry - which is every MinRes induction, every cargo system module, eight
+   * hundred and twenty-four of them - could not be dated, so those columns
+   * could only ever be filled from the crew qualification spreadsheet.
+   *
+   * It is read straight off the columns now: Certification ID against Expiry.
+   * No model, nothing to truncate, and the office's own words kept against
+   * each one so anybody can see what the portal made of them.
+   */
+  const periods = readExpiryRules(grid, XLSX, wb);
+
   const positions = [];
   for (const r of grid.slice(codesAt + 1)) {
     const position = String(r[0] || "").replace(/\s+/g, " ").trim();
@@ -2279,7 +2401,7 @@ function skillsRequirementsFrom(XLSX, wb) {
     });
     if (need.length) positions.push({ position, need });
   }
-  return positions.length || items.length ? { positions, items } : null;
+  return positions.length || items.length || periods.length ? { positions, items, periods } : null;
 }
 
 /* Which of those positions a crew member's own position answers to, and what
