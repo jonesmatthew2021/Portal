@@ -13479,12 +13479,23 @@ function SyncPeople({ found, onClose }) {
   /* Somebody the office holds and the portal does not: a row on the crew
      matrix, and a place on a swing when the roster is loaded and one is
      chosen. Their certificates come across on the sync itself. */
-  const takeOn = (p) => {
+/* Taking somebody onto the portal.
+   *
+   * `batch` is the difference between one person and forty-three. The
+   * spreadsheets used to be written from in here, once for each person - which
+   * is fine for one and a disaster for a list, because forty-three writes of
+   * the same workbook set off at once race each other for it and SharePoint
+   * turns all but one away: 409 resourceModified, name already exists. The
+   * office's file is one file however many people went on.
+   *
+   * So a batch puts people on the portal and nothing else, and the caller
+   * writes the workbooks once when the whole list is through. */
+  const takeOn = (p, batch) => {
     const row = entry(p);
     const name = String(row.name || "").trim();
     const position = String(row.rank || "").trim();
     const swing = spine.find((sp) => swingKeyOf(sp) === row.swing) || null;
-    if (!name || !position) return;
+    if (!name || !position) return null;
 
     const matrixRow = [name, position, "", (QUALS.cols || []).map(() => "")];
     const rows = [...(QUALS.rows || []), matrixRow];
@@ -13514,17 +13525,45 @@ function SyncPeople({ found, onClose }) {
     log("SharePoint", name + " taken onto the portal",
       position + (swing ? " · " + fmtDate(swing.on) + " – " + fmtDate(swing.off) : " · no swing yet"));
 
+    setDone((d) => [...d, p.folder]);
+    if (batch) return { name, plan: swing ? plannedAfter : null, rows };
+
     // The office's spreadsheets follow, and what they managed is said here.
     const folder = p.folder;
     setFiled((f) => [...f, { folder, name, word: "Putting them on the spreadsheets…" }]);
     // The roster workbook is only rewritten where a swing was actually chosen;
-    // rewriting it to say exactly what it already said is a upload for nothing.
+    // rewriting it to say exactly what it already said is an upload for nothing.
     writeCrewToWorkbooks({ want: name, plan: swing ? plannedAfter : null, rows, leaving: false })
       .then((r) => setFiled((f) => f.map((x) => x.folder === folder
         ? { ...x, ok: r && r.ok, word: (r && r.said) || "nothing was written" } : x)))
       .catch((e) => setFiled((f) => f.map((x) => x.folder === folder
         ? { ...x, ok: false, word: String((e && e.message) || e) } : x)));
-    setDone((d) => [...d, folder]);
+    return null;
+  };
+
+  /* The whole list, and then the workbooks once.
+   *
+   * The rows each call hands back are the matrix as it stood for that person,
+   * so the last one through is the matrix with everybody on it - that is what
+   * the spreadsheet is written from, and it is written a single time. */
+  const takeOnEveryone = () => {
+    const ready = strangers.filter((p) => {
+      const r = entry(p);
+      return String(r.name || "").trim() && String(r.rank || "").trim();
+    });
+    if (!ready.length) return;
+
+    let last = null;
+    ready.forEach((p) => { last = takeOn(p, true) || last; });
+    if (!last) return;
+
+    const many = ready.length + " crew";
+    setFiled((f) => [...f, { folder: "__all", name: many, word: "Putting them on the spreadsheets…" }]);
+    writeCrewToWorkbooks({ want: many, plan: last.plan, rows: last.rows, leaving: false })
+      .then((r) => setFiled((f) => f.map((x) => x.folder === "__all"
+        ? { ...x, ok: r && r.ok, word: (r && r.said) || "nothing was written" } : x)))
+      .catch((e) => setFiled((f) => f.map((x) => x.folder === "__all"
+        ? { ...x, ok: false, word: String((e && e.message) || e) } : x)));
   };
 
   const takeOff = (name) => {
@@ -13633,7 +13672,7 @@ function SyncPeople({ found, onClose }) {
                       </Field>
                     </div>
                     <Button variant="ghost" disabled={!String(row.name || "").trim() || !String(row.rank || "").trim()}
-                      onClick={() => takeOn(p)}>
+                      onClick={() => takeOn(p, false)}>
                       Take on
                     </Button>
                   </div>
@@ -13668,10 +13707,7 @@ function SyncPeople({ found, onClose }) {
                 marginTop: 12, paddingTop: 10, borderTop: "1px solid " + T.rule }}>
                 <Button variant="solid"
                   disabled={!strangers.some((p) => String(entry(p).name || "").trim() && String(entry(p).rank || "").trim())}
-                  onClick={() => strangers.forEach((p) => {
-                    const row = entry(p);
-                    if (String(row.name || "").trim() && String(row.rank || "").trim()) takeOn(p);
-                  })}>
+                  onClick={takeOnEveryone}>
                   Take on everyone above
                 </Button>
                 <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted }}>
@@ -19720,7 +19756,16 @@ function CoolibahPortal({ role, onSignOut }) {
       }
     }
 
-    if (trainingMatrix && trainingMatrix.url && /\.xls[xm]$/i.test(trainingMatrix.filename || "") && zipCapable()) {
+    /* Nothing is written into the training matrix while the crew matrix has
+       no columns. The workbook is found by looking for its row of item codes,
+       and with no codes to look for there is nothing to match - which comes
+       back as "it isn't laid out like the crew qualification workbook", which
+       is true of no workbook and alarming to read. A portal that has just been
+       started again is in exactly this state. */
+    const haveCodes = ((rows || quals.rows) && (quals.cols || []).length > 0);
+    if (!haveCodes) {
+      written.push("the training matrix was left alone — the crew matrix has no items on it yet");
+    } else if (trainingMatrix && trainingMatrix.url && /\.xls[xm]$/i.test(trainingMatrix.filename || "") && zipCapable()) {
       try {
         const resp = await fetch(trainingMatrix.url);
         if (!resp.ok) throw new Error("it couldn't be downloaded (" + resp.status + ")");
