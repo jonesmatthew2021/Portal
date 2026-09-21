@@ -12607,7 +12607,7 @@ const RT_BG = {};
 const bgOf = (hex) => RT_BG[hex] || (RT_BG[hex] = { background: hex });
 const RT_NO_DAYS = new Map();
 
-function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRange, onDeleteRange, rankFor }) {
+function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRange, onDeleteRange, rankFor, sortBy }) {
   const spine = (plan && plan.spine) || [];
   const rows = (plan && plan.rows) || [];
   const today = todayISO();
@@ -12815,16 +12815,28 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
       const rank = vague(p.rank) && rankFor ? (rankFor(p.name) || p.rank) : p.rank;
       return { ...p, rank, crew: crews[0] || "OTHER", coverOnly: isRelief(p.name), covered };
     });
+    /* Either way round, within each crew block.
+     *
+     * By rank is the order the vessel is manned in - master, chief officer,
+     * second officer, the engineers down, GPH, cook - which is how a roster is
+     * read when the question is who is covering what. By surname is how it is
+     * read when the question is where one particular person is, and looking for
+     * a name in rank order means knowing their rank first.
+     *
+     * Names are written LASTNAME, First, so sorting the name sorts the surname
+     * and no separate parsing is needed. */
     const byRank = (a, b) => rosterRankAt(a.rank) - rosterRankAt(b.rank) || a.name.localeCompare(b.name);
+    const byName = (a, b) => a.name.localeCompare(b.name);
+    const order = sortBy === "name" ? byName : byRank;
     const out = [];
     ["ALPHA", "BRAVO"].forEach((crew) => {
-      const own = list.filter((p) => !p.coverOnly && p.crew === crew).sort(byRank);
-      const cover = list.filter((p) => p.coverOnly && p.covered === crew).sort(byRank);
+      const own = list.filter((p) => !p.coverOnly && p.crew === crew).sort(order);
+      const cover = list.filter((p) => p.coverOnly && p.covered === crew).sort(order);
       if (own.length) out.push({ label: crew === "ALPHA" ? "Alpha crew" : "Bravo crew", people: own, of: crew });
       if (cover.length) out.push({ label: "Relief / cover", people: cover, relief: true, of: crew });
     });
     const placed = new Set(out.flatMap((b) => b.people.map((p) => p.name)));
-    const rest = list.filter((p) => !placed.has(p.name)).sort(byRank);
+    const rest = list.filter((p) => !placed.has(p.name)).sort(order);
     if (rest.length) out.push({ label: "Other", people: rest, of: "OTHER" });
 
     /* Each crew counts from one, and the relief standing in for that crew
@@ -12836,7 +12848,7 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
       b.people = b.people.map((p) => ({ ...p, no: (counted[key] = (counted[key] || 0) + 1) }));
     });
     return out;
-  }, [plan]);
+  }, [plan, sortBy]);
 
   /* Each person's days worked out once from their own stints, rather than
      asking the question again for every square of the table - a stint knows
@@ -14515,6 +14527,12 @@ function RosterListPage() {
   const [err, setErr] = useState("");
   const [confirmLoad, setConfirmLoad] = useState(false);
   const [tableEdit, setTableEdit] = useState(null);
+  /* Which way the roster is read. Rank is the order the vessel is manned in and
+     the way it is read when the question is who covers what; surname is the way
+     it is read when the question is where one particular person is. Remembered,
+     because whichever somebody uses they use every time. */
+  const [sortBy, setSortBy] = useRemembered("roster-sort", "rank",
+    (v) => v === "rank" || v === "name");
   const asked = useRef(false);
 
   const names = useMemo(() => QUALS.rows.map((r) => r[0]), [QUALS]);
@@ -14735,6 +14753,14 @@ function RosterListPage() {
                 : (rosterPlan.filename || "")))
             : (crewRoster ? crewRoster.filename : "")} />
         <span style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
+          {rosterPlan && (
+            <span style={{ display: "flex", gap: 6, alignItems: "baseline" }}>
+              <span style={{ fontFamily: T.mono, fontSize: 10.5, color: T.muted,
+                textTransform: "uppercase", letterSpacing: "0.08em" }}>Sort by</span>
+              <Button variant={sortBy === "rank" ? "solid" : "quiet"} onClick={() => setSortBy("rank")}>Rank</Button>
+              <Button variant={sortBy === "name" ? "solid" : "quiet"} onClick={() => setSortBy("name")}>Surname</Button>
+            </span>
+          )}
           {admin && rosterPlan && crewRoster && (
             <Button disabled={savingRoster || !rosterPlan.edited} onClick={saveRoster}>
               {savingRoster ? "Saving…" : "Save roster"}
@@ -14784,7 +14810,7 @@ function RosterListPage() {
       {!rosterPlan && !err && <Empty>{busy ? "Reading the roster…" : "The roster hasn't been loaded yet."}</Empty>}
 
       {rosterPlan && (
-        <RosterTimeline plan={rosterPlan} admin={admin}
+        <RosterTimeline plan={rosterPlan} admin={admin} sortBy={sortBy}
           onPerson={(p) => setTableEdit({ kind: "person", name: p.name })}
           onStint={(row) => setTableEdit({ kind: "stint", id: row.id, name: row.name, on: row.on })}
           onDates={(row, on, off) => setDates(row, { key: row.swing }, on, off)}
