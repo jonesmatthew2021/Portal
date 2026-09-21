@@ -68,7 +68,10 @@ function toRecord(row: Row) {
     return { ...common, by: row.uploadedBy, uploaded: row.filedOn };
   }
   if (row.category === "certificate") {
-    const read = row as Row & { readIssued?: string | null; readExpires?: string | null };
+    const read = row as Row & {
+      readIssued?: string | null; readExpires?: string | null;
+      readCode?: string | null; readTitle?: string | null;
+    };
     return {
       ...common,
       person: row.person,
@@ -80,6 +83,11 @@ function toRecord(row: Row) {
       checksum: row.checksum,
       readIssued: read.readIssued ?? null,
       readExpires: read.readExpires ?? null,
+      /* What the reading made of the certificate: which item it answers and
+         the title printed on it. The page names files from these, so it can
+         only rename one it has actually read. */
+      readCode: read.readCode ?? null,
+      readTitle: read.readTitle ?? null,
       by: row.uploadedBy,
       uploaded: row.filedOn,
     };
@@ -491,6 +499,7 @@ export default async (req: Request) => {
               d.uploaded_by AS uploadedBy, d.tag, d.source, d.party, d.rank, d.swing,
               d.filed_on AS filedOn, d.session_id AS sessionId, d.person, d.folder,
               d.qual_code AS qualCode, d.expires_on AS expiresOn, d.checksum,
+              d.read_code AS readCode, d.read_title AS readTitle,
               d.removed_at AS removedAt, d.removed_by AS removedBy,
               json_extract(b.value, '$.issuedOn') AS readIssued,
               json_extract(b.value, '$.expiresOn') AS readExpires,

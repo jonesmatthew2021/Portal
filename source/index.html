@@ -13869,6 +13869,7 @@ function UpdateDocumentation() {
   const [step, setStep] = useState("");          // "" when nothing is running
   const [found, setFound] = useState(null);      // whose folders the sync saw
   const [asking, setAsking] = useState(false);   // items the skills matrix has gained or lost
+  const [naming, setNaming] = useState(false);   // files and folders not named the house way
   const [err, setErr] = useState("");
   const matrixRun = useRef(null);
   const going = useRef(false);
@@ -13969,7 +13970,7 @@ function UpdateDocumentation() {
       // The skills matrix has been re-read by now, so the portal's own columns
       // can be held against it and anything that has changed put to whoever
       // pressed the button.
-      if (asked) setAsking(true);
+      if (asked) { setAsking(true); setNaming(true); }
 
       const at = new Date().toISOString();
       setLastDocUpdate(at);
@@ -14026,9 +14027,234 @@ function UpdateDocumentation() {
 
       {found && <SyncPeople found={found} onClose={() => setFound(null)} />}
       {asking && <MatrixItems onClose={() => setAsking(false)} />}
+      {naming && <FileNames onClose={() => setNaming(false)} />}
     </>
   );
 }
+
+/* Files and folders whose names are not the house style, put to management.
+ *
+ * The office names things by hand and hands change. A certificate arrives as
+ * "Travis MICHALZIK.pdf" or lands in a folder called "Zac", and from then on
+ * the library reads as somebody's working notes rather than a record. The
+ * portal knows better than the filename does: it has read the certificate, so
+ * it knows whose it is, which item it answers, and when it runs out.
+ *
+ * Nothing is renamed without being shown first. A rename moves the file in
+ * SharePoint, and moving a man's certificate on a guess is not something to do
+ * quietly - the list says what each one is now and what it would become, and
+ * every row can be left alone.
+ */
+function FileNames({ onClose }) {
+  const { admin, certificates, quals: QUALS, log } = usePortal();
+  const [done, setDone] = useState([]);
+  const [busy, setBusy] = useState("");
+  const [trouble, setTrouble] = useState({});
+
+  /* Only certificates the portal has actually read. An unread one is left as
+     the office named it - the portal has nothing better to call it. */
+  const proposals = useMemo(() => {
+    const out = [];
+    (certificates || []).forEach((c) => {
+      if (!c.id || !c.stored) return;
+      const code = c.readCode || c.qualCode || "";
+      if (!code) return;
+      const title = c.readTitle || (QUALS.cols.find((x) => x[0] === code) || [])[1] || "";
+      const expires = c.readExpires || c.expiresOn || "";
+      const want = houseFileName(c.person, code, title, expires, c.filename);
+      if (!want || want === c.filename) return;
+      out.push({ id: c.id, person: c.person, was: c.filename, will: want, folder: null });
+    });
+    return out;
+  }, [certificates, QUALS]);
+
+  /* A crew folder named anything other than the person's own name. Every file
+     in it moves together, or the folder is left as it is. */
+  const folders = useMemo(() => {
+    const seen = new Map();
+    (certificates || []).forEach((c) => {
+      if (!c.id || !c.key) return;
+      const at = folderOfKey(c.key);
+      if (!/ - OPMS$/i.test(at.split("/").pop() || "")) return;
+      const want = houseFolderName(c.person);
+      if (!want) return;
+      const now = at.split("/").pop();
+      if (now === want) return;
+      const root = at.slice(0, at.length - now.length);
+      const key = at;
+      if (!seen.has(key)) seen.set(key, { at, now, will: want, root, files: [] });
+      seen.get(key).files.push(c);
+    });
+    return [...seen.values()].filter((f) => !done.includes("folder:" + f.at));
+  }, [certificates, done]);
+
+  const rename = async (row) => {
+    setBusy(row.id);
+    try {
+      const r = await fetch("/api/rename-file", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: row.id, to: row.will, ...(row.folder ? { toFolder: row.folder } : null) }),
+      });
+      const out = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(out.error || ("it couldn't be renamed (" + r.status + ")"));
+      setDone((d) => [...d, row.id]);
+    } catch (e) {
+      setTrouble((t) => ({ ...t, [row.id]: String((e && e.message) || e) }));
+    }
+    setBusy("");
+  };
+
+  const renameFolder = async (f) => {
+    setBusy("folder:" + f.at);
+    let failed = 0;
+    for (const c of f.files) {
+      const code = c.readCode || c.qualCode || "";
+      const title = c.readTitle || (QUALS.cols.find((x) => x[0] === code) || [])[1] || "";
+      const expires = c.readExpires || c.expiresOn || "";
+      const want = (code && houseFileName(c.person, code, title, expires, c.filename)) || c.filename;
+      try {
+        const r = await fetch("/api/rename-file", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ id: c.id, to: want, toFolder: f.root + f.will }),
+        });
+        if (!r.ok) failed++;
+      } catch (e) { failed++; }
+    }
+    log("Admin", "Folder renamed: " + f.now + " to " + f.will,
+      f.files.length + " file" + (f.files.length === 1 ? "" : "s") + " moved"
+      + (failed ? " · " + failed + " could not be moved and are still in the old folder" : ""));
+    setDone((d) => [...d, "folder:" + f.at]);
+    setBusy("");
+  };
+
+  const waiting = proposals.filter((p) => !done.includes(p.id));
+  if (!admin) return null;
+  if (!waiting.length && !folders.length) return null;
+
+  const row = { padding: "9px 0", borderTop: "1px solid " + T.rule };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(22,50,74,0.45)", zIndex: 76,
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ background: T.panel, border: "1px solid " + T.rule, borderTop: "4px solid " + T.accent,
+        borderRadius: 3, padding: "20px 24px", width: "min(760px, 94vw)", maxHeight: "82vh", overflowY: "auto" }}>
+        <Eyebrow color={T.accent}>Names that are not the house style</Eyebrow>
+        <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, margin: "8px 0 14px", lineHeight: 1.6 }}>
+          Nothing has been changed. A rename moves the file in SharePoint as well as on the portal.
+        </div>
+
+        {folders.length > 0 && (
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontFamily: T.display, fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 4 }}>
+              Folders
+            </div>
+            {folders.map((f) => (
+              <div key={f.at} style={{ ...row, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ fontFamily: T.mono, fontSize: 12, color: T.muted, flex: 1, minWidth: 220 }}>
+                  {f.now} <span style={{ color: T.accent }}>→ {f.will}</span>
+                </span>
+                <span style={{ fontFamily: T.body, fontSize: 12, color: T.muted }}>
+                  {f.files.length} file{f.files.length === 1 ? "" : "s"}
+                </span>
+                <Button variant="quiet" disabled={busy === "folder:" + f.at} onClick={() => renameFolder(f)}>
+                  {busy === "folder:" + f.at ? "Moving…" : "Rename the folder"}
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {waiting.length > 0 && (
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontFamily: T.display, fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 4 }}>
+              Files · {waiting.length}
+            </div>
+            {waiting.slice(0, 40).map((p) => (
+              <div key={p.id} style={row}>
+                <div style={{ fontFamily: T.mono, fontSize: 11.5, color: T.muted, wordBreak: "break-word" }}>{p.was}</div>
+                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 3 }}>
+                  <span style={{ fontFamily: T.mono, fontSize: 11.5, color: T.accent, flex: 1, minWidth: 260,
+                    wordBreak: "break-word" }}>→ {p.will}</span>
+                  <Button variant="quiet" disabled={busy === p.id} onClick={() => rename(p)}>
+                    {busy === p.id ? "Renaming…" : "Rename"}
+                  </Button>
+                </div>
+                {trouble[p.id] && (
+                  <div style={{ fontFamily: T.body, fontSize: 12, color: T.bRed, marginTop: 3 }}>{trouble[p.id]}</div>
+                )}
+              </div>
+            ))}
+            {waiting.length > 40 && (
+              <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, paddingTop: 8 }}>
+                …and {waiting.length - 40} more, shown once these are answered.
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
+              marginTop: 12, paddingTop: 10, borderTop: "1px solid " + T.rule }}>
+              <Button variant="solid" disabled={!!busy}
+                onClick={async () => { for (const p of waiting.slice(0, 40)) await rename(p); }}>
+                Rename these {Math.min(40, waiting.length)}
+              </Button>
+              <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted }}>
+                One at a time, so a failure stops at the file it failed on.
+              </span>
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <Button onClick={onClose}>Close</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* The house style for a filed certificate, and what a file is actually called.
+ *
+ * One way of naming things, so that a folder can be read down and understood
+ * without opening anything:
+ *
+ *   folder   LASTNAME, First - OPMS
+ *   file     LASTNAME, First - QL-01 Master - 2030-06-26.pdf
+ *
+ * The expiry goes on the end because that is what somebody wants to know when
+ * they are looking at a list of files and not at the portal. It costs a rename
+ * whenever a ticket is renewed, which is the price of having it there, and the
+ * portal does that rename itself rather than leaving a stale date on a file
+ * nobody will think to check.
+ *
+ * Nothing is guessed. The name only changes where the certificate has been
+ * read and the reading says which item it is - the code, the title and the
+ * date all come from the document itself. An unread certificate is left
+ * exactly as the office named it.
+ */
+const houseFileName = (person, code, title, expires, filename) => {
+  const ext = (String(filename || "").match(/\.[A-Za-z0-9]{1,5}$/) || [""])[0];
+  const who = canonicalName(person || "");
+  const what = [code, title].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  if (!who || !what) return null;
+  // A name a filesystem and SharePoint will both take without argument.
+  /* The characters a filename cannot hold, written the way the office already
+     writes them: an underscore. Their own files read "AMSA Master _24m" and
+     "STCW Reg II_1 & II_2", so a name the portal proposes looks like one of
+     theirs rather than something a machine produced. */
+  const safe = (t) => String(t).replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, " ").trim();
+  const when = /^\d{4}-\d{2}-\d{2}$/.test(String(expires || "")) ? " - " + expires : "";
+  return safe(who) + " - " + safe(what) + when + ext;
+};
+
+const houseFolderName = (person) => {
+  const who = canonicalName(person || "");
+  return who ? who + " - OPMS" : null;
+};
+
+/* The folder a key sits in, and the crew folder within it: the OPMS root and
+   the person's own folder under it. */
+const folderOfKey = (key) => {
+  const cut = String(key || "").lastIndexOf("/");
+  return cut < 0 ? "" : String(key).slice(0, cut);
+};
 
 /* What the office tracks, held against what the portal asks for.
  *

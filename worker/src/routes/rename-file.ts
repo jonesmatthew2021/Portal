@@ -1,6 +1,7 @@
 import type { PortalUser } from "../auth.js";
 import { getEnv } from "../env.js";
 import { fileStore } from "../files/store.js";
+import { tokenForOpmsFolder } from "../db/documents.js";
 
 /**
  * POST /api/rename-file { id, to } — a filed document given a new name.
@@ -25,13 +26,23 @@ export default async (req: Request, actor: PortalUser): Promise<Response> => {
     return Response.json({ error: "Documents are renamed by Management and IT Help." }, { status: 403 });
   }
 
-  const body = (await req.json().catch(() => null)) as { id?: unknown; to?: unknown } | null;
+  const body = (await req.json().catch(() => null)) as
+    { id?: unknown; to?: unknown; toFolder?: unknown } | null;
   const id = typeof body?.id === "string" ? body.id.trim() : "";
   const to = typeof body?.to === "string" ? body.to.trim() : "";
+  /* The folder to put it in, where the file is moving house as well as
+     changing its name. A crew member's folder is renamed by moving every file
+     in it, one at a time, so a run that stops halfway leaves some files in the
+     old folder and some in the new - which is untidy but never lost, and the
+     next run finishes the job. */
+  const toFolder = typeof body?.toFolder === "string" ? body.toFolder.trim().replace(/^\/+|\/+$/g, "") : "";
   if (!id || !to) return Response.json({ error: "A document and a new name are both needed." }, { status: 400 });
   // A name, not a path: nothing that could climb out of the folder it is in.
   if (/[\\/]/.test(to) || to === "." || to === "..") {
     return Response.json({ error: "That isn't a file name." }, { status: 400 });
+  }
+  if (toFolder && (toFolder.includes("..") || toFolder.startsWith("/"))) {
+    return Response.json({ error: "That isn't a folder." }, { status: 400 });
   }
 
   const db = getEnv().DB;
@@ -44,7 +55,7 @@ export default async (req: Request, actor: PortalUser): Promise<Response> => {
 
   const cut = row.blob_key.lastIndexOf("/");
   const folder = cut < 0 ? "" : row.blob_key.slice(0, cut + 1);
-  const nextKey = folder + to;
+  const nextKey = (toFolder ? toFolder + "/" : folder) + to;
   if (nextKey === row.blob_key) {
     await db.prepare("UPDATE documents SET filename = ?2 WHERE id = ?1").bind(id, to).run();
     return Response.json({ renamed: true, key: nextKey });
@@ -55,7 +66,18 @@ export default async (req: Request, actor: PortalUser): Promise<Response> => {
   if (!bytes) return Response.json({ error: "The file itself couldn't be found to move." }, { status: 404 });
 
   await store.set(nextKey, bytes);
-  await db.prepare("UPDATE documents SET filename = ?2, blob_key = ?3 WHERE id = ?1").bind(id, to, nextKey).run();
+  /* The folder token on the record is what the portal files a person's
+     certificates under, so it follows the file rather than being left pointing
+     at where the file used to be. */
+  const token = toFolder ? tokenForOpmsFolder(toFolder.split("/").pop() || "") : null;
+  if (token) {
+    await db
+      .prepare("UPDATE documents SET filename = ?2, blob_key = ?3, folder = ?4 WHERE id = ?1")
+      .bind(id, to, nextKey, token)
+      .run();
+  } else {
+    await db.prepare("UPDATE documents SET filename = ?2, blob_key = ?3 WHERE id = ?1").bind(id, to, nextKey).run();
+  }
   // The books already point at the new file, so a delete that fails leaves a
   // spare copy behind rather than a record pointing at nothing.
   try {
