@@ -237,6 +237,15 @@
       if (p === "/api/files") return await handleFiles(req, url);
       const m = p.match(/^\/api\/files\/([^/]+)$/);
       if (m) return await handleFile(req, url, decodeURIComponent(m[1]));
+      /* Update documentation does a round of the library before it shows
+         anything. There is no library behind the preview, so it is answered
+         with an empty round: nothing arrived, nothing went, nothing moved.
+         That is enough for everything the round leads to - the crew names, the
+         matrix items, the file names - to come up and be looked at. */
+      if (p === "/api/sync")
+        return json({ registered: [], mirrored: 0, followed: 0, moved: [], removed: [] });
+      if (p === "/api/rename-file" || p === "/api/rename")
+        return json({ error: "Renaming moves the file in SharePoint, so it only runs on the live portal." }, 503);
       if (p === "/api/analyse" || p === "/api/ai-checker" || p === "/api/archive")
         return json(
           { error: "This runs on the live server, so it isn't available in the test preview — everything else here works." },

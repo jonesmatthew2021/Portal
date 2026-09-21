@@ -14105,8 +14105,10 @@ function UpdateDocumentation() {
  * every row can be left alone.
  */
 function FileNames({ onClose }) {
-  const { admin, certificates, quals: QUALS, log } = usePortal();
+  const { admin, certificates, quals: QUALS, log, people, rosterPlan, renameCrew } = usePortal();
   const [done, setDone] = useState([]);
+  // What management typed over a suggestion, kept per person until it is used.
+  const [asName, setAsName] = useState({});
   const [busy, setBusy] = useState("");
   const [trouble, setTrouble] = useState({});
   const [run, setRun] = useState(null);
@@ -14196,14 +14198,18 @@ function FileNames({ onClose }) {
       done + " renamed" + (failed ? " · " + failed + " left alone" : ""));
   };
 
-  const renameFolder = async (f) => {
+  /* "as" is who the folder is becoming, where that is not yet what the
+     certificates inside say. Putting a crew member's name right moves his
+     folder in the same press, and the files have to go into it under the new
+     name rather than the one that was wrong. */
+  const renameFolder = async (f, as) => {
     setBusy("folder:" + f.at);
     let failed = 0;
     for (const c of f.files) {
       const code = c.readCode || c.qualCode || "";
       const title = c.readTitle || (QUALS.cols.find((x) => x[0] === code) || [])[1] || "";
       const expires = c.readExpires || c.expiresOn || "";
-      const want = (code && houseFileName(c.person, code, title, expires, c.filename)) || c.filename;
+      const want = (code && houseFileName(as || c.person, code, title, expires, c.filename)) || c.filename;
       try {
         const r = await fetch("/api/rename-file", {
           method: "POST", headers: { "content-type": "application/json" },
@@ -14219,9 +14225,81 @@ function FileNames({ onClose }) {
     setBusy("");
   };
 
+  /* Crew the matrix knows only by a first name.
+   *
+   * Somebody set the folder up as "Sam" or "bILLY" - what the crew call him
+   * rather than what his tickets say - and the matrix took the folder's word
+   * for it. From then on it asks a first name for paperwork that is all signed
+   * with a surname, nothing lines up, and the man reads as holding nothing at
+   * all. Four of them between them accounted for sixty-odd empty boxes.
+   *
+   * His full name is already written down somewhere. His own certificates are
+   * asked first, because the name on a ticket is the name it was issued in;
+   * the crew list and the roster answer for anyone whose certificates are as
+   * vague as his folder. Neither is a decision - the suggestion is shown, and
+   * it can be typed over before it is used.
+   */
+  const crew = useMemo(() => {
+    const letters = (n) => String(n || "").toUpperCase().replace(/[^A-Z]/g, "");
+    const full = (n) => String(n || "").includes(",");
+    const elsewhere = [...(people || []).map((p) => p.name),
+      ...(((rosterPlan || {}).rows) || []).map((r) => r.name)]
+      .filter(Boolean).map(canonicalName).filter(full);
+
+    return (QUALS.rows || [])
+      .filter((r) => !full(canonicalName(r[0])))
+      .map((r) => {
+        const was = r[0];
+        const mine = (certificates || []).filter((c) => letters(c.person) === letters(was));
+
+        const votes = new Map();
+        mine.forEach((c) => {
+          const said = canonicalName(String(c.filename || "").split(" - ")[0]);
+          if (!full(said) || letters(said) === letters(was)) return;
+          votes.set(said, (votes.get(said) || 0) + 1);
+        });
+        const top = [...votes.entries()].sort((a, b) => b[1] - a[1])[0];
+        if (top) {
+          return { was, job: r[1], will: top[0], files: mine.length,
+            why: top[1] + " of his certificates are signed " + top[0] };
+        }
+        const known = elsewhere.find((n) => (n.split(",")[1] || "").split(" ")
+          .filter(Boolean).some((w) => letters(w) === letters(was)));
+        return { was, job: r[1], will: known || "", files: mine.length,
+          why: known ? "the crew list has " + known : "nothing on file says his surname" };
+      })
+      .filter((x) => !done.includes("crew:" + x.was));
+  }, [QUALS, certificates, people, rosterPlan, done]);
+
+  /* Putting the name right and moving his folder are one press. Doing one
+     without the other leaves the matrix asking under a name the library has
+     never heard of, which is the state this is here to get out of. */
+  const fixName = async (x) => {
+    const now = canonicalName(asName[x.was] == null ? x.will : asName[x.was]);
+    if (!now || !now.includes(",")) {
+      setTrouble((t) => ({ ...t, ["crew:" + x.was]: "That needs a surname and a first name." }));
+      return;
+    }
+    setBusy("crew:" + x.was);
+    const letters = (n) => String(n || "").toUpperCase().replace(/[^A-Z]/g, "");
+    const mine = (certificates || []).filter((c) => c.key && letters(c.person) === letters(x.was));
+    if (mine.length) {
+      const at = folderOfKey(mine[0].key);
+      const here = at.split("/").pop();
+      const will = houseFolderName(now);
+      if (/^opms\/[^/]+$/i.test(at) && will && here !== will) {
+        await renameFolder({ at, now: here, will, root: at.slice(0, at.length - here.length),
+          files: mine }, now);
+      }
+    }
+    renameCrew(x.was, now);
+    setDone((d) => [...d, "crew:" + x.was]);
+    setBusy("");
+  };
+
   const waiting = proposals.filter((p) => !done.includes(p.id));
   if (!admin) return null;
-  if (!waiting.length && !folders.length) return null;
+  if (!waiting.length && !folders.length && !crew.length) return null;
 
   const row = { padding: "9px 0", borderTop: "1px solid " + T.rule };
 
@@ -14234,6 +14312,42 @@ function FileNames({ onClose }) {
         <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, margin: "8px 0 14px", lineHeight: 1.6 }}>
           Nothing has been changed. A rename moves the file in SharePoint as well as on the portal.
         </div>
+
+        {crew.length > 0 && (
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontFamily: T.display, fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 4 }}>
+              Crew · {crew.length}
+            </div>
+            {crew.map((x) => (
+              <div key={x.was} style={row}>
+                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={{ fontFamily: T.mono, fontSize: 12.5, color: T.text, minWidth: 90 }}>{x.was}</span>
+                  <span style={{ fontFamily: T.body, fontSize: 12, color: T.muted, minWidth: 110 }}>{x.job}</span>
+                  <span style={{ fontFamily: T.mono, fontSize: 12, color: T.accent }}>→</span>
+                  <input
+                    value={asName[x.was] == null ? x.will : asName[x.was]}
+                    placeholder="LASTNAME, First"
+                    onChange={(e) => setAsName((a) => ({ ...a, [x.was]: e.target.value }))}
+                    style={{ flex: 1, minWidth: 190, fontFamily: T.mono, fontSize: 12.5,
+                      padding: "5px 8px", borderRadius: 2, border: "1px solid " + T.rule,
+                      background: T.raised, color: T.text }} />
+                  <Button variant="solid" disabled={busy === "crew:" + x.was}
+                    onClick={() => fixName(x)}>
+                    {busy === "crew:" + x.was ? "Putting right…" : "Put right"}
+                  </Button>
+                </div>
+                <div style={{ fontFamily: T.body, fontSize: 12, color: T.muted, marginTop: 3 }}>
+                  {x.why}{x.files ? " · " + x.files + " file" + (x.files === 1 ? "" : "s") + " move with him" : ""}
+                </div>
+                {trouble["crew:" + x.was] && (
+                  <div style={{ fontFamily: T.body, fontSize: 12, color: T.bRed, marginTop: 3 }}>
+                    {trouble["crew:" + x.was]}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
 
         {folders.length > 0 && (
           <div style={{ marginBottom: 18 }}>
@@ -20341,6 +20455,93 @@ function CoolibahPortal({ role, onSignOut }) {
     return { ok: !trouble.length, said: [...written, ...trouble].join(" · ") };
   };
 
+/* One person renamed everywhere the portal writes their name down.
+   *
+   * The same sweep as taking somebody off, changing rather than dropping, and
+   * written through the portal's own setters because those are what mark a
+   * slice as changed - written straight into the store, the new name would go
+   * from the screen and the old one be back on the next load.
+   *
+   * Certificates are deliberately left alone. Theirs is the server's copy and
+   * the next poll would only say the old name again; moving the folder they
+   * sit in is what puts them right, and that runs alongside this.
+   */
+  const renameCrew = (from, to) => {
+    const was = String(from || "").trim();
+    const now = canonicalName(to || "");
+    if (!was || !now || was === now) return { ok: false };
+    const letters = (n) => String(n || "").toUpperCase().replace(/[^A-Z]/g, "");
+    const same = (n) => letters(n) === letters(was);
+    const done = { matrix: 0, crewList: 0, swings: 0, lists: 0, marks: 0 };
+
+    setQuals((q) => ({
+      ...q,
+      rows: (q.rows || []).map((r) => {
+        if (!same(r[0])) return r;
+        done.matrix++;
+        return [now, r[1], r[2], r[3]];
+      }),
+    }));
+
+    setPeople((list) => (list || []).map((p) => {
+      if (!same(p.name)) return p;
+      done.crewList++;
+      return { ...p, name: now };
+    }));
+
+    setRosterPlan((plan) => {
+      if (!plan) return plan;
+      let hit = 0;
+      const rows = (plan.rows || []).map((r) => {
+        if (!same(r.name)) return r;
+        hit++;
+        return { ...r, name: now };
+      });
+      done.swings = hit;
+      return hit ? { ...plan, rows, edited: true, updatedAt: todayISO() } : plan;
+    });
+
+    setSwingLists((held) => {
+      const next = {};
+      Object.entries(held || {}).forEach(([k, list]) => {
+        next[k] = {
+          ...list,
+          entries: (((list || {}).entries) || []).map((e) => {
+            if (!same(e.name)) return e;
+            done.lists++;
+            return { ...e, name: now };
+          }),
+        };
+      });
+      return next;
+    });
+
+    /* The notes and the "this came off a certificate" marks are kept under
+       "NAME::ITEM". Re-keyed rather than dropped, so a note written against a
+       man under the wrong name is still his afterwards. */
+    const rekey = (held) => {
+      const next = {};
+      Object.entries(held || {}).forEach(([k, v]) => {
+        const join = k.includes("::") ? "::" : "|";
+        const parts = k.split(join);
+        if (parts.length > 1 && same(parts[0])) {
+          next[now.toUpperCase() + join + parts.slice(1).join(join)] = v;
+          done.marks++;
+        } else next[k] = v;
+      });
+      return next;
+    };
+    setRenewalMarks(rekey(renewalMarks));
+    setOpmsMarks(rekey(opmsMarks));
+    setFilledFromCert(rekey(filledFromCert));
+
+    log("Admin", was + " is " + now,
+      [done.matrix ? "the matrix" : null, done.crewList ? "the crew list" : null,
+        done.swings ? done.swings + " roster rows" : null].filter(Boolean).join(" · ")
+      || "nothing was holding the old name");
+    return { ok: true, ...done };
+  };
+
   const removeCrew = (name) => {
     const want = String(name || "").trim();
     if (!want) return { ok: false };
@@ -20429,7 +20630,7 @@ function CoolibahPortal({ role, onSignOut }) {
     return { ok: true, gone };
   };
 
-  const ctx = { role, admin, session: SESSION, removeCrew, writeCrewToWorkbooks, lastDocUpdate, setLastDocUpdate, folderNames, setFolderNames, filledFromCert, setFilledFromCert, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
+  const ctx = { role, admin, session: SESSION, removeCrew, renameCrew, people, writeCrewToWorkbooks, lastDocUpdate, setLastDocUpdate, folderNames, setFolderNames, filledFromCert, setFilledFromCert, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
 
   return (
     <Ctx.Provider value={ctx}>
