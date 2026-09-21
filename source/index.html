@@ -2258,6 +2258,42 @@ function ticketStandingFor(row, QUALS) {
  * crew member their card lasts four years when it lasts two would put them
  * ashore at a gate, and the other way round only costs a renewal reminder.
  */
+/**
+ * The expiry rules off the filed skills matrix, ready to be kept.
+ *
+ * Shaped the way the rest of the portal already expects periods - a code, a
+ * number of months or a note that it never lapses - with the office's own
+ * wording carried alongside, so anybody can see what was made of each rule.
+ */
+async function expiryRulesFrom(record) {
+  if (!record || !record.url) return { periods: [], problem: "" };
+  const ext = (record.filename || "").split(".").pop().toLowerCase();
+  if (!WORKBOOK_EXTS.includes(ext)) return { periods: [], problem: "" };
+  try {
+    const XLSX = await loadXLSX();
+    const res = await fetch(record.url);
+    if (!res.ok) throw new Error(`It couldn't be downloaded (${res.status}).`);
+    const wb = XLSX.read(await res.arrayBuffer(), { type: "array", cellDates: true });
+    const read = readExpiryRules(null, XLSX, wb);
+    if (!read.length) {
+      return { periods: [], problem: `No expiry rules could be found on ${record.filename}.` };
+    }
+    return {
+      periods: read.map((p) => ({
+        code: p.code,
+        item: p.title || "",
+        months: p.months ?? null,
+        neverExpires: !!p.never,
+        statesOwn: !!p.own,
+        validFor: p.said || "",
+      })),
+      problem: "",
+    };
+  } catch (e) {
+    return { periods: [], problem: `${record.filename} couldn't be read for expiry rules. ${e.message || e}` };
+  }
+}
+
 function expiryRule(said) {
   const text = String(said || "").replace(/\s+/g, " ").trim();
   if (!text) return null;
@@ -9298,9 +9334,11 @@ async function readEverything({ quals, certSheet, validityMatrix = null, fresh, 
   if (validityMatrix) {
     try {
       onPhase({ phase: "validity", read: progress.read, total: progress.total });
-      const { text, problem } = await matrixSheetText(validityMatrix);
+      /* The expiry rules, read off the sheet's own columns rather than guessed
+         at from a truncated dump of the workbook. Sent up already read. */
+      const { periods, problem } = await expiryRulesFrom(validityMatrix);
       if (problem) validityProblem = problem;
-      await analyse({ action: "matrix-read", which: "validity", text });
+      if (periods.length) await analyse({ action: "validity-rules", periods });
     } catch (e) {
       validityProblem = `The validity periods could not be read off the skills matrix, so expiry dates were taken from the certificates alone. ${e.message || e}`;
     }

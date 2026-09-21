@@ -1447,6 +1447,42 @@ export default async (req: Request) => {
   // and the portal is handed the job to ask after with "matrix-read-job". The
   // one shortcut is a reading already made for this document, which is handed
   // straight back with no job at all.
+  /* The expiry rules, handed over already read.
+   *
+   * These used to be got at by shipping the whole skills matrix to the model
+   * and asking it to find them. The sheet holding them runs to ninety thousand
+   * characters and the text was cut off at sixty, so the model never saw most
+   * of the table and the portal ran with no rules at all - which is why a
+   * certificate printing an issue date and no expiry could never be dated.
+   *
+   * The page reads them off the columns itself now, exactly, and puts them
+   * here. Stored in the same shape and under the same key the model's answer
+   * used, so everything that reads periods carries on reading them from one
+   * place and nothing else had to change.
+   */
+  if (action === "validity-rules") {
+    const listed = Array.isArray(body.periods) ? body.periods : null;
+    if (!listed) {
+      return Response.json({ error: "Send the periods that were read." }, { status: 400 });
+    }
+    const { validity } = await matrixDocuments();
+    if (!validity) {
+      return Response.json(
+        { error: "No skills matrix is on the portal, so there are no rules to keep." },
+        { status: 409 },
+      );
+    }
+    const reading = {
+      readable: true,
+      at: new Date().toISOString(),
+      by: "read from the sheet",
+      periods: listed,
+    };
+    const held = { which: "validity", id: validity.id, filename: validity.filename, reading };
+    await matrixStore().setJSON(matrixReadingKey("validity", validity.id), held);
+    return Response.json({ ...held, kept: listed.length });
+  }
+
   if (action === "matrix-read") {
     const which = typeof body.which === "string" ? body.which : "";
     if (!MATRIX_DOCS[which]) {
