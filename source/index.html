@@ -4060,6 +4060,12 @@ function TrainingMatrix() {
     skillsRequirements, setSkillsRequirements, validityMatrix, removeCrew, admin, rosterPlan } = usePortal();
   // Taking a crew member off, asked for here and answered here.
   const [leaving, setLeaving] = useState(null);
+  /* Remembered, because whichever order somebody reads the matrix in they read
+     it in every time. "As the spreadsheet has it" is the office's own order,
+     which is what this always used to show and what somebody comparing the two
+     side by side will want. */
+  const [sortBy, setSortBy] = useRemembered("matrix-sort", "rank",
+    (v) => v === "rank" || v === "name" || v === "sheet");
 
   // The requirements come off the skills matrix workbook. Read here once when
   // nothing is held yet, so the page doesn't wait on an update run.
@@ -4183,7 +4189,25 @@ function TrainingMatrix() {
   const offTicket = Array.from(standings.values());
   const offTicketStrong = offTicket.filter((x) => x.strong).length;
 
-  const rows = QUALS.rows.filter((r) => {
+  /* Either way round.
+   *
+   * By rank is how the matrix is read when the question is whether the vessel
+   * is manned - the masters together, then the mates, the engineers, the GPHs,
+   * the cooks. By surname is how it is read when the question is one person's
+   * tickets, and hunting a name down a rank-ordered list means knowing their
+   * rank first. Names are written LASTNAME, First, so sorting the name sorts
+   * the surname. */
+  const ordered = useMemo(() => {
+    const list = QUALS.rows.slice();
+    if (sortBy === "name") return list.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+    if (sortBy === "rank") {
+      return list.sort((a, b) =>
+        rankGroupAt(a[1]) - rankGroupAt(b[1]) || String(a[0]).localeCompare(String(b[0])));
+    }
+    return list;
+  }, [QUALS, sortBy]);
+
+  const rows = ordered.filter((r) => {
     if (q) {
       // Several names at once, comma-separated — a first name is enough.
       const hay = (r[0] + " " + r[1]).toLowerCase();
@@ -4287,6 +4311,16 @@ function TrainingMatrix() {
           </div>
         );
       })()}
+
+      <div style={{ display: "flex", gap: 6, alignItems: "baseline", flexWrap: "wrap", marginBottom: 11 }}>
+        <span style={{ fontFamily: T.mono, fontSize: 10.5, color: T.muted,
+          textTransform: "uppercase", letterSpacing: "0.08em" }}>Sort by</span>
+        <Button variant={sortBy === "rank" ? "solid" : "quiet"} onClick={() => setSortBy("rank")}>Rank</Button>
+        <Button variant={sortBy === "name" ? "solid" : "quiet"} onClick={() => setSortBy("name")}>Surname</Button>
+        <Button variant={sortBy === "sheet" ? "solid" : "quiet"} onClick={() => setSortBy("sheet")}>
+          As the spreadsheet has it
+        </Button>
+      </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 13 }}>
         {chip("expired or within " + RED_DAYS + " days", T.bRed, tally.red, "red")}
@@ -4761,6 +4795,19 @@ function matchSwingList(entries, people) {
    the position the matrix holds against their name — the roster's departments
    are too broad for this page, where a Chief Engineer and an Assistant
    Engineer are different lines on the list. */
+/* Where a position sits in the order the vessel is manned in, read off
+   * RANK_GROUPS below: masters, deck officers, engineers, GPH, cooks. A
+   * position the list does not recognise goes to the end rather than to the
+   * top, because an unknown rank is not a senior one.
+   *
+   * Module level because the crew matrix and the swing board both sort by it,
+   * and two copies of an order like this is two orders waiting to disagree.
+   */
+const rankGroupAt = (position) => {
+  const i = RANK_GROUPS.findIndex(([, re]) => re.test(String(position || "")));
+  return i < 0 ? RANK_GROUPS.length : i;
+};
+
 const RANK_GROUPS = [
   ["Masters", /master/i],
   ["Chief Officers", /chief (officer|mate)/i],
