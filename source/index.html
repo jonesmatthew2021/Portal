@@ -14050,6 +14050,8 @@ function FileNames({ onClose }) {
   const [done, setDone] = useState([]);
   const [busy, setBusy] = useState("");
   const [trouble, setTrouble] = useState({});
+  const [run, setRun] = useState(null);
+  const stop = useRef(false);
 
   /* Only certificates the portal has actually read. An unread one is left as
      the office named it - the portal has nothing better to call it. */
@@ -14099,10 +14101,40 @@ function FileNames({ onClose }) {
       const out = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(out.error || ("it couldn't be renamed (" + r.status + ")"));
       setDone((d) => [...d, row.id]);
+      setBusy("");
+      return true;
     } catch (e) {
       setTrouble((t) => ({ ...t, [row.id]: String((e && e.message) || e) }));
     }
     setBusy("");
+    return false;
+  };
+
+  /* A list of renames, one after another rather than all at once.
+   *
+   * Every one is a file read, written and deleted in SharePoint, so forty
+   * thrown at it together is how the library ends up refusing most of them -
+   * that lesson was learned taking a crew on. One at a time is slower and
+   * finishes.
+   *
+   * It gives up after five failures in a row. One file that will not move is a
+   * file; five is the library saying no, and carrying on would be a thousand
+   * pointless requests and a wall of red at the end of them. */
+  const renameMany = async (list) => {
+    stop.current = false;
+    setRun({ total: list.length, done: 0, failed: 0, now: "", stopped: false });
+    let done = 0, failed = 0, inARow = 0;
+    for (const p of list) {
+      if (stop.current) { setRun((r) => ({ ...r, stopped: true })); return; }
+      setRun((r) => ({ ...r, now: p.will }));
+      const ok = await rename(p);
+      if (ok) { done++; inARow = 0; } else { failed++; inARow++; }
+      setRun((r) => ({ ...r, done, failed }));
+      if (inARow >= 5) { setRun((r) => ({ ...r, stopped: true })); return; }
+    }
+    setRun((r) => ({ ...r, now: "", stopped: true }));
+    log("Admin", "Certificates renamed to the house style",
+      done + " renamed" + (failed ? " · " + failed + " left alone" : ""));
   };
 
   const renameFolder = async (f) => {
@@ -14192,14 +14224,46 @@ function FileNames({ onClose }) {
             )}
             <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
               marginTop: 12, paddingTop: 10, borderTop: "1px solid " + T.rule }}>
-              <Button variant="solid" disabled={!!busy}
-                onClick={async () => { for (const p of waiting.slice(0, 40)) await rename(p); }}>
+              <Button variant="solid" disabled={!!busy || !!run}
+                onClick={() => renameMany(waiting.slice(0, 40))}>
                 Rename these {Math.min(40, waiting.length)}
               </Button>
+              {waiting.length > 40 && (
+                <Button variant="quiet" disabled={!!busy || !!run} onClick={() => renameMany(waiting)}>
+                  Rename all {waiting.length}
+                </Button>
+              )}
               <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted }}>
                 One at a time, so a failure stops at the file it failed on.
               </span>
             </div>
+
+            {/* A thousand files is several minutes of moving things about in
+                SharePoint, and a page that sits there saying nothing is a page
+                somebody closes halfway through. */}
+            {run && (
+              <div style={{ marginTop: 12, padding: "12px 14px", background: T.raised,
+                border: "1px solid " + T.rule, borderRadius: 2 }}>
+                <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.text }}>
+                  {run.done} of {run.total} renamed{run.failed ? " · " + run.failed + " left alone" : ""}
+                  {run.stopped ? " — stopped" : "…"}
+                </div>
+                <div style={{ height: 6, background: T.panel, borderRadius: 3, overflow: "hidden", margin: "8px 0 6px" }}>
+                  <div style={{ height: "100%", background: T.accent, transition: "width .3s",
+                    width: Math.round((run.done / Math.max(1, run.total)) * 100) + "%" }} />
+                </div>
+                <div style={{ fontFamily: T.mono, fontSize: 11, color: T.muted, wordBreak: "break-word" }}>
+                  {run.stopped
+                    ? "Too many in a row would not move. Nothing else was tried — what has been renamed is renamed."
+                    : run.now}
+                </div>
+                {!run.stopped && (
+                  <div style={{ marginTop: 8 }}>
+                    <Button variant="quiet" onClick={() => { stop.current = true; }}>Stop</Button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
