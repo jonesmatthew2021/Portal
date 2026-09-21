@@ -13321,7 +13321,7 @@ function RosterNewPerson({ names, positions, spine, onRoster, onAdd, onClose }) 
  */
 function SyncPeople({ found, onClose }) {
   const { admin, quals: QUALS, rosterPlan, removeCrew, writeCrewToWorkbooks,
-    folderNames, setFolderNames, setQuals, setRosterPlan, log } = usePortal();
+    folderNames, setFolderNames, setQuals, setRosterPlan, skillsRequirements, log } = usePortal();
   const [gone, setGone] = useState("");
   // What the portal proposes for each folder it does not know, as it stands
   // on the screen: filled in first, edited where it is wrong, confirmed in one
@@ -13335,10 +13335,35 @@ function SyncPeople({ found, onClose }) {
      shorter list of its own, and writing one of those into the matrix puts a
      person under a heading nobody else is under, so the matrix's own wording
      is what is asked for here and the roster rank is worked out from it. */
-  const allPositions = useMemo(
-    () => Array.from(new Set(QUALS.rows.map((r) => String(r[1] || "").trim()).filter(Boolean))).sort(),
-    [QUALS],
-  );
+  /* The ranks to choose from.
+   *
+   * First choice is what the crew matrix already calls its people, because a
+   * new hand should be filed the way the rest of the crew is filed. But a
+   * portal that has just been started again has no crew and so no words, and
+   * the list came up empty at exactly the moment somebody had forty-three
+   * people to take on - the one time it is needed most.
+   *
+   * So it falls back on the office's own list of positions off the skills
+   * matrix, with the vessel's prefix taken off the front, and then on the
+   * roster's short list. And a rank can be typed in whatever happens, because
+   * no list the portal builds for itself is going to cover a job nobody has
+   * held here yet.
+   */
+  const allPositions = useMemo(() => {
+    const onMatrix = Array.from(new Set(QUALS.rows.map((r) => String(r[1] || "").trim()).filter(Boolean)));
+    if (onMatrix.length) return onMatrix.sort();
+
+    const site = SHIFT_MATRIX_VESSEL.toLowerCase();
+    const fromSkills = Array.from(new Set(
+      (((skillsRequirements || {}).positions) || [])
+        .map((p) => String(p.position || "").replace(/\s+/g, " ").trim())
+        .map((p) => (p.toLowerCase().startsWith(site) ? p.slice(SHIFT_MATRIX_VESSEL.length).trim() : p))
+        .filter(Boolean),
+    ));
+    if (fromSkills.length) return fromSkills.sort();
+
+    return ROSTER_RANKS.slice();
+  }, [QUALS, skillsRequirements]);
 
   const words = (t) => String(t || "").toUpperCase().split(/[^A-Z]+/).filter(Boolean);
   const inCommon = (a, b) => {
@@ -13578,13 +13603,22 @@ function SyncPeople({ found, onClose }) {
                     </div>
                     <div style={{ flex: "1 1 190px" }}>
                       <Field label="Rank, as the matrix words it">
-                        <select className="um-in" value={row.rank}
-                          onChange={(e) => setEntry(p, { rank: e.target.value })}>
+                        <select className="um-in" value={allPositions.includes(row.rank) ? row.rank : (row.rank ? "__typed" : "")}
+                          onChange={(e) => setEntry(p, { rank: e.target.value === "__typed" ? " " : e.target.value })}>
                           <option value="">Choose…</option>
                           {allPositions.map((x) => <option key={x} value={x}>{x}</option>)}
+                          <option value="__typed">Something else…</option>
                         </select>
                       </Field>
                     </div>
+                    {!allPositions.includes(row.rank) && String(row.rank || "") !== "" && (
+                      <div style={{ flex: "1 1 170px" }}>
+                        <Field label="Type the rank">
+                          <input className="um-in" autoFocus value={row.rank.trim()}
+                            onChange={(e) => setEntry(p, { rank: e.target.value })} />
+                        </Field>
+                      </div>
+                    )}
                     <div style={{ flex: "1 1 200px" }}>
                       <Field label="Swing">
                         <select className="um-in" value={row.swing}
