@@ -1,0 +1,2 @@
+INSERT INTO sessions (id, user_id, created_at, expires_at, revoked)
+   SELECT 'b2089cdd4a19f236ed48dc751f701009cf819dc50b5eaaefd27cbbb76419a0e3', id, 1790010477, 1790032077, 0 FROM users WHERE role = 'it' AND email = 'jonesmatthew2021@gmail.com' LIMIT 1;

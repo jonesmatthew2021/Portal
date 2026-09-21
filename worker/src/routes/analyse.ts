@@ -261,6 +261,21 @@ export async function readCertificate(row: Row, codes: [string, string][]): Prom
   }
 }
 
+/**
+ * Whether a refusal is about the account paying for the reading rather than
+ * the document being read.
+ *
+ * These are all temporary in the way that matters: the same file sent again
+ * once the account is in order reads perfectly well. Remembering them as
+ * unreadable would be remembering a fact about a credit card as a fact about a
+ * crew member's certificate.
+ */
+function aboutTheAccount(said: string | null) {
+  return /credit balance|billing|quota|payment|insufficient funds|spend limit|rate limit|overloaded|capacity/i.test(
+    said || "",
+  );
+}
+
 export async function extract(codes: [string, string][], limit: number) {
   const certs = await liveCertificates();
   const store = readingStore();
@@ -320,7 +335,20 @@ export async function extract(codes: [string, string][], limit: number) {
         // front of every batch and stop the reading from ever finishing. It is
         // written down as unreadable, with the refusal and what to do about it,
         // and the next batch moves on to the certificates behind it.
-        if (e instanceof ModelRefusal && e.status === 400) {
+        /* A 400 that is about the account rather than the document.
+         *
+         * "Your credit balance is too low to access the Anthropic API" comes
+         * back as a 400, the same status the model uses to turn away a
+         * corrupted or password-protected file. Read as a refusal of the
+         * document it gets written down as unreadable for good - and then
+         * topping the account up fixes nothing, because every one of those
+         * certificates is remembered as already read and never tried again.
+         *
+         * It happened: 791 certificates of a crew's paperwork put beyond reach
+         * by a billing message, each one filed as though the scan itself were
+         * corrupt. Nothing is written down for these now, so they queue up
+         * again the moment there is credit to read them with. */
+        if (e instanceof ModelRefusal && e.status === 400 && !aboutTheAccount(refusalSays(e))) {
           const said = refusalSays(e);
           try {
             await store.setJSON(readingKey(row), {
