@@ -60,6 +60,20 @@ const personFrom = (folder: string) => opmsFolderName(folder);
 
 type Found = { key: string; size?: number };
 
+/**
+ * The crew folder a filed certificate sits in, or null where it sits somewhere
+ * else under OPMS.
+ *
+ * One level down from the OPMS root, with the file itself below it. The old
+ * "<Name> - OPMS" folders and the plain "LASTNAME, First" ones both answer;
+ * the spreadsheets the office drops loose in the root do not, because they
+ * have no folder of their own.
+ */
+function crewFolderOf(key: string): string | null {
+  const m = /^opms\/([^/]+)\/[^/]+$/i.exec(key);
+  return m ? m[1] : null;
+}
+
 async function survey(tick: (pct: number, word: string) => Promise<void> = async () => {}) {
   const store = fileStore();
   const rows = await db.select().from(documents);
@@ -71,7 +85,17 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
 
   const singleFolders = Object.values(SINGLE_FILE_CATEGORIES).map((c) => c.folder + "/");
 
-  // --- the certificates' one home: the "<Name> - OPMS" folders ------------
+  /* --- the certificates' one home: a folder per person under OPMS ---------
+   *
+   * The office's folders were "<First name> - OPMS" - Brenton - OPMS, Evan -
+   * OPMS. They are being renamed to the person's own name and nothing else,
+   * because the folder already sits inside OPMS Documents and saying it twice
+   * told nobody anything.
+   *
+   * Both are read. A folder is a crew folder if it sits directly under the
+   * OPMS root and holds files; the suffix is stripped where it is there and
+   * not looked for where it is not, so the library can be half renamed and
+   * every certificate in it still finds its way onto the books. */
   const newCertificates: { key: string; folder: string; person: string; size?: number }[] = [];
   const strays: Found[] = [];
   // The certificate home: where the office keeps each person's certificates
@@ -94,8 +118,8 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
      rather than acting on it. */
   const folks = new Map<string, string>();
   for (const f of opmsListing.blobs) {
-    const who = /^opms\/([^/]+ - OPMS)\//i.exec(f.key);
-    if (who) folks.set(tokenForOpmsFolder(who[1]), personForOpmsFolder(who[1]));
+    const who = crewFolderOf(f.key);
+    if (who) folks.set(tokenForOpmsFolder(who), personForOpmsFolder(who));
   }
 
   /* A certificate that has moved rather than arrived.
@@ -110,9 +134,9 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
 
   for (const f of opmsListing.blobs) {
     if (known.has(f.key)) continue;
-    const m = /^opms\/([^/]+ - OPMS)\//i.exec(f.key);
+    const m = crewFolderOf(f.key);
     if (!m) continue;
-    const token = tokenForOpmsFolder(m[1]);
+    const token = tokenForOpmsFolder(m);
     const name = safeName(f.key.split("/").pop() || "").toLowerCase();
     const twin = (rowsByToken.get(token) || [])
       .find((r) => r.name === name && r.size === (f.size ?? -2));
@@ -122,7 +146,7 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
       }
       continue;
     }
-    newCertificates.push({ key: f.key, folder: token, person: personForOpmsFolder(m[1]), size: f.size });
+    newCertificates.push({ key: f.key, folder: token, person: personForOpmsFolder(m), size: f.size });
   }
 
   // The office drops the crew qualification expiry spreadsheet loose in OPMS

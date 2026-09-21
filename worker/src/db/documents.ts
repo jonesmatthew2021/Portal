@@ -226,7 +226,10 @@ export function opmsFolderName(token: string) {
 }
 
 /** Where this person's certificates are written: their OPMS folder. */
-export const opmsCertPrefix = (token: string) => `opms/${opmsFolderName(token)} - OPMS`;
+/** Where this person's certificates are written: their own folder under OPMS.
+ * No suffix - the folder is already in OPMS Documents, and saying it twice
+ * told nobody anything. */
+export const opmsCertPrefix = (token: string) => `opms/${opmsFolderName(token)}`;
 
 const TOKEN_BY_OPMS_NAME: Record<string, string> = Object.fromEntries(
   Object.entries(OPMS_FOLDER_NAMES).map(([t, n]) => [n.toLowerCase(), t]),

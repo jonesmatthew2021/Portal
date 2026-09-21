@@ -14075,7 +14075,8 @@ function FileNames({ onClose }) {
     (certificates || []).forEach((c) => {
       if (!c.id || !c.key) return;
       const at = folderOfKey(c.key);
-      if (!/ - OPMS$/i.test(at.split("/").pop() || "")) return;
+      // One level under the OPMS root is a crew folder, suffix or no suffix.
+      if (!/^opms\/[^/]+$/i.test(at)) return;
       const want = houseFolderName(c.person);
       if (!want) return;
       const now = at.split("/").pop();
@@ -14244,10 +14245,9 @@ const houseFileName = (person, code, title, expires, filename) => {
   return safe(who) + " - " + safe(what) + when + ext;
 };
 
-const houseFolderName = (person) => {
-  const who = canonicalName(person || "");
-  return who ? who + " - OPMS" : null;
-};
+/* The person's own name, and nothing else. The folder is already inside OPMS
+   Documents; "Kyle - OPMS" said OPMS twice and told nobody anything. */
+const houseFolderName = (person) => canonicalName(person || "") || null;
 
 /* The folder a key sits in, and the crew folder within it: the OPMS root and
    the person's own folder under it. */
