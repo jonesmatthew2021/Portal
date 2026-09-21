@@ -16175,8 +16175,21 @@ function readOPMSExport(XLSX, buf) {
 /* OPMS Checker. Holds the latest spreadsheet exported from OPMS, and holds it
    against our own skills matrix and the certificates we have scanned. */
 function OPMSChecker() {
-  const { opmsSheet, setOpmsSheet, quals, opmsAnalysis, setOpmsAnalysis, log, role,
-    opmsMarks, setOpmsMarks } = usePortal();
+  /* One spreadsheet, filed in one place.
+   *
+   * There were two slots for it: this page had its own, and Required Documents
+   * had a card of the same name wired to a different one. The same export had
+   * been uploaded to both, and on other weeks the crew qualification workbook
+   * had gone into the other one instead, so which document the portal held
+   * depended on which card somebody had used last.
+   *
+   * It is filed under Required Documents with everything else now, and read
+   * from there. The old slot is still read where a copy is sitting in it, so
+   * nothing filed before this goes dark. */
+  const portal = usePortal();
+  const { setOpmsSheet, quals, opmsAnalysis, setOpmsAnalysis, log, role,
+    opmsMarks, setOpmsMarks } = portal;
+  const opmsSheet = portal.certSheet || portal.opmsSheet;
 
   // A finding's identity across weekly runs: side + person + code-or-item,
   // normalised — so a mark made this week still holds when next week's run
@@ -16499,23 +16512,9 @@ function OPMSChecker() {
 
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
           {opmsSheet && <OpenLink url={opmsSheet.url} />}
-          <SingleDocumentUpload
-            category="opms-sheet"
-            noun="OPMS spreadsheet"
-            eyebrow="Upload latest spreadsheet from OPMS"
-            current={opmsSheet}
-            onFiled={(record) => {
-              setOpmsSheet(record);
-              // A new export is the whole reason to compare: the run starts
-              // itself the moment the sheet lands, instead of waiting for the
-              // button to be remembered.
-              setTimeout(() => runAnalysis(true), 100);
-            }}
-            logAction="OPMS spreadsheet uploaded"
-            label="Upload latest spreadsheet from OPMS"
-            accept=".xlsx,.xlsm,.xls,.csv"
-            variant={opmsSheet ? "quiet" : "solid"}
-          />
+          <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted }}>
+            Filed under Required Documents For Upload, with the rest of the spreadsheets.
+          </span>
         </div>
       </div>
 
@@ -16636,7 +16635,7 @@ function OPMSChecker() {
         <Empty>
           {ready
             ? "Nothing has been compared yet. Analyse spreadsheets and certificates reads the certificates on file, then holds the OPMS export against them and against our skills matrix."
-            : "The OPMS export has to be on file before anything can be compared."}
+            : "The OPMS export has to be on file before anything can be compared — upload it under Required Documents For Upload."}
         </Empty>
       ) : (
         <>
