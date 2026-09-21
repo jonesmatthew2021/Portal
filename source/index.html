@@ -9204,23 +9204,70 @@ async function readEverything({ quals, certSheet, validityMatrix = null, fresh, 
  * roster, and a certificate for someone who has left is not a reason to put them
  * back on it.
  */
-function applyDifferences(quals, differences) {
-  const rows = quals.rows.map((r) => [r[0], r[1], r[2], (r[3] || []).slice()]);
+/**
+ * The certificates' answer, laid over the crew matrix. The only place it is
+ * done.
+ *
+ * There were three: the automatic run after an upload, Generate latest
+ * training matrix, and Update the spreadsheet. Each read the same certificates
+ * and then picked its own list out of the answer - two filtered the analysis's
+ * items on slightly different conditions, the third used the server's settled
+ * list - so the three could write different dates from the same evidence, and
+ * only the third had ever heard of taking a date back off. Which one you had
+ * pressed last decided what the matrix said.
+ *
+ * They all hand their work here now. `settled` is the server's own list, the
+ * one thing that knows both what a certificate proves and what it no longer
+ * proves, and the three buttons keep only their real differences: whether the
+ * office's spreadsheet is left alone, built fresh, or written into in place.
+ *
+ * Back comes the matrix as it should now read, what actually moved (for the
+ * screen and the log), and which cells the certificates spoke for at all -
+ * which is wider than what moved, because the workbook may be missing a date
+ * the matrix already has.
+ */
+function applySettled(quals, settled) {
+  const rows = (quals.rows || []).map((r) => [r[0], r[1], r[2], (r[3] || []).slice()]);
   const rowAt = new Map(rows.map((r, i) => [String(r[0]).trim().toUpperCase(), i]));
-  const colAt = new Map(quals.cols.map((c, i) => [c[0], i]));
+  const cols = quals.cols || [];
+  const colAt = new Map(cols.map((c, i) => [c[0], i]));
 
   const applied = [];
-  differences.forEach((it) => {
-    const r = rowAt.get(String(it.person || "").trim().toUpperCase());
-    const c = colAt.get(it.code);
+  const only = new Set();
+
+  (settled || []).forEach((s) => {
+    const r = rowAt.get(String(s.person || "").trim().toUpperCase());
+    const c = colAt.get(s.code);
     if (r === undefined || c === undefined) return;
-    const before = rows[r][3][c] == null ? "" : rows[r][3][c];
-    if (before === it.proposed) return;
-    rows[r][3][c] = it.proposed;
-    applied.push({ id: it.id, person: rows[r][0], code: it.code, title: it.title, from: before, to: it.proposed });
+
+    const before = rows[r][3][c] == null ? "" : String(rows[r][3][c]);
+    const key = String(s.person).trim().toUpperCase() + "|" + s.code;
+    const moved = (to) => applied.push({
+      person: rows[r][0], code: s.code, title: (cols[c] || [])[1] || "", from: before, to,
+    });
+
+    /* A cell taken back: the certificate behind it has gone from the library,
+       or it answers to another column now, so the date it left comes off the
+       matrix and out of the workbook alike. */
+    if (s.clear) {
+      if (before.trim() !== "") {
+        rows[r][3][c] = "";
+        moved("");
+        only.add(key);
+      }
+      return;
+    }
+
+    if (!s.value) return;
+    if (before.trim() !== s.value) { rows[r][3][c] = s.value; moved(s.value); }
+    else rows[r][3][c] = s.value;
+    /* Named whether or not the matrix moved. The matrix agreeing with the
+       certificate says nothing about the office's workbook, which may still be
+       missing the date entirely. */
+    only.add(key);
   });
 
-  return { next: { cols: quals.cols, rows }, applied };
+  return { next: { cols, rows }, applied, only };
 }
 
 /**
@@ -9341,9 +9388,13 @@ function GenerateLatestMatrix({ variant = "solid", label = "Generate latest trai
       if (moved.length) refileCertificates(moved);
 
       const items = res.items || [];
-      const settled = items.filter((it) => it.source === "certificate" && it.proposed);
-      const { next, applied } = applyDifferences(QUALS, settled);
-      const left = items.length - settled.length;
+      const { next, applied } = applySettled(QUALS, res.settled);
+      /* The questions the certificates answered by themselves, kept apart from
+         the dates that were written: these are lines on the certificate review,
+         marked settled so nobody is asked again. What is left is the open
+         questions. */
+      const answered = items.filter((it) => it.source === "certificate" && it.proposed);
+      const left = items.length - answered.length;
 
       setRun({ phase: "building", read: progress.read, total: progress.total });
       const { filename, file, on, filed, report } = await fileLatestMatrix(next, role, certSheet);
@@ -9366,7 +9417,7 @@ function GenerateLatestMatrix({ variant = "solid", label = "Generate latest trai
         items,
         notes: res.notes || [],
         summary: { ...(res.summary || {}), sheetProblem, refiled: moved.length },
-        verdicts: Object.fromEntries(settled.map((it) => [it.id, "yes"])),
+        verdicts: Object.fromEntries(answered.map((it) => [it.id, "yes"])),
         generated: {
           at: new Date().toISOString(),
           by: role,
@@ -9694,33 +9745,8 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
 
       // The settled dates, laid over the crew matrix, and the exact cells they
       // belong to — the write is narrowed to those cells and no others.
-      const rowAt = new Map(QUALS.rows.map((r, i) => [String(r[0]).trim().toUpperCase(), i]));
-      const colAt = new Map(QUALS.cols.map((c, i) => [c[0], i]));
-      const rows = QUALS.rows.map((r) => [r[0], r[1], r[2], (r[3] || []).slice()]);
-      const only = new Set();
-      let applied = 0;
-      settled.forEach((s) => {
-        const r = rowAt.get(String(s.person || "").trim().toUpperCase());
-        const c = colAt.get(s.code);
-        if (r === undefined || c === undefined) return;
-        // A cell taken back: the certificate that filled it answers to another
-        // column now, so the guess it left behind comes off the matrix and out
-        // of the workbook alike.
-        if (s.clear) {
-          if (String(rows[r][3][c] == null ? "" : rows[r][3][c]).trim() !== "") {
-            applied++;
-            rows[r][3][c] = "";
-            only.add(String(s.person).trim().toUpperCase() + "|" + s.code);
-          }
-          return;
-        }
-        if (!s.value) return;
-        if (String(rows[r][3][c] == null ? "" : rows[r][3][c]).trim() !== s.value) applied++;
-        rows[r][3][c] = s.value;
-        only.add(`${String(s.person).trim().toUpperCase()}|${s.code}`);
-      });
-      const next = { cols: QUALS.cols, rows };
-
+      const { next, applied: changed, only } = applySettled(QUALS, settled);
+      const applied = changed.length;
       /* The note of which cells the portal itself filled from a certificate.
          Only a cell a certificate actually put a date in goes down here - not
          every cell a certificate merely touches. A certificate whose scan gave
@@ -19252,10 +19278,9 @@ function CoolibahPortal({ role, onSignOut }) {
       if (moved.length) refileCertificates(moved);
 
       const items = res.items || [];
-      const fromCerts = items.filter((i) => i.source === "certificate");
       // Applied against the matrix as it stands now — the run is minutes long,
       // and a cell may have been edited by hand while it read.
-      const { next, applied } = applyDifferences(matrixAutoInputs.current.quals, fromCerts);
+      const { next, applied } = applySettled(matrixAutoInputs.current.quals, res.settled);
 
       if (applied.length) {
         /* Against the matrix as it stands at this moment, not the one this run
