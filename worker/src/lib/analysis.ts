@@ -76,9 +76,19 @@ export const certStatesOwnExpiry = (code: string | null | undefined) =>
 export const neverLapses = (code: string | null | undefined) =>
   NO_EXPIRY_CODES.has(String(code || "").trim().toUpperCase());
 
-// Base64 adds a third again to whatever is sent, and the whole prompt has to
-// fit. Anything bigger is left unread with the reason on it.
-export const MAX_READ_BYTES = 4 * 1024 * 1024;
+/* How big a certificate can be and still be read.
+ *
+ * Base64 adds a third again to whatever is sent, so this becomes about 13 MB
+ * on the wire, against a limit of 32 MB for the whole request. It was 4 MB,
+ * which was cautious past the point of being useful: seven of the crew
+ * genuinely had certificates between 4 and 5.2 MB - a dogging ticket, a
+ * medical, an MSIC - and each was left unread and reported as "too large to
+ * read. Re-save it under 4 MB", which asks somebody to degrade a compliance
+ * record to suit a number the portal picked for itself.
+ *
+ * A scan that will not fit even at this size is a scan worth re-saving. These
+ * were not. */
+export const MAX_READ_BYTES = 10 * 1024 * 1024;
 
 // A workbook turned into text runs long — every sheet, every row. This is about
 // 15,000 tokens per document, which leaves the model room to answer.
