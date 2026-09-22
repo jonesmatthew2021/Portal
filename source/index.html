@@ -13349,6 +13349,8 @@ function UpdateDocumentation() {
   const [step, setStep] = useState("");          // "" when nothing is running
   const [found, setFound] = useState(null);      // whose folders the sync saw
   const [asking, setAsking] = useState(false);   // items the skills matrix has gained or lost
+  // Workbooks the library no longer holds, put to whoever is there.
+  const [orphaned, setOrphaned] = useState(null);
   const [err, setErr] = useState("");
   const matrixRun = useRef(null);
   const going = useRef(false);
@@ -13426,25 +13428,24 @@ function UpdateDocumentation() {
        * workbook back reads it all in again, so nothing here is lost that an
        * upload does not bring back.
        */
-      const cleared = [];
-      if (!trainingMatrix && (QUALS.rows || []).length) {
-        cleared.push("the crew matrix");
-        setQuals({ cols: [], rows: [] });
-        setCertAnalysis(null);
-        setMatrixAnalysis(null);
-      }
-      if (!crewRoster && rosterPlan) {
-        cleared.push("the roster");
-        setRosterPlan(null);
-      }
-      if (!skillsMatrix && skillsRequirements) {
-        cleared.push("the requirements");
-        setSkillsRequirements(null);
-      }
-      if (cleared.length) {
-        log("Admin", "Cleared what the library no longer holds",
-          cleared.join(", ") + " — put the workbook back and it is read in again");
-      }
+      /* Asked, not done.
+       *
+       * This used to empty them where the workbook had gone: the crew matrix,
+       * the roster, the requirements. It ran on the hour without anybody
+       * pressing anything, and on 22 Sep it fired three times and took
+       * forty-three crew and fifty-three items off the matrix while nobody was
+       * looking. Whatever the reasoning, a round that tidies up is not allowed
+       * to throw away the portal's own record on its own say-so.
+       *
+       * So it puts it to whoever is there. Say no and the matrix stays exactly
+       * as it is, which is the right answer whenever the library is having a
+       * bad morning rather than actually having lost the file. */
+      const gone = [
+        !trainingMatrix && (QUALS.rows || []).length ? "the crew matrix" : null,
+        !crewRoster && rosterPlan ? "the roster" : null,
+        !skillsMatrix && skillsRequirements ? "the requirements" : null,
+      ].filter(Boolean);
+      if (gone.length) setOrphaned(gone);
 
       // The skills matrix has been re-read by now, so the portal's own columns
       // can be held against it and anything that has changed put to whoever
@@ -13457,7 +13458,7 @@ function UpdateDocumentation() {
         [(out.registered ? out.registered.length : 0) + " new certificates taken on",
           out.mirrored ? out.mirrored + " gone from the library and off the books" : null,
           out.followed ? out.followed + " followed to a new folder" : null,
-          cleared.length ? cleared.join(" and ") + " cleared" : null,
+          gone.length ? gone.join(" and ") + " — the workbook has gone, asked what to do" : null,
         ].filter(Boolean).join(" · "));
       setStep("");
     } catch (e) {
@@ -13503,6 +13504,42 @@ function UpdateDocumentation() {
           top is what presses it. Its progress window and its answer both come
           up over the page and are closed when they have been read. */}
       <UpdateTrainingMatrixInPlace chrome={false} onRunner={(fn) => { matrixRun.current = fn; }} />
+
+      {/* The workbook behind something the portal holds has gone from the
+          library. Asked rather than acted on — see the note where it is
+          noticed. */}
+      {orphaned && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(22,50,74,0.45)", zIndex: 80,
+          display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ background: T.panel, border: "1px solid " + T.rule, borderTop: "4px solid " + T.bRed,
+            borderRadius: 3, padding: "20px 24px", width: "min(600px, 94vw)" }}>
+            <Eyebrow color={T.bRed}>A workbook has gone from the library</Eyebrow>
+            <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.text, margin: "10px 0 6px", lineHeight: 1.6 }}>
+              The library no longer holds the workbook behind {orphaned.join(", ")}.
+            </div>
+            <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, marginBottom: 15, lineHeight: 1.6 }}>
+              Nothing has been emptied. Emptying {orphaned.length === 1 ? "it" : "them"} cannot be undone from
+              here — the dates come back only by putting the workbook back and reading it in again. If the
+              file was moved or the library was slow to answer, leave it alone.
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <Button variant="quiet" onClick={() => setOrphaned(null)}>Leave it as it is</Button>
+              <Button variant="solid" onClick={() => {
+                if (orphaned.includes("the crew matrix")) {
+                  setQuals({ cols: [], rows: [] });
+                  setCertAnalysis(null);
+                  setMatrixAnalysis(null);
+                }
+                if (orphaned.includes("the roster")) setRosterPlan(null);
+                if (orphaned.includes("the requirements")) setSkillsRequirements(null);
+                log("Admin", "Emptied what the library no longer holds",
+                  orphaned.join(", ") + " — put the workbook back and it is read in again");
+                setOrphaned(null);
+              }}>Empty {orphaned.join(", ")}</Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {found && <SyncPeople found={found} onClose={() => setFound(null)} />}
       {asking && <MatrixItems onClose={() => setAsking(false)} />}
@@ -16955,6 +16992,14 @@ function CoolibahPortal({ role, onSignOut }) {
   });
 
   const [sync, setSync] = useState({ state: "loading" });
+  /* Whether anything typed is still on its way up.
+   *
+   * The badge used to read the connection and nothing else, so it said SAVED
+   * from the moment the portal loaded and went on saying it while somebody
+   * typed — which answers "is it saved?" with "yes" before it is. dirty is a
+   * ref, and a ref changing does not redraw anything, so the fact has to be
+   * held somewhere the screen watches. */
+  const [pending, setPending] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [files, setFiles] = useState({ state: "loading" });
   const [retry, setRetry] = useState(0);
@@ -16970,6 +17015,7 @@ function CoolibahPortal({ role, onSignOut }) {
   // over, so a roster edit and a posted note can't wipe each other out.
   const put = (key) => (v) => {
     dirty.current.add(key);
+    setPending(true);
     setStore((s) => ({ ...s, [key]: typeof v === "function" ? v(s[key]) : v }));
   };
   const notes = store.notes,               setNotes = put("notes");
@@ -17278,6 +17324,7 @@ function CoolibahPortal({ role, onSignOut }) {
 
         rev.current = res.rev;
         touched.forEach((k) => dirty.current.delete(k));
+        if (dirty.current.size === 0) setPending(false);
         setSync({ state: "ok", at: new Date().toISOString().slice(11, 16) });
       } catch (e) {
         setSync({ state: "error", msg: e.message });
@@ -18031,14 +18078,27 @@ function CoolibahPortal({ role, onSignOut }) {
             <div style={{ fontFamily: T.display, fontSize: 11, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: T.muted, marginBottom: 10 }}>{VESSEL.strapline}</div>
             {/* Prototype only — stands in for a real login. */}
             <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "flex-end" }}>
-              <span title={sync.state === "error" ? sync.msg : sync.state === "ok" ? `Saved - last checked ${sync.at}` : "Connecting"}
-                style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: T.mono, fontSize: 10,
-                  color: sync.state === "error" ? T.bRed : sync.state === "ok" ? T.teal : T.muted,
-                  textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                <span style={{ width: 7, height: 7, borderRadius: "50%",
-                  background: sync.state === "error" ? T.bRed : sync.state === "ok" ? T.teal : T.muted }} />
-                {sync.state === "ok" ? "Saved" : sync.state === "error" ? "Not saving" : "..."}
-              </span>
+              {/* Saving while anything typed is still on its way up, Saved
+                  once it has landed, and the time it landed on hovering — so
+                  "is that saved?" has an answer on the screen. */}
+              {(() => {
+                const state = sync.state === "error" ? "error" : pending ? "saving"
+                  : sync.state === "ok" ? "ok" : "loading";
+                const colour = state === "error" ? T.bRed : state === "saving" ? T.bOrange
+                  : state === "ok" ? T.teal : T.muted;
+                const said = state === "error" ? "Not saving" : state === "saving" ? "Saving…"
+                  : state === "ok" ? "Saved" : "…";
+                return (
+                  <span title={state === "error" ? sync.msg
+                    : state === "saving" ? "Your changes are on their way to the server"
+                    : state === "ok" ? `Everything is saved — last written ${sync.at}` : "Connecting"}
+                    style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: T.mono, fontSize: 10,
+                      color: colour, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: colour }} />
+                    {said}
+                  </span>
+                );
+              })()}
               <UpdateDocumentation />
               <NotifyToggle log={log} on={notifyOn} setOn={setNotifyOn} count={unreadTotal} />
               {/* Chris's FIT TO SAIL, one click away — the address comes from the
