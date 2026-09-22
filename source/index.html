@@ -6668,13 +6668,19 @@ function UploadCertificates() {
      choices are every position the matrix and the register already carry,
      with room to type one neither of them has. */
   const [rankEdit, setRankEdit] = useState(null); // { person, value }
-  const allPositions = useMemo(
-    () => Array.from(new Set([
+  /* The vessel's eight ranks, and then whatever else the matrix calls its
+     people. Same list as the one offered when a crew member is taken on, and
+     for the same reason: a matrix holding one GPH used to offer a choice
+     between GPH and nothing. See the longer note there. */
+  const allPositions = useMemo(() => {
+    const said = Array.from(new Set([
       ...QUALS.rows.map((r) => String(r[1] || "").trim()),
       ...Object.values(positions).map((x) => String(x || "").trim()),
-    ].filter(Boolean))).sort(),
-    [QUALS, positions],
-  );
+    ].filter(Boolean)));
+    const letters = (t) => String(t).toUpperCase().replace(/[^A-Z]/g, "");
+    const standard = new Set(ROSTER_RANKS.map(letters));
+    return [...ROSTER_RANKS, ...said.filter((p) => !standard.has(letters(p))).sort()];
+  }, [QUALS, positions]);
   const saveRank = (person) => {
     const value = ((rankEdit && rankEdit.value) || "").trim();
     if (!value) return;
@@ -12925,34 +12931,37 @@ function SyncPeople({ found, onClose }) {
      shorter list of its own, and writing one of those into the matrix puts a
      person under a heading nobody else is under, so the matrix's own wording
      is what is asked for here and the roster rank is worked out from it. */
-  /* The ranks to choose from.
+  /* The ranks to choose from: the vessel's eight, and then whatever else the
+   * matrix calls its people.
    *
-   * First choice is what the crew matrix already calls its people, because a
-   * new hand should be filed the way the rest of the crew is filed. But a
-   * portal that has just been started again has no crew and so no words, and
-   * the list came up empty at exactly the moment somebody had forty-three
-   * people to take on - the one time it is needed most.
+   * The eight are always there, in the order the vessel is manned. It used to
+   * offer the matrix's own words and nothing else, on the reasoning that a new
+   * hand should be filed the way the rest of the crew is filed — but the list
+   * is only as long as the matrix is, so a matrix holding one GPH offered a
+   * choice between GPH and typing it out, which is no choice at all.
    *
-   * So it falls back on the office's own list of positions off the skills
-   * matrix, with the vessel's prefix taken off the front, and then on the
-   * roster's short list. And a rank can be typed in whatever happens, because
-   * no list the portal builds for itself is going to cover a job nobody has
-   * held here yet.
+   * What the matrix says is still offered, underneath, because the office
+   * draws finer than the eight do — "Chief Officer - 100m" and "Chief Officer
+   * - Unlimited" are different men on different tickets, and the matrix keys
+   * what it asks of them off exactly those words. Only a wording that says
+   * the same thing as one of the eight is left out, so the list never carries
+   * both COOK and Cook.
+   *
+   * And a rank can still be typed, because no list the portal builds for
+   * itself is going to cover a job nobody has held here yet.
    */
   const allPositions = useMemo(() => {
-    const onMatrix = Array.from(new Set(QUALS.rows.map((r) => String(r[1] || "").trim()).filter(Boolean)));
-    if (onMatrix.length) return onMatrix.sort();
-
     const site = SHIFT_MATRIX_VESSEL.toLowerCase();
-    const fromSkills = Array.from(new Set(
-      (((skillsRequirements || {}).positions) || [])
+    const said = Array.from(new Set([
+      ...QUALS.rows.map((r) => String(r[1] || "").trim()),
+      ...(((skillsRequirements || {}).positions) || [])
         .map((p) => String(p.position || "").replace(/\s+/g, " ").trim())
-        .map((p) => (p.toLowerCase().startsWith(site) ? p.slice(SHIFT_MATRIX_VESSEL.length).trim() : p))
-        .filter(Boolean),
-    ));
-    if (fromSkills.length) return fromSkills.sort();
+        .map((p) => (p.toLowerCase().startsWith(site) ? p.slice(SHIFT_MATRIX_VESSEL.length).trim() : p)),
+    ].filter(Boolean)));
 
-    return ROSTER_RANKS.slice();
+    const letters = (t) => String(t).toUpperCase().replace(/[^A-Z]/g, "");
+    const standard = new Set(ROSTER_RANKS.map(letters));
+    return [...ROSTER_RANKS, ...said.filter((p) => !standard.has(letters(p))).sort()];
   }, [QUALS, skillsRequirements]);
 
   const words = (t) => String(t || "").toUpperCase().split(/[^A-Z]+/).filter(Boolean);
@@ -13231,7 +13240,7 @@ function SyncPeople({ found, onClose }) {
                       </Field>
                     </div>
                     <div style={{ flex: "1 1 190px" }}>
-                      <Field label="Rank, as the matrix words it">
+                      <Field label="Rank">
                         <select className="um-in" value={allPositions.includes(row.rank) ? row.rank : (row.rank ? "__typed" : "")}
                           onChange={(e) => setEntry(p, { rank: e.target.value === "__typed" ? " " : e.target.value })}>
                           <option value="">Choose…</option>
