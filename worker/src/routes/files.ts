@@ -4,6 +4,7 @@ import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
 import { getEnv } from "../env.js";
 import { imageToPdf, imagesToPdf } from "../lib/pdf-wrap.js";
+import { certHome } from "../db/cert-home.js";
 import {
   CERT_ROOT,
   SINGLE_FILE_CATEGORIES,
@@ -253,10 +254,12 @@ async function uploadCertificate(form: FormData, file: File) {
   for (let n = 2; taken.has(stored.toLowerCase()); n++) stored = withSuffix(filename, n);
 
   const id = crypto.randomUUID();
-  // The bytes go into the person's own "<Name> - OPMS" folder — the team's
-  // filing — so an upload here appears in Teams exactly where the office
-  // already keeps that person's certificates.
-  const blobKey = `${opmsCertPrefix(folder)}/${stored}`;
+  // The bytes go into the person's own folder — the team's filing — so an
+  // upload here appears in Teams exactly where the office already keeps that
+  // person's certificates. Which folder that is, is Crew Details' answer: the
+  // one set against him by hand if there is one, and otherwise his name under
+  // the certificate location.
+  const blobKey = `${(await certHome()).prefixFor(folder)}/${stored}`;
 
   // Written before anything in the database changes: if this throws, no row
   // has been touched, so a failed upload can't leave the certificate looking

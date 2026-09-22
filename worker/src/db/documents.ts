@@ -435,7 +435,7 @@ export async function liveSingleFileRow(category: string) {
 }
 
 /** Put a removed file back where it was, under a name the folder still has free. */
-export async function restoreDocument(row: DocumentRow) {
+export async function restoreDocument(row: DocumentRow, fallbackHome?: string) {
   if (!row.removedAt) return row;
 
   let blobKey = row.blobKey;
@@ -457,7 +457,8 @@ export async function restoreDocument(row: DocumentRow) {
       .from(documents)
       .where(and(eq(documents.folder, row.folder), isNull(documents.removedAt)))
       .limit(1);
-    const home = beside[0] ? blobFolder(beside[0].blobKey) : opmsCertPrefix(row.folder);
+    const home = beside[0] ? blobFolder(beside[0].blobKey)
+      : fallbackHome || opmsCertPrefix(row.folder);
     filename = await freeCertName(row.folder, row.filename);
     blobKey = await moveBlob(row.blobKey, `${home}/${filename}`);
   } else if (single) {

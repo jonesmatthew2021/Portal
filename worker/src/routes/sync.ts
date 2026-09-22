@@ -5,6 +5,7 @@ import {
   CERT_ROOT, SINGLE_FILE_CATEGORIES, fileStore, safeName,
   tokenForOpmsFolder, personForOpmsFolder, opmsFolderName,
 } from "../db/documents.js";
+import { certHome, type CertHome } from "../db/cert-home.js";
 import { todayThere } from "../lib/analysis.js";
 import { getStore } from "../compat/blobs.js";
 
@@ -62,16 +63,50 @@ type Found = { key: string; size?: number };
 
 /**
  * The crew folder a filed certificate sits in, or null where it sits somewhere
- * else under OPMS.
+ * else under the certificate location.
  *
- * One level down from the OPMS root, with the file itself below it. The old
+ * One level down from that location, with the file itself below it. The old
  * "<Name> - OPMS" folders and the plain "LASTNAME, First" ones both answer;
  * the spreadsheets the office drops loose in the root do not, because they
  * have no folder of their own.
+ *
+ * Which location that is, is asked of Crew Details — "opms" where nobody has
+ * said otherwise. Read by plain string rather than by pattern, because a
+ * folder the office named is free to hold spaces, commas and brackets, and
+ * none of those may be let loose in an expression.
  */
-function crewFolderOf(key: string): string | null {
-  const m = /^opms\/([^/]+)\/[^/]+$/i.exec(key);
-  return m ? m[1] : null;
+export function crewFolderIn(home: string) {
+  const at = home.toLowerCase() + "/";
+  return (key: string): string | null => {
+    if (!key.toLowerCase().startsWith(at)) return null;
+    const rest = key.slice(at.length);
+    const cut = rest.indexOf("/");
+    return cut > 0 && rest.indexOf("/", cut + 1) < 0 ? rest.slice(0, cut) : null;
+  };
+}
+
+/** A file sitting loose in the certificate location, with no folder of its
+ *  own — which is how the office drops the qualification expiry sheet in. */
+export const looseIn = (home: string) => {
+  const at = home.toLowerCase() + "/";
+  return (key: string) => key.toLowerCase().startsWith(at) && !key.slice(at.length).includes("/");
+};
+
+/**
+ * Whose folder this is.
+ *
+ * Crew Details first: where somebody has been pointed at this folder by hand,
+ * that is the answer and there is nothing to work out. The office named the
+ * folder "Kyle" and somebody said which Kyle, once, and it stays said.
+ *
+ * Only where nobody has said is the name read for a man's name, which is what
+ * the portal did on its own before it could be told.
+ */
+export function whoseFolder(where: CertHome, folderKey: string, folderName: string) {
+  const said = where.manIn(folderKey);
+  return said
+    ? { token: said.token, person: said.person }
+    : { token: tokenForOpmsFolder(folderName), person: personForOpmsFolder(folderName) };
 }
 
 async function survey(tick: (pct: number, word: string) => Promise<void> = async () => {}) {
@@ -103,8 +138,26 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
   // files are already on the books from the old certification folders — the
   // same name and size against the same person is the same certificate, and
   // is left alone rather than taken on twice.
-  await tick(20, "Walking the OPMS person folders");
-  const opmsListing = await store.list({ prefix: "opms/" });
+  /* Where to walk, and whose is whose — both as Crew Details has them. The
+     certificate location is walked, and so is any folder somebody has been
+     pointed at that sits outside it, because a man assigned a folder the walk
+     never reaches would have been assigned nothing at all. */
+  const where = await certHome();
+  const crewFolderOf = crewFolderIn(where.home);
+  const outside = where.assigned.filter((a) => !crewFolderOf(a.key + "/x"));
+  await tick(20, `Walking the crew folders in ${where.home}`);
+  const opmsListing = await store.list({ prefix: where.home + "/" });
+  /* The files in an assigned folder of its own. Everything directly inside it
+     is his — the folder was named as his, so nothing in it has to be read for
+     a name. */
+  const apart: { key: string; size?: number; man: (typeof where.assigned)[number] }[] = [];
+  for (const a of outside) {
+    const listing = await store.list({ prefix: a.key + "/" });
+    for (const f of listing.blobs) {
+      if (f.key.slice(a.key.length + 1).includes("/")) continue;
+      apart.push({ key: f.key, size: f.size, man: a });
+    }
+  }
   const rowsByToken = new Map<string, { id: string; key: string; name: string; size: number }[]>();
   rows.forEach((r) => {
     if (r.removedAt) return;
@@ -119,8 +172,11 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
   const folks = new Map<string, string>();
   for (const f of opmsListing.blobs) {
     const who = crewFolderOf(f.key);
-    if (who) folks.set(tokenForOpmsFolder(who), personForOpmsFolder(who));
+    if (!who) continue;
+    const { token, person } = whoseFolder(where, `${where.home}/${who}`, who);
+    folks.set(token, person);
   }
+  for (const a of apart) folks.set(a.man.token, a.man.person);
 
   /* A certificate that has moved rather than arrived.
    *
@@ -132,27 +188,33 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
    * stops opening. */
   const moved: { id: string; from: string; to: string }[] = [];
 
+  const take = (key: string, size: number | undefined, token: string, person: string) => {
+    if (known.has(key)) return;
+    const name = safeName(key.split("/").pop() || "").toLowerCase();
+    const twin = (rowsByToken.get(token) || [])
+      .find((r) => r.name === name && r.size === (size ?? -2));
+    if (twin) {
+      if (twin.key !== key && !moved.some((x) => x.id === twin.id)) {
+        moved.push({ id: twin.id, from: twin.key, to: key });
+      }
+      return;
+    }
+    newCertificates.push({ key, folder: token, person, size });
+  };
+
   for (const f of opmsListing.blobs) {
-    if (known.has(f.key)) continue;
     const m = crewFolderOf(f.key);
     if (!m) continue;
-    const token = tokenForOpmsFolder(m);
-    const name = safeName(f.key.split("/").pop() || "").toLowerCase();
-    const twin = (rowsByToken.get(token) || [])
-      .find((r) => r.name === name && r.size === (f.size ?? -2));
-    if (twin) {
-      if (twin.key !== f.key && !moved.some((x) => x.id === twin.id)) {
-        moved.push({ id: twin.id, from: twin.key, to: f.key });
-      }
-      continue;
-    }
-    newCertificates.push({ key: f.key, folder: token, person: personForOpmsFolder(m), size: f.size });
+    const { token, person } = whoseFolder(where, `${where.home}/${m}`, m);
+    take(f.key, f.size, token, person);
   }
+  for (const a of apart) take(a.key, a.size, a.man.token, a.man.person);
 
   // The office drops the crew qualification expiry spreadsheet loose in OPMS
   // Documents; the newest one there is the training matrix to hold.
+  const loose = looseIn(where.home);
   const sheetCandidates = opmsListing.blobs
-    .filter((f) => /^opms\/[^/]+$/.test(f.key) && /qualification\s*expiry/i.test(f.key));
+    .filter((f) => loose(f.key) && /qualification\s*expiry/i.test(f.key));
   sheetCandidates.sort((a, b) => (a.key < b.key ? 1 : -1));
   const trainingSheet = sheetCandidates[0] || null;
 
@@ -181,9 +243,10 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
 
   // --- live files whose bytes are gone from the folders --------------------
   await tick(88, "Comparing the folders with the portal's books");
-  const scannedPrefixes = ["opms/", ...singleFolders];
+  const scannedPrefixes = [where.home + "/", ...outside.map((a) => a.key + "/"), ...singleFolders];
   const seen = new Set([
     ...opmsListing.blobs.map((f) => f.key),
+    ...apart.map((a) => a.key),
     ...Object.values(singles).flatMap((s) => s.found.map((f) => f.key)),
   ]);
   // The singles listings above only kept unknown keys; list the known ones too.

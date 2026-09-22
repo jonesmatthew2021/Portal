@@ -152,19 +152,30 @@ function mappings(): [string, string][] {
     .sort((a, b) => b[0].length - a[0].length);
 }
 
+/* A folder in the library that belongs to none of the mapped families and sits
+   outside the portal's own folder still has to be addressable — the certificate
+   location on Crew Details can be set to any folder there is. Such a path keeps
+   itself, behind a prefix that says so, and toReal hands it straight back. So
+   the round trip holds for every folder in the library rather than only the
+   mapped ones; without it a folder picked outside them was quietly re-rooted
+   inside the portal's own, where there was nothing, and the sync found nothing
+   and said so. */
+const ELSEWHERE = "library/";
+
 const toReal = (key: string) => {
+  if (key.startsWith(ELSEWHERE)) return key.slice(ELSEWHERE.length);
   for (const [from, to] of mappings()) {
     if (key.startsWith(from)) return to + key.slice(from.length);
   }
   return rooted(key);
 };
 
-const fromReal = (path: string) => {
+export const fromReal = (path: string) => {
   for (const [from, to] of mappings()) {
     if (path.startsWith(to)) return from + path.slice(to.length);
   }
   const root = rooted("");
-  return root && path.startsWith(root) ? path.slice(root.length) : path;
+  return root && path.startsWith(root) ? path.slice(root.length) : ELSEWHERE + path;
 };
 
 /** Graph's simple upload needs the parent folders to exist; make them, one

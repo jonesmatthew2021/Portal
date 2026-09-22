@@ -2,6 +2,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
+import { certHome } from "../db/cert-home.js";
 import {
   fileStore,
   liveSingleFileExists,
@@ -159,7 +160,10 @@ export default async (req: Request, context: { params: { id: string } }) => {
       );
     }
 
-    const restored = await restoreDocument(row);
+    // Where his certificates go back to, if he has nothing else on file to
+    // point at: his own folder where Crew Details names one.
+    const home = row.folder ? (await certHome()).prefixFor(row.folder) : undefined;
+    const restored = await restoreDocument(row, home);
     return Response.json({
       restored: true,
       category: restored.category,
