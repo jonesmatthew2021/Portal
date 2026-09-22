@@ -12,6 +12,7 @@
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { portalSource } from "../../tools/source.mjs";
 import { createRequire } from "node:module";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -26,7 +27,7 @@ const babel = require("@babel/standalone");
 
 mkdirSync(ASSETS, { recursive: true });
 
-const src = readFileSync(join(REPO, "source", "index.html"), "utf8");
+const src = portalSource();
 const open = src.indexOf('<script type="text/babel"');
 if (open === -1) throw new Error("source/index.html has no text/babel script to compile");
 const openEnd = src.indexOf(">", open) + 1;

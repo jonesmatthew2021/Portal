@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { buildPreview } from "./build-preview.mjs";
+import { portalJsx, areaFiles } from "./source.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(join(ROOT, "tools", "package.json"));
@@ -50,15 +51,9 @@ const run = (title, fn) => {
 };
 const skip = (title, why) => results.push({ skipped: true, title, note: why });
 
-/* The portal's own script, lifted out of the page. */
-const portalJsx = () => {
-  const src = readFileSync(join(ROOT, "source", "index.html"), "utf8");
-  const open = src.indexOf('<script type="text/babel"');
-  if (open < 0) throw new Error("source/index.html has no portal script in it.");
-  const start = src.indexOf(">", open) + 1;
-  const end = src.indexOf("</script>", start);
-  return src.slice(start, end);
-};
+/* The portal's own script, lifted out of the assembled page — the shell plus
+   every area under source/areas. Taken from one place so the checks and the
+   builds cannot disagree about what the portal's source is. */
 
 /* ---------------------------------------------------------------- 1 */
 run("The portal compiles", () => {
@@ -104,6 +99,25 @@ run("preview.html is in step with the portal", () => {
 });
 
 /* ---------------------------------------------------------------- 4 */
+run("Every area is in the portal", () => {
+  /* A file dropped into source/areas that the build does not pick up would be
+     work that never reaches the portal and never says so. The assembler goes
+     by what is in the folder, so this is really checking that each one was
+     found and that each one carries the component the switch asks for. */
+  const names = areaFiles();
+  if (!names.length) return "no areas — the shell is the whole portal";
+  const jsx = portalJsx();
+  const missing = names.filter((n) => !jsx.includes("/* ---- source/areas/" + n + " ---- */"));
+  if (missing.length) {
+    throw new Error(
+      missing.length + " area file(s) are not in the built portal: " + missing.join(", ") +
+      "\n      Check the /* @areas */ marker is still in source/index.html.",
+    );
+  }
+  return names.length + " area(s), all spliced in";
+});
+
+/* ---------------------------------------------------------------- 5 */
 run("The worker's types are clean", () => {
   try {
     execFileSync("npx", ["tsc", "--noEmit"], {
@@ -119,7 +133,7 @@ run("The worker's types are clean", () => {
   return "no type errors";
 });
 
-/* ---------------------------------------------------------------- 5 */
+/* ---------------------------------------------------------------- 6 */
 const rulesTest = join(ROOT, "worker", "tests", "rules.test.ts");
 if (!existsSync(rulesTest)) {
   skip("The worker's rules answer correctly", "no rule tests written yet");

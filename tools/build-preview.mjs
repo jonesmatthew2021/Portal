@@ -8,6 +8,7 @@
  * generated now, so it cannot.
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { portalSource } from "./source.mjs";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -25,7 +26,7 @@ const BANNER = `<!--
 
 /** Returns the built preview. Writes it to preview.html unless write is false. */
 export function buildPreview({ write = true, quiet = false } = {}) {
-  const src = readFileSync(join(ROOT, "source", "index.html"), "utf8");
+  const src = portalSource();
 
   let out = src.replace(
     "<title>TSV Coolibah - Crew Portal</title>",
