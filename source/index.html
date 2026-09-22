@@ -13257,39 +13257,18 @@ function SyncPeople({ found, onClose }) {
                         </Field>
                       </div>
                     )}
-                    <div style={{ flex: "1 1 200px" }}>
-                      <Field label="Swing">
-                        <select className="um-in" value={row.swing}
-                          onChange={(e) => setEntry(p, { swing: e.target.value })}>
-                          <option value="">No swing yet</option>
-                          {spine.map((sp) => (
-                            <option key={swingKeyOf(sp)} value={swingKeyOf(sp)}>
-                              {fmtDate(sp.on)} – {fmtDate(sp.off)}{sp.crew ? " · " + sp.crew : ""}
-                            </option>
-                          ))}
-                        </select>
-                      </Field>
-                    </div>
+                    {/* No swing picker. The swing a man is on is the roster's
+                        answer, seeded from it above, and asking again here only
+                        offered a way of disagreeing with it. */}
                     <Button variant="ghost" disabled={!String(row.name || "").trim() || !String(row.rank || "").trim()}
                       onClick={() => takeOn(p, false)}>
                       Take on
                     </Button>
                   </div>
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
-                    {/* The office's folder for somebody already on the portal.
-                        Said once, and the portal knows it from then on. */}
-                    <select className="um-in" style={{ maxWidth: 230, fontSize: 11 }} value=""
-                      onChange={(e) => {
-                        if (!e.target.value) return;
-                        setFolderNames({ ...(folderNames || {}), [p.folder]: e.target.value });
-                        log("SharePoint", "The folder " + p.name + " is " + e.target.value,
-                          "paired once, and remembered");
-                      }}>
-                      <option value="">…or they are already on the portal as</option>
-                      {onPortal.map((n) => (
-                        <option key={n} value={n}>{n}{spokenFor.has(n) ? " — already paired" : ""}</option>
-                      ))}
-                    </select>
+                    {/* Pairing a folder with somebody already on the portal is
+                        done on Crew Details, against the man himself, where it
+                        sits beside his name and can be seen and undone. */}
                     {!surnameKnown && (
                       <span style={{ fontFamily: T.body, fontSize: 12, color: T.bOrange }}>
                         The folder gives one word, so the portal doesn't know the surname — write the full name in.
