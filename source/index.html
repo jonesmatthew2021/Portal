@@ -17936,10 +17936,42 @@ function CrewDetails() {
   const [typed, setTyped] = useState("");
   const [attachTo, setAttachTo] = useState({});   // spelling -> crew member picked
 
-  /* Crew in the register, in the order the vessel is manned. */
-  const crew = useMemo(() => (people || []).slice().sort((a, b) =>
-    rankGroupAt(a.dept || "") - rankGroupAt(b.dept || "")
-    || String(a.name || "").localeCompare(String(b.name || ""))), [people]);
+  /* The register under rank headings, in the order the vessel is manned.
+   *
+   * The rank comes off the matrix rather than out of the register, because the
+   * matrix is where the office writes what a man is employed as and the
+   * register only knows which department he is in. Read through the register,
+   * so a row the spreadsheet spells differently still finds its man.
+   *
+   * RANK_GROUPS is the order, the same one the matrix and the swing board sort
+   * by. Anybody with no row on the matrix goes last under a heading that says
+   * so - that is worth seeing rather than hiding, because it means the portal
+   * is asking nothing of him.
+   */
+  const groups = useMemo(() => {
+    const jobOf = new Map();
+    (QUALS.rows || []).forEach((r) => {
+      const who = reg.nameOf(r[0]) || r[0];
+      if (!jobOf.has(who)) jobOf.set(who, r[1] || "");
+    });
+
+    const held = new Map();
+    (people || []).forEach((p) => {
+      const job = jobOf.get(p.name) || "";
+      const at = job ? rankGroupAt(job) : RANK_GROUPS.length;
+      const title = job ? (RANK_GROUPS[at] || [])[0] || "Other" : "Not on the matrix";
+      if (!held.has(title)) held.set(title, { title, at, crew: [] });
+      held.get(title).crew.push({ ...p, job });
+    });
+
+    return [...held.values()]
+      .sort((a, b) => a.at - b.at || a.title.localeCompare(b.title))
+      .map((g) => ({ ...g, crew: g.crew.sort((a, b) =>
+        String(a.name || "").localeCompare(String(b.name || ""))) }));
+  }, [people, QUALS, reg]);
+
+  // Still wanted whole, for the "who is this?" pickers underneath.
+  const crew = useMemo(() => groups.flatMap((g) => g.crew), [groups]);
 
   /* Every spelling the portal has seen, and where. A spelling the register
      already answers to is not a problem and is not listed. */
@@ -18016,7 +18048,14 @@ function CrewDetails() {
         <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.muted, margin: "8px 0 4px", lineHeight: 1.6 }}>
           {crew.length} on the register. Everything else on the portal reads its names from here.
         </div>
-        {crew.map((p) => (
+        {groups.map((g) => (
+          <div key={g.title}>
+            <div style={{ fontFamily: T.mono, fontSize: 10.5, color: g.title === "Not on the matrix" ? T.bYellow : T.accent,
+              textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700,
+              marginTop: 16, paddingBottom: 2 }}>
+              {g.title} · {g.crew.length}
+            </div>
+            {g.crew.map((p) => (
           <div key={p.id} style={row}>
             <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
               {editing === p.id ? (
@@ -18033,7 +18072,7 @@ function CrewDetails() {
                   <span style={{ fontFamily: T.display, fontSize: 14, fontWeight: 700, color: T.text,
                     flex: "1 1 200px" }}>{p.name}</span>
                   <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted }}>
-                    {[p.dept, p.crew ? "Swing " + p.crew : null].filter(Boolean).join(" · ")}
+                    {[p.job || p.dept, p.crew ? "Swing " + p.crew : null].filter(Boolean).join(" · ")}
                   </span>
                   <Button variant="quiet" onClick={() => { setEditing(p.id); setTyped(p.name); }}>
                     Change the name
@@ -18055,6 +18094,8 @@ function CrewDetails() {
                 ))}
               </div>
             )}
+          </div>
+            ))}
           </div>
         ))}
       </div>
