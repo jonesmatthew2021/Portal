@@ -18,7 +18,8 @@
  * that spelling is understood for good, however many times it comes back.
  */
 function CrewDetails() {
-  const { people, setPeople, quals: QUALS, certificates, rosterPlan, renameCrew, setCrewRank,
+  const { people, setPeople, quals: QUALS, setQuals, certificates, rosterPlan, setRosterPlan,
+    renameCrew, setCrewRank, swingLists, setSwingLists, writeCrewToWorkbooks,
     notPeople, setNotPeople, certRoot, setCertRoot, log } = usePortal();
 
   const reg = useMemo(() => crewRegister(people), [people]);
@@ -151,6 +152,110 @@ function CrewDetails() {
   };
 
   const nextId = () => "p-" + Date.now() + "-" + Math.floor(Math.random() * 1000);
+
+  /* The register, pushed through the whole portal in one press.
+   *
+   * The register is where the crew are named; this makes everything else say
+   * so. Every matrix row takes the register's spelling of its man and the
+   * rank set against him; every man on the register with no matrix row gets
+   * one, empty, for his certificates to land in. The roster's rows take the
+   * same names and ranks. The swing lists take the names. Then the office's
+   * workbooks are rewritten to carry the same crew, through the same write
+   * the take-on panel uses — once, not once per man, which is the lesson the
+   * 409s taught.
+   *
+   * Nothing is removed by it, anywhere. A matrix row for a man the register
+   * does not know is left exactly as it is and goes on being asked about on
+   * this page; taking a man off is its own decision with its own popup.
+   */
+  const [syncing, setSyncing] = useState(null);   // null | {word} | {done}
+  const syncEverything = async () => {
+    if (syncing) return;
+    setSyncing({ word: "Lining the pages up…" });
+
+    const byName = new Map((people || []).map((p) => [p.name, p]));
+    const cols = QUALS.cols || [];
+    const claimed = new Set();
+    let renamed = 0, ranked = 0;
+
+    const rows = (QUALS.rows || []).map((r) => {
+      const who = reg.nameOf(r[0]) || String(r[0] || "").trim();
+      const man = byName.get(who);
+      if (man) claimed.add(man.id);
+      let next = r;
+      if (who && who !== r[0]) { next = [who, next[1], next[2], next[3]]; renamed++; }
+      if (man && man.rank && String(next[1] || "") !== man.rank) {
+        next = [next[0], man.rank, next[2], next[3]]; ranked++;
+      }
+      return next;
+    });
+    const added = [];
+    (people || []).forEach((p) => {
+      if (p.active === false || claimed.has(p.id)) return;
+      rows.push([p.name, p.rank || "", "", cols.map(() => "")]);
+      added.push(p.name);
+    });
+    if (renamed || ranked || added.length) setQuals({ ...QUALS, rows });
+
+    let plannedAfter = null;
+    let rosterFixed = 0;
+    setRosterPlan((plan) => {
+      if (!plan) return plan;
+      const prows = (plan.rows || []).map((r) => {
+        const who = reg.nameOf(r.name);
+        const man = who ? byName.get(who) : null;
+        const rank = man && man.rank ? rosterRankFor(man.rank) : r.rank;
+        const renaming = who && who !== r.name;
+        if (!renaming && String(rank || "") === String(r.rank || "")) return r;
+        rosterFixed++;
+        return { ...r, name: who || r.name, rank };
+      });
+      if (!rosterFixed) return plan;
+      plannedAfter = { ...plan, rows: prows, edited: true, updatedAt: todayISO() };
+      return plannedAfter;
+    });
+
+    let listsFixed = 0;
+    setSwingLists((held) => {
+      const next = {};
+      Object.entries(held || {}).forEach(([k, list]) => {
+        next[k] = { ...list, entries: (((list || {}).entries) || []).map((e) => {
+          const who = reg.nameOf(e.name);
+          if (who && who !== e.name) { listsFixed++; return { ...e, name: who }; }
+          return e;
+        }) };
+      });
+      return next;
+    });
+
+    /* The office's workbooks carry the same crew. Only worth the round trip
+       when the pages actually moved; a sync that changed nothing writes
+       nothing and says so. */
+    let workbooks = "the spreadsheets were already in step";
+    if (added.length || plannedAfter) {
+      setSyncing({ word: "Writing the spreadsheets…" });
+      try {
+        const r = await writeCrewToWorkbooks({
+          want: added.length ? added.length + " crew" : "the crew register",
+          plan: plannedAfter, rows, leaving: false,
+        });
+        workbooks = (r && r.said) || "written";
+      } catch (e) {
+        workbooks = "the spreadsheets couldn't be written: " + String((e && e.message) || e);
+      }
+    }
+
+    const doneWords = [
+      added.length ? added.length + " added to the matrix" : null,
+      renamed ? renamed + " matrix " + (renamed === 1 ? "name" : "names") + " put right" : null,
+      ranked ? ranked + " " + (ranked === 1 ? "rank" : "ranks") + " brought over" : null,
+      rosterFixed ? rosterFixed + " roster rows lined up" : null,
+      listsFixed ? listsFixed + " swing list names lined up" : null,
+    ].filter(Boolean);
+    log("Admin", "The register was synced through the portal",
+      (doneWords.join(" · ") || "everything already lined up") + " · " + workbooks);
+    setSyncing({ done: { added, renamed, ranked, rosterFixed, listsFixed, workbooks, words: doneWords } });
+  };
 
   const attach = (stray, id) => {
     setPeople((list) => (list || []).map((p) => (p.id === id
@@ -287,7 +392,37 @@ function CrewDetails() {
         padding: "9px 12px", border: "1px solid " + T.rule, borderRadius: 2, marginBottom: 12 }}>
         <Button variant="quiet" onClick={() => setPicking({ kind: "root" })}>Set certificate location</Button>
         {certRoot ? <span style={chip}>{certRoot}</span> : null}
+        <span style={{ flex: 1 }} />
+        <Button variant="solid" disabled={!!syncing && !syncing.done}
+          onClick={syncEverything}>
+          {syncing && !syncing.done ? syncing.word : "Sync entire document"}
+        </Button>
       </div>
+
+      {/* What the sync did, closed when it has been read. */}
+      {syncing && syncing.done && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(22,50,74,0.45)", zIndex: 82,
+          display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ background: T.panel, border: "1px solid " + T.rule, borderTop: "4px solid " + T.accent,
+            borderRadius: 3, padding: "20px 24px", width: "min(560px, 94vw)" }}>
+            <Eyebrow color={T.accent}>The register, everywhere</Eyebrow>
+            <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.text, margin: "10px 0 4px", lineHeight: 1.7 }}>
+              {syncing.done.words.length === 0
+                ? "Every page already carried the register's names and ranks — nothing needed changing."
+                : syncing.done.words.join(". ") + "."}
+            </div>
+            {syncing.done.added.length > 0 && (
+              <div style={{ fontFamily: T.mono, fontSize: 11.5, color: T.muted, margin: "6px 0", lineHeight: 1.7 }}>
+                {syncing.done.added.join(" · ")}
+              </div>
+            )}
+            <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, marginBottom: 14, lineHeight: 1.6 }}>
+              Spreadsheets: {syncing.done.workbooks}
+            </div>
+            <Button variant="solid" onClick={() => setSyncing(null)}>Close</Button>
+          </div>
+        </div>
+      )}
 
       <div style={{ background: T.panel, border: "1px solid " + T.rule, borderRadius: 2, padding: "16px 18px" }}>
         <Eyebrow color={T.accent}>The crew</Eyebrow>
