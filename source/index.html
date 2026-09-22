@@ -17935,6 +17935,10 @@ function CrewDetails() {
   const [editing, setEditing] = useState(null);   // id of the person being renamed
   const [typed, setTyped] = useState("");
   const [attachTo, setAttachTo] = useState({});   // spelling -> crew member picked
+  // Typed against a stray before it is taken on: the name, the rank, the swing.
+  const [asName, setAsName] = useState({});
+  const [asRank, setAsRank] = useState({});
+  const [asSwing, setAsSwing] = useState({});
 
   /* The register under rank headings, in the order the vessel is manned.
    *
@@ -17948,6 +17952,10 @@ function CrewDetails() {
    * so - that is worth seeing rather than hiding, because it means the portal
    * is asking nothing of him.
    */
+  /* The positions the office uses, off the matrix, for the rank pickers. */
+  const positions = useMemo(() => Array.from(new Set((QUALS.rows || [])
+    .map((r) => String(r[1] || "").trim()).filter(Boolean))).sort(), [QUALS]);
+
   const groups = useMemo(() => {
     const jobOf = new Map();
     (QUALS.rows || []).forEach((r) => {
@@ -17957,7 +17965,11 @@ function CrewDetails() {
 
     const held = new Map();
     (people || []).forEach((p) => {
-      const job = jobOf.get(p.name) || "";
+      /* A rank given here beats the matrix's. The matrix is the office's word
+         on what a man is employed as and it is right nearly always - but
+         somebody with no row on it has no word at all, and this is the page
+         for saying so. */
+      const job = p.rank || jobOf.get(p.name) || "";
       const at = job ? rankGroupAt(job) : RANK_GROUPS.length;
       const title = job ? (RANK_GROUPS[at] || [])[0] || "Other" : "Not on the matrix";
       if (!held.has(title)) held.set(title, { title, at, crew: [] });
@@ -18013,9 +18025,10 @@ function CrewDetails() {
      Taken from those rather than asked for, because a register entry with no
      department drops off the bottom of the Roster page without saying why. */
   const takeOn = (stray) => {
-    const name = canonicalName(stray.name);
+    const name = canonicalName(asName[stray.name] == null ? stray.name : asName[stray.name]);
+    if (!name) return;
     const row = (QUALS.rows || []).find((r) => nameLetters(r[0]) === nameLetters(stray.name));
-    const job = row ? row[1] || "" : "";
+    const job = asRank[stray.name] || (row ? row[1] || "" : "");
     const stint = (((rosterPlan || {}).rows) || []).find((r) => {
       const a = new Set(registerWords(r.name)), b = new Set(registerWords(name));
       if (a.size < 2 || b.size < 2) return nameLetters(r.name) === nameLetters(stray.name);
@@ -18024,9 +18037,11 @@ function CrewDetails() {
       small.forEach((w) => { if (!big.has(w)) all = false; });
       return all;
     });
-    const swing = stint ? String(stint.crew || "").trim().toUpperCase().slice(0, 1) : "";
+    const swing = asSwing[stray.name]
+      || (stint ? String(stint.crew || "").trim().toUpperCase().slice(0, 1) : "");
     setPeople((list) => [...(list || []), {
       id: nextId(), name, aliases: [stray.name], active: true,
+      rank: job || "",
       dept: job ? deptForRank(job) : "GPH",
       crew: swing === "A" || swing === "B" ? swing : "",
     }]);
@@ -18038,13 +18053,54 @@ function CrewDetails() {
   const drop = (id, alias) => setPeople((list) => (list || []).map((p) => (p.id === id
     ? { ...p, aliases: (p.aliases || []).filter((a) => a !== alias) } : p)));
 
+  /* The rank, and the department that follows from it. The department is not
+     asked for separately because it has only ever been worked out from the
+     rank, and two places to set one thing is two places to set it wrongly. */
+  const setRank = (id, rank) => setPeople((list) => (list || []).map((p) => (p.id === id
+    ? { ...p, rank, dept: rank ? deptForRank(rank) : p.dept } : p)));
+
+  const setSwing = (id, letter) => setPeople((list) => (list || []).map((p) => (p.id === id
+    ? { ...p, crew: letter } : p)));
+
+  /* Off the register, and nothing else.
+   *
+   * His certificates stay in SharePoint, his row stays on the matrix and his
+   * stints stay on the roster. This is the register forgetting a name, not the
+   * portal forgetting a man - taking somebody off the vessel is done on the
+   * matrix, where it says so and archives his paperwork. Asked first all the
+   * same, because a register the matrix reads its names from is not a list to
+   * delete from by accident.
+   */
+  const [dropping, setDropping] = useState(null);
+  const takeOff = (p) => {
+    setPeople((list) => (list || []).filter((x) => x.id !== p.id));
+    log("Admin", p.name + " taken off the crew register",
+      "His certificates, his matrix row and his roster stints are untouched");
+    setDropping(null);
+  };
+
   /* Not everything in a library is a person. "HRWL Verification" is a folder
      of paperwork and "SPREADSHEET, Certificates" is a filename the sync read
      as a name. Set aside rather than forced onto somebody. */
+  /* Delete, on a spelling that is not anybody. "HRWL Verification" is a
+     folder of paperwork and "SPREADSHEET, Certificates" is a filename the sync
+     read as a name; neither is a man and neither is worth being asked about
+     twice. Nothing is deleted from SharePoint - the spelling is written down as
+     not a person so this page stops raising it. */
   const setAside = (stray) => {
     setNotPeople([...(notPeople || []), stray.name]);
     log("Admin", stray.name + " is not a crew member", "Set aside on Crew Details");
   };
+
+  const rankPicker = (value, onPick, width) => (
+    <NameSelect width={width} value={value || ""} onPick={onPick}
+      options={[{ value: "", label: "No rank" }, ...positions.map((p) => ({ value: p, label: p }))]} />
+  );
+  const swingPicker = (value, onPick, width) => (
+    <NameSelect width={width} value={value || ""} onPick={onPick}
+      options={[{ value: "", label: "No swing" },
+        ...SWINGS.map((x) => ({ value: x.letter, label: x.name }))]} />
+  );
 
   const rename = (p) => {
     const name = canonicalName(typed);
@@ -18094,13 +18150,13 @@ function CrewDetails() {
               ) : (
                 <>
                   <span style={{ fontFamily: T.display, fontSize: 14, fontWeight: 700, color: T.text,
-                    flex: "1 1 200px" }}>{p.name}</span>
-                  <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted }}>
-                    {[p.job || p.dept, p.crew ? "Swing " + p.crew : null].filter(Boolean).join(" · ")}
-                  </span>
+                    flex: "1 1 160px" }}>{p.name}</span>
+                  {rankPicker(p.rank || p.job, (v) => setRank(p.id, v), 195)}
+                  {swingPicker(p.crew, (v) => setSwing(p.id, v), 125)}
                   <Button variant="quiet" onClick={() => { setEditing(p.id); setTyped(p.name); }}>
                     Change the name
                   </Button>
+                  <Button variant="quiet" onClick={() => setDropping(p)}>Delete</Button>
                 </>
               )}
             </div>
@@ -18139,26 +18195,67 @@ function CrewDetails() {
               Say who each one is and it is understood from then on, however it comes back.
             </div>
             {strays.map((x) => (
-              <div key={x.name} style={{ ...row, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                <span style={{ fontFamily: T.mono, fontSize: 13, color: T.text, flex: "0 1 190px" }}>{x.name}</span>
-                <span style={{ fontFamily: T.body, fontSize: 12, color: T.muted, flex: "0 1 200px" }}>
-                  {[...x.where].join(" and ")} · {x.n} time{x.n === 1 ? "" : "s"}
-                </span>
-                <NameSelect width={210} value={attachTo[x.name] || ""}
-                  onPick={(v) => setAttachTo((a) => ({ ...a, [x.name]: v }))}
-                  options={[{ value: "", label: "Who is this?" },
-                    ...crew.map((p) => ({ value: p.id, label: p.name }))]} />
-                <Button variant="solid" disabled={!attachTo[x.name]}
-                  onClick={() => attach(x, attachTo[x.name])}>
-                  That's him
-                </Button>
-                <Button variant="quiet" onClick={() => takeOn(x)}>Somebody new</Button>
-                <Button variant="quiet" onClick={() => setAside(x)}>Not a person</Button>
+              <div key={x.name} style={row}>
+                {/* Somebody the register already has. */}
+                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={{ fontFamily: T.mono, fontSize: 13, color: T.text, flex: "0 1 170px" }}>{x.name}</span>
+                  <span style={{ fontFamily: T.body, fontSize: 12, color: T.muted, flex: "0 1 180px" }}>
+                    {[...x.where].join(" and ")} · {x.n} time{x.n === 1 ? "" : "s"}
+                  </span>
+                  <NameSelect width={210} value={attachTo[x.name] || ""}
+                    onPick={(v) => setAttachTo((a) => ({ ...a, [x.name]: v }))}
+                    options={[{ value: "", label: "Who is this?" },
+                      ...crew.map((p) => ({ value: p.id, label: p.name }))]} />
+                  <Button variant="solid" disabled={!attachTo[x.name]}
+                    onClick={() => attach(x, attachTo[x.name])}>
+                    That's him
+                  </Button>
+                  <Button variant="quiet" onClick={() => setAside(x)}>Delete</Button>
+                </div>
+
+                {/* Or nobody the register has yet. The name, the rank and the
+                    swing are all fillable here rather than being guessed and
+                    corrected on the row above afterwards. */}
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap",
+                  marginTop: 7, paddingLeft: 2 }}>
+                  <span style={{ fontFamily: T.mono, fontSize: 10, color: T.muted,
+                    textTransform: "uppercase", letterSpacing: "0.08em", flex: "0 0 74px" }}>Or new</span>
+                  <input
+                    value={asName[x.name] == null ? canonicalName(x.name) : asName[x.name]}
+                    placeholder="LASTNAME, First"
+                    onChange={(e) => setAsName((a) => ({ ...a, [x.name]: e.target.value }))}
+                    style={{ flex: "0 1 190px", fontFamily: T.mono, fontSize: 12.5, padding: "5px 8px",
+                      borderRadius: 2, border: "1px solid " + T.rule, background: T.raised, color: T.text }} />
+                  {rankPicker(asRank[x.name], (v) => setAsRank((a) => ({ ...a, [x.name]: v })), 195)}
+                  {swingPicker(asSwing[x.name], (v) => setAsSwing((a) => ({ ...a, [x.name]: v })), 125)}
+                  <Button variant="quiet" onClick={() => takeOn(x)}>Somebody new</Button>
+                </div>
               </div>
             ))}
           </>
         )}
       </div>
+
+      {/* Asked before a name goes off the register, because the matrix reads
+          its names from it. Nothing else about the man is touched. */}
+      {dropping && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(22,50,74,0.45)", zIndex: 78,
+          display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ background: T.panel, border: "1px solid " + T.rule, borderTop: "4px solid " + T.bRed,
+            borderRadius: 3, padding: "20px 24px", width: "min(520px, 94vw)" }}>
+            <Eyebrow color={T.bRed}>Take {dropping.name} off the register?</Eyebrow>
+            <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.muted, margin: "9px 0 15px", lineHeight: 1.6 }}>
+              His certificates, his row on the matrix and his stints on the roster all stay exactly as
+              they are. What goes is the register's entry — so every spelling that reached him through
+              it stops reaching anybody, and this page will start asking about them again.
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <Button variant="solid" onClick={() => takeOff(dropping)}>Take him off</Button>
+              <Button variant="quiet" onClick={() => setDropping(null)}>Leave him on</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
