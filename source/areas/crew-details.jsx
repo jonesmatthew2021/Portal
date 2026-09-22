@@ -19,7 +19,7 @@
  */
 function CrewDetails() {
   const { people, setPeople, quals: QUALS, certificates, rosterPlan, renameCrew,
-    notPeople, setNotPeople, log } = usePortal();
+    notPeople, setNotPeople, certRoot, setCertRoot, log } = usePortal();
 
   const reg = useMemo(() => crewRegister(people), [people]);
   const [editing, setEditing] = useState(null);   // id of the person being renamed
@@ -97,6 +97,29 @@ function CrewDetails() {
     (((rosterPlan || {}).rows) || []).forEach((r) => note(r.name, "the roster"));
     return [...seen.values()].sort((a, b) => b.n - a.n);
   }, [QUALS, certificates, rosterPlan, reg, notPeople]);
+
+  /* Where the certificates are.
+   *
+   * Two settings, and they answer two different questions. The certificate
+   * location is the one folder in the library that the crew's folders sit in,
+   * and it is set once for everybody. A man's own folder is only written down
+   * where the folder underneath it cannot be worked out from his name - the
+   * office called it "Kyle", or "PK", or something that is not a name at all -
+   * and saying so here settles it for good.
+   *
+   * Both are folders the library already has. Neither makes one: the folders
+   * are the office's and the portal only ever reads them.
+   */
+  const [picking, setPicking] = useState(null);   // {kind:"root"} or {kind:"person", p}
+  const parentOf = (s) => {
+    const cut = String(s || "").lastIndexOf("/");
+    return cut > 0 ? s.slice(0, cut) : "";
+  };
+  const setFolderFor = (p, folder) => {
+    setPeople((list) => (list || []).map((x) => (x.id === p.id ? { ...x, certFolder: folder } : x)));
+    log("Admin", folder ? p.name + "'s certificates folder set" : p.name + "'s certificates folder cleared",
+      folder || "Back to being worked out from his name");
+  };
 
   const nextId = () => "p-" + Date.now() + "-" + Math.floor(Math.random() * 1000);
 
@@ -213,6 +236,13 @@ function CrewDetails() {
 
   return (
     <div>
+      {/* The primary location: the folder the crew's certificate folders sit in. */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
+        padding: "9px 12px", border: "1px solid " + T.rule, borderRadius: 2, marginBottom: 12 }}>
+        <Button variant="quiet" onClick={() => setPicking({ kind: "root" })}>Set certificate location</Button>
+        {certRoot ? <span style={chip}>{certRoot}</span> : null}
+      </div>
+
       <div style={{ background: T.panel, border: "1px solid " + T.rule, borderRadius: 2, padding: "16px 18px" }}>
         <Eyebrow color={T.accent}>The crew</Eyebrow>
         <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.muted, margin: "8px 0 4px", lineHeight: 1.6 }}>
@@ -246,10 +276,25 @@ function CrewDetails() {
                   <Button variant="quiet" onClick={() => { setEditing(p.id); setTyped(p.name); }}>
                     Change the name
                   </Button>
+                  <Button variant="quiet" onClick={() => setPicking({ kind: "person", p })}>
+                    Assign certificates folder
+                  </Button>
                   <Button variant="quiet" onClick={() => setDropping(p)}>Delete</Button>
                 </>
               )}
             </div>
+            {p.certFolder && (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
+                <span style={{ fontFamily: T.mono, fontSize: 10, color: T.muted,
+                  textTransform: "uppercase", letterSpacing: "0.08em" }}>Certificates</span>
+                <span style={chip}>
+                  {p.certFolder}
+                  <button type="button" onClick={() => setFolderFor(p, "")} title="Not his folder"
+                    style={{ marginLeft: 5, border: 0, background: "none", color: T.muted,
+                      cursor: "pointer", padding: 0, fontFamily: T.mono, fontSize: 11 }}>×</button>
+                </span>
+              </div>
+            )}
             {(p.aliases || []).length > 0 && (
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
                 <span style={{ fontFamily: T.mono, fontSize: 10, color: T.muted,
@@ -326,6 +371,28 @@ function CrewDetails() {
         )}
       </div>
 
+      {/* The library itself, to pick a folder out of. The primary location
+          opens where it already points; a man's own folder opens inside the
+          primary location, which is where the crew's folders are. */}
+      {picking && (
+        <CertFolderPicker
+          title={picking.kind === "root" ? "Set certificate location"
+            : "Which folder holds " + picking.p.name + "'s certificates?"}
+          start={picking.kind === "root" ? parentOf(certRoot)
+            : (picking.p.certFolder ? parentOf(picking.p.certFolder) : certRoot)}
+          chosen={picking.kind === "root" ? certRoot : picking.p.certFolder || ""}
+          onPick={(folder) => {
+            if (picking.kind === "root") {
+              setCertRoot(folder);
+              log("Admin", "Certificate location set", folder);
+            } else {
+              setFolderFor(picking.p, folder);
+            }
+            setPicking(null);
+          }}
+          onClose={() => setPicking(null)} />
+      )}
+
       {/* Asked before a name goes off the register, because the matrix reads
           its names from it. Nothing else about the man is touched. */}
       {dropping && (
@@ -346,6 +413,106 @@ function CrewDetails() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Picking a folder the library already has.
+ *
+ * The folders are the office's. This walks them, shows what is there, and
+ * hands back the one that was pressed - it never makes a folder, renames one
+ * or moves one. Only folders are listed, because a folder is the only thing
+ * that can be picked.
+ */
+function CertFolderPicker({ title, start, chosen, onPick, onClose }) {
+  const [path, setPath] = useState(start || "");
+  const [folders, setFolders] = useState(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  React.useEffect(() => {
+    let live = true;
+    setBusy(true); setErr("");
+    /* Read as words first and as JSON second. A library that is down answers
+       with a page rather than an answer, and "Unexpected token" is not a thing
+       to put on a screen. */
+    fetch("/api/sharepoint?path=" + encodeURIComponent(path))
+      .then((r) => r.text().then((body) => {
+        let out = null;
+        try { out = JSON.parse(body); } catch (e) {}
+        if (!r.ok || !out) {
+          throw new Error((out && out.error) || "The library couldn't be read (" + r.status + ").");
+        }
+        return out;
+      }))
+      .then((out) => { if (live) setFolders((out.entries || []).filter((e) => e.folder)); })
+      .catch((e) => { if (live) { setErr(String(e.message || e)); setFolders([]); } })
+      .then(() => { if (live) setBusy(false); });
+    return () => { live = false; };
+  }, [path]);
+
+  const crumbs = path ? path.split("/") : [];
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(22,50,74,0.45)", zIndex: 80,
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ background: T.panel, border: "1px solid " + T.rule, borderTop: "4px solid " + T.accent,
+        borderRadius: 3, padding: "20px 24px", width: "min(620px, 94vw)",
+        maxHeight: "82vh", display: "flex", flexDirection: "column" }}>
+        <Eyebrow color={T.accent}>{title}</Eyebrow>
+
+        {/* Where we are in the library, and the way back up. */}
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", fontFamily: T.mono,
+          fontSize: 12, padding: "8px 11px", background: T.raised, border: "1px solid " + T.rule,
+          borderLeft: "4px solid " + T.accent, borderRadius: 2, margin: "11px 0 10px" }}>
+          <a style={{ cursor: "pointer", color: T.accent, fontWeight: 700 }} onClick={() => setPath("")}>Library</a>
+          {crumbs.map((c, i) => (
+            <React.Fragment key={i}>
+              <span style={{ color: T.muted }}>/</span>
+              <a style={{ cursor: "pointer", color: i === crumbs.length - 1 ? T.text : T.accent }}
+                onClick={() => setPath(crumbs.slice(0, i + 1).join("/"))}>{c}</a>
+            </React.Fragment>
+          ))}
+        </div>
+
+        {err && (
+          <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.bRed, marginBottom: 10 }}>{err}</div>
+        )}
+
+        <div style={{ flex: 1, minHeight: 90, overflowY: "auto", marginBottom: 12 }}>
+          {busy && folders === null ? <Empty>Reading the library...</Empty>
+            : folders && folders.length === 0 && !err ? <Empty>No folders in here.</Empty>
+            : (folders || []).map((e) => {
+              const here = path ? path + "/" + e.name : e.name;
+              const on = here === chosen;
+              return (
+                <div key={e.path} style={{ display: "flex", gap: 10, alignItems: "center",
+                  padding: "8px 2px", borderBottom: "1px solid " + T.rule, opacity: busy ? 0.5 : 1 }}>
+                  <span style={{ color: T.accent, fontFamily: T.mono, fontSize: 12 }}>&#9656;</span>
+                  <a style={{ cursor: "pointer", flex: 1, minWidth: 0, fontFamily: T.body, fontSize: 13.5,
+                    fontWeight: on ? 700 : 600, color: on ? T.accent : T.text }}
+                    onClick={() => setPath(here)}>{e.name}</a>
+                  <span style={{ fontFamily: T.mono, fontSize: 10.5, color: T.muted }}>
+                    {e.count == null ? "" : e.count + " item" + (e.count === 1 ? "" : "s")}
+                  </span>
+                  <Button variant={on ? "ghost" : "quiet"} onClick={() => onPick(here)}>
+                    {on ? "This one" : "Use this one"}
+                  </Button>
+                </div>
+              );
+            })}
+        </div>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <Button variant="solid" disabled={!path} onClick={() => onPick(path)}>
+            Use the folder I'm in
+          </Button>
+          {chosen ? <Button variant="quiet" onClick={() => onPick("")}>Clear it</Button> : null}
+          <span style={{ flex: 1 }} />
+          <Button variant="quiet" onClick={onClose}>Leave it</Button>
+        </div>
+      </div>
     </div>
   );
 }

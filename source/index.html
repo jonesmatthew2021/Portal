@@ -17128,6 +17128,10 @@ function CoolibahPortal({ role, onSignOut }) {
   /* Spellings the library holds that are not anybody — a folder of paperwork,
      a filename the sync read as a name. Kept so Crew Details stops asking. */
   const notPeople = store.notPeople || [], setNotPeople = put("notPeople");
+  /* The one folder in the library that holds the crew's certificate folders —
+     the primary location, set once on Crew Details. A folder the office already
+     has: the portal is told which one it is, it does not make one. */
+  const certRoot = store.certRoot || "", setCertRoot = put("certRoot");
   const rosterPattern = { ...ROSTER_DEFAULTS, ...(store.rosterPattern || {}) };
   const setRosterPattern = put("rosterPattern");
   ROSTER_ANCHOR = /^\d{4}-\d{2}-\d{2}$/.test(rosterPattern.anchor || "")
@@ -18039,7 +18043,7 @@ function CoolibahPortal({ role, onSignOut }) {
   };
 
   const ctx = { role, admin, session: SESSION, removeCrew, renameCrew, people, setPeople,
-    notPeople, setNotPeople, writeCrewToWorkbooks, lastDocUpdate, setLastDocUpdate, folderNames, setFolderNames, filledFromCert, setFilledFromCert, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
+    notPeople, setNotPeople, certRoot, setCertRoot, writeCrewToWorkbooks, lastDocUpdate, setLastDocUpdate, folderNames, setFolderNames, filledFromCert, setFilledFromCert, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
 
   return (
     <Ctx.Provider value={ctx}>
