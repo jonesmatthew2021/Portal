@@ -526,6 +526,12 @@ async function purgeStoredFile(id) {
 // Fold what is stored on the server into the lists the portal starts with, so
 // real uploads sit above the sample entries rather than replacing them.
 function withStoredFiles(store, items) {
+  // Departments that have been renamed since a roster was saved.
+  const people = renameDepts(store.people);
+  /* A certificate carries whatever its folder was called. The register says
+     who that is, so the rest of the portal never sees the folder's wording. */
+  const known = asKnownPerson(people);
+
   const pick = (category, bucket) =>
     items
       .filter((i) => i.category === category && (bucket === undefined || i.bucket === bucket))
@@ -537,14 +543,16 @@ function withStoredFiles(store, items) {
 
   return {
     ...store,
-    // Departments that have been renamed since a roster was saved.
-    people: renameDepts(store.people),
+    people,
     notes: [...pick("note"), ...seedOnly(store.notes)],
     docs,
     correspondence: [...pick("correspondence", "correspondence"), ...seedOnly(store.correspondence)],
     pwCorrespondence: [...pick("correspondence", "pwCorrespondence"), ...seedOnly(store.pwCorrespondence)],
     matrixArchive: pick("matrix"),
-    certificates: pick("certificate"),
+    certificates: pick("certificate").map((c) => {
+      const person = known(c.person);
+      return person === c.person ? c : { ...c, person };
+    }),
     // Only ever one of these is on the server, so the newest is the current one.
     certSheet: pick("certificate-sheet")[0] || null,
     // The two documents the portal is required to hold at all times.
@@ -644,16 +652,127 @@ function isCrewRow(row) {
   return !REQUIREMENT_ROW_WORDS.test(name);
 }
 
+/* ==========================================================================
+ * The crew register: one place a person is named, and everything reads it.
+ *
+ * The office writes the same man six ways. The matrix spreadsheet has
+ * "bILLY", his SharePoint folder is "Billy - OPMS", his certificates are
+ * signed "SITTIYOS, Kachin", the travel roster says "KACHIN SITTIYOS" and the
+ * swing list says "Kachin Sittiyos". Every one of those is a different string,
+ * so nothing joined up and the man read as holding no paperwork at all.
+ *
+ * Renaming things to agree was tried and it does not hold - the next export
+ * from OPMS comes back spelled the old way. So the portal stops trying. The
+ * crew register on Crew Details holds each person's name once, together with
+ * every other spelling they are known by, and the portal answers to any of
+ * them and speaks only the register's.
+ *
+ * Which means a folder called "Billy - OPMS" can stay called that for ever.
+ * ======================================================================== */
+
+/** A name with everything that is not a letter taken out, for comparing. */
+const nameLetters = (n) => String(n || "").toUpperCase().replace(/[^A-Z]/g, "");
+
+/** The words in a name, initials dropped — they are not worth matching on. */
+const registerWords = (n) => String(n || "").toUpperCase().split(/[^A-Z]+/).filter((w) => w.length > 1);
+
+/**
+ * The register, ready to answer to a name written any way round.
+ *
+ * Two ways of asking. First the spelling itself, letter for letter, which
+ * covers the register's own names and every alias listed against them.
+ *
+ * Then the words, in any order. The travel roster writes "BRENTON EVANS" and
+ * "MICHAEL CHRISTIE ROGERS" where the matrix writes "EVANS, Brenton" and
+ * "ROGERS, Michael" — the same man, the same words, put in the other order and
+ * sometimes with a middle name along. Left to aliases that would have been
+ * forty rows of the office's two habits, answered one at a time, and answered
+ * again the next time somebody exported the roster. So the register matches on
+ * the words instead: one name's words all inside the other's, at least two of
+ * them, and exactly one person it could be. Two candidates is not a match —
+ * guessing between two crew members is worse than asking.
+ *
+ * A single word is never matched this way. "Sam" is somebody's first name and
+ * three men could answer to it; that one is asked.
+ */
+function crewRegister(people) {
+  const exact = new Map();
+  const spellings = [];
+  (people || []).forEach((p) => {
+    const name = String((p && p.name) || "").trim();
+    if (!name) return;
+    exact.set(nameLetters(name), name);
+    spellings.push({ name, of: name });
+  });
+  // Aliases second, so a spelling that is somebody's actual name is never
+  // taken over by another person having listed it as one of theirs.
+  (people || []).forEach((p) => {
+    const name = String((p && p.name) || "").trim();
+    if (!name) return;
+    ((p && p.aliases) || []).forEach((a) => {
+      const k = nameLetters(a);
+      if (!k) return;
+      if (!exact.has(k)) exact.set(k, name);
+      spellings.push({ name: String(a), of: name });
+    });
+  });
+
+  const bags = spellings
+    .map((x) => ({ of: x.of, w: new Set(registerWords(x.name)) }))
+    .filter((x) => x.w.size >= 2);
+
+  const byWords = (spelling) => {
+    const w = new Set(registerWords(spelling));
+    if (w.size < 2) return null;
+    const could = new Set();
+    bags.forEach((b) => {
+      const small = w.size <= b.w.size ? w : b.w;
+      const big = w.size <= b.w.size ? b.w : w;
+      let all = true;
+      small.forEach((x) => { if (!big.has(x)) all = false; });
+      if (all) could.add(b.of);
+    });
+    return could.size === 1 ? [...could][0] : null;
+  };
+
+  const nameOf = (spelling) => exact.get(nameLetters(spelling)) || byWords(spelling) || null;
+  return { nameOf, knows: (spelling) => !!nameOf(spelling) };
+}
+
+/** Whatever a name was written as, as the register writes it. */
+function asKnownPerson(people) {
+  const reg = crewRegister(people);
+  return (person) => reg.nameOf(person) || person;
+}
+
 /**
  * The matrix with only the crew on it.
  *
  * The same object comes back when every row is somebody's, so a matrix that was
  * never carrying furniture doesn't count as having changed.
  */
-function crewRowsOnly(quals) {
+function crewRowsOnly(quals, people) {
   if (!quals || !Array.isArray(quals.rows)) return quals;
   let rows = quals.rows.filter(isCrewRow);
   let changed = rows.length !== quals.rows.length;
+
+  /* The register's name, whatever the spreadsheet called him.
+   *
+   * Done here because this is the one gate the matrix loads through, so the
+   * grid, the tallies, the gap pages and every report say the same name
+   * without being asked to. The spreadsheet is left exactly as the office
+   * sent it - this is what the portal reads it as. */
+  if ((people || []).length) {
+    const known = asKnownPerson(people);
+    rows = rows.map((r) => {
+      const name = known(r[0]);
+      if (name === r[0]) return r;
+      changed = true;
+      const nr = r.slice();
+      nr[0] = name;
+      return nr;
+    });
+  }
 
   // Items that never lapse (NO_EXPIRY_CODES — VS-04 Helm CONNECT) carry no
   // expiry date: any date ever typed or read into one of their columns means
@@ -17796,6 +17915,189 @@ function RequiredDocuments() {
 /* The Admin tab's landing page: one screen that answers "what needs me
    today?". Every number on it exists elsewhere in the portal — this page only
    gathers them, worst first, each with the button that goes to the fix. */
+/**
+ * Crew Details — the crew register.
+ *
+ * Every person, named once, with every other spelling they are known by. The
+ * rest of the portal reads its names from here, so whatever OPMS, the travel
+ * roster or a spreadsheet calls somebody, it reaches the right man.
+ *
+ * The second half of the page is the point of it. Every name the portal has
+ * seen anywhere and cannot place is listed, with where it was seen and how
+ * many times - and attaching one to a crew member is one press. Do it once and
+ * that spelling is understood for good, however many times it comes back.
+ */
+function CrewDetails() {
+  const { people, setPeople, quals: QUALS, certificates, rosterPlan, renameCrew,
+    notPeople, setNotPeople, log } = usePortal();
+
+  const reg = useMemo(() => crewRegister(people), [people]);
+  const [editing, setEditing] = useState(null);   // id of the person being renamed
+  const [typed, setTyped] = useState("");
+  const [attachTo, setAttachTo] = useState({});   // spelling -> crew member picked
+
+  /* Crew in the register, in the order the vessel is manned. */
+  const crew = useMemo(() => (people || []).slice().sort((a, b) =>
+    rankGroupAt(a.dept || "") - rankGroupAt(b.dept || "")
+    || String(a.name || "").localeCompare(String(b.name || ""))), [people]);
+
+  /* Every spelling the portal has seen, and where. A spelling the register
+     already answers to is not a problem and is not listed. */
+  const strays = useMemo(() => {
+    const seen = new Map();
+    const aside = new Set((notPeople || []).map(nameLetters));
+    const note = (raw, where) => {
+      const name = String(raw || "").trim();
+      if (!name || reg.knows(name)) return;
+      const k = nameLetters(name);
+      if (!k || aside.has(k)) return;
+      if (!seen.has(k)) seen.set(k, { name, where: new Set(), n: 0 });
+      const at = seen.get(k);
+      at.n++;
+      at.where.add(where);
+      // The fullest spelling of the two is the one worth showing.
+      if (name.length > at.name.length) at.name = name;
+    };
+    (QUALS.rows || []).forEach((r) => note(r[0], "the matrix"));
+    (certificates || []).forEach((c) => { note(c.person, "certificates"); note(c.folder, "certificates"); });
+    (((rosterPlan || {}).rows) || []).forEach((r) => note(r.name, "the roster"));
+    return [...seen.values()].sort((a, b) => b.n - a.n);
+  }, [QUALS, certificates, rosterPlan, reg, notPeople]);
+
+  const nextId = () => "p-" + Date.now() + "-" + Math.floor(Math.random() * 1000);
+
+  const attach = (stray, id) => {
+    setPeople((list) => (list || []).map((p) => (p.id === id
+      ? { ...p, aliases: [...(p.aliases || []), stray.name] } : p)));
+    const to = ((people || []).find((p) => p.id === id) || {}).name || "";
+    log("Admin", stray.name + " is " + to, "Added to the crew register as another spelling of the same person");
+  };
+
+  const takeOn = (stray) => {
+    const name = canonicalName(stray.name);
+    setPeople((list) => [...(list || []), { id: nextId(), name, aliases: [stray.name], active: true }]);
+    log("Admin", name + " added to the crew register", "From " + [...stray.where].join(" and "));
+  };
+
+  const drop = (id, alias) => setPeople((list) => (list || []).map((p) => (p.id === id
+    ? { ...p, aliases: (p.aliases || []).filter((a) => a !== alias) } : p)));
+
+  /* Not everything in a library is a person. "HRWL Verification" is a folder
+     of paperwork and "SPREADSHEET, Certificates" is a filename the sync read
+     as a name. Set aside rather than forced onto somebody. */
+  const setAside = (stray) => {
+    setNotPeople([...(notPeople || []), stray.name]);
+    log("Admin", stray.name + " is not a crew member", "Set aside on Crew Details");
+  };
+
+  const rename = (p) => {
+    const name = canonicalName(typed);
+    if (!name) return;
+    /* The old spelling becomes one of his aliases. Whatever was calling him
+       that - a spreadsheet, a folder - is still calling him that, and this
+       page exists so that stops mattering. */
+    setPeople((list) => (list || []).map((x) => (x.id === p.id
+      ? { ...x, name, aliases: [...new Set([...(x.aliases || []), p.name])] } : x)));
+    if (p.name !== name) renameCrew(p.name, name);
+    setEditing(null);
+    setTyped("");
+  };
+
+  const chip = {
+    fontFamily: T.mono, fontSize: 11, padding: "2px 6px", borderRadius: 2,
+    border: "1px solid " + T.rule, background: T.raised, color: T.muted,
+  };
+  const row = { padding: "10px 0", borderTop: "1px solid " + T.rule };
+
+  return (
+    <div>
+      <div style={{ background: T.panel, border: "1px solid " + T.rule, borderRadius: 2, padding: "16px 18px" }}>
+        <Eyebrow color={T.accent}>The crew</Eyebrow>
+        <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.muted, margin: "8px 0 4px", lineHeight: 1.6 }}>
+          {crew.length} on the register. Everything else on the portal reads its names from here.
+        </div>
+        {crew.map((p) => (
+          <div key={p.id} style={row}>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              {editing === p.id ? (
+                <>
+                  <input value={typed} placeholder="LASTNAME, First"
+                    onChange={(e) => setTyped(e.target.value)}
+                    style={{ flex: "1 1 220px", fontFamily: T.mono, fontSize: 13, padding: "5px 8px",
+                      borderRadius: 2, border: "1px solid " + T.rule, background: T.raised, color: T.text }} />
+                  <Button variant="solid" onClick={() => rename(p)}>Save</Button>
+                  <Button variant="quiet" onClick={() => { setEditing(null); setTyped(""); }}>Leave it</Button>
+                </>
+              ) : (
+                <>
+                  <span style={{ fontFamily: T.display, fontSize: 14, fontWeight: 700, color: T.text,
+                    flex: "1 1 200px" }}>{p.name}</span>
+                  <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted }}>
+                    {[p.dept, p.crew ? "Swing " + p.crew : null].filter(Boolean).join(" · ")}
+                  </span>
+                  <Button variant="quiet" onClick={() => { setEditing(p.id); setTyped(p.name); }}>
+                    Change the name
+                  </Button>
+                </>
+              )}
+            </div>
+            {(p.aliases || []).length > 0 && (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
+                <span style={{ fontFamily: T.mono, fontSize: 10, color: T.muted,
+                  textTransform: "uppercase", letterSpacing: "0.08em" }}>Also</span>
+                {(p.aliases || []).map((a) => (
+                  <span key={a} style={chip}>
+                    {a}
+                    <button type="button" onClick={() => drop(p.id, a)} title="Not him"
+                      style={{ marginLeft: 5, border: 0, background: "none", color: T.muted,
+                        cursor: "pointer", padding: 0, fontFamily: T.mono, fontSize: 11 }}>×</button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ height: 14 }} />
+
+      <div style={{ background: T.panel, border: "1px solid " + T.rule, borderRadius: 2, padding: "16px 18px" }}>
+        <Eyebrow color={strays.length ? T.bYellow : T.accent}>Names the register does not know</Eyebrow>
+        {strays.length === 0 ? (
+          <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.muted, marginTop: 8 }}>
+            Every name on the matrix, the certificates and the roster reaches somebody on the register.
+          </div>
+        ) : (
+          <>
+            <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.muted, margin: "8px 0 4px", lineHeight: 1.6 }}>
+              {strays.length} spelling{strays.length === 1 ? "" : "s"} the portal has seen and cannot place.
+              Say who each one is and it is understood from then on, however it comes back.
+            </div>
+            {strays.map((x) => (
+              <div key={x.name} style={{ ...row, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ fontFamily: T.mono, fontSize: 13, color: T.text, flex: "0 1 190px" }}>{x.name}</span>
+                <span style={{ fontFamily: T.body, fontSize: 12, color: T.muted, flex: "0 1 200px" }}>
+                  {[...x.where].join(" and ")} · {x.n} time{x.n === 1 ? "" : "s"}
+                </span>
+                <NameSelect width={210} value={attachTo[x.name] || ""}
+                  onPick={(v) => setAttachTo((a) => ({ ...a, [x.name]: v }))}
+                  options={[{ value: "", label: "Who is this?" },
+                    ...crew.map((p) => ({ value: p.id, label: p.name }))]} />
+                <Button variant="solid" disabled={!attachTo[x.name]}
+                  onClick={() => attach(x, attachTo[x.name])}>
+                  That's him
+                </Button>
+                <Button variant="quiet" onClick={() => takeOn(x)}>Somebody new</Button>
+                <Button variant="quiet" onClick={() => setAside(x)}>Not a person</Button>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TodayScreen({ go }) {
   const { quals: QUALS, certificates, certSheet, opmsSheet, matrixUpdated,
     opmsAnalysis, opmsMarks, renewalMarks } = usePortal();
@@ -18973,7 +19275,7 @@ function CrewCertificateUpload() {
 /* The Admin tab's own pages. Kept as a list so the strip that switches between
    them and the page that is rendered can't disagree about what exists. */
 const ADMIN_PAGES = [
-  { id: "today", label: "Today" },
+  { id: "crew-details", label: "Crew Details" },
   { id: "swing-allocation", label: "Swing Allocation" },
   { id: "required-docs", label: "Required Documents For Upload" },
   { id: "checker", label: "Certification Checker" },
@@ -18994,7 +19296,7 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
   // here so switching between them doesn't reset the screen underneath.
   // Uploads come first — a portal with nothing filed can do nothing else on
   // this tab.
-  const [page, setPage] = useRemembered("admin-page", "today",
+  const [page, setPage] = useRemembered("admin-page", "crew-details",
     (v) => ADMIN_PAGES.some((p) => p.id === v));
 
   if (!isAdmin(currentUser)) {
@@ -19060,7 +19362,7 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
         })}
       </div>
 
-      {page === "today" && <TodayScreen go={(t) => setPage(t === "matrix-tab" ? "checker" : t)} />}
+      {page === "crew-details" && <CrewDetails />}
       {page === "required-docs" && <RequiredDocuments />}
       {page === "elearning" && <ELearningStatus />}
       {/* One page for the swing: the compliance cards first — the swing that is
@@ -19637,6 +19939,9 @@ function CoolibahPortal({ role, onSignOut }) {
      them. Rather than make the office rename forty folders, the pairing is
      written down here the once, the first time anybody is asked. */
   const folderNames = store.folderNames || {}, setFolderNames = put("folderNames");
+  /* Spellings the library holds that are not anybody — a folder of paperwork,
+     a filename the sync read as a name. Kept so Crew Details stops asking. */
+  const notPeople = store.notPeople || [], setNotPeople = put("notPeople");
   const rosterPattern = { ...ROSTER_DEFAULTS, ...(store.rosterPattern || {}) };
   const setRosterPattern = put("rosterPattern");
   ROSTER_ANCHOR = /^\d{4}-\d{2}-\d{2}$/.test(rosterPattern.anchor || "")
@@ -19648,7 +19953,13 @@ function CoolibahPortal({ role, onSignOut }) {
   // Requirement rows are dropped here rather than on each screen, so the crew
   // are the same forty people wherever they are counted — the matrix, the
   // certificate lists, the reports and what is sent away to be compared.
-  const quals = crewRowsOnly(store.quals || QUALS), setQuals = put("quals");
+  /* Worked out when the matrix or the register changes and not on every
+     render: the gate hands back a new object whenever it has renamed anything,
+     and forty-three rows of fifty-three items rebuilt on every keystroke is
+     felt. */
+  const quals = useMemo(() => crewRowsOnly(store.quals || QUALS, store.people),
+    [store.quals, store.people]);
+  const setQuals = put("quals");
   const docs = store.docs,                 setDocs = put("docs");
   // Matrix spreadsheets filed before the portal kept the date itself. Nothing
   // writes to this any more — it is read only so that a matrix updated back then
@@ -19700,8 +20011,12 @@ function CoolibahPortal({ role, onSignOut }) {
         analyse({ action: "validity-periods" }).catch(() => null),
       ]);
       const map = {};
+      /* The server reads these off the documents, which carry their folder's
+         wording. Keyed under the register's name instead, so a date found in
+         "Billy - OPMS" reaches Kachin Sittiyos's row. */
+      const known = asKnownPerson(people);
       (r.dates || []).forEach((d) => {
-        map[`${d.person}::${d.code}`] = {
+        map[`${known(d.person).toUpperCase()}::${String(d.code || "").toUpperCase()}`] = {
           issued: d.issued || null,
           expires: d.expires || null,
           issuer: d.issuer || null,
@@ -20537,7 +20852,8 @@ function CoolibahPortal({ role, onSignOut }) {
     return { ok: true, gone };
   };
 
-  const ctx = { role, admin, session: SESSION, removeCrew, renameCrew, people, writeCrewToWorkbooks, lastDocUpdate, setLastDocUpdate, folderNames, setFolderNames, filledFromCert, setFilledFromCert, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
+  const ctx = { role, admin, session: SESSION, removeCrew, renameCrew, people, setPeople,
+    notPeople, setNotPeople, writeCrewToWorkbooks, lastDocUpdate, setLastDocUpdate, folderNames, setFolderNames, filledFromCert, setFilledFromCert, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
 
   return (
     <Ctx.Provider value={ctx}>
