@@ -18005,10 +18005,34 @@ function CrewDetails() {
     log("Admin", stray.name + " is " + to, "Added to the crew register as another spelling of the same person");
   };
 
+  /* Somebody new, with his department and his swing filled in rather than left
+     for somebody to notice later.
+
+     Both are already written down: the matrix says what he is employed as,
+     which gives the department, and the roster says which swing he sails on.
+     Taken from those rather than asked for, because a register entry with no
+     department drops off the bottom of the Roster page without saying why. */
   const takeOn = (stray) => {
     const name = canonicalName(stray.name);
-    setPeople((list) => [...(list || []), { id: nextId(), name, aliases: [stray.name], active: true }]);
-    log("Admin", name + " added to the crew register", "From " + [...stray.where].join(" and "));
+    const row = (QUALS.rows || []).find((r) => nameLetters(r[0]) === nameLetters(stray.name));
+    const job = row ? row[1] || "" : "";
+    const stint = (((rosterPlan || {}).rows) || []).find((r) => {
+      const a = new Set(registerWords(r.name)), b = new Set(registerWords(name));
+      if (a.size < 2 || b.size < 2) return nameLetters(r.name) === nameLetters(stray.name);
+      const small = a.size <= b.size ? a : b, big = a.size <= b.size ? b : a;
+      let all = true;
+      small.forEach((w) => { if (!big.has(w)) all = false; });
+      return all;
+    });
+    const swing = stint ? String(stint.crew || "").trim().toUpperCase().slice(0, 1) : "";
+    setPeople((list) => [...(list || []), {
+      id: nextId(), name, aliases: [stray.name], active: true,
+      dept: job ? deptForRank(job) : "GPH",
+      crew: swing === "A" || swing === "B" ? swing : "",
+    }]);
+    log("Admin", name + " added to the crew register",
+      [job || null, swing ? "Swing " + swing : null, "from " + [...stray.where].join(" and ")]
+        .filter(Boolean).join(" · "));
   };
 
   const drop = (id, alias) => setPeople((list) => (list || []).map((p) => (p.id === id
