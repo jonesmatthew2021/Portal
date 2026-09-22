@@ -141,12 +141,19 @@ test("a location the office named with spaces, commas and brackets still answers
   assert.equal(at("Ships/TSV CoolibahXATB0/Crew, certificates/Kyle/Medical.pdf"), null);
 });
 
-/** Crew Details with one man pointed at one folder, and nobody else. */
-const saidFor = (key: string, token: string, person: string) => ({
+/** Crew Details with one man pointed at one folder, and nobody else.
+ *  `inUse` is where other men's certificates already are, which is what
+ *  answers for everybody nobody has been asked about. */
+const saidFor = (
+  key: string,
+  token: string,
+  person: string,
+  inUse: Record<string, string> = {},
+) => ({
   home: "opms",
   assigned: [{ key, token, person }],
   manIn: (k: string) => (k.toLowerCase() === key.toLowerCase() ? { key, token, person } : null),
-  prefixFor: (t: string) => (t === token ? key : `opms/${t}`),
+  prefixFor: (t: string) => (t === token ? key : inUse[t] || null),
 });
 
 test("a folder named for a man beats the name worked out from the folder", () => {
@@ -167,6 +174,25 @@ test("a folder nobody was asked about is still read for a name", () => {
 test("his certificates are written into the folder he was given", () => {
   const where = saidFor("opms/Kyle", "sittiyos-kachin", "SITTIYOS, Kachin");
   assert.equal(where.prefixFor("sittiyos-kachin"), "opms/Kyle");
+});
+
+test("a man nobody was asked about is filed where the rest of his already are", () => {
+  // Most of the crew have never been pointed at a folder by hand and do not
+  // need to be: the sync found their folder and their papers have gone into
+  // it ever since.
+  const where = saidFor("opms/Kyle", "sittiyos-kachin", "SITTIYOS, Kachin",
+    { "evans-brenton": "opms/Brenton - OPMS" });
+  assert.equal(where.prefixFor("evans-brenton"), "opms/Brenton - OPMS");
+});
+
+test("no folder is invented for a man the portal cannot place", () => {
+  /* This is the whole of it. The fallback used to be his name under the
+     certificate location, so filing a certificate for somebody the library had
+     no folder for quietly made one - and the library filled with near-empty
+     folders for men who already had a folder under a name the office uses.
+     Nothing is written now; the caller is told to go and say where it goes. */
+  const where = saidFor("opms/Kyle", "sittiyos-kachin", "SITTIYOS, Kachin");
+  assert.equal(where.prefixFor("rose-matthew"), null);
 });
 
 /* Crew Details picks folders out of the library, so it saves a real library

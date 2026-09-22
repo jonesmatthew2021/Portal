@@ -254,12 +254,28 @@ async function uploadCertificate(form: FormData, file: File) {
   for (let n = 2; taken.has(stored.toLowerCase()); n++) stored = withSuffix(filename, n);
 
   const id = crypto.randomUUID();
-  // The bytes go into the person's own folder — the team's filing — so an
-  // upload here appears in Teams exactly where the office already keeps that
-  // person's certificates. Which folder that is, is Crew Details' answer: the
-  // one set against him by hand if there is one, and otherwise his name under
-  // the certificate location.
-  const blobKey = `${(await certHome()).prefixFor(folder)}/${stored}`;
+  /* The bytes go into the person's own folder — the team's filing — so an
+   * upload here appears in Teams exactly where the office already keeps that
+   * person's certificates. Which folder that is, is Crew Details' answer: the
+   * one set against him by hand, or the folder his certificates are already
+   * in.
+   *
+   * Where neither is known, nothing is written. The portal used to make a
+   * folder from his name at that point, which is how the library came to hold
+   * a second, near-empty folder for men who already had one under a name the
+   * office uses. Somebody says where it goes instead. */
+  const home = (await certHome()).prefixFor(folder);
+  if (!home) {
+    return Response.json(
+      {
+        error: `${file.name} wasn't filed — the portal doesn't know which folder ${person}'s `
+          + "certificates go in, and it won't make one. Set his folder on Crew Details.",
+        needsFolder: person,
+      },
+      { status: 409 },
+    );
+  }
+  const blobKey = `${home}/${stored}`;
 
   // Written before anything in the database changes: if this throws, no row
   // has been touched, so a failed upload can't leave the certificate looking

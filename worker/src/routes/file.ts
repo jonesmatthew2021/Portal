@@ -161,8 +161,10 @@ export default async (req: Request, context: { params: { id: string } }) => {
     }
 
     // Where his certificates go back to, if he has nothing else on file to
-    // point at: his own folder where Crew Details names one.
-    const home = row.folder ? (await certHome()).prefixFor(row.folder) : undefined;
+    // point at: the folder Crew Details names, or the one the rest of his are
+    // in. Undefined where neither is known, and restoreDocument then puts it
+    // back where it came from rather than anywhere new.
+    const home = (row.folder ? (await certHome()).prefixFor(row.folder) : null) || undefined;
     const restored = await restoreDocument(row, home);
     return Response.json({
       restored: true,

@@ -6158,6 +6158,10 @@ function UploadCertificates() {
   const folderRef = useRef(null);
   const answer = useRef(null);                // resolves the popup
   const forRest = useRef(null);               // choice applied to the rest of the batch
+  // A file whose owner the portal cannot work out, waiting to be told whose it is.
+  const [whose, setWhose] = useState(null);   // null | { name }
+  const whoseAnswer = useRef(null);
+  const [whosePick, setWhosePick] = useState("");
 
   // The reading that follows a batch runs in the shared auto-update — set going
   // here, watched from the window over the page (MatrixAutoWindow), and
@@ -6258,6 +6262,31 @@ function UploadCertificates() {
       setDup(info);
     });
 
+  /* Whose is this?
+   *
+   * The portal reads the owner off the filename and off the folder it came
+   * out of. Where neither says, it used to put the file aside and report "no
+   * crew member" at the end of the run — so a folder drop of two hundred
+   * finished with a list of files that had not been filed and nothing said at
+   * the time. The run stops and asks instead, one file at a time, and what is
+   * answered is used for that file.
+   *
+   * Only management ever sees this. A crew member uploading his own
+   * certificate is signed in as himself, so there is nothing to ask. */
+  const askWhose = (item) =>
+    new Promise((resolve) => {
+      whoseAnswer.current = resolve;
+      setWhosePick("");
+      setWhose(item);
+    });
+
+  const answerWhose = (person) => {
+    setWhose(null);
+    const resolve = whoseAnswer.current;
+    whoseAnswer.current = null;
+    if (resolve) resolve(person || "");
+  };
+
   const respond = (choice) => {
     if (dupAll) forRest.current = choice;
     setDup(null);
@@ -6331,8 +6360,11 @@ function UploadCertificates() {
    * weekly export, read here only to flag where it disagrees.
    */
   const fileAll = async () => {
-    const ready = queue.filter((x) => x.person && x.person !== OTHER);
-    if (!ready.length || busy) return;
+    /* Anything queued will do to start. A file with nobody against it is
+       asked about while the run waits, rather than being a reason not to run:
+       the whole point of asking is that the answer arrives in the middle of a
+       folder drop, not before it. */
+    if (!queue.length || busy) return;
 
     setBusy(true); setErr(""); setDone(null); clearMatrixAuto();
     forRest.current = null; setDupAll(false);
@@ -6343,8 +6375,14 @@ function UploadCertificates() {
     for (const item of queue) {
       pos++;
       if (!item.person || item.person === OTHER) {
-        results.push({ key: item.key, name: item.file.name, person: item.person, state: "unassigned" });
-        continue;
+        setAt(`${pos} of ${queue.length} · whose is ${item.file.name}?`);
+        const said = await askWhose(item);
+        if (!said) {
+          results.push({ key: item.key, name: item.file.name, person: item.person, state: "unassigned" });
+          continue;
+        }
+        item.person = said;
+        patch(item.key, { person: said });
       }
       // A batch off a folder drop runs to hundreds, so the count matters as much
       // as the name — "12 of 214" says how much of the evening this is going to be.
@@ -6796,15 +6834,14 @@ function UploadCertificates() {
           })}
 
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
-            <Button onClick={fileAll} disabled={busy || ready === 0}
-              title={ready === 0 ? "Every file needs a crew member before anything can be filed" : undefined}>
+            <Button onClick={fileAll} disabled={busy || queue.length === 0}>
               {busy
                 ? (auto ? "Reading what was filed..." : `Filing ${at || "..."}`)
-                : `File ${ready} certificate${ready === 1 ? "" : "s"}`}
+                : `File ${queue.length} certificate${queue.length === 1 ? "" : "s"}`}
             </Button>
             {queue.length > ready && (
               <span style={{ fontFamily: T.body, fontSize: 13, color: T.bOrange }}>
-                {queue.length - ready} still need a crew member.
+                {queue.length - ready} will be asked about as they come up.
               </span>
             )}
           </div>
@@ -7348,6 +7385,33 @@ function UploadCertificates() {
 
       {/* Notes — the standing footnotes, editable in place and shared */}
       <NotesPanel />
+
+      {/* Whose certificate is this? Asked while the run waits, so nothing is
+          filed against a guess and nothing is quietly left unfiled. */}
+      {whose && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 92, background: "rgba(18,41,61,0.45)",
+          display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ background: T.panel, border: "1px solid " + T.rule, borderTop: "4px solid " + T.accent,
+            borderRadius: 3, padding: "20px 24px", width: "min(560px, 94vw)" }}>
+            <Eyebrow color={T.accent}>Whose certificate is this?</Eyebrow>
+            <div style={{ fontFamily: T.mono, fontSize: 12.5, color: T.text, margin: "10px 0 4px",
+              wordBreak: "break-word" }}>{whose.file.name}</div>
+            <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, marginBottom: 14, lineHeight: 1.6 }}>
+              Neither the file name nor the folder it came from says. It is filed into that
+              person's own folder — the portal will not make a new one.
+            </div>
+            <NameSelect value={whosePick} onPick={setWhosePick}
+              options={[{ value: "", label: "Choose the crew member" },
+                ...names.map((n) => ({ value: n, label: n }))]} />
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
+              <Button variant="solid" disabled={!whosePick} onClick={() => answerWhose(whosePick)}>
+                File it against {whosePick || "…"}
+              </Button>
+              <Button variant="quiet" onClick={() => answerWhose("")}>Leave this one</Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* The popup the uploader gets when a certificate is already in the folder */}
       {dup && (
@@ -16197,13 +16261,26 @@ const ACCESS_LEVELS = [
    PDF and named the way OPMS wants it; the window then hands the finished
    file back to save and upload to OPMS. */
 function CrewCertificateUpload() {
-  const { quals: QUALS } = usePortal();
+  const { quals: QUALS, people } = usePortal();
   const names = useMemo(() => QUALS.rows.map((r) => r[0]), [QUALS]);
+  /* Whose certificate this is, taken from who is signed in.
+   *
+   * A crew member reached this page with his own email, so there is nothing to
+   * ask him: it is his certificate. It used to be a box he typed his name into,
+   * seeded from his login and editable, so a certificate could be filed against
+   * a man who was not the one uploading it - by a slip, or by somebody helping
+   * a mate out - and nothing downstream could tell.
+   *
+   * The name is read through the crew register, so however the login spells him
+   * he reaches the one name the portal knows him by. */
   const [typed, setTyped] = useState(SESSION_USER.name || "");
   const filedAs = useMemo(() => {
+    const reg = crewRegister(people);
+    const mine = reg.nameOf(SESSION_USER.name) || reg.nameOf(typed);
+    if (mine) return mine;
     const c = canonicalName(typed);
     return c ? (matchRoster(c, names) || c) : "";
-  }, [typed, names]);
+  }, [typed, names, people]);
   const [jobs, setJobs] = useState([]);
   const [open, setOpen] = useState(false);
   const [hot, setHot] = useState(false);
@@ -16357,16 +16434,27 @@ function CrewCertificateUpload() {
         you can save the finished file and upload that same copy to OPMS.
       </div>
 
+      {/* Who it is filed against. A crew member signed in with his own email
+          is not asked — it is his certificate. Management, and anyone the
+          register does not recognise, still says who. */}
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 12 }}>
-        <div style={{ flex: "1 1 260px" }}>
-          <Field label="Your name">
-            <input className="um-in" value={typed} placeholder="First name and surname"
-              onChange={(e) => setTyped(e.target.value)} />
-          </Field>
-        </div>
-        <div style={{ fontFamily: T.mono, fontSize: 11.5, color: filedAs ? T.text : T.muted, paddingBottom: 9 }}>
-          {filedAs ? `Filed as ${filedAs}` : ""}
-        </div>
+        {crewRegister(people).nameOf(SESSION_USER.name) ? (
+          <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.text }}>
+            Filed against <b>{filedAs}</b>
+          </div>
+        ) : (
+          <>
+            <div style={{ flex: "1 1 260px" }}>
+              <Field label="Your name">
+                <input className="um-in" value={typed} placeholder="First name and surname"
+                  onChange={(e) => setTyped(e.target.value)} />
+              </Field>
+            </div>
+            <div style={{ fontFamily: T.mono, fontSize: 11.5, color: filedAs ? T.text : T.muted, paddingBottom: 9 }}>
+              {filedAs ? `Filed as ${filedAs}` : ""}
+            </div>
+          </>
+        )}
       </div>
       {nameErr && <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.bRed, marginBottom: 10 }}>{nameErr}</div>}
 

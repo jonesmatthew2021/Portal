@@ -42,9 +42,10 @@ export type CertHome = {
   assigned: ManInAFolder[];
   /** Whose folder this is, where Crew Details has said so. */
   manIn: (folderKey: string) => ManInAFolder | null;
-  /** Where this man's certificates are written: his own folder if he has been
-   *  given one, and otherwise his name under the certificate location. */
-  prefixFor: (token: string) => string;
+  /** Where this man's certificates are written: the folder Crew Details gave
+   *  him, or the one his certificates are already in. Null where neither is
+   *  known — nothing is written to a folder nobody has pointed at. */
+  prefixFor: (token: string) => string | null;
 };
 
 type StatePerson = { name?: string; certFolder?: string };
@@ -96,10 +97,59 @@ export async function certHome(): Promise<CertHome> {
   const byKey = new Map(assigned.map((a) => [a.key.toLowerCase(), a]));
   const byToken = new Map(assigned.map((a) => [a.token, a]));
 
+  /* Where each man's certificates already are, read off the certificates
+     themselves. Most of the crew have never been pointed at a folder by hand
+     and do not need to be - the sync found their folder years ago and their
+     papers have been going into it ever since. */
+  const settled = await foldersInUse();
+
   return {
     home,
     assigned,
     manIn: (folderKey) => byKey.get(String(folderKey || "").toLowerCase()) || null,
-    prefixFor: (token) => byToken.get(token)?.key || `${home}/${opmsFolderName(token)}`,
+    /* Never invented.
+     *
+     * This used to fall back to the man's name under the certificate location,
+     * which meant that filing a certificate for somebody the library had no
+     * folder for quietly made one - and the library filled up with near-empty
+     * folders for people who already had a folder under another name. The
+     * caller is told there is nowhere to put it instead, and asks. */
+    prefixFor: (token) => byToken.get(token)?.key || settled.get(token) || null,
   };
+}
+
+/**
+ * The folder each person's certificates are actually in, by their token.
+ *
+ * The commonest one wins, because a man whose papers are spread over two
+ * folders has one real folder and one accident, and the accident is not where
+ * the next certificate should go.
+ */
+async function foldersInUse(): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  try {
+    const rows = await getEnv()
+      .DB.prepare(
+        "SELECT folder, blob_key AS blobKey FROM documents " +
+          "WHERE category = 'certificate' AND removed_at IS NULL AND folder IS NOT NULL",
+      )
+      .all<{ folder: string; blobKey: string }>();
+
+    const tally = new Map<string, Map<string, number>>();
+    for (const r of rows.results || []) {
+      const cut = String(r.blobKey || "").lastIndexOf("/");
+      if (cut < 1) continue;
+      const where = r.blobKey.slice(0, cut);
+      if (!tally.has(r.folder)) tally.set(r.folder, new Map());
+      const seen = tally.get(r.folder)!;
+      seen.set(where, (seen.get(where) || 0) + 1);
+    }
+    for (const [token, seen] of tally) {
+      const best = [...seen.entries()].sort((a, b) => b[1] - a[1])[0];
+      if (best) out.set(token, best[0]);
+    }
+  } catch (e) {
+    console.error("the folders in use couldn't be read:", e);
+  }
+  return out;
 }
