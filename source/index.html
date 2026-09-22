@@ -692,8 +692,9 @@ const registerWords = (n) => String(n || "").toUpperCase().split(/[^A-Z]+/).filt
  * them, and exactly one person it could be. Two candidates is not a match —
  * guessing between two crew members is worse than asking.
  *
- * A single word is never matched this way. "Sam" is somebody's first name and
- * three men could answer to it; that one is asked.
+ * A single word is matched only where exactly one man on the register answers
+ * to it — one Sam on the register and "SAM" is him; two Evanses and "EVANS"
+ * is a question, not a match.
  */
 function crewRegister(people) {
   const exact = new Map();
@@ -735,7 +736,28 @@ function crewRegister(people) {
     return could.size === 1 ? [...could][0] : null;
   };
 
-  const nameOf = (spelling) => exact.get(nameLetters(spelling)) || byWords(spelling) || null;
+  /* One word, where exactly one man answers to it.
+   *
+   * The rule used to be that a single word was never matched — "Sam" was
+   * somebody's first name and three men might answer to it. But the register
+   * knows how many men answer to it: on this one there is one Sam and one
+   * Evgeny, and a folder called SAM went on reading as a stranger after the
+   * man had been put on the register by hand, because nobody had also typed
+   * the folder's word in as one of his spellings. The same rule the take-on
+   * pairing has always used: one word, one man, that man — two men, no match,
+   * and the question is asked instead. */
+  const byOneWord = (spelling) => {
+    const w = registerWords(spelling);
+    if (w.length !== 1) return null;
+    const could = new Set();
+    spellings.forEach((x) => {
+      if (registerWords(x.name).includes(w[0])) could.add(x.of);
+    });
+    return could.size === 1 ? [...could][0] : null;
+  };
+
+  const nameOf = (spelling) =>
+    exact.get(nameLetters(spelling)) || byWords(spelling) || byOneWord(spelling) || null;
   return { nameOf, knows: (spelling) => !!nameOf(spelling) };
 }
 
