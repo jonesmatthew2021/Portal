@@ -168,9 +168,9 @@ function CertChecker() {
         <DownloadPDF build={asPDF} variant="quiet" />
       </div>
 
-      {/* The standing rules an expiry can't be judged without — the same notes
-          the certificates page carries, editable from either place. */}
-      <NotesPanel compact />
+      {/* The notes used to sit here as well. They are kept on Required
+          Documents For Upload now, which is the one place they are written —
+          the same notes either way, because both read certNotes. */}
 
       <div id="cert-gap-detail">
         {all.length === 0 ? (
