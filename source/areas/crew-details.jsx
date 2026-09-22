@@ -451,6 +451,44 @@ function CrewDetails() {
             }
             setPicking(null);
           }}
+          onAuto={(names, path) => {
+            /* Every folder on the screen, assigned to its man in one press.
+             *
+             * Each folder's name is read through the register — the part
+             * before the office's " - OPMS" tail — under the register's own
+             * rules: a spelling it has been taught, or a word exactly one man
+             * answers to. "Evgeny - OPMS" reaches EVDOKIMOV, Evgeny; "Chris"
+             * and "PK" reach nobody and are left for by hand, because
+             * guessing here files one man's certificates as another's.
+             *
+             * Nothing said by hand is touched: a man who already has a folder
+             * keeps it, and a folder already assigned stays whose it is. Two
+             * folders wanting the same man is a question, not an assignment —
+             * both are left. */
+            const taken = new Set((people || [])
+              .map((p) => String(p.certFolder || "").toLowerCase()).filter(Boolean));
+            const want = new Map();     // person id -> [folder, ...]
+            const left = [];
+            names.forEach((name) => {
+              const folder = path ? path + "/" + name : name;
+              if (taken.has(folder.toLowerCase())) return;
+              const who = reg.nameOf(String(name).split(" - ")[0].trim()) || reg.nameOf(name);
+              const p = who ? (people || []).find((x) => x.name === who) : null;
+              if (!p || p.certFolder) { left.push(name); return; }
+              want.set(p.id, [...(want.get(p.id) || []), folder]);
+            });
+            const sure = new Map([...want].filter(([, f]) => f.length === 1).map(([id, f]) => [id, f[0]]));
+            [...want].filter(([, f]) => f.length > 1).forEach(([, f]) => left.push(...f.map((x) => x.split("/").pop())));
+            if (sure.size) {
+              setPeople((list) => (list || []).map((p) =>
+                sure.has(p.id) && !p.certFolder ? { ...p, certFolder: sure.get(p.id) } : p));
+            }
+            log("Admin", "Certificate folders auto-assigned",
+              sure.size + " assigned"
+              + (left.length ? " · left for by hand: " + left.sort().join(", ") : ""));
+            setPicking(null);
+            return { assigned: sure.size, left };
+          }}
           onClose={() => setPicking(null)} />
       )}
 
@@ -486,7 +524,7 @@ function CrewDetails() {
  * or moves one. Only folders are listed, because a folder is the only thing
  * that can be picked.
  */
-function CertFolderPicker({ title, start, chosen, onPick, onClose }) {
+function CertFolderPicker({ title, start, chosen, onPick, onAuto, onClose }) {
   const [path, setPath] = useState(start || "");
   const [folders, setFolders] = useState(null);
   const [err, setErr] = useState("");
@@ -569,6 +607,14 @@ function CertFolderPicker({ title, start, chosen, onPick, onClose }) {
           <Button variant="solid" disabled={!path} onClick={() => onPick(path)}>
             Use the folder I'm in
           </Button>
+          {/* Every folder on this screen assigned to its man in one press,
+              where the register can say whose it is. The rest are left. */}
+          {onAuto && (
+            <Button variant="quiet" disabled={busy || !(folders || []).length}
+              onClick={() => onAuto((folders || []).map((e) => e.name), path)}>
+              Auto assign
+            </Button>
+          )}
           {chosen ? <Button variant="quiet" onClick={() => onPick("")}>Clear it</Button> : null}
           <span style={{ flex: 1 }} />
           <Button variant="quiet" onClick={onClose}>Leave it</Button>
