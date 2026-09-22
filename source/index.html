@@ -1464,17 +1464,21 @@ function Choices({ value, options, onPick, compact = false }) {
   );
 }
 
-/* The one drop-down the portal has. The no-drop-downs rule above holds for
-   short lists, where seeing every option at once beats a menu — but the crew
-   list is forty names long, and laid out in the open it buried the page it sat
-   on. A long list of names is the one place a menu reads better. */
-function NameSelect({ value, options, onPick }) {
+/* Where the portal does use a drop-down.
+ *
+ * The no-drop-downs rule above holds for a choice worth seeing all of at once.
+ * It does not hold for the crew list, which is forty names long and buried the
+ * page it sat on, and it does not hold for the sort control: which order a
+ * list is in is a preference, not a decision, and it does not earn a row of
+ * buttons across the top of the page.
+ */
+function NameSelect({ value, options, onPick, width }) {
   return (
     <select className="um-in" value={String(value ?? "")}
       onChange={(e) => onPick(e.target.value)}
       style={{ fontFamily: T.body, fontSize: 13, color: T.text, background: T.panel,
         border: `1px solid ${T.rule}`, borderRadius: 2, padding: "8px 10px",
-        width: "100%", maxWidth: 420 }}>
+        width: width || "100%", maxWidth: width || 420 }}>
       {options.map((o, i) => {
         const v = o && typeof o === "object" ? o.value : o;
         const label = o && typeof o === "object" ? o.label : o;
@@ -4312,14 +4316,14 @@ function TrainingMatrix() {
         );
       })()}
 
-      <div style={{ display: "flex", gap: 6, alignItems: "baseline", flexWrap: "wrap", marginBottom: 11 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 11 }}>
         <span style={{ fontFamily: T.mono, fontSize: 10.5, color: T.muted,
           textTransform: "uppercase", letterSpacing: "0.08em" }}>Sort by</span>
-        <Button variant={sortBy === "rank" ? "solid" : "quiet"} onClick={() => setSortBy("rank")}>Rank</Button>
-        <Button variant={sortBy === "name" ? "solid" : "quiet"} onClick={() => setSortBy("name")}>Surname</Button>
-        <Button variant={sortBy === "sheet" ? "solid" : "quiet"} onClick={() => setSortBy("sheet")}>
-          As the spreadsheet has it
-        </Button>
+        <NameSelect value={sortBy} onPick={setSortBy} width={230} options={[
+          { value: "rank", label: "Rank" },
+          { value: "name", label: "Surname" },
+          { value: "sheet", label: "As the spreadsheet has it" },
+        ]} />
       </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 13 }}>
@@ -14836,11 +14840,13 @@ function RosterListPage() {
             : (crewRoster ? crewRoster.filename : "")} />
         <span style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
           {rosterPlan && (
-            <span style={{ display: "flex", gap: 6, alignItems: "baseline" }}>
+            <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <span style={{ fontFamily: T.mono, fontSize: 10.5, color: T.muted,
                 textTransform: "uppercase", letterSpacing: "0.08em" }}>Sort by</span>
-              <Button variant={sortBy === "rank" ? "solid" : "quiet"} onClick={() => setSortBy("rank")}>Rank</Button>
-              <Button variant={sortBy === "name" ? "solid" : "quiet"} onClick={() => setSortBy("name")}>Surname</Button>
+              <NameSelect value={sortBy} onPick={setSortBy} width={150} options={[
+                { value: "rank", label: "Rank" },
+                { value: "name", label: "Surname" },
+              ]} />
             </span>
           )}
           {admin && rosterPlan && crewRoster && (
