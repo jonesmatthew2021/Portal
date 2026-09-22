@@ -42,17 +42,28 @@ function CrewDetails() {
    * so - that is worth seeing rather than hiding, because it means the portal
    * is asking nothing of him.
    */
-  /* The positions to pick from: the ones the office uses on the matrix, and
-     the ones already set against men on the register.
+  /* The positions to pick from: the vessel's eight, in the order the vessel
+     is manned, and then whatever else the matrix or the register calls a man.
 
-     The matrix on its own was not enough. A portal with no crew matrix filed
-     yet had nothing in the list at all, so every man read "No rank" and there
-     was no way to give him one - and a rank set from the certificates page
-     could not even be shown back here. */
-  const positions = useMemo(() => Array.from(new Set([
-    ...(QUALS.rows || []).map((r) => String(r[1] || "").trim()),
-    ...(people || []).map((p) => String(p.rank || "").trim()),
-  ].filter(Boolean))).sort(), [QUALS, people]);
+     The eight are always there. The list used to be built only from what the
+     matrix and the register already held, so a portal with an empty matrix
+     and one junior engineer offered a choice between JUNIOR ENGINEER and
+     nothing — every other man read "No rank" with no way to give him one. The
+     same fix as the two other rank pickers, and the same reason.
+
+     What the matrix says is still offered underneath, because the office
+     draws finer than the eight do; only a wording that says the same thing as
+     one of the eight is left out, so the list never carries both COOK and
+     Cook. */
+  const positions = useMemo(() => {
+    const said = Array.from(new Set([
+      ...(QUALS.rows || []).map((r) => String(r[1] || "").trim()),
+      ...(people || []).map((p) => String(p.rank || "").trim()),
+    ].filter(Boolean)));
+    const letters = (t) => String(t).toUpperCase().replace(/[^A-Z]/g, "");
+    const standard = new Set(ROSTER_RANKS.map(letters));
+    return [...ROSTER_RANKS, ...said.filter((p) => !standard.has(letters(p))).sort()];
+  }, [QUALS, people]);
 
   const groups = useMemo(() => {
     const jobOf = new Map();
