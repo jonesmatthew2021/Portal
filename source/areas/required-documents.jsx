@@ -30,31 +30,39 @@ function RequiredDocuments() {
       blurb: c.blurb,
       required: c.required,
       record: records[c.key] || null,
-      upload: (record) => (
-        <SingleDocumentUpload
-          category={c.category}
-          noun={c.noun}
-          eyebrow={c.title}
-          blurb={`${c.blurb} One is kept on the portal - the latest - ${
-            c.required
-              ? "and it is required at all times, so uploading a newer one replaces it in the same step."
-              : "so uploading a newer one replaces it in the same step."}`}
-          current={record}
-          onFiled={(rec) => {
-            setters[c.key](rec);
-            // The skills matrix carries the validity periods, which feed the
-            // crew matrix — they are what turns a certificate's issue date
-            // into the expiry the matrix carries — so replacing it holds the
-            // certificates against the new periods and brings the matrix up to
-            // what they now say. The compliance check reads it afresh on its
-            // own screen.
-            if (c.key === "skills") portal.runMatrixAuto({ validityMatrix: rec, origin: "spreadsheet" });
-          }}
-          logAction={c.logAction}
-          label={record ? `Replace the ${c.noun}` : `Upload the ${c.noun}`}
-          variant={record ? "quiet" : "solid"}
-        />
-      ),
+      upload: (record) => {
+        // The same landing whichever way the file arrives — uploaded from a
+        // machine or pointed at in the library.
+        const filed = (rec) => {
+          setters[c.key](rec);
+          // The skills matrix carries the validity periods, which feed the
+          // crew matrix — they are what turns a certificate's issue date
+          // into the expiry the matrix carries — so replacing it holds the
+          // certificates against the new periods and brings the matrix up to
+          // what they now say. The compliance check reads it afresh on its
+          // own screen.
+          if (c.key === "skills") portal.runMatrixAuto({ validityMatrix: rec, origin: "spreadsheet" });
+        };
+        return (
+          <span style={{ display: "inline-flex", gap: 8, flexWrap: "wrap" }}>
+            <SingleDocumentUpload
+              category={c.category}
+              noun={c.noun}
+              eyebrow={c.title}
+              blurb={`${c.blurb} One is kept on the portal - the latest - ${
+                c.required
+                  ? "and it is required at all times, so uploading a newer one replaces it in the same step."
+                  : "so uploading a newer one replaces it in the same step."}`}
+              current={record}
+              onFiled={filed}
+              logAction={c.logAction}
+              label={record ? `Replace the ${c.noun}` : `Upload the ${c.noun}`}
+              variant={record ? "quiet" : "solid"}
+            />
+            <ImportFromSharePoint category={c.category} noun={c.noun} onFiled={filed} logAction={c.logAction} />
+          </span>
+        );
+      },
     })),
     {
       key: "certificate-sheet",
@@ -64,10 +72,15 @@ function RequiredDocuments() {
       required: true,
       record: certSheet || null,
       upload: (record) => (
-        <UpdateSpreadsheet
-          label={record ? "Replace the spreadsheet" : "Upload the spreadsheet"}
-          variant={record ? "quiet" : "solid"}
-        />
+        <span style={{ display: "inline-flex", gap: 8, flexWrap: "wrap" }}>
+          <UpdateSpreadsheet
+            label={record ? "Replace the spreadsheet" : "Upload the spreadsheet"}
+            variant={record ? "quiet" : "solid"}
+          />
+          <ImportFromSharePoint category="certificate-sheet" noun="crew certificates spreadsheet"
+            onFiled={(rec) => portal.setCertSheet(rec)}
+            logAction="Filed the crew certificates spreadsheet from SharePoint" />
+        </span>
       ),
     },
   ];

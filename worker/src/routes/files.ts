@@ -40,7 +40,7 @@ function humanSize(bytes: number) {
 
 // Turn a row back into the shape the portal already renders for that section,
 // so the front end can drop it straight into its lists.
-function toRecord(row: Row) {
+export function toRecord(row: Row) {
   const common = {
     id: row.id,
     filename: row.filename,

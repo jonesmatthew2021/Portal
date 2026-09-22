@@ -2878,6 +2878,92 @@ function parseWorkbook(XLSX, buf, current) {
  * `onFiled` is handed the new record once it is down, so the caller can put it on
  * the page and act on it — filing a matrix is what sets the analysis going.
  */
+/* One of the office's workbooks, taken straight from the library.
+ *
+ * The office drops these loose in the certificate location. Until now the
+ * portal only ever got one two ways: a sync that happened to notice, or
+ * somebody downloading it to their own machine and uploading it back into the
+ * portal it was already sitting next to. This lists what the library holds
+ * that looks like the document and files the one chosen — nothing is moved,
+ * the portal points at where the office put it. */
+function ImportFromSharePoint({ category, noun, onFiled, logAction }) {
+  const { log } = usePortal();
+  const [open, setOpen] = useState(false);
+  const [found, setFound] = useState(null);   // null = not asked yet
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const look = async () => {
+    setOpen(true); setBusy(true); setErr(""); setFound(null);
+    try {
+      const r = await fetch("/api/import-single", { method: "POST",
+        headers: { "content-type": "application/json" }, body: JSON.stringify({ category }) });
+      const out = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(out.error || ("the library couldn't be read (" + r.status + ")"));
+      setFound(out.found || []);
+    } catch (e) { setErr(e.message || String(e)); setFound([]); }
+    setBusy(false);
+  };
+
+  const take = async (f) => {
+    setBusy(true); setErr("");
+    try {
+      const r = await fetch("/api/import-single", { method: "POST",
+        headers: { "content-type": "application/json" }, body: JSON.stringify({ category, key: f.key }) });
+      const out = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(out.error || ("it couldn't be filed (" + r.status + ")"));
+      onFiled(out.record, out.replaced || []);
+      log("Admin", logAction || ("Filed the " + noun + " from SharePoint"),
+        out.record.filename + (out.restored ? " — put back as it was" : "")
+        + ((out.replaced || []).length ? " · replaced " + out.replaced[0].filename : ""));
+      setOpen(false);
+    } catch (e) { setErr(e.message || String(e)); }
+    setBusy(false);
+  };
+
+  return (
+    <>
+      <button className="um-btn um-tab" onClick={look}
+        style={{ background: T.panel, color: T.text, border: `1px solid ${T.rule}`,
+          fontSize: 11, fontWeight: 700, padding: "9px 14px", borderRadius: 2, whiteSpace: "nowrap" }}>
+        Import from SharePoint
+      </button>
+
+      {open && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 80, background: "rgba(18,41,61,0.45)",
+          display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderTop: `4px solid ${T.accent}`,
+            borderRadius: 3, padding: 20, width: "100%", maxWidth: 560 }}>
+            <Eyebrow color={T.accent}>The {noun}, from SharePoint</Eyebrow>
+            {busy && !found && (
+              <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, marginTop: 10 }}>Looking in the library…</div>
+            )}
+            {found && found.length === 0 && !err && (
+              <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, marginTop: 10, lineHeight: 1.6 }}>
+                Nothing in the library looks like a {noun}.
+              </div>
+            )}
+            {found && found.length > 0 && found.map((f) => (
+              <div key={f.key} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
+                padding: "9px 0", borderTop: `1px solid ${T.rule}`, marginTop: 6 }}>
+                <span style={{ fontFamily: T.mono, fontSize: 12, color: T.text, flex: "1 1 260px", wordBreak: "break-word" }}>
+                  {f.filename}
+                  {f.wasOnFile && <span style={{ color: T.muted }}> · was on file before</span>}
+                </span>
+                <Button variant="solid" disabled={busy} onClick={() => take(f)}>File this one</Button>
+              </div>
+            ))}
+            {err && <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.bRed, marginTop: 10 }}>{err}</div>}
+            <div style={{ marginTop: 14 }}>
+              <Button variant="quiet" onClick={() => setOpen(false)}>Close</Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function SingleDocumentUpload({
   category,
   noun,

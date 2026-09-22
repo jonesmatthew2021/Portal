@@ -19,6 +19,7 @@ import migrate from "./routes/migrate.js";
 import migrateCerts from "./routes/migrate-certs.js";
 import readOne from "./routes/read-one.js";
 import clearR2 from "./routes/clear-r2.js";
+import importSingle from "./routes/import-single.js";
 
 /**
  * The portal's front door on Cloudflare.
@@ -89,6 +90,7 @@ export default {
       if (path === "/api/migrate-files") return await migrate(req);
       if (path === "/api/migrate-certs-opms") return await migrateCerts(req, user!);
       if (path === "/api/clear-r2") return await clearR2(req);
+      if (path === "/api/import-single") return await importSingle(req, user?.name || "Import from SharePoint");
 
       const runMatch = /^\/api\/run\/([a-z-]+)$/.exec(path);
       if (runMatch) return await run(req, runMatch[1]);
