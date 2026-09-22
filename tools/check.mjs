@@ -118,6 +118,31 @@ run("Every area is in the portal", () => {
 });
 
 /* ---------------------------------------------------------------- 5 */
+run("Every rank has a heading to sit under", () => {
+  /* The rank pickers offer the vessel's eight ranks and Crew Details groups
+     the crew under RANK_GROUPS. The two are separate lists, so a rank can be
+     offered that no heading matches — which is what happened to JUNIOR
+     ENGINEER: eight men picked it and landed under "Other". */
+  const jsx = portalJsx();
+  const cut = (a, b) => { const i = jsx.indexOf(a); return jsx.slice(i, jsx.indexOf(b, i) + b.length); };
+  const { RANK_GROUPS, ROSTER_RANKS, rankGroupAt } = new Function([
+    cut("const RANK_GROUPS = [", "\n];"),
+    cut("const ROSTER_RANKS = [", "];"),
+    cut("const rankGroupAt =", "\n};"),
+    "return { RANK_GROUPS, ROSTER_RANKS, rankGroupAt };",
+  ].join("\n"))();
+
+  const homeless = ROSTER_RANKS.filter((r) => rankGroupAt(r) >= RANK_GROUPS.length);
+  if (homeless.length) {
+    throw new Error(
+      homeless.length + " rank(s) fall through to \"Other\": " + homeless.join(", ") +
+      "\n      Add them to RANK_GROUPS, or the crew who hold them have no heading.",
+    );
+  }
+  return ROSTER_RANKS.length + " rank(s), each under a heading";
+});
+
+/* ---------------------------------------------------------------- 6 */
 run("The worker's types are clean", () => {
   try {
     execFileSync("npx", ["tsc", "--noEmit"], {
@@ -133,7 +158,7 @@ run("The worker's types are clean", () => {
   return "no type errors";
 });
 
-/* ---------------------------------------------------------------- 6 */
+/* ---------------------------------------------------------------- 7 */
 const rulesTest = join(ROOT, "worker", "tests", "rules.test.ts");
 if (!existsSync(rulesTest)) {
   skip("The worker's rules answer correctly", "no rule tests written yet");

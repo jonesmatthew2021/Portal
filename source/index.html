@@ -4937,7 +4937,11 @@ const RANK_GROUPS = [
   ["Second Officers", /second (officer|mate)/i],
   ["Chief Engineer", /chief engineer/i],
   ["First Engineer", /first engineer/i],
-  ["Assistant Engineers", /assistant engineer/i],
+  /* One berth, two names for it. The office's matrix says "Assistant
+     Engineer" and the vessel's own list of ranks says "JUNIOR ENGINEER", and
+     they are the same man — so they belong under one heading rather than the
+     junior engineers falling through to "Other", which is what they did. */
+  ["Junior Engineers", /junior engineer|assistant engineer/i],
   ["GPH", /\bgph\b|general purpose/i],
   ["Chefs", /cook|chef|steward/i],
 ];
