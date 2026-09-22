@@ -292,6 +292,14 @@ function AccessGrantsPage() {
           </>
         )}
       </div>
+
+      {/* Start again, at the very bottom of the last page on the tab: the one
+          thing on the portal that cannot be undone, as far from anything
+          anybody presses in a hurry as it can be put. */}
+      <div style={{ background: T.panel, border: `1px solid ${T.rule}`,
+        borderLeft: `4px solid ${T.bRed}`, borderRadius: 2, padding: "13px 15px", marginTop: 18 }}>
+        <StartAgain />
+      </div>
     </div>
   );
 }

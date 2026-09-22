@@ -85,46 +85,14 @@ function RequiredDocuments() {
     },
   ];
 
-  const missing = docs.filter((d) => d.required && !d.record);
 
   return (
     <div>
-      {/* The one button on this page: every certificate on file is read, the
-          dates worked out, written into the training matrix spreadsheet, and
-          the crew matrix brought to the same figures. */}
-      <div style={{ background: T.panel, border: `1px solid ${T.rule}`,
-        borderLeft: `4px solid ${T.accent}`, borderRadius: 2, padding: "13px 15px",
-        marginBottom: 14, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
-        <div style={{ flex: "1 1 320px" }}>
-          <Eyebrow color={T.accent}>Update the spreadsheet</Eyebrow>
-          <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.muted, lineHeight: 1.6, marginTop: 6 }}>
-            Reads every certificate on file, writes the dates into the training matrix spreadsheet,
-            and brings the crew matrix to the same figures.
-          </div>
-        </div>
-        <UpdateTrainingMatrixInPlace label="Update the spreadsheet" />
-        <StartAgain />
-      </div>
-
-      <div style={{ background: T.panel, border: `1px solid ${T.rule}`,
-        borderLeft: `4px solid ${missing.length ? T.bRed : T.green}`, borderRadius: 2,
-        padding: "15px 17px", marginBottom: 18 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
-          <Eyebrow color={missing.length ? T.bRed : T.accent}>Required documents for upload</Eyebrow>
-          <Chip fg={missing.length ? T.bRed : T.bGreen} bg={missing.length ? T.bRedBg : T.bGreenBg}>
-            {missing.length
-              ? `${missing.length} of ${docs.length} not on file`
-              : `all ${docs.length} on file`}
-          </Chip>
-        </div>
-        <div style={{ fontFamily: T.body, fontSize: 14, color: T.text, lineHeight: 1.7, marginTop: 10 }}>
-          Three spreadsheets and the crew's certificates. The portal keeps one of each spreadsheet —
-          the latest — and every certification screen on the tab reads from what is filed here, so
-          anything missing is missing from all of them.
-          {missing.length > 0 && <> Still to come: {missing.map((m) => `the ${m.noun}`).join(", ")}.</>}
-        </div>
-      </div>
-
+      {/* Straight to the documents. The spreadsheet is brought up to date by
+          Update documentation at the top of every page, which does this and
+          the rest of the round; Start again is at the foot of Access Grants,
+          with the other things nobody should press in a hurry. Each card
+          carries its own state, so a summary above them said it twice. */}
       <div className="um-reqdocs">
         {docs.map((d) => (
           <div key={d.key} style={{ background: T.panel, border: `1px solid ${T.rule}`,
