@@ -42,9 +42,17 @@ function CrewDetails() {
    * so - that is worth seeing rather than hiding, because it means the portal
    * is asking nothing of him.
    */
-  /* The positions the office uses, off the matrix, for the rank pickers. */
-  const positions = useMemo(() => Array.from(new Set((QUALS.rows || [])
-    .map((r) => String(r[1] || "").trim()).filter(Boolean))).sort(), [QUALS]);
+  /* The positions to pick from: the ones the office uses on the matrix, and
+     the ones already set against men on the register.
+
+     The matrix on its own was not enough. A portal with no crew matrix filed
+     yet had nothing in the list at all, so every man read "No rank" and there
+     was no way to give him one - and a rank set from the certificates page
+     could not even be shown back here. */
+  const positions = useMemo(() => Array.from(new Set([
+    ...(QUALS.rows || []).map((r) => String(r[1] || "").trim()),
+    ...(people || []).map((p) => String(p.rank || "").trim()),
+  ].filter(Boolean))).sort(), [QUALS, people]);
 
   const groups = useMemo(() => {
     const jobOf = new Map();

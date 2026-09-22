@@ -18099,14 +18099,19 @@ function CoolibahPortal({ role, onSignOut }) {
     const same = (n) => letters(n) === letters(was);
     const done = { matrix: 0, crewList: 0, swings: 0, lists: 0, marks: 0 };
 
-    setQuals((q) => ({
-      ...q,
-      rows: (q.rows || []).map((r) => {
+    /* The matrix as the portal reads it, not the raw slice the store holds.
+       A portal that has never had a crew matrix filed holds nothing there and
+       reads the built-in one instead - and writing the slice back would have
+       put an empty matrix over the top of it and lost every row. Written only
+       where a row actually changed, for the same reason. */
+    {
+      const rows = (quals.rows || []).map((r) => {
         if (!same(r[0])) return r;
         done.matrix++;
         return [now, r[1], r[2], r[3]];
-      }),
-    }));
+      });
+      if (done.matrix) setQuals({ ...quals, rows });
+    }
 
     setPeople((list) => (list || []).map((p) => {
       if (!same(p.name)) return p;
@@ -18207,14 +18212,16 @@ function CoolibahPortal({ role, onSignOut }) {
       || ((people || []).find((p) => same(p.name)) || {}).rank || "";
     if (String(was) === job) return { ok: false };
 
-    setQuals((q) => ({
-      ...q,
-      rows: (q.rows || []).map((r) => {
+    // The matrix as the portal reads it, and written back only where a row
+    // changed - see renameCrew for why the raw slice is no good here.
+    {
+      const rows = (quals.rows || []).map((r) => {
         if (!same(r[0]) || String(r[1] || "") === job) return r;
         done.matrix++;
         return [r[0], job, r[2], r[3]];
-      }),
-    }));
+      });
+      if (done.matrix) setQuals({ ...quals, rows });
+    }
 
     setPeople((list) => (list || []).map((p) => {
       if (!same(p.name) || (p.rank || "") === job) return p;
