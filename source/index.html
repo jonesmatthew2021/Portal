@@ -12920,8 +12920,9 @@ function RosterNewPerson({ names, positions, spine, onRoster, onAdd, onClose }) 
  * is theirs. Nothing here happens on its own.
  */
 function SyncPeople({ found, onClose }) {
-  const { admin, quals: QUALS, rosterPlan, removeCrew, writeCrewToWorkbooks,
+  const { admin, quals: QUALS, rosterPlan, removeCrew, writeCrewToWorkbooks, people,
     folderNames, setFolderNames, setQuals, setRosterPlan, skillsRequirements, log } = usePortal();
+  const reg = useMemo(() => crewRegister(people), [people]);
   const [gone, setGone] = useState("");
   // What the portal proposes for each folder it does not know, as it stands
   // on the screen: filled in first, edited where it is wrong, confirmed in one
@@ -12976,7 +12977,25 @@ function SyncPeople({ found, onClose }) {
   const sameName = (a, b) =>
     String(a || "").toUpperCase().replace(/[^A-Z]/g, "") === String(b || "").toUpperCase().replace(/[^A-Z]/g, "");
 
-  const onPortal = QUALS.rows.map((r) => r[0]);
+  /* Who is on the portal: everybody on the crew register, and anybody the
+     matrix still names who has not reached the register yet.
+
+     It used to be the matrix alone. The matrix is what the office sends and
+     it can be empty - it was, the morning this was found - and with it empty
+     every folder in SharePoint read as a stranger, including forty-three men
+     who had just been given a rank and a swing on Crew Details. Crew Details
+     is where the crew are named now; this reads it. */
+  const onPortal = useMemo(() => {
+    const seen = new Set();
+    const out = [];
+    [...(people || []).map((p) => p.name), ...QUALS.rows.map((r) => r[0])].forEach((n) => {
+      const name = reg.nameOf(n) || String(n || "").trim();
+      if (!name || seen.has(name)) return;
+      seen.add(name);
+      out.push(name);
+    });
+    return out;
+  }, [people, QUALS, reg]);
 
   /* Which folder belongs to whom, worked out once.
    *
@@ -13001,7 +13020,15 @@ function SyncPeople({ found, onClose }) {
     const list = found || [];
     const claim = (folder, who) => { out.set(folder, who); taken.add(who); };
 
+    /* 0. what the register already knows. A folder name or the name worked
+          out from it that the register answers to - by name or by any spelling
+          listed against a man - is that man, and nothing further is guessed. */
     list.forEach((p) => {
+      const who = reg.nameOf(p.name) || reg.nameOf(p.folder);
+      if (who && !taken.has(who)) claim(p.folder, who);
+    });
+    list.forEach((p) => {
+      if (out.has(p.folder)) return;
       const said = (folderNames || {})[p.folder];
       if (said && onPortal.includes(said) && !taken.has(said)) claim(p.folder, said);
     });
@@ -13018,7 +13045,7 @@ function SyncPeople({ found, onClose }) {
       if (hits.length === 1) claim(p.folder, hits[0]);
     });
     return out;
-  }, [found, QUALS, folderNames]);
+  }, [found, onPortal, folderNames, reg]);
 
   const spokenFor = new Set(pairing.values());
 
