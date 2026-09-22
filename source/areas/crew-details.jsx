@@ -175,6 +175,16 @@ function CrewDetails() {
   const setSwing = (id, letter) => setPeople((list) => (list || []).map((p) => (p.id === id
     ? { ...p, crew: letter } : p)));
 
+  /* The man's own particulars, which are his and not a document's.
+   *
+   * His MSIC expiry already comes off the card itself, read as VS-01 — but the
+   * number printed on it is nowhere, and it is what gets asked for at the gate
+   * and on every port form. Date of birth the same: every crew list Portways
+   * and the ports ask for wants it, and it was being typed from memory each
+   * time. Held against the person, so it is written once. */
+  const setDetail = (id, field, value) => setPeople((list) => (list || []).map((p) => (p.id === id
+    ? { ...p, [field]: value } : p)));
+
   /* Off the register, and nothing else.
    *
    * His certificates stay in SharePoint, his row stays on the matrix and his
@@ -283,6 +293,25 @@ function CrewDetails() {
                 </>
               )}
             </div>
+            {/* His MSIC number and his date of birth. Typed straight in — they
+                are short, they change almost never, and saving on every
+                keystroke is what the rest of the portal does. */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
+              <span style={{ fontFamily: T.mono, fontSize: 10, color: T.muted,
+                textTransform: "uppercase", letterSpacing: "0.08em", flex: "0 0 74px" }}>MSIC</span>
+              <input value={p.msic || ""} placeholder="Card number"
+                onChange={(e) => setDetail(p.id, "msic", e.target.value)}
+                style={{ flex: "0 1 170px", fontFamily: T.mono, fontSize: 12.5, padding: "5px 8px",
+                  borderRadius: 2, border: "1px solid " + T.rule, background: T.raised, color: T.text }} />
+              <span style={{ fontFamily: T.mono, fontSize: 10, color: T.muted,
+                textTransform: "uppercase", letterSpacing: "0.08em", marginLeft: 6 }}>Born</span>
+              <input className="um-in" type="date" value={p.dob || ""}
+                title="Date of birth"
+                onChange={(e) => setDetail(p.id, "dob", e.target.value)}
+                style={{ flex: "0 1 165px", fontFamily: T.mono, fontSize: 12.5, padding: "4px 8px",
+                  borderRadius: 2, border: "1px solid " + T.rule, background: T.raised, color: T.text }} />
+            </div>
+
             {p.certFolder && (
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
                 <span style={{ fontFamily: T.mono, fontSize: 10, color: T.muted,
