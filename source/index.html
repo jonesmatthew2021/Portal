@@ -6743,22 +6743,6 @@ function UploadCertificates() {
 
   return (
     <div>
-      <div style={{ fontFamily: T.body, fontSize: 14, color: T.muted, lineHeight: 1.7, marginBottom: 14 }}>
-        Certificates are kept in the company SharePoint's <b>OPMS Documents</b> folder, in each crew
-        member's own <b>Name - OPMS</b> folder. Drop the crew folders straight in — <b>Brenton - OPMS</b> and the rest,
-        or the one folder holding all of them — and each folder is matched to its person on the matrix
-        and filed under them. Anything the roster doesn't recognise is set once, for the whole folder.
-        If a certificate is already in that person's folder, nothing is written until you have said
-        what to do about it.
-      </div>
-      <div style={{ fontFamily: T.body, fontSize: 14, color: T.muted, lineHeight: 1.7, marginBottom: 14 }}>
-        Once they are filed they are read, and each one is moved into the folder of the person whose
-        name is printed on it — so a scan called <b>Scan_0043.pdf</b> ends up with its owner rather than
-        wherever it was dropped. The crew matrix is then brought up to what the certificates say,
-        without anyone having to run anything — and the training matrix spreadsheet catches up when
-        Update the spreadsheet at the top of the page is pressed.
-      </div>
-
       {/* Who the next files belong to */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 12 }}>
         <div style={{ flex: "1 1 260px" }}>
@@ -17801,10 +17785,6 @@ function RequiredDocuments() {
         gap: 14, flexWrap: "wrap", marginBottom: 14 }}>
         <div style={{ flex: "1 1 320px" }}>
           <Eyebrow color={T.accent}>Crew certificates</Eyebrow>
-          <div style={{ fontFamily: T.body, fontSize: 14, color: T.muted, lineHeight: 1.7, marginTop: 8 }}>
-            The certificates themselves, filed one folder per crew member. Unlike the spreadsheets
-            above, the portal holds as many of these as you give it.
-          </div>
         </div>
         <UpdateTableButton />
       </div>
