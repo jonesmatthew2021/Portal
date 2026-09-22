@@ -5843,6 +5843,59 @@ const certFolder = (person) =>
     .toLowerCase()
     .slice(0, 80) || "unnamed";
 
+/**
+ * Which folder a man's certificates go in, as Crew Details says - the
+ * browser's half of the answer the server gives when a file is sent.
+ *
+ * Two places it can come from, in this order: the folder written against him
+ * on Crew Details, and the folder his certificates are already in, read off
+ * the certificates themselves. The commonest one wins there, because a man
+ * whose papers are spread over two folders has one real folder and one
+ * accident, and the accident is not where the next one should go.
+ *
+ * Nothing is ever worked out from his name. A name makes a folder that the
+ * library does not have, and the portal does not make folders - the folders
+ * are the office's. Where neither answers, this says nothing is known, and
+ * the page asks for it to be set on Crew Details rather than inventing one.
+ */
+function useCertHome() {
+  const { people, certificates } = usePortal();
+  return useMemo(() => {
+    const lastPart = (path) => {
+      const cut = String(path || "").lastIndexOf("/");
+      return cut > 0 ? path.slice(cut + 1) : String(path || "");
+    };
+
+    const said = new Map();
+    (people || []).forEach((p) => {
+      const k = nameLetters(p.name);
+      if (k && p.certFolder) said.set(k, { where: lastPart(p.certFolder), full: p.certFolder, set: true });
+    });
+
+    const tally = new Map();
+    (certificates || []).forEach((c) => {
+      const cut = String(c.path || "").lastIndexOf("/");
+      if (cut < 1) return;
+      const k = nameLetters(c.person);
+      if (!k) return;
+      if (!tally.has(k)) tally.set(k, new Map());
+      const seen = tally.get(k);
+      const at = c.path.slice(0, cut);
+      seen.set(at, (seen.get(at) || 0) + 1);
+    });
+
+    return (person) => {
+      const k = nameLetters(person);
+      if (!k) return null;
+      if (said.has(k)) return said.get(k);
+      const seen = tally.get(k);
+      if (!seen || !seen.size) return null;
+      const best = [...seen.entries()].sort((a, b) => b[1] - a[1])[0][0];
+      return { where: lastPart(best), full: best, set: false };
+    };
+  }, [people, certificates]);
+}
+
 // SHA-256 of the bytes, so a certificate already filed under a different name is
 // spotted on the page before anything is uploaded. Where the browser won't do it,
 // the check the server does on the way in still catches it.
@@ -6029,11 +6082,15 @@ function UploadCertificates() {
     quals: QUALS, setQuals, certificates, addCertificates, removeCertificate,
     updateCertificate, setMatrixUpdated, log, role, certDates, validityPeriods,
     matrixAuto: auto, runMatrixAuto, clearMatrixAuto,
+    people, renameCrew, setCrewRank,
   } = usePortal();
   // The same three columns the certification screens carry, against each filed
   // scan: the issue date read off the certificate, the expiry, and how long the
   // item stays valid off the skills matrix.
   const validityFor = useValidityLookup();
+  // Which folder each man's certificates go in, as Crew Details says. Nothing
+  // is worked out from a name here: a file with no folder to go to is not sent.
+  const certHomeOf = useCertHome();
   // A scan filed before codes were recorded still names its code in the file
   // name — "DWYER_ Matthew - QL-18 Provide First Aid" — so where the record
   // carries none, the name is held against the matrix's own codes.
@@ -6127,14 +6184,46 @@ function UploadCertificates() {
     return { position: row[1], items };
   };
 
-  const names = useMemo(
-    () => QUALS.rows.map((r) => r[0]).sort((a, b) => a.localeCompare(b)),
-    [QUALS],
-  );
-  const positions = useMemo(
-    () => Object.fromEntries(QUALS.rows.map((r) => [r[0], r[1]])),
-    [QUALS],
-  );
+  /* Who there is to file a certificate against: the crew register, off Crew
+   * Details, and nothing else if it can be helped.
+   *
+   * This list used to be the crew matrix's rows. The matrix is the office's
+   * spreadsheet and it is not the register - somebody taken on last week has
+   * an entry on Crew Details and no row on the matrix yet, and he was simply
+   * not on this page to pick. So the register comes first. A matrix row the
+   * register has never heard of is added after it rather than dropped,
+   * because a name the portal cannot place still has certificates and they
+   * have to be filable; Crew Details is where it gets placed.
+   */
+  const names = useMemo(() => {
+    const out = [];
+    const seen = new Set();
+    const add = (n) => {
+      const name = String(n || "").trim();
+      const k = nameLetters(name);
+      if (!name || !k || seen.has(k)) return;
+      seen.add(k);
+      out.push(name);
+    };
+    (people || []).forEach((p) => add(p.name));
+    QUALS.rows.forEach((r) => add(r[0]));
+    return out.sort((a, b) => a.localeCompare(b));
+  }, [people, QUALS]);
+
+  /* What each of them is employed as. The rank set against him on Crew
+   * Details is his own word on it and wins; the matrix's is the office's and
+   * is what is used where nobody has said otherwise. Read through the
+   * register, so a matrix row spelled another way still finds its man. */
+  const positions = useMemo(() => {
+    const known = asKnownPerson(people);
+    const out = {};
+    QUALS.rows.forEach((r) => {
+      const who = known(r[0]);
+      if (!(who in out) && r[1]) out[who] = r[1];
+    });
+    (people || []).forEach((p) => { if (p.rank) out[p.name] = p.rank; });
+    return out;
+  }, [people, QUALS]);
 
   const [person, setPerson] = useState("");   // who files are filed against by default
   const [queue, setQueue] = useState([]);     // staged, before anything is sent
@@ -6549,55 +6638,65 @@ function UploadCertificates() {
      page that reads it (this list's headings, the swing roster's groups, the
      shift checks) follows on its own. The choices are the positions the
      matrix already carries, with room to type one it doesn't. */
-  /* Fixing somebody's name in place. A typo on the matrix follows a person
-     everywhere, so saving rewrites the matrix row, has the server relabel
-     every record filed under the old name, and reloads so every page reads
-     the corrected books. Swing lists are uploaded documents and keep their
-     own spelling; the roster's spelling is edited on the Roster page. */
+  /* Fixing somebody's name in place, and having it land everywhere at once.
+   *
+   * renameCrew is the portal's own name change and it does the lot: the matrix
+   * row, the crew register - keeping the old spelling as one of his, so
+   * anything still calling him that reaches him - the roster, the swing lists,
+   * the notes filed against him, and his certificates here. The server is told
+   * separately because the records it holds carry the name too. No file moves:
+   * they are in the office's folders and they stay in them.
+   *
+   * This used to patch the matrix row on its own and then reload the page two
+   * and a half seconds later, which is how Crew Details and the roster came to
+   * be left saying the old name. */
   const [nameEdit, setNameEdit] = useState(null); // { person, value, busy }
   const saveName = async (person) => {
     const value = canonicalName(((nameEdit && nameEdit.value) || "").trim());
     if (!value || value === person) { setNameEdit(null); return; }
     setNameEdit((ed) => ({ ...ed, busy: true }));
+    renameCrew(person, value);
     try {
       await fetch("/api/rename-person", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ from: person, to: value }) });
     } catch (e) {}
-    const i = QUALS.rows.findIndex(
-      (row) => String(row[0]).trim().toUpperCase() === String(person).trim().toUpperCase(),
-    );
-    if (i >= 0) {
-      const rows = QUALS.rows.map((row) => [row[0], row[1], row[2], (row[3] || []).slice()]);
-      rows[i][0] = value;
-      setQuals({ cols: QUALS.cols, rows });
-    }
-    log("Crew Matrix", `${person} renamed`, `${person} → ${value}, records included`);
-    // The matrix save is debounced; give it a breath, then read everything back.
-    setTimeout(() => window.location.reload(), 2500);
+    setNameEdit(null);
   };
+  /* The same for the rank: set once here, written to the matrix row, to his
+     entry on Crew Details and to the roster's rows together, so the headings
+     on this list, the register and the manning all read it at once. The
+     choices are every position the matrix and the register already carry,
+     with room to type one neither of them has. */
   const [rankEdit, setRankEdit] = useState(null); // { person, value }
   const allPositions = useMemo(
-    () => Array.from(new Set(QUALS.rows.map((r) => String(r[1] || "").trim()).filter(Boolean))),
-    [QUALS],
+    () => Array.from(new Set([
+      ...QUALS.rows.map((r) => String(r[1] || "").trim()),
+      ...Object.values(positions).map((x) => String(x || "").trim()),
+    ].filter(Boolean))).sort(),
+    [QUALS, positions],
   );
   const saveRank = (person) => {
     const value = ((rankEdit && rankEdit.value) || "").trim();
     if (!value) return;
-    const r = QUALS.rows.findIndex(
-      (row) => String(row[0]).trim().toUpperCase() === String(person).trim().toUpperCase(),
-    );
-    if (r < 0) { setRankEdit(null); return; }
-    const before = QUALS.rows[r][1] || "—";
-    if (before !== value) {
-      const rows = QUALS.rows.map((row) => [row[0], row[1], row[2], (row[3] || []).slice()]);
-      rows[r][1] = value;
-      setQuals({ cols: QUALS.cols, rows });
-      log("Crew Matrix", `${person}'s rank changed`, `${before} → ${value}`);
-    }
+    setCrewRank(person, value);
     setRankEdit(null);
   };
 
   const ready = queue.filter((x) => x.person && x.person !== OTHER).length;
+
+  /* Who on the list the portal has no folder for. Said before the button is
+     pressed rather than after: a folder drop runs to hundreds of files, and
+     finding out one failure at a time at the end of it is no use to anybody.
+     Nothing is made for them - somebody points at the folder on Crew Details
+     and they go in it. */
+  const homeless = useMemo(() => {
+    const out = new Set();
+    queue.forEach((x) => {
+      if (!x.person || x.person === OTHER) return;
+      if (!certHomeOf(x.person)) out.add(x.person);
+    });
+    return [...out].sort((a, b) => a.localeCompare(b));
+  }, [queue, certHomeOf]);
 
   // ---- the staging list, gathered back into the folders it came from ---------
   // A folder drop puts hundreds of files on this list. Shown one after another
@@ -6759,7 +6858,8 @@ function UploadCertificates() {
 
                 {g.items.map((item) => {
                   const clash = clashFor(item);
-                  const folder = item.person && item.person !== OTHER ? certFolder(item.person) : null;
+                  const hasPerson = item.person && item.person !== OTHER;
+                  const home = hasPerson ? certHomeOf(item.person) : null;
                   return (
                     <div key={item.key} style={{ background: T.panel, border: `1px solid ${T.rule}`,
                       borderLeft: `3px solid ${clash ? T.bOrange : item.person ? T.teal : T.rule}`,
@@ -6773,8 +6873,16 @@ function UploadCertificates() {
                           </div>
                           <div style={{ fontFamily: T.mono, fontSize: 11, color: T.muted, marginTop: 3 }}>
                             {humanSize(item.file.size)}
-                            {folder ? ` · filed for ${item.person}` : " · no crew member chosen"}
+                            {!hasPerson ? " · no crew member chosen"
+                              : home ? ` · ${item.person} · ${home.where}`
+                              : ` · ${item.person} · no folder`}
                           </div>
+                          {hasPerson && !home && (
+                            <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.bRed, marginTop: 5, lineHeight: 1.5 }}>
+                              The portal has no folder for {item.person} and won't make one.
+                              Set his folder on Crew Details.
+                            </div>
+                          )}
                           {clash && (
                             <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.bOrange, marginTop: 5, lineHeight: 1.5 }}>
                               {clash.kind === "content"
@@ -6845,6 +6953,12 @@ function UploadCertificates() {
               </span>
             )}
           </div>
+          {homeless.length > 0 && (
+            <div style={{ fontFamily: T.body, fontSize: 13, color: T.bRed, marginTop: 10, lineHeight: 1.6 }}>
+              No folder on Crew Details for {homeless.join(", ")}. Nothing of theirs will be filed
+              until one is set, and the portal won't make one.
+            </div>
+          )}
           {/* Files left out of the batch — worth saying, but nothing failed */}
           {err && <div style={{ fontFamily: T.body, fontSize: 13, color: T.bOrange, marginTop: 10 }}>{err}</div>}
         </div>
@@ -7063,11 +7177,13 @@ function UploadCertificates() {
               })()}
               <span style={{ fontFamily: T.mono, fontSize: 11, color: T.muted, letterSpacing: 0, textTransform: "none" }}>
                 {(() => {
-                  // Where these are actually filed — read off the real path
-                  // any item in the folder carries, not guessed at.
-                  const real = f.items[0] && f.items[0].path;
-                  const dir = real ? real.split("/").slice(0, -1).join("/") : ('certification/' + f.folder);
-                  return dir + '/ · ' + f.items.length;
+                  /* Where these are actually filed — read off the real path an
+                     item in the folder carries. Never worked out from his name:
+                     a name makes a folder the library hasn't got, and a folder
+                     the library hasn't got is not where anything is. */
+                  const real = f.items.find((c) => c.path);
+                  const dir = real ? real.path.split("/").slice(0, -1).join("/") + "/" : "no folder";
+                  return dir + ' · ' + f.items.length;
                 })()}
               </span>
             </button>
@@ -7080,6 +7196,13 @@ function UploadCertificates() {
                   padding: "8px 0 2px" }}>
                   <span style={{ fontFamily: T.mono, fontSize: 11, color: T.muted }}>
                     Rank · <span style={{ color: T.text }}>{positions[f.person] || "not on the matrix"}</span>
+                  </span>
+                  {/* The folder the next one goes into: the one set against him
+                      on Crew Details, or the one his papers are already in. */}
+                  <span style={{ fontFamily: T.mono, fontSize: 11, color: T.muted }}>
+                    Folder · <span style={{ color: certHomeOf(f.person) ? T.text : T.bRed }}>
+                      {(certHomeOf(f.person) || {}).where || "none set on Crew Details"}
+                    </span>
                   </span>
                   {positions[f.person] !== undefined && (
                     <button className="um-btn"
@@ -17962,9 +18085,11 @@ function CoolibahPortal({ role, onSignOut }) {
    * slice as changed - written straight into the store, the new name would go
    * from the screen and the old one be back on the next load.
    *
-   * Certificates are deliberately left alone. Theirs is the server's copy and
-   * the next poll would only say the old name again; moving the folder they
-   * sit in is what puts them right, and that runs alongside this.
+   * His certificates come with him. The files themselves do not move - they
+   * are in the office's folders and they stay there - but the name on the page
+   * changes with everything else, and the spelling he is leaving behind is
+   * kept as one of his on the register, so the next poll reads the server's
+   * copy back as him rather than as a stranger.
    */
   const renameCrew = (from, to) => {
     const was = String(from || "").trim();
@@ -17986,7 +18111,10 @@ function CoolibahPortal({ role, onSignOut }) {
     setPeople((list) => (list || []).map((p) => {
       if (!same(p.name)) return p;
       done.crewList++;
-      return { ...p, name: now };
+      /* The spelling he is leaving behind becomes one of his. A spreadsheet, a
+         folder or a certificate filed under it is still calling him that, and
+         the register is the thing that stops that mattering. */
+      return { ...p, name: now, aliases: [...new Set([...(p.aliases || []), p.name])] };
     }));
 
     setRosterPlan((plan) => {
@@ -18035,10 +18163,83 @@ function CoolibahPortal({ role, onSignOut }) {
     setOpmsMarks(rekey(opmsMarks));
     setFilledFromCert(rekey(filledFromCert));
 
+    /* His certificates, on the page, now. The server's copy still carries the
+       old spelling and the relabel runs alongside this - but the register
+       answers to that spelling as his from here on, so the next poll reads it
+       back as him either way. Written here as well so the certificate list
+       says the new name the moment the button is pressed. */
+    setStore((st) => ({
+      ...st,
+      certificates: (st.certificates || []).map((c) => (same(c.person) ? { ...c, person: now } : c)),
+    }));
+
     log("Admin", was + " is " + now,
       [done.matrix ? "the matrix" : null, done.crewList ? "the crew list" : null,
         done.swings ? done.swings + " roster rows" : null].filter(Boolean).join(" · ")
       || "nothing was holding the old name");
+    return { ok: true, ...done };
+  };
+
+  /**
+   * Somebody's rank, changed once and landing everywhere.
+   *
+   * A rank is written down in three places and they used to be set one at a
+   * time: the row the office sends on the crew matrix, the man's own entry on
+   * Crew Details, and the rows the roster is built from. Changed on one page
+   * only, the other two went on saying what they said before - so the
+   * certificate list called him a Master and the roster still had him an IR.
+   *
+   * All three are set together here, through the portal's own setters, which
+   * is what has every page holding his details read the new rank at once
+   * rather than after a reload. The department follows the rank, because it
+   * has only ever been worked out from it.
+   */
+  const setCrewRank = (name, rank) => {
+    const who = String(name || "").trim();
+    const job = String(rank || "").trim();
+    if (!who) return { ok: false };
+    const letters = (n) => String(n || "").toUpperCase().replace(/[^A-Z]/g, "");
+    const same = (n) => letters(n) === letters(who);
+    const done = { matrix: 0, crewList: 0, swings: 0 };
+
+    // What it was, read before anything is set, so the log says so plainly.
+    const was = ((quals.rows || []).find((r) => same(r[0])) || [])[1]
+      || ((people || []).find((p) => same(p.name)) || {}).rank || "";
+    if (String(was) === job) return { ok: false };
+
+    setQuals((q) => ({
+      ...q,
+      rows: (q.rows || []).map((r) => {
+        if (!same(r[0]) || String(r[1] || "") === job) return r;
+        done.matrix++;
+        return [r[0], job, r[2], r[3]];
+      }),
+    }));
+
+    setPeople((list) => (list || []).map((p) => {
+      if (!same(p.name) || (p.rank || "") === job) return p;
+      done.crewList++;
+      return { ...p, rank: job, dept: job ? deptForRank(job) : p.dept };
+    }));
+
+    setRosterPlan((plan) => {
+      if (!plan) return plan;
+      let hit = 0;
+      const rows = (plan.rows || []).map((r) => {
+        if (!same(r.name) || String(r.rank || "") === job) return r;
+        hit++;
+        return { ...r, rank: job };
+      });
+      done.swings = hit;
+      return hit ? { ...plan, rows, edited: true, updatedAt: todayISO() } : plan;
+    });
+
+    log("Admin", who + " is " + (job || "on no rank"),
+      [was ? "was " + was : null,
+        done.matrix ? "the matrix" : null,
+        done.crewList ? "the register" : null,
+        done.swings ? done.swings + " roster rows" : null].filter(Boolean).join(" · ")
+      || "nothing was holding a rank for him");
     return { ok: true, ...done };
   };
 
@@ -18130,7 +18331,7 @@ function CoolibahPortal({ role, onSignOut }) {
     return { ok: true, gone };
   };
 
-  const ctx = { role, admin, session: SESSION, removeCrew, renameCrew, people, setPeople,
+  const ctx = { role, admin, session: SESSION, removeCrew, renameCrew, setCrewRank, people, setPeople,
     notPeople, setNotPeople, certRoot, setCertRoot, writeCrewToWorkbooks, lastDocUpdate, setLastDocUpdate, folderNames, setFolderNames, filledFromCert, setFilledFromCert, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
 
   return (

@@ -434,6 +434,14 @@ export async function liveSingleFileRow(category: string) {
   return rows[0] || null;
 }
 
+/** Nowhere to put a certificate back. Thrown rather than a folder being made
+ *  for it - the folders are the office's, and one is set on Crew Details. */
+export class NoFolderForRestore extends Error {
+  constructor(readonly person: string) {
+    super("no folder");
+  }
+}
+
 /** Put a removed file back where it was, under a name the folder still has free. */
 export async function restoreDocument(row: DocumentRow, fallbackHome?: string) {
   if (!row.removedAt) return row;
@@ -448,17 +456,20 @@ export async function restoreDocument(row: DocumentRow, fallbackHome?: string) {
      * Which folder that is, is asked of his other files rather than worked out
      * from his name. The office still calls some of them "Chris - OPMS", and a
      * worked-out "AYERS, Christopher James" would not be that folder - it
-     * would be a new one, holding one restored file and nothing else. The
-     * worked-out name is only used where he has nothing else on file to point
-     * at.
+     * would be a new one, holding one restored file and nothing else.
+     *
+     * Where he has nothing else on file and Crew Details has not been asked,
+     * nothing goes back. This used to fall through to the worked-out name,
+     * which is a folder being made by the portal - and the portal does not
+     * make folders. Somebody says where it goes instead.
      */
     const beside = await db
       .select({ blobKey: documents.blobKey })
       .from(documents)
       .where(and(eq(documents.folder, row.folder), isNull(documents.removedAt)))
       .limit(1);
-    const home = beside[0] ? blobFolder(beside[0].blobKey)
-      : fallbackHome || opmsCertPrefix(row.folder);
+    const home = beside[0] ? blobFolder(beside[0].blobKey) : fallbackHome;
+    if (!home) throw new NoFolderForRestore(row.person || row.folder);
     filename = await freeCertName(row.folder, row.filename);
     blobKey = await moveBlob(row.blobKey, `${home}/${filename}`);
   } else if (single) {

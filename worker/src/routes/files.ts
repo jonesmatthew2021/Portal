@@ -10,7 +10,6 @@ import {
   SINGLE_FILE_CATEGORIES,
   certFolderFor,
   fileStore,
-  opmsCertPrefix,
   relocateToRemovedBlob,
   safeContentType,
   safeName,

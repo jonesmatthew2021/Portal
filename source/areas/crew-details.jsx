@@ -18,7 +18,7 @@
  * that spelling is understood for good, however many times it comes back.
  */
 function CrewDetails() {
-  const { people, setPeople, quals: QUALS, certificates, rosterPlan, renameCrew,
+  const { people, setPeople, quals: QUALS, certificates, rosterPlan, renameCrew, setCrewRank,
     notPeople, setNotPeople, certRoot, setCertRoot, log } = usePortal();
 
   const reg = useMemo(() => crewRegister(people), [people]);
@@ -168,9 +168,16 @@ function CrewDetails() {
 
   /* The rank, and the department that follows from it. The department is not
      asked for separately because it has only ever been worked out from the
-     rank, and two places to set one thing is two places to set it wrongly. */
-  const setRank = (id, rank) => setPeople((list) => (list || []).map((p) => (p.id === id
-    ? { ...p, rank, dept: rank ? deptForRank(rank) : p.dept } : p)));
+     rank, and two places to set one thing is two places to set it wrongly.
+
+     Set through the portal's own rank change, so the matrix row and the
+     roster's rows are put right in the same press. Picked here and written
+     only here, the certificate list would still have had him under his old
+     heading and the roster would still have been manning him as one. */
+  const setRank = (id, rank) => {
+    const p = (people || []).find((x) => x.id === id);
+    if (p) setCrewRank(p.name, rank);
+  };
 
   const setSwing = (id, letter) => setPeople((list) => (list || []).map((p) => (p.id === id
     ? { ...p, crew: letter } : p)));
@@ -280,7 +287,20 @@ function CrewDetails() {
               ) : (
                 <>
                   <span style={{ fontFamily: T.display, fontSize: 14, fontWeight: 700, color: T.text,
-                    flex: "1 1 160px" }}>{p.name}</span>
+                    flex: "1 1 150px" }}>{p.name}</span>
+                  {/* His MSIC number and his date of birth, beside his name.
+                      Typed straight in — they are short, they change almost
+                      never, and saving on every keystroke is what the rest of
+                      the portal does. */}
+                  <input value={p.msic || ""} placeholder="MSIC number" title="MSIC number"
+                    onChange={(e) => setDetail(p.id, "msic", e.target.value)}
+                    style={{ flex: "0 1 140px", fontFamily: T.mono, fontSize: 12.5, padding: "5px 8px",
+                      borderRadius: 2, border: "1px solid " + T.rule, background: T.raised, color: T.text }} />
+                  <input className="um-in" type="date" value={p.dob || ""}
+                    title="Date of birth"
+                    onChange={(e) => setDetail(p.id, "dob", e.target.value)}
+                    style={{ flex: "0 1 150px", fontFamily: T.mono, fontSize: 12.5, padding: "4px 8px",
+                      borderRadius: 2, border: "1px solid " + T.rule, background: T.raised, color: T.text }} />
                   {rankPicker(p.rank || p.job, (v) => setRank(p.id, v), 195)}
                   {swingPicker(p.crew, (v) => setSwing(p.id, v), 125)}
                   <Button variant="quiet" onClick={() => { setEditing(p.id); setTyped(p.name); }}>
@@ -293,25 +313,6 @@ function CrewDetails() {
                 </>
               )}
             </div>
-            {/* His MSIC number and his date of birth. Typed straight in — they
-                are short, they change almost never, and saving on every
-                keystroke is what the rest of the portal does. */}
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
-              <span style={{ fontFamily: T.mono, fontSize: 10, color: T.muted,
-                textTransform: "uppercase", letterSpacing: "0.08em", flex: "0 0 74px" }}>MSIC</span>
-              <input value={p.msic || ""} placeholder="Card number"
-                onChange={(e) => setDetail(p.id, "msic", e.target.value)}
-                style={{ flex: "0 1 170px", fontFamily: T.mono, fontSize: 12.5, padding: "5px 8px",
-                  borderRadius: 2, border: "1px solid " + T.rule, background: T.raised, color: T.text }} />
-              <span style={{ fontFamily: T.mono, fontSize: 10, color: T.muted,
-                textTransform: "uppercase", letterSpacing: "0.08em", marginLeft: 6 }}>Born</span>
-              <input className="um-in" type="date" value={p.dob || ""}
-                title="Date of birth"
-                onChange={(e) => setDetail(p.id, "dob", e.target.value)}
-                style={{ flex: "0 1 165px", fontFamily: T.mono, fontSize: 12.5, padding: "4px 8px",
-                  borderRadius: 2, border: "1px solid " + T.rule, background: T.raised, color: T.text }} />
-            </div>
-
             {p.certFolder && (
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
                 <span style={{ fontFamily: T.mono, fontSize: 10, color: T.muted,

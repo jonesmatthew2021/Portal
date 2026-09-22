@@ -8,6 +8,7 @@ import {
   liveSingleFileExists,
   purgeDocument,
   removeDocument,
+  NoFolderForRestore,
   restoreDocument,
   singleFileCategory,
   type DocumentRow,
@@ -162,10 +163,26 @@ export default async (req: Request, context: { params: { id: string } }) => {
 
     // Where his certificates go back to, if he has nothing else on file to
     // point at: the folder Crew Details names, or the one the rest of his are
-    // in. Undefined where neither is known, and restoreDocument then puts it
-    // back where it came from rather than anywhere new.
+    // in. Where neither is known there is nowhere to put it, and nothing is
+    // made up - the restore is refused and somebody sets his folder.
     const home = (row.folder ? (await certHome()).prefixFor(row.folder) : null) || undefined;
-    const restored = await restoreDocument(row, home);
+    let restored;
+    try {
+      restored = await restoreDocument(row, home);
+    } catch (e) {
+      if (e instanceof NoFolderForRestore) {
+        return Response.json(
+          {
+            error: `${row.filename} can't go back - the portal doesn't know which folder `
+              + `${e.person}'s certificates are in, and it won't make one. `
+              + "Set his folder on Crew Details, then restore it.",
+            needsFolder: e.person,
+          },
+          { status: 409 },
+        );
+      }
+      throw e;
+    }
     return Response.json({
       restored: true,
       category: restored.category,
