@@ -83,6 +83,16 @@ function CrewDetails() {
   // Still wanted whole, for the "who is this?" pickers underneath.
   const crew = useMemo(() => groups.flatMap((g) => g.crew), [groups]);
 
+  /* A number against each man, counting straight down the page rather than
+     starting again under every rank heading. The last one is the number on the
+     register, so the count at the top and the bottom of the list agree — which
+     is what somebody checking they have everybody is actually doing. */
+  const numberOf = useMemo(() => {
+    const at = new Map();
+    crew.forEach((p, i) => at.set(p.id, i + 1));
+    return at;
+  }, [crew]);
+
   /* Every spelling the portal has seen, and where. A spelling the register
      already answers to is not a problem and is not listed. */
   const strays = useMemo(() => {
@@ -294,6 +304,8 @@ function CrewDetails() {
                 </>
               ) : (
                 <>
+                  <span style={{ fontFamily: T.mono, fontSize: 11.5, color: T.muted,
+                    flex: "0 0 24px", textAlign: "right" }}>{numberOf.get(p.id)}</span>
                   <span style={{ fontFamily: T.display, fontSize: 14, fontWeight: 700, color: T.text,
                     flex: "1 1 150px" }}>{p.name}</span>
                   {/* His MSIC number and his date of birth, beside his name.
