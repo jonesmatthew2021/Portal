@@ -12408,6 +12408,11 @@ function UpdateDocumentation() {
   const [err, setErr] = useState("");
   const matrixRun = useRef(null);
   const going = useRef(false);
+  // The document's stamp as this tab holds it now, readable from inside a
+  // round that started a while ago: the polls carry on underneath a round,
+  // and the hour's own save moves the stamp on while a tab's round runs.
+  const docStamp = useRef(lastDocUpdate);
+  docStamp.current = lastDocUpdate;
 
   const stamp = (iso) => {
     if (!iso) return "never";
@@ -12422,6 +12427,8 @@ function UpdateDocumentation() {
     if (going.current) return;
     going.current = true;
     setErr(""); setFound(null);
+    // Where the document stood when this round began.
+    const pulled = docStamp.current || "";
     try {
       // The worker's hour holds the lease this takes; wait for it rather
       // than be refused, and if refused all the same, wait once more.
@@ -12519,15 +12526,29 @@ function UpdateDocumentation() {
       if (asked) setAsking(true);
 
       const at = new Date().toISOString();
+      /* The stamp is always written, whatever the round found - the clock
+         that decides when the next one is due reads it, and a round that
+         left it alone would be due again at once. */
       setLastDocUpdate(at);
-      log("Admin", asked ? "Portal updated" : "Portal updated on the hour",
-        [(out.registered ? out.registered.length : 0) + " new certificates taken on",
-          out.returned ? out.returned + " written off in error, back on the books" : null,
-          out.mirrored ? out.mirrored + " gone from the library and off the books" : null,
-          out.heldBack ? out.heldBack + " unaccounted for in one pass — too many to believe, nothing was written off" : null,
-          out.followed ? out.followed + " followed to a new folder" : null,
-          gone.length ? gone.join(" and ") + " — the workbook has gone, asked what to do" : null,
-        ].filter(Boolean).join(" · "));
+      /* The log line is not. An hourly round that found nothing to do while
+         the hour's own save had already moved the document on (its stamp is
+         newer than the one this round began from) was the fallback running
+         behind a server that had done the work, and a line saying so an hour,
+         every hour, is noise in the crew's change log. A press of the button
+         is always answered. */
+      const nothing = !(out.registered && out.registered.length) && !out.returned && !out.mirrored
+        && !out.heldBack && !out.followed && !gone.length;
+      const movedOn = !!docStamp.current && docStamp.current > pulled;
+      if (asked || !(nothing && movedOn)) {
+        log("Admin", asked ? "Portal updated" : "Portal updated on the hour",
+          [(out.registered ? out.registered.length : 0) + " new certificates taken on",
+            out.returned ? out.returned + " written off in error, back on the books" : null,
+            out.mirrored ? out.mirrored + " gone from the library and off the books" : null,
+            out.heldBack ? out.heldBack + " unaccounted for in one pass — too many to believe, nothing was written off" : null,
+            out.followed ? out.followed + " followed to a new folder" : null,
+            gone.length ? gone.join(" and ") + " — the workbook has gone, asked what to do" : null,
+          ].filter(Boolean).join(" · "));
+      }
       setStep("");
     } catch (e) {
       setErr(e.message || String(e));
