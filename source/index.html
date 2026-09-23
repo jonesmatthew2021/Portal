@@ -826,200 +826,13 @@ function crewRowsOnly(quals, people) {
 
 
 
-const SEED = {
-  // Handover notes filed against a rank and a swing.
-  notes: [
-    { id: "n1", rank: "master", swing: "sw-2026-08", filename: "Master handover — Aug swing.pdf", by: "P. Whelan", uploaded: "2026-07-28", size: "412 KB" },
-    { id: "n2", rank: "chief-engineer", swing: "sw-2026-08", filename: "C-E handover notes Aug.pdf", by: "D. Okafor", uploaded: "2026-07-28", size: "308 KB" },
-    { id: "n3", rank: "chief-officer", swing: "sw-2026-08", filename: "CO handover + deck defects.docx", by: "R. Tavita", uploaded: "2026-07-29", size: "96 KB" },
-    { id: "n4", rank: "chef", swing: "sw-2026-08", filename: "Galley stores and handover.pdf", by: "L. Fuavao", uploaded: "2026-07-28", size: "144 KB" },
-
-    { id: "n5", rank: "master", swing: "sw-2026-07", filename: "Master handover — Jul swing.pdf", by: "M. Jones", uploaded: "2026-06-30", size: "388 KB" },
-    { id: "n6", rank: "chief-officer", swing: "sw-2026-07", filename: "CO handover Jul.docx", by: "A. Kaur", uploaded: "2026-06-30", size: "88 KB" },
-    { id: "n7", rank: "second-officer", swing: "sw-2026-07", filename: "2O nav and pubs handover.pdf", by: "M. Bennett", uploaded: "2026-06-30", size: "212 KB" },
-    { id: "n8", rank: "chief-engineer", swing: "sw-2026-07", filename: "C-E handover notes Jul.pdf", by: "D. Okafor", uploaded: "2026-07-01", size: "296 KB" },
-    { id: "n9", rank: "first-engineer", swing: "sw-2026-07", filename: "1E machinery status.pdf", by: "S. Lindqvist", uploaded: "2026-06-30", size: "174 KB" },
-    { id: "n10", rank: "gph", swing: "sw-2026-07", filename: "GPH deck handover.docx", by: "T. Ngata", uploaded: "2026-06-30", size: "62 KB" },
-
-    { id: "n11", rank: "master", swing: "sw-2026-06", filename: "Master handover — Jun swing.pdf", by: "P. Whelan", uploaded: "2026-06-02", size: "356 KB" },
-    { id: "n12", rank: "chief-engineer", swing: "sw-2026-06", filename: "C-E handover notes Jun.pdf", by: "D. Okafor", uploaded: "2026-06-02", size: "284 KB" },
-    { id: "n13", rank: "junior-engineers", swing: "sw-2026-06", filename: "JE watchkeeping notes.docx", by: "N. Adeyemi", uploaded: "2026-06-03", size: "54 KB" },
-  ],
-
-  // Crew roster imported from Swing_Roster.xlsx.
-  // crew: "A" or "B" for the two rotating swings, null for shore-based or unassigned.
-  people: [
-    { id: "p-matt", name: "Matt", dept: "Masters", crew: "A", active: true },
-    { id: "p-evan", name: "Evan", dept: "Masters", crew: "A", active: true },
-    { id: "p-arthur", name: "Arthur", dept: "Masters", crew: "B", active: true },
-    { id: "p-brenton", name: "Brenton", dept: "Masters", crew: "B", active: true },
-    { id: "p-pk", name: "PK", dept: "Masters", crew: null, active: true },
-
-    { id: "p-rohin", name: "Rohin", dept: "DECK OFFICERS", crew: "A", active: true },
-    { id: "p-ryan", name: "Ryan", dept: "DECK OFFICERS", crew: "A", active: true },
-    { id: "p-mick", name: "Mick", dept: "DECK OFFICERS", crew: "B", active: true },
-    { id: "p-ruwan", name: "Ruwan", dept: "DECK OFFICERS", crew: "B", active: true },
-
-    { id: "p-dylan", name: "Dylan", dept: "GPH", crew: "A", active: true },
-    { id: "p-bradd", name: "Bradd", dept: "GPH", crew: "A", active: true },
-    { id: "p-macca", name: "Macca", dept: "GPH", crew: "B", active: true },
-    { id: "p-kyle", name: "Kyle", dept: "GPH", crew: "B", active: true },
-    { id: "p-gph-fillin", name: "Fill-in", dept: "GPH", crew: null, active: true },
-
-    { id: "p-andriy", name: "Andriy", dept: "Engineers", crew: "A", active: true },
-    { id: "p-dave", name: "Dave", dept: "Engineers", crew: "A", active: true },
-    { id: "p-finn", name: "Finn", dept: "Engineers", crew: "A", active: true },
-    { id: "p-jamie", name: "Jamie", dept: "Engineers", crew: "A", active: true },
-    { id: "p-eric", name: "Eric", dept: "Engineers", crew: "A", active: true },
-    { id: "p-mark", name: "Mark", dept: "Engineers", crew: "A", active: true },
-    { id: "p-annand", name: "Annand", dept: "Engineers", crew: "B", active: true },
-    { id: "p-savio", name: "Savio", dept: "Engineers", crew: "B", active: true },
-    { id: "p-marlou", name: "Marlou", dept: "Engineers", crew: "B", active: true },
-    { id: "p-andy", name: "Andy", dept: "Engineers", crew: "B", active: true },
-    { id: "p-leon", name: "Leon", dept: "Engineers", crew: "B", active: true },
-    { id: "p-eng-fillin", name: "Fill-in", dept: "Engineers", crew: "B", active: true },
-
-    { id: "p-tamas", name: "Tamas", dept: "Chefs", crew: "A", active: true },
-    { id: "p-billy", name: "Billy", dept: "Chefs", crew: "B", active: true },
-  ],
-
-  certTypes: ["STCW Basic Safety", "Medical (AMSA)", "Advanced Fire", "Confined Space", "HUET", "Dangerous Goods"],
-  // Gaps are deliberate — a real matrix has them, and finding them is the point.
-  certs: {
-    "p-matt": ["2027-04-12", "2027-01-30", "2026-11-05", "2026-09-14", "2027-06-01", "2026-08-22"],
-    "p-evan": ["2027-02-08", "2026-10-19", "2027-03-11", "2026-12-02", "2026-09-30", "2027-05-16"],
-    "p-arthur": ["2026-09-05", "2027-07-21", "2026-08-19", "2027-02-14", "2027-01-08", "2026-11-27"],
-    "p-brenton": ["2028-01-15", "2026-12-11", "2027-09-03", "2027-04-25", "2026-10-07", "2027-08-19"],
-    "p-rohin": ["2026-08-30", "2027-03-22", "2027-11-14", "2026-09-08", "2027-05-30", null],
-    "p-ryan": ["2027-06-18", "2027-02-03", "2026-10-26", "2027-07-09", "2026-12-15", "2027-03-28"],
-    "p-mick": ["2027-05-04", "2026-11-22", "2027-08-30", "2027-01-17", "2026-09-25", "2027-10-11"],
-    "p-ruwan": ["2026-10-13", "2027-04-06", "2027-01-29", "2026-08-11", "2027-09-18", "2027-02-24"],
-    "p-dylan": ["2027-07-30", "2026-09-19", "2027-05-12", "2027-11-03", "2026-10-31", null],
-    "p-bradd": ["2026-12-08", "2027-08-14", "2026-09-02", "2027-03-19", "2027-12-05", "2026-11-11"],
-    "p-macca": ["2027-03-15", "2026-10-02", "2027-06-28", "2027-01-11", null, "2027-04-19"],
-    "p-kyle": ["2026-09-21", "2027-05-08", "2027-02-17", "2026-12-24", "2027-07-06", "2027-01-03"],
-    "p-andriy": ["2027-09-12", "2027-01-19", "2026-11-16", "2027-06-05", "2026-10-14", "2027-08-01"],
-    "p-dave": ["2026-08-25", "2027-04-30", "2027-10-08", "2027-02-11", "2027-05-23", "2026-12-19"],
-    "p-tamas": ["2027-03-05", "2026-11-08", "2027-07-17", null, "2027-02-28", "2026-09-11"],
-    "p-billy": ["2027-06-09", "2027-01-24", "2026-10-05", "2027-08-27", "2026-12-31", "2027-04-14"],
-  },
-
-  docs: {
-    vesselSafety: [
-      { id: "v1", title: "Vessel safety meeting — 28 July 2026", from: "Chaired by Master", date: "2026-07-28", tag: "Monthly" },
-      { id: "v2", title: "Vessel safety meeting — 30 June 2026", from: "Chaired by Master", date: "2026-06-30", tag: "Monthly" },
-      { id: "v3", title: "Vessel safety meeting — 29 May 2026", from: "Chaired by C/O", date: "2026-05-29", tag: "Monthly" },
-    ],
-    partnershipSafety: [
-      { id: "q1", title: "Partnership quarterly safety review — Q2 FY26", from: "Partnership HSE", date: "2026-07-15", tag: "Quarterly" },
-      { id: "q2", title: "Partnership quarterly safety review — Q1 FY26", from: "Partnership HSE", date: "2026-04-14", tag: "Quarterly" },
-    ],
-    insurance: [
-      { id: "i1", title: "P&I certificate of entry 2026/27", from: "United Marine", date: "2026-02-20", tag: "P&I" },
-      { id: "i2", title: "Hull & machinery cover note", from: "United Marine", date: "2026-02-20", tag: "H&M" },
-      { id: "i3", title: "Workers compensation certificate of currency - WA", from: "United Marine", date: "2026-07-01", tag: "Workers comp" },
-      { id: "i4", title: "Protection and indemnity - claims reporting procedure", from: "United Marine", date: "2025-11-14", tag: "Procedure" },
-    ],
-    travel: [
-      { id: "h1", title: "Crew change accommodation - standing booking procedure", from: "United Marine", date: "2026-06-05", tag: "Procedure" },
-      { id: "h2", title: "Perth airport hotel - corporate rate confirmation", from: "United Marine", date: "2026-05-18", tag: "Perth" },
-      { id: "h3", title: "Onslow accommodation - room allocation contacts", from: "PortWays Australia", date: "2026-04-22", tag: "Onslow" },
-      { id: "h4", title: "Late arrival and missed connection - what to do", from: "United Marine", date: "2026-03-30", tag: "Procedure" },
-{ id: "f1", title: "Perth to Onslow charter schedule - Q3 2026", from: "United Marine", date: "2026-07-02", tag: "Schedule" },
-      { id: "f2", title: "Flight booking request form", from: "United Marine", date: "2026-01-16", tag: "Form" },
-      { id: "f3", title: "Baggage allowance and dangerous goods on charter", from: "United Marine", date: "2026-03-11", tag: "Reference" },
-      { id: "f4", title: "Travel variation request - process and cut-off dates", from: "United Marine", date: "2026-06-05", tag: "Procedure" },
-    ],
-    templates: [
-      { id: "t1", title: "Handover notes template - all ranks", from: "TSV Coolibah", date: "2026-05-02", tag: "Handover" },
-      { id: "t2", title: "Permit to work - blank forms", from: "United Marine", date: "2026-03-11", tag: "Forms" },
-      { id: "t3", title: "Safety meeting minutes template", from: "United Marine", date: "2026-02-09", tag: "Safety" },
-      { id: "t4", title: "Incident and near miss report form", from: "United Marine", date: "2026-02-09", tag: "Forms" },
-      { id: "t5", title: "Toolbox talk record", from: "TSV Coolibah", date: "2026-04-18", tag: "Safety" },
-    ],
-    agreements: [
-      { id: "g1", title: "United Marine / MRL services agreement", from: "Partnership", date: "2025-09-01", tag: "Agreement" },
-      { id: "g2", title: "PortWays Australia - scope of works", from: "Partnership", date: "2025-09-01", tag: "Scope" },
-      { id: "g3", title: "Transhipment operations - responsibility matrix", from: "Partnership", date: "2026-01-28", tag: "Reference" },
-      { id: "g4", title: "Crewing and manning schedule - annexure C", from: "Partnership", date: "2026-04-03", tag: "Annexure" },
-    ],
-    documentation: [
-      { id: "g1", title: "Safety Management System manual — Rev 7", from: "United Marine", date: "2026-05-19", tag: "SMS" },
-      { id: "g2", title: "Transhipment operations manual", from: "United Marine", date: "2026-04-02", tag: "Manual" },
-      { id: "g3", title: "Bunkering procedure — Rev C", from: "TSV Coolibah", date: "2026-07-18", tag: "Procedure" },
-      { id: "g4", title: "Permit to work — blank forms", from: "United Marine", date: "2026-03-11", tag: "Forms" },
-      { id: "g5", title: "Emergency response plan and muster list", from: "TSV Coolibah", date: "2026-06-08", tag: "SMS" },
-      { id: "g6", title: "Boom conveyor operating and maintenance manual", from: "Manufacturer", date: "2025-11-24", tag: "Manual" },
-      { id: "g7", title: "Mooring arrangement plan — OGV alongside", from: "TSV Coolibah", date: "2026-02-27", tag: "Plan" },
-      { id: "g8", title: "Vessel particulars", from: "United Marine", date: "2026-01-15", tag: "Reference" },
-    ],
-  },
-
-  history: [
-    { id: "hx1", at: "2026-08-03T14:20", by: "M. Jones", section: "Crew Rosters", action: "Kyle ashore for 09 Sep – 06 Oct", detail: "Changed from onboard" },
-    { id: "hx2", at: "2026-08-03T14:22", by: "M. Jones", section: "Crew Rosters", action: "Fill-in onboard for 09 Sep – 06 Oct", detail: "Covering Kyle" },
-    { id: "hx3", at: "2026-07-29T09:05", by: "Preetham Kumar", section: "Partnership Correspondence", action: "Posted a note", detail: "MHE planned maintenance tasking — where this sits · MinRes / MRL" },
-    { id: "hx4", at: "2026-07-29T08:41", by: "R. Tavita", section: "Handover Notes", action: "Chief Officer notes filed", detail: "CO handover + deck defects.docx · R. Tavita" },
-    { id: "hx5", at: "2026-07-28T16:12", by: "P. Whelan", section: "Handover Notes", action: "Master notes filed", detail: "Master handover — Aug swing.pdf · P. Whelan" },
-  ],
-
-  // PortWays Australia — shore-side correspondence, minutes and close-outs.
-  portwaysCorrespondence: [
-    { id: "w1", kind: "email", party: "PortWays Australia", tag: "Shore", title: "PortWays safety meeting — July 2026",
-      filename: "PortWays safety meeting July.msg", size: "176 KB", postedBy: CORRESPONDENCE_POSTER, date: "2026-07-22" },
-    { id: "w2", kind: "note", party: "PortWays Australia", tag: "Incident",
-      title: "Bunker hose near miss — shore investigation closed out",
-      body: "PortWays have closed out the bunker hose investigation. Revised pressure test procedure issued, filed under Documentation. Confirm it is followed at both ends before every transfer.",
-      postedBy: CORRESPONDENCE_POSTER, date: "2026-06-11" },
-    { id: "w3", kind: "email", party: "PortWays Australia", tag: "Shore", title: "PortWays safety meeting — June 2026",
-      filename: "PortWays safety meeting June.msg", size: "164 KB", postedBy: CORRESPONDENCE_POSTER, date: "2026-06-24" },
-  ],
-
-  // Partnership correspondence — either a written note or an attached email.
-  correspondence: [
-    {
-      id: "k1", kind: "note", party: "MinRes / MRL", tag: "Maintenance",
-      title: "MHE planned maintenance tasking — where this sits",
-      body: "Position paper went to MRL 24 July, no substantive reply. Tasks still loading into HELM against TSV crew. Asked for it to go on the next partnership meeting agenda. Keep recording tasks as they appear so we have a record of volume.",
-      postedBy: CORRESPONDENCE_POSTER, date: "2026-07-29",
-    },
-    {
-      id: "k2", kind: "email", party: "United Marine", tag: "Manning",
-      title: "RE: Manning levels — response to MRL query",
-      filename: "RE Manning levels - MRL query.msg", size: "88 KB",
-      postedBy: CORRESPONDENCE_POSTER, date: "2026-07-29",
-    },
-    {
-      id: "k3", kind: "email", party: "PortWays Australia", tag: "Bunkering",
-      title: "Revised bunker hose pressure test procedure",
-      filename: "Bunker hose pressure test - rev C.msg", size: "214 KB",
-      postedBy: CORRESPONDENCE_POSTER, date: "2026-07-18",
-    },
-    {
-      id: "k4", kind: "note", party: "United Marine", tag: "Crewing",
-      title: "Q3 crew change schedule confirmed",
-      body: "Q3 crew change dates confirmed, unchanged from the June draft. Flights booked four weeks out. Raise any variation before the booking window closes.",
-      postedBy: CORRESPONDENCE_POSTER, date: "2026-07-11",
-    },
-    {
-      id: "k5", kind: "email", party: "MinRes / MRL", tag: "Maintenance",
-      title: "MHE planned maintenance tasking — position paper as sent",
-      filename: "MHE tasking position paper.pdf", size: "412 KB",
-      postedBy: CORRESPONDENCE_POSTER, date: "2026-07-24",
-    },
-  ],
-
-  appSuggestions: [
-    { id: "a1", text: "Add a search across every tab at once, not one section at a time.", by: "R. Tavita", date: "2026-08-02", status: "new", votes: 5 },
-    { id: "a2", text: "Email alert when new partnership correspondence is posted, so we don't have to keep checking.", by: "Anonymous", date: "2026-07-31", status: "under-review", votes: 8 },
-  ],
-
-  suggestions: [
-    { id: "s1", text: "Fit a second wash-down point aft. The hose run across the deck is a trip hazard during hold cleaning.", by: "T. Ngata", date: "2026-07-30", status: "under-review", votes: 7 },
-    { id: "s2", text: "Move the toolbox talk to 0630 so the offgoing watch can attend before turning in.", by: "J. Moreno", date: "2026-07-26", status: "actioned", votes: 11 },
-    { id: "s3", text: "Better lighting on the accommodation ladder landing — hard to see footing on night crew changes.", by: "K. Bilong", date: "2026-07-21", status: "new", votes: 4 },
-  ],
-};
+// The buckets a document can be filed under — the Safety Minutes libraries
+// and the five Documentation tabs. The portal starts with nothing in any of
+// them: a compliance portal shows what has been filed, never a sample of what
+// might be. The list is fixed here rather than read off the contents, so an
+// empty bucket is still a bucket that uploads can land in.
+const DOC_BUCKETS = ["vesselSafety", "partnershipSafety", "insurance", "travel", "templates", "agreements", "documentation"];
+const emptyDocs = () => Object.fromEntries(DOC_BUCKETS.map((k) => [k, []]));
 
 /* ==================================================================== */
 
@@ -17099,13 +16912,13 @@ function CoolibahPortal({ role, onSignOut }) {
 
   // Everything shared lives in one object, so it can be saved and loaded whole.
   const [store, setStore] = useState({
-    notes: SEED.notes,
-    suggestions: SEED.suggestions,
-    correspondence: SEED.correspondence,
-    pwCorrespondence: SEED.portwaysCorrespondence,
-    appSuggestions: SEED.appSuggestions,
-    docs: SEED.docs,
-    people: SEED.people,
+    notes: [],
+    suggestions: [],
+    correspondence: [],
+    pwCorrespondence: [],
+    appSuggestions: [],
+    docs: emptyDocs(),
+    people: [],
     overrides: {},
     // Who is onboard and which watch they are on, as somebody put it there —
     // side and shift, both keyed by person. Empty until the crew rosters page
@@ -17137,7 +16950,7 @@ function CoolibahPortal({ role, onSignOut }) {
     // and the days per swing. Four weeks, Wednesday to Wednesday, from
     // 12 Aug 2026 — until somebody moves it on Swing Compliance.
     rosterPattern: { ...ROSTER_DEFAULTS },
-    history: SEED.history,
+    history: [],
     comments: {},
     hiddenTabs: [],
     quals: QUALS,
