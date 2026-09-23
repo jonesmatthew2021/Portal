@@ -262,7 +262,7 @@ async function theHour(
   // The hour so far, on the record before the reading spends anything: if
   // the reading runs the budget dry, the page still sees this hour and the
   // word that the round did not get to run, never last hour's line.
-  await written({ ...round, roundSkipped: round.roundSkipped ?? round.roundError ?? "round not yet run" });
+  await written(round.roundSkipped || round.roundError ? round : { roundSkipped: "round not yet run" });
 
   if (env.ANTHROPIC_API_KEY) {
     try {
