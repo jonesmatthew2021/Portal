@@ -326,7 +326,9 @@ function documentsDb(rows: (ReturnType<typeof liveRow> | ReturnType<typeof keptR
   }, asked);
   return db;
 }
-const writes = (db: { asked: Asked[] }) => db.asked.filter((a) => /^UPDATE|^INSERT/.test(a.sql));
+/* What changed on the books - the documents table; the lease's own row in
+   the sync store is not the books. */
+const writes = (db: { asked: Asked[] }) => db.asked.filter((a) => /^(UPDATE|INSERT INTO) documents/.test(a.sql));
 const bytesOf = (s: string) => new TextEncoder().encode(s).buffer as ArrayBuffer;
 const todaysWorkbook = (over: Partial<Parameters<typeof replaceSingleFile>[0]> = {}) => ({
   category: "training-matrix", bytes: bytesOf("new workbook"), filename: "20260924 - CREW QUALIFICATION EXPIRY.xlsx",
@@ -1134,6 +1136,9 @@ test("a lease that runs out while the hour is waiting is taken on a later try", 
  * removed copy or a loose file holds it.
  * ------------------------------------------------------------------------ */
 function renameDb(rows: Row[], lease: unknown = null) {
+  // The one row of the sync store the rename touches, carried across
+  // writes so the drop reads back what the take wrote.
+  let held = lease;
   return fakeDb((sql, args) => {
     if (/SELECT id, filename, blob_key, adopted_from_folder FROM documents WHERE id = \?1 AND removed_at IS NULL/.test(sql)) {
       return { results: rows.filter((r) => r.id === args[0] && !r.removedAt).map((r) => ({ id: r.id, filename: r.filename, blob_key: r.blobKey, adopted_from_folder: r.adoptedFromFolder ?? null })) };
@@ -1141,7 +1146,10 @@ function renameDb(rows: Row[], lease: unknown = null) {
     if (/SELECT id FROM documents WHERE blob_key = \?1 AND id != \?2/.test(sql)) {
       return { results: rows.filter((r) => r.blobKey === args[0] && r.id !== args[1]).map((r) => ({ id: r.id })) };
     }
-    if (/SELECT value FROM blobs/.test(sql)) return { results: lease ? [{ value: JSON.stringify(lease) }] : [] };
+    // The round lease, as the rename takes it: a row with its version mark
+    // where one is given, and the take and the drop going in.
+    if (/SELECT value, etag FROM blobs/.test(sql)) return { results: held ? [{ value: JSON.stringify(held), etag: "mark" }] : [] };
+    if (/^(INSERT INTO|UPDATE) blobs/.test(sql)) { held = JSON.parse(String(args[2])); return { changes: 1 }; }
     if (/^UPDATE documents SET filename/.test(sql)) return { changes: 1 };
     return undefined;
   });
@@ -1182,22 +1190,31 @@ test("the office's own file is never renamed, and nothing is renamed while the h
   assert.equal(office.status, 409);
   assert.match(((await office.json()) as { error: string }).error, /the office's own file/);
 
-  setEnv({ DB: renameDb([liveRow("tm1", theirs)], { until: Date.now() + 60000, by: "the round on the hour", token: "x" }), FILES: bucket, FILE_STORE: "r2" } as never);
+  const heldDb = renameDb([liveRow("tm1", theirs)], { until: Date.now() + 60000, by: "the round on the hour", token: "x" });
+  setEnv({ DB: heldDb, FILES: bucket, FILE_STORE: "r2" } as never);
   const held = await renameTo("tm1", "20260924 - CREW QUALIFICATION EXPIRY.xlsx");
   assert.equal(held.status, 409);
   assert.match(((await held.json()) as { error: string }).error, /try again in a minute/);
   assert.deepEqual(bucket.keys(), [theirs], "nothing moved either time");
+  assert.deepEqual(writes(heldDb), [], "nothing on the books changed");
+  assert.deepEqual(leaseWrites(heldDb), [], "and the hour's lease was not touched");
 });
 
-test("a rename onto a free name moves the file and the row follows it", async () => {
+test("a rename onto a free name moves the file and the row follows it, under a lease of its own", async () => {
   const from = "opms/20260924 - CREW QUALIFICATION EXPIRY (2).xlsx";
   const bucket = fakeBucket({ [from]: "the round's" });
-  const db = renameDb([liveRow("tm2", from)]);
+  // The hour's lease from earlier, run out: the rename takes it over.
+  const db = renameDb([liveRow("tm2", from)], { until: 0, by: "the round on the hour", token: "x" });
   setEnv({ DB: db, FILES: bucket, FILE_STORE: "r2" } as never);
   const res = await renameTo("tm2", "20260924 - CREW QUALIFICATION EXPIRY.xlsx");
   assert.equal(res.status, 200, await res.text());
   assert.deepEqual(bucket.keys(), ["opms/20260924 - CREW QUALIFICATION EXPIRY.xlsx"], "moved, not copied");
   assert.deepEqual(writes(db)[0].args, ["tm2", "20260924 - CREW QUALIFICATION EXPIRY.xlsx", "opms/20260924 - CREW QUALIFICATION EXPIRY.xlsx"]);
+  const lease = leaseWrites(db).map((a) => JSON.parse(String(a.args[2])) as { by: string; until: number });
+  assert.equal(lease.length, 2, "taken once and dropped once");
+  assert.equal(lease[0].by, "IT", "taken in the renamer's name");
+  assert.ok(lease[0].until > Date.now());
+  assert.equal(lease[1].until, 0, "…and run out at the end");
 });
 
 /* ------------------------------------------------------------------------ *
@@ -1279,11 +1296,17 @@ test("Import from SharePoint over the portal's own dated copy parks it flat, and
   const loose = "opms/20260930 - CREW QUALIFICATION EXPIRY.xlsx";
   await bucket.put(loose, bytesOf("dropped in by hand"));
   portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "the round on the hour", token: "x" }));
+  const before = portal.db.asked.length;
   assert.equal((await importFrom(loose)).status, 409, "refused while the lease stands");
   assert.equal(portal.rows.find((r) => r.id === "tm1")!.removedAt, null, "nothing stepped down");
+  assert.ok(!portal.db.asked.slice(before).some((a) => /^(UPDATE|INSERT)/.test(a.sql)), "nothing written at all");
+  assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).by, "the round on the hour", "the hour's lease is untouched");
 
   portal.blobs.set("sync|round-lease", JSON.stringify({ until: 0, by: "the round on the hour", token: "x" }));
   assert.equal((await importFrom(loose)).status, 200);
+  const lease = JSON.parse(portal.blobs.get("sync|round-lease")!);
+  assert.equal(lease.by, "Matthew", "the import ran under its own lease");
+  assert.equal(lease.until, 0, "…and gave it back");
   const mine = portal.rows.find((r) => r.id === "tm1")!;
   assert.ok(mine.removedAt);
   assert.equal(mine.keptInPlace, null);

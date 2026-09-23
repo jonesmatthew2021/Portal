@@ -1,7 +1,7 @@
 import type { PortalUser } from "../auth.js";
 import { getEnv } from "../env.js";
 import { fileStore } from "../files/store.js";
-import { roundRunning } from "../lib/round.js";
+import { takeLease, dropLease } from "../lib/round.js";
 
 /**
  * POST /api/rename-file { id, to } — a filed document given a new name.
@@ -58,47 +58,60 @@ export default async (req: Request, actor: PortalUser): Promise<Response> => {
       { status: 409 },
     );
   }
-  if (await roundRunning()) {
+  // The file moved here may be the workbook the hour is writing: the rename
+  // takes the one lease every writer of the workbook takes, for its own
+  // turn, and stands aside while somebody holds it.
+  const lease = await takeLease(actor.name || actor.email || "a rename");
+  if (!lease) {
     return Response.json({ error: "The hourly round is writing the workbook; try again in a minute." }, { status: 409 });
   }
-
-  /* The folder the file is already in. It is never anything else.
-     A rename used to be able to move the file to another folder, and where
-     that folder did not exist SharePoint made it - so renaming was quietly
-     also a way of filling the library with folders nobody had asked for.
-     Folders are the office's to name; this renames what is in them. */
-  const cut = row.blob_key.lastIndexOf("/");
-  const folder = cut < 0 ? "" : row.blob_key.slice(0, cut + 1);
-  const nextKey = folder + to;
-  if (nextKey === row.blob_key) {
-    await db.prepare("UPDATE documents SET filename = ?2 WHERE id = ?1").bind(id, to).run();
-    return Response.json({ renamed: true, key: nextKey });
-  }
-
-  const store = fileStore();
-  // Whoever holds the address, live or removed, keeps it: a removed copy
-  // is a file somebody may yet restore, and a live one is another document.
-  const holder = await db
-    .prepare("SELECT id FROM documents WHERE blob_key = ?1 AND id != ?2 LIMIT 1")
-    .bind(nextKey, id)
-    .first<{ id: string }>();
-  if (holder || (await store.getMetadata(nextKey))) {
-    return Response.json(
-      { error: `${to} is already in that folder; nothing was moved.` },
-      { status: 409 },
-    );
-  }
-  const bytes = await store.get(row.blob_key);
-  if (!bytes) return Response.json({ error: "The file itself couldn't be found to move." }, { status: 404 });
-
-  await store.set(nextKey, bytes);
-  await db.prepare("UPDATE documents SET filename = ?2, blob_key = ?3 WHERE id = ?1").bind(id, to, nextKey).run();
-  // The books already point at the new file, so a delete that fails leaves a
-  // spare copy behind rather than a record pointing at nothing.
   try {
-    await store.delete(row.blob_key);
-  } catch (e) {
-    return Response.json({ renamed: true, key: nextKey, leftBehind: row.blob_key });
+    /* The folder the file is already in. It is never anything else.
+       A rename used to be able to move the file to another folder, and where
+       that folder did not exist SharePoint made it - so renaming was quietly
+       also a way of filling the library with folders nobody had asked for.
+       Folders are the office's to name; this renames what is in them. */
+    const cut = row.blob_key.lastIndexOf("/");
+    const folder = cut < 0 ? "" : row.blob_key.slice(0, cut + 1);
+    const nextKey = folder + to;
+    if (nextKey === row.blob_key) {
+      await db.prepare("UPDATE documents SET filename = ?2 WHERE id = ?1").bind(id, to).run();
+      return Response.json({ renamed: true, key: nextKey });
+    }
+
+    const store = fileStore();
+    // Whoever holds the address, live or removed, keeps it: a removed copy
+    // is a file somebody may yet restore, and a live one is another document.
+    const holder = await db
+      .prepare("SELECT id FROM documents WHERE blob_key = ?1 AND id != ?2 LIMIT 1")
+      .bind(nextKey, id)
+      .first<{ id: string }>();
+    if (holder || (await store.getMetadata(nextKey))) {
+      return Response.json(
+        { error: `${to} is already in that folder; nothing was moved.` },
+        { status: 409 },
+      );
+    }
+    const bytes = await store.get(row.blob_key);
+    if (!bytes) return Response.json({ error: "The file itself couldn't be found to move." }, { status: 404 });
+
+    await store.set(nextKey, bytes);
+    await db.prepare("UPDATE documents SET filename = ?2, blob_key = ?3 WHERE id = ?1").bind(id, to, nextKey).run();
+    // The books already point at the new file, so a delete that fails leaves a
+    // spare copy behind rather than a record pointing at nothing.
+    try {
+      await store.delete(row.blob_key);
+    } catch (e) {
+      return Response.json({ renamed: true, key: nextKey, leftBehind: row.blob_key });
+    }
+    return Response.json({ renamed: true, key: nextKey, was: row.blob_key });
+  } finally {
+    // The move is done by now. A drop that fails must not turn it into an
+    // error; the lease runs out on its own after LEASE_MS.
+    try {
+      await dropLease(lease.token);
+    } catch (e) {
+      console.error("the rename's lease was not dropped:", e);
+    }
   }
-  return Response.json({ renamed: true, key: nextKey, was: row.blob_key });
 };

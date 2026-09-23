@@ -4,7 +4,7 @@ import { documents } from "../db/schema.js";
 import { SINGLE_FILE_CATEGORIES, fileStore, safeName, relocateToRemovedBlob } from "../db/documents.js";
 import { certHome } from "../db/cert-home.js";
 import { todayThere } from "../lib/analysis.js";
-import { roundRunning } from "../lib/round.js";
+import { takeLease, dropLease } from "../lib/round.js";
 import { looseIn } from "./sync.js";
 import { toRecord } from "./files.js";
 
@@ -90,55 +90,68 @@ export default async (req: Request, by: string) => {
 
   // ---- file the one chosen ----
   if (key.includes("..") || key.startsWith("/")) return Response.json({ error: "That isn't a file." }, { status: 400 });
-  // The hour may be writing the workbook this would step down.
-  if (await roundRunning()) {
+  // This steps the live workbook down, which the hour may be writing: it
+  // takes the one lease every writer of the workbook takes, for its own
+  // turn, and stands aside while somebody holds it.
+  const lease = await takeLease(by);
+  if (!lease) {
     return Response.json({ error: "The hourly round is writing the workbook; try again in a minute." }, { status: 409 });
   }
-  const meta = (await fileStore().getMetadata(key)) as { size?: number; contentType?: string } | null;
-  if (!meta) return Response.json({ error: "That file is no longer in the library." }, { status: 404 });
+  try {
+    const meta = (await fileStore().getMetadata(key)) as { size?: number; contentType?: string } | null;
+    if (!meta) return Response.json({ error: "That file is no longer in the library." }, { status: 404 });
 
-  // Whatever is current steps down, the way a removal takes a file off: the
-  // office's own file stays exactly where it is, kept in place; the portal's
-  // own copy is parked flat under removed/, so its name is free and the
-  // sync does not find it live. Either way it is there to go back to.
-  const live = rows.filter((r) => !r.removedAt && r.blobKey !== key);
-  for (const r of live) {
-    const theirs = !!r.adoptedFromFolder;
-    const blobKey = theirs ? r.blobKey : await relocateToRemovedBlob(r);
-    await db.update(documents)
-      .set({ removedAt: new Date(), removedBy: by, blobKey, keptInPlace: theirs ? 1 : null })
-      .where(eq(documents.id, r.id));
+    // Whatever is current steps down, the way a removal takes a file off: the
+    // office's own file stays exactly where it is, kept in place; the portal's
+    // own copy is parked flat under removed/, so its name is free and the
+    // sync does not find it live. Either way it is there to go back to.
+    const live = rows.filter((r) => !r.removedAt && r.blobKey !== key);
+    for (const r of live) {
+      const theirs = !!r.adoptedFromFolder;
+      const blobKey = theirs ? r.blobKey : await relocateToRemovedBlob(r);
+      await db.update(documents)
+        .set({ removedAt: new Date(), removedBy: by, blobKey, keptInPlace: theirs ? 1 : null })
+        .where(eq(documents.id, r.id));
+    }
+
+    const had = byKey.get(key);
+    let row;
+    if (had) {
+      // The 22 Sep case: the portal already knew this file and had written it
+      // off. Its row comes back as it was - and as the office's file, which
+      // is what it is wherever it came from.
+      [row] = await db.update(documents)
+        .set({ removedAt: null, removedBy: null, keptInPlace: null, adoptedFromFolder: 1 })
+        .where(eq(documents.id, had.id))
+        .returning();
+    } else {
+      const filename = safeName(key.split("/").pop() || "document");
+      [row] = await db.insert(documents).values({
+        id: crypto.randomUUID(),
+        category,
+        blobKey: key,
+        filename,
+        contentType: meta.contentType || "application/octet-stream",
+        sizeBytes: meta.size ?? 0,
+        uploadedBy: by,
+        filedOn: todayThere(),
+        // Taken from the folder the office put it in: theirs, never moved.
+        adoptedFromFolder: 1,
+      }).returning();
+    }
+
+    return Response.json({
+      record: toRecord(row),
+      replaced: live.map((r) => ({ id: r.id, filename: r.filename })),
+      restored: !!had,
+    });
+  } finally {
+    // The work is done by now. A drop that fails must not turn it into an
+    // error; the lease runs out on its own after LEASE_MS.
+    try {
+      await dropLease(lease.token);
+    } catch (e) {
+      console.error("the import's lease was not dropped:", e);
+    }
   }
-
-  const had = byKey.get(key);
-  let row;
-  if (had) {
-    // The 22 Sep case: the portal already knew this file and had written it
-    // off. Its row comes back as it was - and as the office's file, which
-    // is what it is wherever it came from.
-    [row] = await db.update(documents)
-      .set({ removedAt: null, removedBy: null, keptInPlace: null, adoptedFromFolder: 1 })
-      .where(eq(documents.id, had.id))
-      .returning();
-  } else {
-    const filename = safeName(key.split("/").pop() || "document");
-    [row] = await db.insert(documents).values({
-      id: crypto.randomUUID(),
-      category,
-      blobKey: key,
-      filename,
-      contentType: meta.contentType || "application/octet-stream",
-      sizeBytes: meta.size ?? 0,
-      uploadedBy: by,
-      filedOn: todayThere(),
-      // Taken from the folder the office put it in: theirs, never moved.
-      adoptedFromFolder: 1,
-    }).returning();
-  }
-
-  return Response.json({
-    record: toRecord(row),
-    replaced: live.map((r) => ({ id: r.id, filename: r.filename })),
-    restored: !!had,
-  });
 };
