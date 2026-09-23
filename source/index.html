@@ -8246,6 +8246,47 @@ function mergeQuals(base, mine, theirs) {
 }
 
 /**
+ * A save that landed on top of somebody else's, worked out again.
+ *
+ * Theirs is the shape of the answer, and only the slices this tab touched
+ * go back over it. Four of those slices the round on the hour writes too -
+ * the matrix, the change log, the note of cells filled from a certificate,
+ * and its sightings and what it owes the workbook - so laid back whole they
+ * would write the tab's stale copy over the hour's work. Each is merged
+ * against what this tab last loaded or saved (base) instead: mergeQuals for
+ * the matrix, and the merges beside it in source/shared/matrix-rules.js for
+ * the rest. The document's stamp is the newer of the two.
+ *
+ * One pure function, so the rule the provider's save loop follows can be
+ * proved outright (tools/client-rules.test.mjs).
+ */
+function mergeSaved({ touched, mine, theirs, base }) {
+  const t = theirs && typeof theirs === "object" ? theirs : null;
+  const b = base || {};
+  const merged = { ...(t || mine) };
+  touched.forEach((k) => { merged[k] = mine[k]; });
+  if (touched.includes("quals") && t && t.quals) {
+    merged.quals = mergeQuals(b.quals, mine.quals, t.quals);
+  }
+  if (touched.includes("history")) {
+    merged.history = mergeHistory(mine.history || [], (t && t.history) || [], HISTORY_LIMIT);
+  }
+  if (touched.includes("filledFromCert")) {
+    merged.filledFromCert = mergeFilled(b.filled, mine.filledFromCert || {}, (t && t.filledFromCert) || {});
+  }
+  if (touched.includes("orphanSeen")) {
+    merged.orphanSeen = mergeSeen(b.seen, mine.orphanSeen || {}, (t && t.orphanSeen) || {});
+  }
+  if (touched.includes("workbookPending")) {
+    merged.workbookPending = mergePending(b.pending, mine.workbookPending || [], (t && t.workbookPending) || []);
+  }
+  // ISO stamps compare as text; whichever side moved the document last is right.
+  const ours = String(mine.lastDocUpdate || ""), theirStamp = String((t && t.lastDocUpdate) || "");
+  merged.lastDocUpdate = (ours > theirStamp ? ours : theirStamp) || null;
+  return merged;
+}
+
+/**
  * Bring the spreadsheet on file up to date and file it back.
  *
  * The workbook that is already on the portal is the one that comes back out of
@@ -16262,6 +16303,18 @@ function CoolibahPortal({ role, onSignOut }) {
   // top of somebody else's is merged against this rather than laid over
   // theirs whole — see mergeQuals.
   const baseline = useRef(null);
+  // The same for the three notes the round on the hour writes as well: the
+  // cells filled from a certificate, the orphans it has seen, and what it
+  // owes the workbook. Merged against these on a collision - see mergeSaved.
+  const baselineFilled = useRef(null);
+  const baselineSeen = useRef(null);
+  const baselinePending = useRef(null);
+  const rebase = (data) => {
+    baseline.current = (data && data.quals) || null;
+    baselineFilled.current = (data && data.filledFromCert) || {};
+    baselineSeen.current = (data && data.orphanSeen) || {};
+    baselinePending.current = (data && data.workbookPending) || [];
+  };
 
   // Load once, then keep checking for other people's changes.
   React.useEffect(() => {
@@ -16278,7 +16331,7 @@ function CoolibahPortal({ role, onSignOut }) {
 
         if (data && serverRev > rev.current && dirty.current.size === 0) {
           rev.current = serverRev;
-          baseline.current = data.quals || null;
+          rebase(data);
           // Files always come from the file store, never from this document.
           setStore(withStoredFiles(data, storedFiles.current));
         } else if (!data && firstLoad.current) {
@@ -16286,7 +16339,7 @@ function CoolibahPortal({ role, onSignOut }) {
           // server so there is something for everyone else to load.
           const seeded = await saveState(withoutStoredFiles(store), 0);
           rev.current = seeded.rev;
-          baseline.current = (seeded.conflict && seeded.data ? seeded.data : store).quals || null;
+          rebase(seeded.conflict && seeded.data ? seeded.data : store);
           // Somebody beat us to it by a fraction of a second. Theirs wins.
           if (seeded.conflict && seeded.data) {
             setStore(withStoredFiles(seeded.data, storedFiles.current));
@@ -16335,15 +16388,16 @@ function CoolibahPortal({ role, onSignOut }) {
         if (res.conflict) {
           // Someone saved while this was being typed. Rather than throw either
           // version away, take theirs and lay only the slices touched here back
-          // on top of it. The matrix is the exception: laid back whole, a tab
-          // that changed one cell ten minutes ago would write its ten-minute-old
-          // copy over every date anyone had filled in since. So only the cells
-          // this tab actually changed go back over theirs.
-          const merged = { ...(res.data || mine) };
-          touched.forEach((k) => { merged[k] = store[k]; });
-          if (touched.includes("quals") && res.data && res.data.quals) {
-            merged.quals = mergeQuals(baseline.current, store.quals, res.data.quals);
-          }
+          // on top of it. The matrix, the change log and the round's notes are
+          // the exception: laid back whole, a tab that changed one cell ten
+          // minutes ago would write its ten-minute-old copy over every date
+          // the hour had filled in since. So only what this tab actually
+          // changed goes back over theirs - see mergeSaved.
+          const merged = mergeSaved({
+            touched, mine: store, theirs: res.data,
+            base: { quals: baseline.current, filled: baselineFilled.current,
+              seen: baselineSeen.current, pending: baselinePending.current },
+          });
           sent = withoutStoredFiles(merged);
           res = await saveState(sent, res.rev);
 
@@ -16365,7 +16419,7 @@ function CoolibahPortal({ role, onSignOut }) {
         }
 
         rev.current = res.rev;
-        baseline.current = sent.quals || null;
+        rebase(sent);
         touched.forEach((k) => dirty.current.delete(k));
         if (dirty.current.size === 0) setPending(false);
         setSync({ state: "ok", at: new Date().toISOString().slice(11, 16) });

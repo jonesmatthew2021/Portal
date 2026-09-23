@@ -56,7 +56,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, mergeHistory, mergeFilled, mergeSeen, mergePending };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -382,6 +382,79 @@ const is = (got, want, what) => {
   is(looks, 3, "it looked until the portal said the round had finished");
   is(waited, 2, "…and said it was waiting each time it was not");
   is(await lib.waitForRound(), true, "a portal that cannot say counts as free: the request itself is what gets refused");
+}
+
+/* ---- the change log and the round's notes, three copies to one: what
+        the hour wrote is kept, and only what this tab changed lands ---- */
+{
+  const e = (id, at) => ({ id, at, by: "x", section: "Admin", action: id, detail: "" });
+  const mine = [e("m2", "2026-09-24T10:30"), e("m1", "2026-09-24T09:00")];
+  const theirs = [e("s1", "2026-09-24T10:00"), e("m1", "2026-09-24T09:00")];
+  const out = rules.mergeHistory(mine, theirs);
+  is(out.map((x) => x.id), ["m2", "s1", "m1"], "the hour's line and the tab's line are both kept, newest first, and a line both hold appears once");
+  const tied = rules.mergeHistory([e("a", "2026-09-24T10:00"), e("b", "2026-09-24T10:00")], [e("c", "2026-09-24T10:00")]);
+  is(tied.map((x) => x.id), ["a", "b", "c"], "lines with the same stamp keep mine's order");
+  const many = Array.from({ length: 480 }, (_, i) => e("m" + i, "2026-09-24T10:" + String(59 - (i % 60)).padStart(2, "0")));
+  const more = Array.from({ length: 40 }, (_, i) => e("s" + i, "2026-09-24T11:00"));
+  const capped = rules.mergeHistory(many, more);
+  is(capped.length, 500, "the log is capped at five hundred");
+  is(capped.slice(0, 40).every((x) => x.id.startsWith("s")), true, "…and the newest survive the cap");
+  is(rules.mergeHistory(null, undefined), [], "nothing on either side is an empty log");
+
+  const keys = (o) => Object.keys(o).sort();
+  is(keys(rules.mergeFilled({ A: true, B: true }, { A: true }, { A: true, B: true, C: true })), ["A", "C"],
+    "a cell the tab took off its note stays off, and one the hour added stays on");
+  is(keys(rules.mergeFilled({ A: true }, { A: true, D: true }, { A: true, C: true })), ["A", "C", "D"],
+    "a cell the tab added and one the hour added are both on the note");
+  is(keys(rules.mergeSeen({ A: "h1", B: "h1" }, { A: "h1" }, { A: "h1", B: "h1", C: "h2" })), ["A", "C"], "the sightings follow the same rule");
+  is(keys(rules.mergeSeen({ A: "h1" }, { A: "h1", D: "h2" }, { A: "h1", C: "h2" })), ["A", "C", "D"], "…both ways");
+  is(rules.mergeSeen({ A: "h1" }, { A: "h1" }, { A: "h2" }).A, "h2", "a sighting both hold carries the hour's stamp");
+  is(rules.mergePending(["A", "B"], ["A"], ["A", "B", "C"]), ["A", "C"], "what the workbook is owed follows the same rule");
+  is(rules.mergePending(["A"], ["A", "D"], ["A", "C"]), ["A", "C", "D"], "…both ways");
+  is(rules.mergePending(null, ["A", "A"], undefined), ["A"], "a list is a set: no key twice");
+}
+
+/* ---- the provider's save loop uses those merges on a collision, on the
+        code that ships ---- */
+{
+  const e = (id, at) => ({ id, at, by: "x", section: "Admin", action: id, detail: "" });
+  const quals = { cols: [["QL-01", "Master"]], rows: [["EVANS, Brenton", "Master", "", ["2031-05-26"]]] };
+  const base = { quals, filled: { A: true, B: true }, seen: { X: "h1" }, pending: ["P"] };
+  const mine = {
+    notes: ["mine"],
+    quals: { cols: quals.cols, rows: [["EVANS, Brenton", "Master", "", ["2032-01-01"]]] },
+    history: [e("m1", "2026-09-24T10:30")],
+    filledFromCert: { A: true },
+    orphanSeen: { X: "h1", Y: "h2" },
+    workbookPending: [],
+    lastDocUpdate: "2026-09-24T09:00:00.000Z",
+  };
+  const theirs = {
+    notes: ["theirs"], other: "kept",
+    quals: { cols: quals.cols, rows: [["EVANS, Brenton", "Master", "", ["2031-05-26"]], ["ROSE, Matthew", "Mate", "", [""]]] },
+    history: [e("s1", "2026-09-24T10:00")],
+    filledFromCert: { A: true, B: true, C: true },
+    orphanSeen: { X: "h1", Z: "h3" },
+    workbookPending: ["P", "Q"],
+    lastDocUpdate: "2026-09-24T10:00:00.000Z",
+  };
+  const touched = ["notes", "quals", "history", "filledFromCert", "orphanSeen", "workbookPending", "lastDocUpdate"];
+  const out = lib.mergeSaved({ touched, mine, theirs, base });
+  is(out.notes, ["mine"], "a plain slice this tab touched goes back over theirs");
+  is(out.other, "kept", "a slice this tab never touched is theirs");
+  is(out.quals.rows.map((r) => r[0] + ":" + r[3][0]), ["EVANS, Brenton:2032-01-01", "ROSE, Matthew:"], "the matrix is merged cell by cell: my date lands, their new man stays");
+  is(out.history.map((x) => x.id), ["m1", "s1"], "the hour's log line is kept beside the tab's");
+  is(Object.keys(out.filledFromCert).sort(), ["A", "C"], "the note of filled cells is merged, not laid back whole");
+  is(Object.keys(out.orphanSeen).sort(), ["X", "Y", "Z"], "the sightings are merged");
+  is(out.workbookPending, ["Q"], "what is owed the workbook is merged: paid by the tab, still owed by the hour");
+  is(out.lastDocUpdate, "2026-09-24T10:00:00.000Z", "the document's stamp is the newer of the two");
+  const untouched = lib.mergeSaved({ touched: ["notes"], mine, theirs, base });
+  is(untouched.history.map((x) => x.id), ["s1"], "a log this tab did not write to is theirs as it is");
+  is(untouched.filledFromCert, theirs.filledFromCert, "…and so is the note");
+  const page = lib.mergeHistory(mine.history, theirs.history);
+  is(page, rules.mergeHistory(mine.history, theirs.history), "mergeHistory in the page answers as the module does");
+  is(lib.mergeFilled(base.filled, mine.filledFromCert, theirs.filledFromCert),
+    rules.mergeFilled(base.filled, mine.filledFromCert, theirs.filledFromCert), "mergeFilled in the page answers as the module does");
 }
 
 /* ---- an open tab runs the round only when the worker's hour has not:

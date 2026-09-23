@@ -353,3 +353,100 @@ export function settleRound({ filledFromCert, claimed, unread, settled, seenBefo
 
   return { settled: out, orphans, noteNow, seenNow };
 }
+
+/**
+ * Two change logs, brought back to one.
+ *
+ * The round on the hour writes its own line into the shared document's
+ * history, and a tab that saves on top of it used to lay its own copy of the
+ * log back whole, so the hour's line went. Both are kept: the union by id,
+ * newest first (the stamps are ISO minute strings, so they compare as text),
+ * with mine's own order kept where two stamps tie, and capped at the length
+ * the log keeps.
+ * @param {{ id?: string, at?: string }[] | null | undefined} mine
+ * @param {{ id?: string, at?: string }[] | null | undefined} theirs
+ * @param {number} [limit]
+ */
+export function mergeHistory(mine, theirs, limit = 500) {
+  const seen = new Set();
+  /** @type {{ id?: string, at?: string }[]} */
+  const all = [];
+  [...(Array.isArray(mine) ? mine : []), ...(Array.isArray(theirs) ? theirs : [])].forEach((e) => {
+    if (!e || typeof e !== "object") return;
+    if (e.id != null) {
+      if (seen.has(e.id)) return;
+      seen.add(e.id);
+    }
+    all.push(e);
+  });
+  // A stable sort, so entries with the same stamp keep the order they came in.
+  const at = (/** @type {{ at?: string }} */ e) => String(e.at || "");
+  return all
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => (at(a.e) < at(b.e) ? 1 : at(a.e) > at(b.e) ? -1 : a.i - b.i))
+    .map((x) => x.e)
+    .slice(0, limit);
+}
+
+/**
+ * Three copies of a set of keys, brought back to one: theirs, plus every key
+ * mine added since base, minus every key mine took off since base. What
+ * theirs did in the meantime is kept as it is, and a key both sides hold
+ * carries theirs' value.
+ * @template V
+ * @param {Record<string, V> | null | undefined} base
+ * @param {Record<string, V> | null | undefined} mine
+ * @param {Record<string, V> | null | undefined} theirs
+ * @returns {Record<string, V>}
+ */
+function mergeKeys(base, mine, theirs) {
+  const b = base && typeof base === "object" ? base : {};
+  const m = mine && typeof mine === "object" ? mine : {};
+  const t = theirs && typeof theirs === "object" ? theirs : {};
+  const has = (/** @type {object} */ o, /** @type {string} */ k) => Object.prototype.hasOwnProperty.call(o, k);
+  /** @type {Record<string, V>} */
+  const out = { ...t };
+  Object.keys(m).forEach((k) => { if (!has(b, k) && !has(out, k)) out[k] = m[k]; });
+  Object.keys(b).forEach((k) => { if (!has(m, k)) delete out[k]; });
+  return out;
+}
+
+/**
+ * The note of which cells the portal filled from a certificate, three copies
+ * to one. The round on the hour writes it, and so does Update the
+ * spreadsheet in a tab; whichever saves second must keep the other's keys.
+ * @param {Record<string, boolean> | null | undefined} base
+ * @param {Record<string, boolean> | null | undefined} mine
+ * @param {Record<string, boolean> | null | undefined} theirs
+ */
+export function mergeFilled(base, mine, theirs) {
+  return mergeKeys(base, mine, theirs);
+}
+
+/**
+ * The note of orphans seen, the same rule.
+ * @param {Record<string, string> | null | undefined} base
+ * @param {Record<string, string> | null | undefined} mine
+ * @param {Record<string, string> | null | undefined} theirs
+ */
+export function mergeSeen(base, mine, theirs) {
+  return mergeKeys(base, mine, theirs);
+}
+
+/**
+ * The cells owed to the workbook, the same rule: a list of keys, treated as a
+ * set, theirs' order first and mine's additions after.
+ * @param {string[] | null | undefined} base
+ * @param {string[] | null | undefined} mine
+ * @param {string[] | null | undefined} theirs
+ */
+export function mergePending(base, mine, theirs) {
+  /** @param {string[] | null | undefined} list */
+  const asSet = (list) => {
+    /** @type {Record<string, boolean>} */
+    const o = {};
+    (Array.isArray(list) ? list : []).forEach((k) => { if (typeof k === "string" && k) o[k] = true; });
+    return o;
+  };
+  return Object.keys(mergeKeys(asSet(base), asSet(mine), asSet(theirs)));
+}
