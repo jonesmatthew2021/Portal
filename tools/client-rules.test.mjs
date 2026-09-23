@@ -409,7 +409,9 @@ const is = (got, want, what) => {
   is(e413 && e413.status, 413, "a save the server refused carries the status");
   is(lib.saveTryAgainIn(e413), 0, "…and is not tried again: it would be refused again");
   is(lib.saveTryAgainIn(new TypeError("Failed to fetch")), 15000, "a save that never got there (offline) is tried again");
-  is(lib.saveTryAgainIn(null), 15000, "…whatever the error looks like");
+  is(lib.saveTryAgainIn(new Error("Converting circular structure to JSON")), 0, "something that went wrong in the tab before the save left would go wrong the same way again, so is not");
+  is(lib.saveTryAgainIn(new SyntaxError("Unexpected token")), 0, "…nor is an answer the tab could not read");
+  is(lib.saveTryAgainIn(null), 0, "…nor is nothing at all to go on");
 
   const before = new Map([["notes", 1], ["people", 2]]);
   const now = new Map([["notes", 1], ["people", 3]]);

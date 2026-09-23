@@ -323,13 +323,17 @@ async function saveState(data, rev) {
    nothing going up and, because a tab with unsaved changes stands down
    from the hourly round and skips other people's changes, nothing coming
    down either, until somebody happened to type in it. So a save that
-   did not get through is tried again shortly. A save the server looked at
-   and refused (a 4xx - signed out, too big) would be refused again, so is
-   not. */
+   did not get through is tried again shortly - but only where the next go
+   could come out differently: a server that fell over (a 5xx) or a fetch
+   that never got there (the browser throws a TypeError). A save the
+   server looked at and refused (a 4xx - signed out, too big) would be
+   refused again, and so would anything that went wrong in the tab itself
+   before the save left, which would go wrong the same way every fifteen
+   seconds with the badge flickering red for as long as the tab is open. */
 const SAVE_RETRY_MS = 15000;
 function saveTryAgainIn(e) {
   const s = e && e.status;
-  return s >= 400 && s < 500 ? 0 : SAVE_RETRY_MS;
+  return s >= 500 || (e && e.name === "TypeError") ? SAVE_RETRY_MS : 0;
 }
 
 /* Which of the slices a save carried are saved now that it has landed:
@@ -16572,8 +16576,9 @@ function CoolibahPortal({ role, onSignOut }) {
         setSync({ state: "ok", at: new Date().toISOString().slice(11, 16) });
       } catch (e) {
         setSync({ state: "error", msg: e.message });
-        // A save that never got there is tried again; one the server
-        // refused is left for the person to see (see saveTryAgainIn).
+        // A save that never got there, or that the server fell over on, is
+        // tried again; one that would fail the same way next time is left
+        // for the person to see (see saveTryAgainIn).
         const again = saveTryAgainIn(e);
         if (again) setTimeout(() => setRetry((n) => n + 1), again);
       } finally {
