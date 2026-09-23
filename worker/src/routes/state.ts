@@ -1,5 +1,9 @@
 import { PORTAL_ROW_ID } from "../db/schema.js";
 import { getEnv } from "../env.js";
+import { MAX_BYTES, recordHistory, countsOf } from "../lib/shared-state.js";
+// The history helpers live with the shared-state code now (lib/shared-state.ts);
+// re-exported here so history.ts keeps its imports.
+export { HISTORY_KEEP, ensureHistoryTable, recordHistory, countsOf, type HistoryCounts } from "../lib/shared-state.js";
 
 /**
  * The portal's one shared row — ported from the earlier build unchanged in
@@ -10,8 +14,6 @@ import { getEnv } from "../env.js";
  * versions can be looked at and any one of them put back (see history.ts).
  */
 const ROW_ID = PORTAL_ROW_ID;
-const MAX_BYTES = 5 * 1024 * 1024;
-export const HISTORY_KEEP = 200;
 
 function humanSize(bytes: number) {
   return bytes >= 1024 * 1024
@@ -24,7 +26,7 @@ const NO_STORE = { "Cache-Control": "no-store" };
 // Raw D1 and raw strings throughout this route on purpose: the state is a
 // ~600 KB JSON document, every open portal polls this endpoint every few
 // seconds, and parsing-and-restringifying it per poll (which the ORM's
-// json-mode column does) was enough CPU to trip the free plan's limit. The
+// json-mode column does) was enough CPU to trip a per-request budget. The
 // stored value is already the JSON to serve, so it is passed through
 // byte-for-byte and never parsed here.
 async function currentRaw() {
@@ -32,95 +34,6 @@ async function currentRaw() {
     .DB.prepare("SELECT data, rev FROM portal_state WHERE id = ?1")
     .bind(ROW_ID)
     .first<{ data: string; rev: number }>();
-}
-
-/* ------------------------------------------------------------ history ---- */
-
-// The history table is made the first time it is needed rather than by a
-// migration, so nothing has to be run against the live database by hand. The
-// statement is idempotent and costs next to nothing; it runs once per isolate.
-// The three counts are worked out at save time, when the document is already
-// parsed, so listing the history never has to read 200 documents back.
-let historyReady: Promise<unknown> | null = null;
-export function ensureHistoryTable() {
-  if (!historyReady) {
-    historyReady = getEnv()
-      .DB.prepare(
-        "CREATE TABLE IF NOT EXISTS portal_state_history (" +
-          "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
-          "portal_id TEXT NOT NULL, " +
-          "rev INTEGER NOT NULL, " +
-          "data TEXT NOT NULL, " +
-          "saved_at INTEGER NOT NULL, " +
-          "saved_by TEXT, " +
-          "crew INTEGER, " +
-          "matrix_rows INTEGER, " +
-          "dated_cells INTEGER)",
-      )
-      .run()
-      .catch((e) => {
-        // A failed attempt must not be remembered as done.
-        historyReady = null;
-        throw e;
-      });
-  }
-  return historyReady;
-}
-
-export type HistoryCounts = { crew: number; matrixRows: number; datedCells: number };
-
-// What the revisions list shows about each save: how many crew were on the
-// register, how many rows the matrix had, and how many cells held a date.
-export function countsOf(data: unknown): HistoryCounts {
-  const d = (data && typeof data === "object" ? data : {}) as {
-    people?: unknown; quals?: { rows?: unknown };
-  };
-  const people = Array.isArray(d.people) ? d.people : [];
-  const rows = d.quals && Array.isArray(d.quals.rows) ? (d.quals.rows as unknown[]) : [];
-  let dated = 0;
-  for (const r of rows) {
-    const cells = Array.isArray(r) && Array.isArray(r[3]) ? (r[3] as unknown[]) : [];
-    for (const c of cells) if (/^\d{4}-\d{2}-\d{2}/.test(String(c ?? ""))) dated++;
-  }
-  return { crew: people.length, matrixRows: rows.length, datedCells: dated };
-}
-
-// A burst of saves from the one person — the page saves a couple of seconds
-// after typing stops, so one edit is often three saves — is kept as one
-// version, the newest, rather than three. Otherwise an afternoon's typing
-// would push the version from before a bad hourly round off the end of the
-// list, which is the version the list exists to keep.
-const COALESCE_MS = 60 * 1000;
-
-// Puts one saved version on the record and lets go of anything older than
-// the newest HISTORY_KEEP for this portal.
-export async function recordHistory(
-  rev: number, dataText: string, savedBy: string | null, counts: HistoryCounts,
-) {
-  await ensureHistoryTable();
-  const db = getEnv().DB;
-  const now = Date.now();
-  const newest = await db
-    .prepare("SELECT id, saved_by, saved_at FROM portal_state_history WHERE portal_id = ?1 ORDER BY id DESC LIMIT 1")
-    .bind(ROW_ID)
-    .first<{ id: number; saved_by: string | null; saved_at: number }>();
-  const sameBurst = !!newest && newest.saved_by === savedBy && now - newest.saved_at < COALESCE_MS;
-  const write = sameBurst
-    ? db.prepare(
-        "UPDATE portal_state_history SET rev = ?2, data = ?3, saved_at = ?4, crew = ?5, matrix_rows = ?6, dated_cells = ?7 WHERE id = ?1",
-      ).bind(newest!.id, rev, dataText, now, counts.crew, counts.matrixRows, counts.datedCells)
-    : db.prepare(
-        "INSERT INTO portal_state_history " +
-          "(portal_id, rev, data, saved_at, saved_by, crew, matrix_rows, dated_cells) " +
-          "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-      ).bind(ROW_ID, rev, dataText, now, savedBy, counts.crew, counts.matrixRows, counts.datedCells);
-  await db.batch([
-    write,
-    db.prepare(
-      "DELETE FROM portal_state_history WHERE portal_id = ?1 AND id NOT IN " +
-        "(SELECT id FROM portal_state_history WHERE portal_id = ?1 ORDER BY id DESC LIMIT ?2)",
-    ).bind(ROW_ID, HISTORY_KEEP),
-  ]);
 }
 
 /* -------------------------------------------------------------- route ---- */

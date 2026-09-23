@@ -17,6 +17,7 @@ import { setEnv } from "../src/env.js";
 import { compareMatrix } from "../src/routes/analyse.js";
 import { relocateToRemovedBlob } from "../src/db/documents.js";
 import { replaceSingleFile } from "../src/db/single-file.js";
+import { saveDocument } from "../src/lib/shared-state.js";
 import { asKnownPerson } from "../../source/shared/names.js";
 
 /* ------------------------------------------------------------------------ *
@@ -271,4 +272,50 @@ test("the new file takes a suffix rather than writing over the office's file of 
   const { row } = await replaceSingleFile(todaysWorkbook());
   assert.equal(row.filename, "20260924 - CREW QUALIFICATION EXPIRY (2).xlsx");
   assert.equal(bucket.text(theirs), "the office's copy");
+});
+
+/* ------------------------------------------------------------------------ *
+ * Saving the shared document from the worker: a save that lands on a
+ * stale revision is worked out again on the fresh one.
+ * ------------------------------------------------------------------------ */
+test("a save that finds the document moved on reads again and tries once more", async () => {
+  let reads = 0;
+  let updates = 0;
+  const db = fakeDb((sql, args) => {
+    if (/SELECT data, rev FROM portal_state/.test(sql)) {
+      reads++;
+      return { results: [{ data: JSON.stringify({ n: reads, history: [] }), rev: reads === 1 ? 7 : 8 }] };
+    }
+    if (/UPDATE portal_state SET data/.test(sql)) {
+      updates++;
+      // The first save is refused: somebody saved rev 8 in between.
+      return { changes: updates === 1 ? 0 : 1 };
+    }
+    return undefined;
+  });
+  setEnv({ DB: db } as never);
+  const remembered: number[] = [];
+  const seen: number[] = [];
+  const out = await saveDocument(
+    (doc) => { seen.push(doc.n as number); return { ...doc, touched: true }; },
+    "the round on the hour",
+    { remember: async (rev) => { remembered.push(rev); } },
+  );
+  assert.equal(updates, 2, "the update was attempted twice");
+  assert.deepEqual(seen, [1, 2], "the change was worked out again on the fresh copy, not the stale one");
+  const tried = db.asked.filter((a) => /UPDATE portal_state/.test(a.sql)).map((a) => a.args[3]);
+  assert.deepEqual(tried, [7, 8], "each attempt was against the revision it had just read");
+  assert.deepEqual(out, { rev: 9, changed: true });
+  assert.deepEqual(remembered, [9], "the history is told once, with the revision that landed");
+});
+
+test("a change that answers null writes nothing", async () => {
+  const db = fakeDb((sql) => {
+    if (/SELECT data, rev FROM portal_state/.test(sql)) return { results: [{ data: "{}", rev: 3 }] };
+    return undefined;
+  });
+  setEnv({ DB: db } as never);
+  const out = await saveDocument(() => null, "the round on the hour", { remember: async () => {} });
+  assert.deepEqual(out, { rev: 3, changed: false });
+  assert.equal(db.asked.filter((a) => /UPDATE/.test(a.sql)).length, 0, "no update was even attempted");
 });
