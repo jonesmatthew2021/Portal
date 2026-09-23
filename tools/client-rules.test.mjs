@@ -223,6 +223,58 @@ const is = (got, want, what) => {
   is(given.length, 1, "the settled list handed in is not written on");
 }
 
+/* ---- a date comes off only on its second sighting as an orphan, and a
+        value settled this round always beats a clearing ---- */
+{
+  const filled = { "A::QL-01": true, "B::QL-02": true };
+  const first = rules.settleRound({ filledFromCert: filled, claimed: ["A::QL-01"], unread: 0, settled: [], seenBefore: {}, now: "2026-09-24T03" });
+  is(first.orphans, [], "an orphan seen for the first time is not cleared");
+  is(first.settled, [], "…so nothing is added to the settled list");
+  is(first.seenNow, { "B::QL-02": "2026-09-24T03" }, "…but it is noted, with the hour it was seen");
+  is(Object.keys(first.noteNow).sort(), ["A::QL-01", "B::QL-02"], "…and it stays in the note of filled cells");
+
+  const second = rules.settleRound({ filledFromCert: filled, claimed: ["A::QL-01"], unread: 0, settled: [], seenBefore: first.seenNow, now: "2026-09-24T04" });
+  is(second.orphans, ["B::QL-02"], "seen again the next round, it is cleared");
+  is(second.settled, [{ person: "B", code: "QL-02", value: "", clear: true }], "…in the same write");
+  is(Object.keys(second.noteNow), ["A::QL-01"], "…and drops out of the note");
+
+  const back = rules.settleRound({ filledFromCert: filled, claimed: ["A::QL-01", "B::QL-02"], unread: 0, settled: [], seenBefore: first.seenNow, now: "2026-09-24T04" });
+  is(back.orphans, [], "claimed again in between, it is not cleared");
+  is(back.seenNow, {}, "…and drops out of the sightings");
+
+  const valued = rules.settleRound({ filledFromCert: filled, claimed: ["A::QL-01"], unread: 0,
+    settled: [{ person: "b", code: "ql-02", value: "2030-01-01" }], seenBefore: first.seenNow, now: "2026-09-24T04" });
+  is(valued.orphans, [], "a value settled for the cell this round means it is not an orphan at all");
+  is(valued.settled, [{ person: "b", code: "ql-02", value: "2030-01-01" }], "…and the value is what goes out");
+  is(valued.seenNow, {}, "…and it is not a sighting either");
+
+  const both = rules.settleRound({ filledFromCert: {}, claimed: [], unread: 0,
+    settled: [{ person: "C", code: "QL-03", value: "2030-01-01" }, { person: "C", code: "QL-03", clear: true }] });
+  is(both.settled.map((x) => !!x.clear), [true, false], "clears go first and values after, so a value always has the last word");
+}
+
+/* ---- the rename race: the note under the old spelling, the claim under
+        the new, and a value for the cell this round ---- */
+{
+  const reg = names.crewRegister([{ name: "SITTIYOS, Kachin", aliases: ["bILLY"] }]);
+  const race = rules.settleRound({
+    filledFromCert: { "BILLY::QL-01": true },
+    claimed: ["SITTIYOS, KACHIN::QL-01"],
+    unread: 0,
+    settled: [{ person: "SITTIYOS, Kachin", code: "QL-01", value: "2031-02-17" }],
+    seenBefore: { "BILLY::QL-01": "2026-09-24T03" },
+    now: "2026-09-24T04",
+    nameOf: reg.nameOf,
+  });
+  is(race.orphans, [], "the note under the old spelling is the same cell as the claim under the new: no clear");
+  is(race.settled, [{ person: "SITTIYOS, Kachin", code: "QL-01", value: "2031-02-17" }], "the value stands");
+  is(Object.keys(race.noteNow), ["SITTIYOS, KACHIN::QL-01"], "the note is re-keyed under the register's name");
+  is(race.seenNow, {}, "nothing is a sighting");
+  const quals = { cols: [["QL-01", "Master"]], rows: [["bILLY", "Cook", "", ["2031-02-17"]]] };
+  const laid = rules.applySettled(quals, race.settled, reg.nameOf);
+  is(laid.next.rows[0][3][0], "2031-02-17", "the cell keeps the value");
+}
+
 /* ---- a settled date finds its row through the register's name ---- */
 {
   /* The real register, not a stand-in: its nameOf answers null for anyone it

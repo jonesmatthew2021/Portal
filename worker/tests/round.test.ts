@@ -18,7 +18,8 @@ import { compareMatrix } from "../src/routes/analyse.js";
 import { relocateToRemovedBlob } from "../src/db/documents.js";
 import { replaceSingleFile } from "../src/db/single-file.js";
 import { saveDocument } from "../src/lib/shared-state.js";
-import { asKnownPerson } from "../../source/shared/names.js";
+import { asKnownPerson, crewRegister } from "../../source/shared/names.js";
+import { settleRound, applySettled } from "../../source/shared/matrix-rules.js";
 
 /* ------------------------------------------------------------------------ *
  * A D1 that answers from a table of statements.
@@ -318,4 +319,65 @@ test("a change that answers null writes nothing", async () => {
   const out = await saveDocument(() => null, "the round on the hour", { remember: async () => {} });
   assert.deepEqual(out, { rev: 3, changed: false });
   assert.equal(db.asked.filter((a) => /UPDATE/.test(a.sql)).length, 0, "no update was even attempted");
+});
+
+/* ------------------------------------------------------------------------ *
+ * What a round takes back: a date comes off only on its second sighting as
+ * an orphan, a value settled this round always beats a clearing, and a
+ * rename in between changes nothing.
+ * ------------------------------------------------------------------------ */
+test("an orphan is cleared on its second consecutive sighting, not its first", () => {
+  const filled = { "A::QL-01": true, "B::QL-02": true };
+  const first = settleRound({ filledFromCert: filled, claimed: ["A::QL-01"], unread: 0, settled: [], seenBefore: {}, now: "2026-09-24T03" });
+  assert.deepEqual(first.orphans, [], "first sighting: no clear");
+  assert.deepEqual(first.seenNow, { "B::QL-02": "2026-09-24T03" }, "…but noted");
+  assert.deepEqual(Object.keys(first.noteNow).sort(), ["A::QL-01", "B::QL-02"], "…and still in the note");
+
+  const second = settleRound({ filledFromCert: filled, claimed: ["A::QL-01"], unread: 0, settled: [], seenBefore: first.seenNow, now: "2026-09-24T04" });
+  assert.deepEqual(second.settled, [{ person: "B", code: "QL-02", value: "", clear: true }], "second sighting: cleared");
+  assert.deepEqual(Object.keys(second.noteNow), ["A::QL-01"]);
+
+  const back = settleRound({ filledFromCert: filled, claimed: ["A::QL-01", "B::QL-02"], unread: 0, settled: [], seenBefore: first.seenNow, now: "2026-09-24T04" });
+  assert.deepEqual(back.orphans, [], "claimed again in between: dropped");
+  assert.deepEqual(back.seenNow, {});
+});
+
+test("a value settled for a cell this round beats any clearing of it", () => {
+  const out = settleRound({
+    filledFromCert: { "B::QL-02": true }, claimed: [], unread: 0,
+    settled: [{ person: "b", code: "ql-02", value: "2030-01-01" }],
+    seenBefore: { "B::QL-02": "2026-09-24T03" }, now: "2026-09-24T04",
+  });
+  assert.deepEqual(out.orphans, [], "not an orphan: a value speaks for it");
+  assert.deepEqual(out.settled, [{ person: "b", code: "ql-02", value: "2030-01-01" }]);
+  const ordered = settleRound({ filledFromCert: {}, claimed: [], unread: 0,
+    settled: [{ person: "C", code: "QL-03", value: "2030-01-01" }, { person: "C", code: "QL-03", clear: true }] });
+  assert.deepEqual(ordered.settled.map((x) => !!x.clear), [true, false], "clears first, values after");
+});
+
+test("the rename race: noted under the old spelling, claimed under the new, valued this round", () => {
+  const reg = crewRegister([{ name: "SITTIYOS, Kachin", aliases: ["bILLY"] }]);
+  const race = settleRound({
+    filledFromCert: { "BILLY::QL-01": true },
+    claimed: ["SITTIYOS, KACHIN::QL-01"],
+    unread: 0,
+    settled: [{ person: "SITTIYOS, Kachin", code: "QL-01", value: "2031-02-17" }],
+    seenBefore: { "BILLY::QL-01": "2026-09-24T03" },
+    now: "2026-09-24T04",
+    nameOf: reg.nameOf,
+  });
+  assert.deepEqual(race.orphans, [], "no clear");
+  assert.deepEqual(Object.keys(race.noteNow), ["SITTIYOS, KACHIN::QL-01"], "the note is keyed under the register's name");
+  assert.deepEqual(race.seenNow, {});
+  const laid = applySettled(
+    { cols: [["QL-01", "Master"]], rows: [["bILLY", "Cook", "", ["2031-02-17"]]] },
+    race.settled, reg.nameOf,
+  );
+  assert.equal(laid.next.rows[0][3][0], "2031-02-17", "the cell keeps the value");
+});
+
+test("with no sightings kept, the page's button still clears on first sighting", () => {
+  const out = settleRound({ filledFromCert: { "B::QL-02": true }, claimed: [], unread: 0, settled: [] });
+  assert.deepEqual(out.orphans, ["B::QL-02"]);
+  assert.deepEqual(out.seenNow, {});
 });

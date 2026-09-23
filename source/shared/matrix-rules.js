@@ -234,39 +234,93 @@ export function applySettled(quals, settled, nameOf = (n) => n) {
  * "Gone from the library" can only be told from "not read yet" once
  * everything on the books has been read, so the clearing waits for that.
  *
- * Back comes a copy of `settled` with one clearing entry per orphan, the
- * orphans themselves, and the note as it should read after this round: the
- * orphans gone, and every cell a certificate actually put a date in added.
- * A certificate whose scan gave no date leaves the office's own date in
- * place, and noting that cell would mean deleting the certificate later
- * wiped a date the portal never put there.
+ * A cell is only cleared on its second sighting as an orphan. `seenBefore`
+ * is the note of orphans the previous round saw (key to the hour it saw
+ * them) and `seenNow` comes back as the note for the next round to keep: an
+ * orphan seen for the first time is noted and left alone, one that was in
+ * `seenBefore` too is cleared, and a key claimed again in between drops
+ * out of the note. One round's view of the library can be wrong - a listing
+ * that missed a folder, a reading not yet made - and a date taken off the
+ * office's record on one bad look is worse than a date left an hour longer.
+ * Left out, `seenBefore` means clear on first sighting, which is what the
+ * page's button does today.
+ *
+ * Names are read through `nameOf` before anything is compared, the register's
+ * where the caller has one: a note kept under "BILLY::QL-01" and a claim
+ * made under "SITTIYOS, KACHIN::QL-01" are the same cell. And a value this
+ * round settles for a cell beats any clearing of it, whichever spelling
+ * either arrived under - the clears go first in the list that comes back
+ * and the values after, so a value always has the last word.
+ *
+ * Back comes a copy of `settled` with one clearing entry per orphan cleared,
+ * the orphans cleared, the note as it should read after this round (the
+ * cleared orphans gone, and every cell a certificate actually put a date in
+ * added), and `seenNow`. A certificate whose scan gave no date leaves the
+ * office's own date in place, and noting that cell would mean deleting the
+ * certificate later wiped a date the portal never put there.
  * @param {{
  *   filledFromCert?: Record<string, boolean> | null,
  *   claimed?: string[] | null,
  *   unread?: number | null,
  *   settled?: { person: string, code: string, value?: string, clear?: boolean }[] | null,
+ *   seenBefore?: Record<string, string> | null,
+ *   now?: string | null,
+ *   nameOf?: ((name: string) => string | null | undefined) | null,
  * }} round
  */
-export function settleRound({ filledFromCert, claimed, unread, settled }) {
-  const backed = new Set(claimed || []);
-  const wasFilled = filledFromCert || {};
-  const stillReading = !!unread;
-  const orphans = stillReading ? [] : Object.keys(wasFilled).filter((k) => !backed.has(k));
-
-  const out = (settled || []).slice();
-  orphans.forEach((k) => {
+export function settleRound({ filledFromCert, claimed, unread, settled, seenBefore, now, nameOf }) {
+  /** @param {string} n */
+  const as = (n) => { const k = nameOf ? nameOf(n) : n; return k == null || k === "" ? n : k; };
+  /** @param {unknown} person @param {unknown} code */
+  const keyOf = (person, code) =>
+    String(as(String(person || ""))).trim().toUpperCase() + "::" + String(code || "").trim().toUpperCase();
+  /** A PERSON::CODE key, its person read through the register.
+   * @param {string} k */
+  const normKey = (k) => {
     const cut = k.indexOf("::");
-    if (cut < 0) return;
-    out.push({ person: k.slice(0, cut), code: k.slice(cut + 2), value: "", clear: true });
+    return cut < 0 ? k : keyOf(k.slice(0, cut), k.slice(cut + 2));
+  };
+
+  const backed = new Set((claimed || []).map(normKey));
+  /** The note as it was, every key read through the register.
+   * @type {Record<string, boolean>} */
+  const wasFilled = {};
+  Object.keys(filledFromCert || {}).forEach((k) => { wasFilled[normKey(k)] = true; });
+  const stillReading = !!unread;
+
+  /* A value settled this round for the same cell, under whatever spelling:
+     the cell is spoken for, so it is neither an orphan nor to be cleared. */
+  const valued = new Set();
+  (settled || []).forEach((x) => { if (!x.clear && x.value) valued.add(keyOf(x.person, x.code)); });
+
+  const candidates = stillReading ? [] : Object.keys(wasFilled).filter((k) => !backed.has(k) && !valued.has(k));
+
+  /* Second sighting only, where the caller keeps the note between rounds. */
+  const twoSightings = seenBefore !== undefined && seenBefore !== null;
+  /** @type {Record<string, string>} */
+  const seenNow = {};
+  const orphans = candidates.filter((k) => {
+    if (!twoSightings) return true;
+    seenNow[k] = String(now || "");
+    return Object.prototype.hasOwnProperty.call(seenBefore, k);
   });
+
+  /** @type {{ person: string, code: string, value?: string, clear?: boolean }[]} */
+  const clears = orphans.map((k) => {
+    const cut = k.indexOf("::");
+    return { person: k.slice(0, cut), code: k.slice(cut + 2), value: "", clear: true };
+  });
+  const given = (settled || []).slice();
+  // Clears first, values after, so a value always has the last word.
+  const out = [...clears, ...given.filter((x) => !!x.clear), ...given.filter((x) => !x.clear)];
 
   /** @type {Record<string, boolean>} */
   const noteNow = { ...wasFilled };
   orphans.forEach((k) => { delete noteNow[k]; });
   out.forEach((x) => {
     if (x.clear || !x.value) return;
-    noteNow[String(x.person).trim().toUpperCase() + "::" + String(x.code).trim().toUpperCase()] = true;
+    noteNow[keyOf(x.person, x.code)] = true;
   });
 
-  return { settled: out, orphans, noteNow };
+  return { settled: out, orphans, noteNow, seenNow };
 }
