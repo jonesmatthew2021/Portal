@@ -742,13 +742,39 @@ export function recalcOnOpen(xml) {
  * even where the workbook and the matrix disagree. It is how the certificate
  * run writes in what the certificates settle without dragging the rest of the
  * matrix over whatever else the workbook says.
+ *
+ * `opts.mode` of "applied-and-blanks" is the hourly round's way in, with
+ * `opts.keys` the NAME|CODE cells the round itself just changed. Those are
+ * written whatever the workbook says - the certificate's answer is the
+ * answer - and so is any cell in scope that is BLANK in the workbook and
+ * has a value on the matrix. A cell the office typed differently is left
+ * exactly as typed and counted in `report.leftAsTyped`: the round runs with
+ * nobody watching, and a figure somebody wrote by hand is not a thing to
+ * write over on the hour. Rows in scope are the ones the workbook already
+ * has, plus anyone carrying a changed cell; nobody else is added to the
+ * office's file by the round.
+ *
+ * `opts.nameOf` reads a name the workbook writes through the crew register,
+ * so a row the office calls "bILLY" is the matrix's "SITTIYOS, Kachin" and
+ * not a second man to be added underneath. The page's callers pass nothing
+ * and names are compared as written, as they always were.
  * @param {ArrayBuffer} buf
  * @param {Quals} quals
  * @param {Set<string> | null} [only]
  * @param {Set<string> | null} [blank]
+ * @param {{ mode?: "applied-and-blanks", keys?: Set<string> | null,
+ *   nameOf?: ((name: string) => string | null | undefined) | null }} [opts]
  */
-export async function updateFiledWorkbook(buf, quals, only = null, blank = null) {
+export async function updateFiledWorkbook(buf, quals, only = null, blank = null, opts = {}) {
   const entries = readZip(buf);
+  const appliedMode = opts.mode === "applied-and-blanks";
+  const changedKeys = appliedMode ? (opts.keys || new Set()) : null;
+  /** A name as the register writes it, where the caller has one.
+   * @param {unknown} n */
+  const as = (n) => {
+    const k = opts.nameOf ? opts.nameOf(String(n == null ? "" : n)) : null;
+    return k == null || k === "" ? String(n == null ? "" : n) : k;
+  };
 
   const wbPart = partOf(entries, "xl/workbook.xml");
   const relsPart = partOf(entries, "xl/_rels/workbook.xml.rels");
@@ -799,13 +825,7 @@ export async function updateFiledWorkbook(buf, quals, only = null, blank = null)
    * @param {unknown} name
    * @param {string} code
    */
-  const keyOf = (name, code) => `${String(name).trim().toUpperCase()}|${code}`;
-  // Only the people and items the write actually concerns. With no `only`
-  // everything on the matrix is in scope, which is what the matrix-driven
-  // update has always done.
-  const inScope = only
-    ? quals.rows.filter((p) => quals.cols.some((c) => only.has(keyOf(p[0], c[0]))))
-    : quals.rows;
+  const keyOf = (name, code) => `${as(String(name).trim()).trim().toUpperCase()}|${code}`;
   const onlyCodes = only ? new Set([...only].map((k) => k.slice(k.indexOf("|") + 1))) : null;
   const missingCols = codes.filter((code) => !colForCode.has(code) && (!onlyCodes || onlyCodes.has(code)));
 
@@ -818,9 +838,22 @@ export async function updateFiledWorkbook(buf, quals, only = null, blank = null)
   /** @type {Map<string, Row>} */
   const rowForName = new Map();
   crewRows.forEach((r) => {
-    const key = says(cellAt(r, NAME_COL)).trim().toUpperCase();
+    const key = as(says(cellAt(r, NAME_COL)).trim()).trim().toUpperCase();
     if (!rowForName.has(key)) rowForName.set(key, r);
   });
+  /** The workbook row for a matrix name, read through the register.
+   * @param {unknown} name */
+  const rowOf = (name) => rowForName.get(as(String(name == null ? "" : name).trim()).trim().toUpperCase());
+
+  // Only the people and items the write actually concerns. With no `only`
+  // everything on the matrix is in scope, which is what the matrix-driven
+  // update has always done. The round's mode takes the rows the workbook
+  // already has and anyone carrying a cell it changed.
+  const inScope = only
+    ? quals.rows.filter((p) => quals.cols.some((c) => only.has(keyOf(p[0], c[0]))))
+    : changedKeys
+    ? quals.rows.filter((p) => !!rowOf(p[0]) || quals.cols.some((c) => changedKeys.has(keyOf(p[0], c[0]))))
+    : quals.rows;
 
   // What each item column holds today — figures or text, and in which style —
   // so a date written into a cell that has never had one in it is written the
@@ -861,9 +894,9 @@ export async function updateFiledWorkbook(buf, quals, only = null, blank = null)
     if (!shape.sample) shape.sample = borrowedSample;
   });
 
-  /** @type {{ sheet: string, written: number, formulas: number, addedRows: string[], skippedRows: string[], clearedRows: string[], skippedCols: string[] }} */
+  /** @type {{ sheet: string, written: number, formulas: number, leftAsTyped: number, addedRows: string[], skippedRows: string[], clearedRows: string[], skippedCols: string[] }} */
   const report = {
-    sheet: target.name, written: 0, formulas: 0,
+    sheet: target.name, written: 0, formulas: 0, leftAsTyped: 0,
     addedRows: [], skippedRows: [], clearedRows: [], skippedCols: missingCols,
   };
 
@@ -896,7 +929,7 @@ export async function updateFiledWorkbook(buf, quals, only = null, blank = null)
     : { kind: "inline", value: text });
 
   inScope.forEach((person) => {
-    const row = rowForName.get(String(person[0]).trim().toUpperCase());
+    const row = rowOf(person[0]);
     if (!row) { report.skippedRows.push(person[0]); return; }
 
     quals.cols.forEach((col, i) => {
@@ -906,7 +939,14 @@ export async function updateFiledWorkbook(buf, quals, only = null, blank = null)
 
       const want = person[3] && person[3][i] != null ? String(person[3][i]).trim() : "";
       const existing = cellAt(row, at);
-      if (says(existing).trim() === want) return;
+      const has = says(existing).trim();
+      if (has === want) return;
+      /* The round's mode: a cell it changed is written; a blank cell takes
+         the matrix's value; anything the office typed is left as typed. */
+      if (changedKeys && !changedKeys.has(keyOf(person[0], col[0])) && has !== "") {
+        if (want !== "") report.leftAsTyped++;
+        return;
+      }
 
       const shape = shapeOf.get(col[0]) || { numeric: true, sample: "", style: null };
       const style = existing && existing.s != null ? existing.s : shape.style;
@@ -927,7 +967,7 @@ export async function updateFiledWorkbook(buf, quals, only = null, blank = null)
     colForCode.forEach((at) => everyCol.add(at));
     const order = [...everyCol].sort((a, b) => a - b);
     blank.forEach((who) => {
-      const row = rowForName.get(String(who).trim().toUpperCase());
+      const row = rowOf(who);
       if (!row) return;
       let emptied = 0;
       order.forEach((at) => {
@@ -951,7 +991,7 @@ export async function updateFiledWorkbook(buf, quals, only = null, blank = null)
      concerns one newcomer and nobody else would otherwise find no crew rows at
      all and leave them off the workbook. */
   const placed = quals.rows
-    .map((p) => rowForName.get(String(p[0]).trim().toUpperCase()))
+    .map((p) => rowOf(p[0]))
     .filter((r) => r !== undefined);
   if (report.skippedRows.length && placed.length) {
     const lastCrew = placed.reduce((a, b) => (b.num > a.num ? b : a));

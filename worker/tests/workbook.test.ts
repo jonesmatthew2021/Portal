@@ -124,3 +124,64 @@ test("the expiry rules read off the Guidance Information sheet", async () => {
 test("two alternatives: the shorter is the rule", () => {
   assert.equal(expiryRule("2 years or 4 years")?.months, 24);
 });
+
+/* ---- the hourly round's way in: only what it changed, and blanks ---- */
+test("applied-and-blanks: a date the office typed differently is left as typed and counted", async () => {
+  const buf = await writeZip(workbook(sheetXml, workbookXml)).arrayBuffer();
+  /* On the sheet Evans's QL-01 is serial 48000 (2031-06-01) and QL-17 47500;
+     Farmer's are 48100 and 47600, Cook's 48200 and 47700. The matrix
+     disagrees with every one it has a date for, but the round only changed
+     Evans's QL-17 this hour. This fixture carries no cell styles, so a date
+     goes in as text the way textDate writes it. */
+  const three = {
+    cols: quals.cols,
+    rows: [
+      ["EVANS, Brenton", "Master", "", ["2031-05-26", "2028-02-02"]],
+      ["FARMER, Evan", "Master", "", ["2028-04-18", ""]],
+      ["COOK, Jack", "Second Mate", "", ["", "2028-01-05"]],
+    ] as [string, string, string, string[]][],
+  };
+  const out = await updateFiledWorkbook(buf, three, null, null, {
+    mode: "applied-and-blanks", keys: new Set(["EVANS, BRENTON|QL-17"]),
+  });
+  if (!out.blob) throw new Error("nothing was written: " + JSON.stringify(out.report));
+  const xml = await partText(partOf(readZip(await out.blob.arrayBuffer()), "xl/worksheets/sheet1.xml"));
+  const cell = (ref: string) => (xml.match(new RegExp(`<c r="${ref}"[^>]*>(?:<f>[^<]*</f>)?(?:<v>([^<]*)</v>|<is><t[^>]*>([^<]*)</t></is>)`)) || []).slice(1).find(Boolean);
+  assert.equal(cell("F3"), "2028-02-02", "the cell the round changed is written");
+  assert.equal(cell("E3"), "48000", "Evans's QL-01, which the office typed differently, is left as typed");
+  assert.equal(cell("E4"), "48100", "Farmer's QL-01 too");
+  assert.equal(cell("F4"), "47600", "a date the office has that the matrix lacks is left alone and not counted");
+  assert.equal(cell("E5"), "48200", "Cook's QL-01 is not blanked because the matrix is blank");
+  assert.equal(cell("F5"), "47700", "Cook's QL-17, typed differently, is left as typed");
+  assert.equal(out.report.written, 1, "one cell written");
+  assert.equal(out.report.leftAsTyped, 3, "three cells the office typed differently, counted");
+  assert.deepEqual(out.report.addedRows, [], "nobody was added");
+});
+
+test("applied-and-blanks: a blank cell takes the matrix's date, and a row the office spells its own way is his", async () => {
+  const blankSheet = sheetXml.replace('<c r="E3" t="n"><v>48000</v></c>', "").replace("EVANS, Brenton", "bRENTON");
+  const buf = await writeZip(workbook(blankSheet, workbookXml)).arrayBuffer();
+  const one = {
+    cols: quals.cols,
+    rows: [["EVANS, Brenton", "Master", "", ["2031-05-26", "2028-02-02"]]] as [string, string, string, string[]][],
+  };
+  const nameOf = (n: string) => (n.toUpperCase() === "BRENTON" ? "EVANS, Brenton" : n);
+  const out = await updateFiledWorkbook(buf, one, null, null, { mode: "applied-and-blanks", keys: new Set(), nameOf });
+  if (!out.blob) throw new Error("nothing was written: " + JSON.stringify(out.report));
+  const xml = await partText(partOf(readZip(await out.blob.arrayBuffer()), "xl/worksheets/sheet1.xml"));
+  assert.ok(/<c r="E3"[^>]*><is><t[^>]*>2031-05-26<\/t>/.test(xml), "the blank QL-01 cell took 2031-05-26");
+  assert.deepEqual(out.report.addedRows, [], "bRENTON is Brenton Evans, not a new man");
+  assert.equal(out.report.leftAsTyped, 1, "his QL-17, typed differently, is left");
+  assert.ok(xml.includes("bRENTON"), "the office's spelling stays on the sheet");
+});
+
+test("applied-and-blanks: nothing to write is nothing written", async () => {
+  const buf = await writeZip(workbook(sheetXml, workbookXml)).arrayBuffer();
+  const agree = {
+    cols: quals.cols,
+    rows: [["EVANS, Brenton", "Master", "", ["2031-06-01", "2030-01-17"]]] as [string, string, string, string[]][],
+  };
+  const out = await updateFiledWorkbook(buf, agree, null, null, { mode: "applied-and-blanks", keys: new Set() });
+  assert.equal(out.blob, null);
+  assert.equal(out.report.leftAsTyped, 0);
+});

@@ -95,3 +95,28 @@ assert((outXml.match(/<mergeCell ref="([^"]+)"/) || [])[1] === "B10:F10", "the m
 assert(/dimension ref="A1:F11"/.test(outXml), "the dimension grew to row 11");
 assert(rowsBack.join(",") === [...rowsBack].sort((a, b) => a - b).join(","), "rows are in ascending order");
 console.log(process.exitCode ? "SOME CHECKS FAILED" : "ALL GOOD — the insert behaves like Excel's own");
+
+/* ---- the hourly round's way in: only the cells it changed, plus blanks;
+        anything the office typed is left as typed and counted ---- */
+{
+  const three = {
+    cols: quals.cols,
+    rows: [
+      ["EVANS, Brenton", "Master", "", ["2031-05-26", "2028-02-02"]],
+      ["FARMER, Evan", "Master", "", ["2028-04-18", ""]],
+      ["COOK, Jack", "Second Mate", "", ["", "2028-01-05"]],
+    ],
+  };
+  const roundOut = await lib.updateFiledWorkbook(await new Blob([zipped]).arrayBuffer(), three, null, null, {
+    mode: "applied-and-blanks", keys: new Set(["EVANS, BRENTON|QL-17"]),
+  });
+  assert(!!roundOut.blob, "the round's mode wrote something");
+  const roundXml = roundOut.blob ? await lib.partText(lib.partOf(lib.readZip(await roundOut.blob.arrayBuffer()), "xl/worksheets/sheet1.xml")) : "";
+  // This fixture carries no cell styles, so a date goes in as text.
+  const cellOf = (ref) => (roundXml.match(new RegExp(`<c r="${ref}"[^>]*>(?:<f>[^<]*</f>)?(?:<v>([^<]*)</v>|<is><t[^>]*>([^<]*)</t></is>)`)) || []).slice(1).find(Boolean);
+  assert(cellOf("F3") === "2028-02-02", "the one cell the round changed was written");
+  assert(cellOf("E3") === "48000", "a date the office typed differently was left as typed");
+  assert(roundOut.report.written === 1 && roundOut.report.leftAsTyped === 3, "one written, three left as typed and counted");
+  assert(roundOut.report.addedRows.length === 0, "the round adds nobody the workbook has not got");
+}
+console.log(process.exitCode ? "SOME CHECKS FAILED" : "ALL GOOD — the round's mode leaves the office's figures alone");
