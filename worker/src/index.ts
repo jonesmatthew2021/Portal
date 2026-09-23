@@ -22,6 +22,7 @@ import migrateCerts from "./routes/migrate-certs.js";
 import readOne from "./routes/read-one.js";
 import clearR2 from "./routes/clear-r2.js";
 import importSingle from "./routes/import-single.js";
+import fauna from "./routes/fauna.js";
 import { runMatrixRound, roundRunning, takeLease, dropLease, type Lease } from "./lib/round.js";
 import { readDocument } from "./lib/shared-state.js";
 import { crewRowsOnly } from "../../source/shared/names.js";
@@ -93,6 +94,8 @@ export default {
 
       if (path === "/api/analyse") return await analyse(req);
       if (path === "/api/ai-checker") return await aiChecker(req);
+      // The Marine Fauna Observation Log, spoken into a phone (/fauna/).
+      if (path.startsWith("/api/fauna/")) return await fauna(req, user!, path);
       if (path === "/api/archive") return await archive(req);
       if (path === "/api/sync/progress") {
         return Response.json((await syncProgress()) ?? { pct: 0, word: "No sync has run yet", done: true }, {

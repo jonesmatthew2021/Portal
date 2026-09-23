@@ -136,6 +136,23 @@ CREATE TABLE IF NOT EXISTS login_events (
 );
 CREATE INDEX IF NOT EXISTS login_events_ts_idx ON login_events (ts);
 
+-- The Marine Fauna Observation Log: one row per sighting (or per nil-sighting
+-- watch), spoken into the phone app at /fauna/. data is the whole entry as
+-- JSON, keyed the way source/fauna/fields.js names the log's columns; month
+-- and at are pulled out for listing and for the month export. Taken off with
+-- deleted_at rather than deleted. The worker creates this table itself the
+-- first time it is needed (src/routes/fauna.ts). Added 24 Sep 2026.
+CREATE TABLE IF NOT EXISTS fauna_sightings (
+  id TEXT PRIMARY KEY,
+  month TEXT NOT NULL,
+  at TEXT NOT NULL,
+  observer TEXT,
+  data TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  deleted_at INTEGER
+);
+
 -- The JSON records the earlier build kept in named blob stores. Strongly
 -- consistent on purpose: poll loops read these back the moment after they are
 -- written.

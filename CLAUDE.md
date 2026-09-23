@@ -49,6 +49,23 @@ component directly.
 To add an area: drop a `.jsx` file in `source/areas/`. The build picks it up by
 filename order and a check confirms it arrived.
 
+`source/fauna/` is the **Marine Fauna Observation Log** phone app, served at
+`/fauna/` behind the same sign-in and installable from the phone's browser
+as its own icon. It is plain HTML and a module, copied into the worker's
+assets as they are (no JSX, no build step beyond the copy):
+
+| File under `source/fauna/` | What |
+|---|---|
+| `index.html` | the app: talk, the columns fill in, it asks for what is missing, save |
+| `fields.js` | the log's 31 columns, which must be filled, the questions, the rules that read a spoken sentence — the page, the worker and the tests all run this one file |
+| `template.xlsx` | the office's own workbook with one month tab, made by `node tools/fauna-template.mjs "<the office's log.xlsx>"`; the month export is written into it |
+| `manifest.webmanifest`, `icon.svg` | the home-screen app; `node tools/fauna-icons.mjs` redraws the PNGs |
+
+The worker side is `worker/src/routes/fauna.ts`: the AI reads the sentence
+(`POST /api/fauna/parse`, falling back to the rules in `fields.js` when the
+model cannot be reached), the entries live in `fauna_sightings`, and
+`GET /api/fauna/export?month=` hands back the month as the office's workbook.
+
 `source/shared/` holds the code the page and the worker both run: the workbook
 writer (`workbook.js`), the matrix rules (`matrix-rules.js`) and the names
 register (`names.js`). The build splices them into the page at `/* @shared */`

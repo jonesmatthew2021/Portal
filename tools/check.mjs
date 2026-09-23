@@ -125,6 +125,31 @@ run("Every area and shared file is in the portal", () => {
   return names.length + " area(s) and " + shared.length + " shared file(s), all spliced in";
 });
 
+/* --------------------------------------------------------------- 4b */
+run("The fauna log compiles and is in the live site", () => {
+  /* The phone app at /fauna/ is plain HTML and a module, copied into the
+     worker's assets as they are. So two things can go wrong quietly: a typo
+     that breaks the page on the phone, and an edit under source/fauna that
+     never reached worker/assets because the build was not run. */
+  const babel = require("@babel/standalone");
+  const { parser } = babel.packages;
+  const dir = join(ROOT, "source", "fauna");
+  const page = readFileSync(join(dir, "index.html"), "utf8");
+  const open = page.indexOf('<script type="module">');
+  if (open < 0) throw new Error("source/fauna/index.html has no module script");
+  const script = page.slice(page.indexOf(">", open) + 1, page.indexOf("</script>", open));
+  parser.parse(script, { sourceType: "module" });
+  parser.parse(readFileSync(join(dir, "fields.js"), "utf8"), { sourceType: "module" });
+  for (const f of ["index.html", "fields.js", "manifest.webmanifest", "icon-192.png", "icon-512.png", "template.xlsx"]) {
+    const built = join(ROOT, "worker", "assets", "fauna", f);
+    if (!existsSync(built)) throw new Error("worker/assets/fauna/" + f + " is missing.\n      Run: node tools/build.mjs");
+    if (!readFileSync(join(dir, f)).equals(readFileSync(built))) {
+      throw new Error("worker/assets/fauna/" + f + " is not what source/fauna/" + f + " would build.\n      Run: node tools/build.mjs");
+    }
+  }
+  return "no syntax errors, and the live copy matches the source";
+});
+
 /* ---------------------------------------------------------------- 5 */
 run("Every rank has a heading to sit under", () => {
   /* The rank pickers offer the vessel's eight ranks and Crew Details groups
@@ -216,7 +241,7 @@ if (!existsSync(rulesTest)) {
     try {
       // The rules, the shared workbook code as the worker imports it, and
       // the hourly round piece by piece.
-      const out = execFileSync("npx", ["tsx", "--test", "tests/rules.test.ts", "tests/workbook.test.ts", "tests/round.test.ts"], {
+      const out = execFileSync("npx", ["tsx", "--test", "tests/rules.test.ts", "tests/workbook.test.ts", "tests/round.test.ts", "tests/fauna.test.ts"], {
         cwd: join(ROOT, "worker"), stdio: "pipe", shell: true, timeout: 180000, encoding: "utf8",
       });
       const m = /(?:#|ℹ)\s*pass (\d+)/.exec(out);

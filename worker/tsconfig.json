@@ -20,6 +20,7 @@
   "include": [
     "src/**/*.ts",
     "../source/shared/*.js",
+    "../source/fauna/*.js",
     "tests/**/*.ts"
   ]
 }

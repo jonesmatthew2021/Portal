@@ -12,7 +12,8 @@
     "db:remote": "wrangler d1 execute portal --remote --file=./schema.sql",
     "seed": "node scripts/seed-local.mjs",
     "check": "node ../tools/check.mjs",
-    "build": "node ../tools/build.mjs"
+    "build": "node ../tools/build.mjs",
+    "dev:8790": "wrangler dev --port 8790"
   },
   "dependencies": {
     "drizzle-orm": "^0.44.2"

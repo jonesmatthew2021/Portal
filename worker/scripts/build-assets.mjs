@@ -9,7 +9,7 @@
  * Run automatically by `npm run dev` and `npm run deploy`.
  */
 
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { portalSource } from "../../tools/source.mjs";
@@ -47,7 +47,15 @@ copyFileSync(join(REPO, "source", "crew-list-form.html"), join(ASSETS, "crew-lis
 for (const f of ["manifest.webmanifest", "icon-192.png", "icon-512.png", "apple-touch-icon.png"]) {
   copyFileSync(join(REPO, "source", "app", f), join(ASSETS, f));
 }
+// The fauna log — the phone app at /fauna/ — is its own folder, carried over
+// as it is: the page, its rules module, its manifest and icons, and the
+// workbook template the month export is written into. Plain files, nothing
+// to compile.
+const FAUNA = join(ASSETS, "fauna");
+mkdirSync(FAUNA, { recursive: true });
+const faunaFiles = readdirSync(join(REPO, "source", "fauna")).filter((f) => !f.endsWith(".svg"));
+for (const f of faunaFiles) copyFileSync(join(REPO, "source", "fauna", f), join(FAUNA, f));
 
 console.log(
-  `assets built — index.html ${(out.length / 1024 / 1024).toFixed(1)} MB (compiled in ${((Date.now() - t0) / 1000).toFixed(1)}s), crew-list-form.html and app icons copied`,
+  `assets built — index.html ${(out.length / 1024 / 1024).toFixed(1)} MB (compiled in ${((Date.now() - t0) / 1000).toFixed(1)}s), crew-list-form.html, app icons and the fauna log (${faunaFiles.length} files) copied`,
 );

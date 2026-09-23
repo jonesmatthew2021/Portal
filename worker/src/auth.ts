@@ -207,22 +207,32 @@ const PAGE = (inner: string) => `<!doctype html>
   .wrong { color:#b03a2e; font-size:13px; margin:0 0 12px; }
 </style></head><body>${inner}</body></html>`;
 
-const EMAIL_FORM = (msg?: string) =>
+// Where to land once signed in: the page that was asked for, so the fauna
+// log opens as the fauna log and not the portal's front page. Only a path on
+// this site is ever followed.
+const safeNext = (v: unknown) => {
+  const s = typeof v === "string" ? v.trim() : "";
+  return /^\/(?!\/)[^\s]*$/.test(s) && !s.startsWith("/login") && !s.startsWith("/api/") ? s : "/";
+};
+
+const EMAIL_FORM = (msg?: string, next = "/") =>
   PAGE(`<form method="POST" action="/login">
   <h1>TSV COOLIBAH</h1>
   <div class="sub">Crew Portal &middot; United Marine</div>
   ${msg ? `<p class="wrong">${msg}</p>` : ""}
+  <input type="hidden" name="next" value="${next.replace(/"/g, "&quot;")}">
   <input type="email" name="email" placeholder="Your email address" autofocus autocomplete="email" required>
   <button type="submit">Email me a sign-in code</button>
   <p class="note">A six-digit code goes to your email &mdash; on your phone or anywhere your mail is. Type it on the next screen and this device stays signed in for one week.</p>
 </form>`);
 
-const CODE_FORM = (email: string, msg?: string) =>
+const CODE_FORM = (email: string, msg?: string, next = "/") =>
   PAGE(`<form method="POST" action="/login/verify">
   <h1>TSV COOLIBAH</h1>
   <div class="sub">A code is on its way to<br><b>${email.replace(/</g, "&lt;")}</b></div>
   ${msg ? `<p class="wrong">${msg}</p>` : ""}
   <input type="hidden" name="email" value="${email.replace(/"/g, "&quot;")}">
+  <input type="hidden" name="next" value="${next.replace(/"/g, "&quot;")}">
   <input inputmode="numeric" pattern="[0-9]*" maxlength="6" name="code" placeholder="6-digit code" autofocus autocomplete="one-time-code" required>
   <button type="submit">Enter the portal</button>
   <p class="note">Nothing arrived after a minute? Check junk mail, then <a href="/login">start again</a>.</p>
@@ -255,7 +265,8 @@ async function sendCode(email: string, code: string) {
 async function handleRequestCode(req: Request): Promise<Response> {
   const form = await req.formData().catch(() => null);
   const email = cleanEmail(form?.get("email"));
-  if (!email) return html(EMAIL_FORM("Type a whole email address."));
+  const next = safeNext(form?.get("next"));
+  if (!email) return html(EMAIL_FORM("Type a whole email address.", next));
 
   const db = getEnv().DB;
   let user = await db
@@ -307,15 +318,16 @@ async function handleRequestCode(req: Request): Promise<Response> {
       }
     }
   }
-  return html(CODE_FORM(email));
+  return html(CODE_FORM(email, undefined, next));
 }
 
 async function handleVerify(req: Request): Promise<Response> {
   const form = await req.formData().catch(() => null);
   const email = cleanEmail(form?.get("email"));
   const code = String(form?.get("code") || "").trim();
+  const next = safeNext(form?.get("next"));
   if (!email || !/^\d{6}$/.test(code)) {
-    return html(email ? CODE_FORM(email, "The code is the six digits from the email.") : EMAIL_FORM());
+    return html(email ? CODE_FORM(email, "The code is the six digits from the email.", next) : EMAIL_FORM(undefined, next));
   }
 
   const db = getEnv().DB;
@@ -328,7 +340,7 @@ async function handleVerify(req: Request): Promise<Response> {
     if (row) {
       await db.prepare("UPDATE login_codes SET attempts = attempts + 1 WHERE email = ?1").bind(email).run();
     }
-    return html(CODE_FORM(email, msg), 401);
+    return html(CODE_FORM(email, msg, next), 401);
   };
 
   if (!row || row.expires_at < now()) {
@@ -365,7 +377,7 @@ async function handleVerify(req: Request): Promise<Response> {
   return new Response(null, {
     status: 303,
     headers: {
-      Location: "/",
+      Location: next,
       "Set-Cookie": `${SESSION_COOKIE}=${token}; Path=/; Max-Age=${SESSION_DAYS * 86400}; HttpOnly; Secure; SameSite=Lax`,
     },
   });
@@ -389,7 +401,11 @@ async function handleLogout(req: Request): Promise<Response> {
  * Returns null when the request may pass (and the user, when there is one),
  * or the Response that answers it instead.
  */
-const PUBLIC_FILES = new Set(["/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/apple-touch-icon.png"]);
+const PUBLIC_FILES = new Set([
+  "/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/apple-touch-icon.png",
+  // The fauna log's own home-screen icon and manifest.
+  "/fauna/manifest.webmanifest", "/fauna/icon-192.png", "/fauna/icon-512.png",
+]);
 
 export async function gate(
   req: Request,
@@ -408,7 +424,8 @@ export async function gate(
   }
   if (path === "/login") {
     if (req.method === "POST") return { barred: await handleRequestCode(req), user: null };
-    return { barred: html(EMAIL_FORM()), user: null };
+    // /login?next=/fauna/ is how the fauna app sends a signed-out phone here.
+    return { barred: html(EMAIL_FORM(undefined, safeNext(new URL(req.url).searchParams.get("next")))), user: null };
   }
   if (path === "/login/verify" && req.method === "POST") return { barred: await handleVerify(req), user: null };
   if (path === "/logout") return { barred: await handleLogout(req), user: null };
@@ -433,5 +450,6 @@ export async function gate(
   if (path.startsWith("/api/")) {
     return { barred: Response.json({ error: "Sign in first — open the portal in the browser." }, { status: 401 }), user: null };
   }
-  return { barred: html(EMAIL_FORM()), user: null };
+  // A page asked for before signing in is where the sign-in lands afterwards.
+  return { barred: html(EMAIL_FORM(undefined, safeNext(path))), user: null };
 }

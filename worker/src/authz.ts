@@ -30,6 +30,9 @@ export function allowed(user: PortalUser, method: string, path: string): boolean
   // Crew: reads pass, and exactly two writes — the shared-state save (which
   // crewStateBody strips to comments) and nothing else.
   if (method === "GET" || method === "HEAD") return true;
+  // The fauna log is a watchkeeper's job, whatever their level: any signed-in
+  // observer may log a sighting, change one of theirs, or export the month.
+  if (path.startsWith("/api/fauna/")) return true;
   if (method === "PUT" && path === "/api/state") return true;
   // Crew may file their own certificates — the upload page's two calls. The
   // files door is held to certificates in index.ts.

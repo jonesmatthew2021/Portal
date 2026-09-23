@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0B3D5C">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Fauna Log">
+<link rel="manifest" href="/fauna/manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="/fauna/icon-192.png">
+<link rel="apple-touch-icon" href="/fauna/icon-192.png">
+<title>Fauna Log - TSV Coolibah</title>
+<style>
+  :root { --navy:#0B3D5C; --sea:#1C5C8C; --ink:#14283A; --mute:#5D7688; --line:#D6E0E8; --bg:#F2F6F9; --card:#fff;
+    --warn:#B8621B; --bad:#C0281F; --good:#1F7A4D; --carried:#7A8A99; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; padding:0; background:var(--bg); color:var(--ink); font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; -webkit-text-size-adjust:100%; }
+  body { padding-bottom:calc(24px + env(safe-area-inset-bottom)); }
+  header { background:var(--navy); color:#fff; padding:calc(10px + env(safe-area-inset-top)) 16px 12px; position:sticky; top:0; z-index:5; }
+  header .row { display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
+  header h1 { font-size:15px; letter-spacing:.8px; margin:0; font-weight:700; }
+  header .who { font-size:12px; opacity:.8; }
+  header .fix { font-size:13px; margin-top:4px; display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+  header .fix b { font-weight:600; font-variant-numeric:tabular-nums; }
+  header .fix .pos.stale { opacity:.6; }
+  header button.mute { background:transparent; border:1px solid rgba(255,255,255,.4); color:#fff; border-radius:6px; font:inherit; font-size:12px; padding:3px 8px; }
+  main { padding:14px 16px 0; max-width:640px; margin:0 auto; }
+  .talk { display:flex; flex-direction:column; align-items:center; gap:10px; margin:6px 0 14px; }
+  .mic { width:96px; height:96px; border-radius:50%; border:0; background:var(--sea); color:#fff; box-shadow:0 6px 18px rgba(11,61,92,.35); font-size:40px; display:flex; align-items:center; justify-content:center; touch-action:manipulation; }
+  .mic:active { transform:scale(.97); }
+  .mic.listening { background:var(--bad); animation:pulse 1.2s ease-in-out infinite; }
+  .mic.busy { background:var(--mute); }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(192,40,31,.45)} 70%{box-shadow:0 0 0 22px rgba(192,40,31,0)} 100%{box-shadow:0 0 0 0 rgba(192,40,31,0)} }
+  .mic svg { width:44px; height:44px; fill:#fff; }
+  .state { font-size:13px; color:var(--mute); min-height:18px; text-align:center; }
+  .heard { width:100%; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px; font-size:15px; line-height:1.4; min-height:44px; color:var(--ink); }
+  .heard .interim { color:var(--mute); }
+  .heard:empty::before { content:"Tap the microphone and say what you saw."; color:var(--mute); }
+  .question { width:100%; background:#FFF6E8; border:1px solid #F0D3A8; color:#6B3E0E; border-radius:10px; padding:10px 12px; font-size:16px; line-height:1.35; display:none; }
+  .question.show { display:block; }
+  .question .k { font-size:12px; letter-spacing:.6px; text-transform:uppercase; color:#9A6A2E; display:block; margin-bottom:2px; }
+  .done { width:100%; background:#E9F5EE; border:1px solid #BFE0CC; color:#1F5A3A; border-radius:10px; padding:10px 12px; font-size:15px; display:none; }
+  .done.show { display:block; }
+  .typed { width:100%; display:none; gap:8px; }
+  .typed.show { display:flex; }
+  .typed input { flex:1; font:inherit; font-size:15px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; }
+  .typed button { font:inherit; font-size:14px; padding:10px 14px; border:0; border-radius:8px; background:var(--sea); color:#fff; }
+  .link { background:transparent; border:0; color:var(--sea); font:inherit; font-size:13px; text-decoration:underline; padding:2px 4px; }
+  section.group { background:var(--card); border:1px solid var(--line); border-radius:12px; margin:0 0 12px; overflow:hidden; }
+  section.group h2 { font-size:12px; letter-spacing:.8px; text-transform:uppercase; color:var(--mute); margin:0; padding:10px 12px 6px; }
+  .fields { display:grid; grid-template-columns:1fr 1fr; }
+  .f { display:flex; flex-direction:column; gap:2px; padding:8px 12px; border-top:1px solid var(--line); min-height:52px; cursor:pointer; }
+  .f:nth-child(odd) { border-right:1px solid var(--line); }
+  .f .l { font-size:11.5px; color:var(--mute); letter-spacing:.2px; }
+  .f .v { font-size:16px; font-weight:600; color:var(--ink); }
+  .f.empty .v { color:var(--line); font-weight:500; }
+  .f.empty.need .v { color:var(--warn); }
+  .f.empty.need { background:#FFFAF3; }
+  .f.carried .v { color:var(--carried); font-weight:500; font-style:italic; }
+  .f.locked .l::after { content:" · typed"; color:var(--good); }
+  .f.focus { outline:2px solid var(--warn); outline-offset:-2px; }
+  .f select, .f input { font:inherit; font-size:16px; padding:6px 8px; border:1px solid var(--line); border-radius:6px; width:100%; background:#fff; }
+  .f .yn { display:flex; gap:6px; }
+  .f .yn button { flex:1; font:inherit; font-size:15px; padding:8px; border:1px solid var(--line); border-radius:6px; background:#fff; }
+  .f .yn button.on { background:var(--sea); color:#fff; border-color:var(--sea); }
+  .actions { display:flex; gap:10px; margin:4px 0 18px; }
+  .actions button { flex:1; font:inherit; font-size:16px; font-weight:600; padding:14px; border:0; border-radius:10px; }
+  .actions .save { background:var(--good); color:#fff; }
+  .actions .save[disabled] { background:#9CC3AD; }
+  .actions .nil { background:#fff; border:1px solid var(--line); color:var(--ink); }
+  .actions .discard { background:#fff; border:1px solid var(--line); color:var(--bad); flex:0 0 auto; padding:14px 16px; }
+  .month { display:flex; justify-content:space-between; align-items:center; margin:6px 0 8px; }
+  .month h2 { font-size:12px; letter-spacing:.8px; text-transform:uppercase; color:var(--mute); margin:0; }
+  .month .dl { font:inherit; font-size:13px; color:var(--sea); text-decoration:none; border:1px solid var(--line); background:#fff; border-radius:8px; padding:6px 10px; }
+  .month select { font:inherit; font-size:13px; border:1px solid var(--line); border-radius:8px; padding:5px 8px; background:#fff; }
+  ul.list { list-style:none; margin:0; padding:0; }
+  ul.list li { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:8px; display:flex; justify-content:space-between; gap:10px; align-items:center; }
+  ul.list li .t { font-weight:600; font-variant-numeric:tabular-nums; }
+  ul.list li .d { font-size:14px; color:var(--ink); flex:1; margin-left:10px; }
+  ul.list li .s { font-size:11.5px; color:var(--mute); }
+  ul.list li.pending .s { color:var(--warn); }
+  ul.list li.empty { color:var(--mute); justify-content:center; font-size:14px; }
+  .toast { position:fixed; left:50%; bottom:calc(20px + env(safe-area-inset-bottom)); transform:translateX(-50%); background:var(--ink); color:#fff; padding:10px 16px; border-radius:10px; font-size:14px; opacity:0; transition:opacity .2s; pointer-events:none; max-width:90vw; text-align:center; z-index:9; }
+  .toast.show { opacity:1; }
+  #fatal { display:none; color:#fff; background:var(--bad); font-family:ui-monospace,monospace; font-size:13px; line-height:1.6; padding:14px 16px; white-space:pre-wrap; word-break:break-word; }
+</style>
+</head>
+<body>
+<header>
+  <div class="row"><h1>FAUNA LOG</h1><span class="who" id="who"></span><button class="mute" id="mute" type="button">Voice on</button></div>
+  <div class="fix"><b id="clock">--:--</b><span id="today"></span><span class="pos stale" id="pos">no position yet</span></div>
+</header>
+<div id="fatal"></div>
+<main>
+  <div class="talk">
+    <button class="mic" id="mic" type="button" aria-label="Talk">
+      <svg viewBox="0 0 24 24"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 0 0-7 0v6A3.5 3.5 0 0 0 12 15zm5.3-3.5a5.3 5.3 0 0 1-10.6 0H4.9a7.1 7.1 0 0 0 6.2 7v2.5h1.8v-2.5a7.1 7.1 0 0 0 6.2-7h-1.8z"/></svg>
+    </button>
+    <div class="state" id="state"></div>
+    <div class="heard" id="heard"></div>
+    <div class="question" id="question"></div>
+    <div class="done" id="done"></div>
+    <div class="typed" id="typed"><input id="typedText" placeholder="Type what you saw instead" autocomplete="off"><button id="typedGo" type="button">Read</button></div>
+    <button class="link" id="typeToggle" type="button">Type instead</button>
+  </div>
+
+  <div id="groups"></div>
+
+  <div class="actions">
+    <button class="discard" id="discard" type="button">Clear</button>
+    <button class="nil" id="nil" type="button">Nil sightings</button>
+    <button class="save" id="save" type="button">Save</button>
+  </div>
+
+  <div class="month">
+    <h2>Saved entries</h2>
+    <select id="monthPick"></select>
+    <a class="dl" id="download" href="#">Download month</a>
+  </div>
+  <ul class="list" id="list"></ul>
+</main>
+<div class="toast" id="toast"></div>
+
+<script type="module">
+import {
+  FIELDS, FIELD, SPECIES, blankRecord, settle, mergeParsed, missingFields, nextQuestion, parseSpoken,
+  latLongText, observerName, monthName, isBlank,
+} from "./fields.js";
+
+/* ------------------------------------------------------------ helpers -- */
+const $ = (id) => document.getElementById(id);
+const pad = (n) => String(n).padStart(2, "0");
+const localDate = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const localTime = (d = new Date()) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const tzHours = -new Date().getTimezoneOffset() / 60;
+const store = {
+  get(k, fallback) { try { const v = localStorage.getItem(k); return v == null ? fallback : JSON.parse(v); } catch { return fallback; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  del(k) { try { localStorage.removeItem(k); } catch {} },
+};
+let toastTimer = null;
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 2600);
+}
+window.addEventListener("error", (e) => { const f = $("fatal"); f.style.display = "block"; f.textContent = "SOMETHING BROKE - screenshot this\n\n" + (e.message || e) + "\n" + (e.filename || "") + ":" + (e.lineno || ""); });
+
+const GROUPS = [
+  { key: "vessel", title: "Vessel", keys: ["activity", "heading", "platformHeight"] },
+  { key: "conditions", title: "Conditions", keys: ["windSpeed", "windDir", "waveHeight", "cloud", "glare", "visibility", "seaState", "weather", "light"] },
+  { key: "when", title: "When and where", keys: ["time", "date", "observer", "lat", "long"] },
+  { key: "animal", title: "Sighting", keys: ["faunaType", "species", "certainty", "total", "adults", "calves", "distance", "bearing", "condition", "behaviour", "inZone"] },
+  { key: "response", title: "Response", keys: ["action", "stopWork", "comments"] },
+];
+const CARRIED_KEYS = ["activity", "heading", "platformHeight", "windSpeed", "windDir", "waveHeight", "cloud", "glare", "visibility", "seaState", "weather"];
+const CARRY_HOURS = 3;
+
+/* -------------------------------------------------------------- state -- */
+let me = { name: "", role: "" };
+let entry = newEntry();
+let saved = [];                         // this month's entries from the server
+let queue = store.get("fauna.queue", []); // saves that could not reach the server yet
+let fix = store.get("fauna.fix", null);  // { lat, lon, at }
+let voiceOn = store.get("fauna.voice", true);
+let month = localDate().slice(0, 7);
+let listening = false, busy = false, wantAnswer = null;
+let typedLast = false;   // the last words were typed, so the answer is typed too
+
+function newEntry() {
+  return { record: blankRecord(), locked: [], carried: [], transcript: "", id: null };
+}
+
+/* ---------------------------------------------------------- the clock -- */
+function tick() {
+  const d = new Date();
+  $("clock").textContent = localTime(d);
+  $("today").textContent = d.toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
+}
+setInterval(tick, 1000); tick();
+
+/* ------------------------------------------------------------ position -- */
+function showFix() {
+  const el = $("pos");
+  if (!fix) { el.textContent = "no position yet"; el.className = "pos stale"; return; }
+  const [la, lo] = latLongText(fix.lat, fix.lon);
+  el.textContent = `${la} ${lo}`;
+  el.className = "pos" + (Date.now() - fix.at > 10 * 60 * 1000 ? " stale" : "");
+}
+function takeFix() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve(fix);
+    navigator.geolocation.getCurrentPosition(
+      (p) => { fix = { lat: p.coords.latitude, lon: p.coords.longitude, at: Date.now() }; store.set("fauna.fix", fix); showFix(); resolve(fix); },
+      () => { showFix(); resolve(fix); },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 },
+    );
+  });
+}
+showFix();
+takeFix();
+
+/* --------------------------------------------------------------- voice -- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+let rec = null, sessionText = "", sessionFinal = "";
+function say(text) {
+  return new Promise((resolve) => {
+    if (!voiceOn || !("speechSynthesis" in window) || !text) return resolve();
+    try {
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = "en-AU";
+      const voices = speechSynthesis.getVoices();
+      u.voice = voices.find((v) => /en[-_]AU/i.test(v.lang)) || voices.find((v) => /en[-_]GB/i.test(v.lang)) || null;
+      u.rate = 1.02;
+      u.onend = () => resolve(); u.onerror = () => resolve();
+      speechSynthesis.speak(u);
+      setTimeout(resolve, 12000);
+    } catch { resolve(); }
+  });
+}
+$("mute").textContent = voiceOn ? "Voice on" : "Voice off";
+$("mute").onclick = () => { voiceOn = !voiceOn; store.set("fauna.voice", voiceOn); $("mute").textContent = voiceOn ? "Voice on" : "Voice off"; if (!voiceOn) try { speechSynthesis.cancel(); } catch {} };
+
+function setState(s) { $("state").textContent = s; }
+function showHeard(finalText, interim) {
+  const h = $("heard");
+  h.innerHTML = "";
+  if (finalText) h.append(document.createTextNode(finalText + " "));
+  if (interim) { const i = document.createElement("span"); i.className = "interim"; i.textContent = interim; h.append(i); }
+}
+
+function startListening(focus) {
+  if (!SR) { $("typed").classList.add("show"); $("typedText").focus(); setState("This browser cannot listen - type it instead."); return; }
+  if (listening || busy) return;
+  wantAnswer = focus || null;
+  sessionText = ""; sessionFinal = "";
+  rec = new SR();
+  rec.lang = "en-AU"; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1;
+  rec.onresult = (e) => {
+    let interim = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const r = e.results[i];
+      if (r.isFinal) sessionFinal += (sessionFinal ? " " : "") + r[0].transcript.trim();
+      else interim += r[0].transcript;
+    }
+    showHeard(sessionFinal, interim);
+  };
+  rec.onerror = (e) => {
+    if (e.error === "no-speech") setState("Nothing heard. Tap and try again.");
+    else if (e.error === "not-allowed" || e.error === "service-not-allowed") setState("The microphone is blocked. Allow it in the browser and try again.");
+    else if (e.error !== "aborted") setState("Listening stopped: " + e.error);
+  };
+  rec.onend = () => {
+    listening = false; $("mic").classList.remove("listening");
+    const text = sessionFinal.trim();
+    if (text) { entry.transcript = (entry.transcript ? entry.transcript + " " : "") + text; heard(text, wantAnswer); }
+    else if (!$("state").textContent) setState("");
+    wantAnswer = null;
+  };
+  try {
+    rec.start();
+    listening = true; $("mic").classList.add("listening");
+    setState(focus ? "Listening for the answer..." : "Listening...");
+    if (!entry.record.time) stampNow();
+    takeFix();
+  } catch (e) { setState("Could not start listening: " + (e.message || e)); }
+}
+function stopListening() { if (rec) try { rec.stop(); } catch {} }
+
+$("mic").onclick = () => {
+  if (listening) { stopListening(); return; }
+  try { speechSynthesis.cancel(); } catch {}
+  typedLast = false;
+  startListening(pendingQuestion ? pendingQuestion.keys : null);
+};
+$("typeToggle").onclick = () => { $("typed").classList.toggle("show"); if ($("typed").classList.contains("show")) $("typedText").focus(); };
+const typedGo = () => {
+  const t = $("typedText").value.trim();
+  if (!t) return;
+  $("typedText").value = "";
+  typedLast = true;
+  if (!entry.record.time) stampNow();
+  entry.transcript = (entry.transcript ? entry.transcript + " " : "") + t;
+  showHeard(t, "");
+  heard(t, currentFocus());
+};
+$("typedGo").onclick = typedGo;
+$("typedText").addEventListener("keydown", (e) => { if (e.key === "Enter") typedGo(); });
+
+let pendingQuestion = null;
+function currentFocus() { return pendingQuestion ? pendingQuestion.keys : null; }
+
+/* -------------------------------------------------------- the reading -- */
+function stampNow() {
+  const r = entry.record;
+  if (!r.time) r.time = localTime();
+  if (!r.date) r.date = localDate();
+  if (!r.observer && me.name) r.observer = observerName(me.name);
+  if (fix && (!r.lat || !r.long) && !entry.locked.includes("lat")) {
+    const [la, lo] = latLongText(fix.lat, fix.lon);
+    r.lat = la; r.long = lo; r.latDec = fix.lat; r.lonDec = fix.lon;
+  }
+  render();
+}
+
+function lastConditions() {
+  // The most recent saved entry today, within a few hours: its conditions
+  // are almost certainly still the conditions.
+  const now = new Date();
+  const todays = saved.filter((s) => s.date === localDate(now) && s.time);
+  if (!todays.length) return null;
+  const last = todays[todays.length - 1];
+  const [h, m] = String(last.time).split(":").map(Number);
+  const ageH = (now.getHours() * 60 + now.getMinutes() - (h * 60 + m)) / 60;
+  if (ageH < 0 || ageH > CARRY_HOURS) return null;
+  const out = {};
+  for (const k of CARRIED_KEYS) if (!isBlank(last[k])) out[k] = last[k];
+  if (out.activity === "Transiting") delete out.heading;
+  return Object.keys(out).length ? out : null;
+}
+
+async function heard(text, focus) {
+  busy = true; $("mic").classList.add("busy"); setState("Reading...");
+  const r = entry.record;
+  const ctx = { latDec: r.latDec ?? fix?.lat ?? null, lonDec: r.lonDec ?? fix?.lon ?? null, tzHours };
+  let result = null;
+  try {
+    const res = await fetch("/api/fauna/parse", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ transcript: text, record: r, focus, locked: entry.locked, lastConditions: lastConditions(), ...ctx }),
+    });
+    if (res.status === 401) { location.href = "/login"; return; }
+    if (res.ok) result = await res.json();
+  } catch {}
+  if (!result || !result.record) {
+    // Off the air: the same rules, run here.
+    const parsed = parseSpoken(text, r, { focus });
+    const merged = settle(mergeParsed(r, parsed, entry.locked), ctx);
+    result = { record: merged, by: "rules (offline)" };
+  }
+  // Anything the reading filled that a carried value stood in for is now real.
+  entry.carried = entry.carried.filter((k) => result.record[k] === r[k]);
+  entry.record = { ...r, ...result.record, latDec: r.latDec, lonDec: r.lonDec };
+  busy = false; $("mic").classList.remove("busy");
+  setState(result.by && result.by !== "model" ? "Read without the AI (" + result.by.replace(/^rules \(|\)$/g, "") + ")" : "");
+  render();
+  await askNext();
+}
+
+async function askNext() {
+  const q = nextQuestion(entry.record);
+  pendingQuestion = q;
+  const qEl = $("question"), dEl = $("done");
+  if (!q) {
+    qEl.classList.remove("show");
+    dEl.textContent = entry.record.kind === "nil" ? "Nil sightings for this watch. Save it." : "That is everything. Check it and save.";
+    dEl.classList.add("show");
+    render();
+    await say("That's everything.");
+    return;
+  }
+  dEl.classList.remove("show");
+  qEl.innerHTML = "";
+  const k = document.createElement("span"); k.className = "k"; k.textContent = "Still needed";
+  qEl.append(k, document.createTextNode(q.text));
+  qEl.classList.add("show");
+  render();
+  if (typedLast) { $("typedText").focus(); return; }
+  await say(q.text);
+  if (voiceOn && SR) startListening(q.keys);
+}
+
+/* ------------------------------------------------------------- render -- */
+function valueText(f, v) {
+  if (isBlank(v)) return "—";
+  if (f.key === "heading" || f.key === "bearing") return v + "°";
+  if (f.key === "windSpeed") return v + " km/h";
+  if (f.key === "waveHeight") return v + " m";
+  if (f.key === "distance" || f.key === "platformHeight") return v + " m";
+  if (f.key === "date") { const [y, m, d] = String(v).split("-"); return `${d}/${m}/${y}`; }
+  return String(v);
+}
+let editing = null;
+function render() {
+  const r = entry.record;
+  const missing = new Set(missingFields(r));
+  const focus = new Set(currentFocus() || []);
+  const host = $("groups");
+  host.innerHTML = "";
+  for (const g of GROUPS) {
+    if (r.kind === "nil" && (g.key === "animal" || g.key === "response")) continue;
+    const sec = document.createElement("section"); sec.className = "group";
+    const h = document.createElement("h2"); h.textContent = g.title; sec.append(h);
+    const grid = document.createElement("div"); grid.className = "fields";
+    for (const key of g.keys) {
+      const f = FIELD[key]; const v = r[key];
+      const cell = document.createElement("div");
+      cell.className = "f" + (isBlank(v) ? " empty" : "") + (missing.has(key) ? " need" : "") + (entry.carried.includes(key) ? " carried" : "") + (entry.locked.includes(key) ? " locked" : "") + (focus.has(key) ? " focus" : "");
+      const l = document.createElement("div"); l.className = "l"; l.textContent = f.label;
+      cell.append(l);
+      if (editing === key) cell.append(editor(f));
+      else { const val = document.createElement("div"); val.className = "v"; val.textContent = valueText(f, v); cell.append(val); cell.onclick = () => { editing = key; render(); }; }
+      grid.append(cell);
+    }
+    sec.append(grid); host.append(sec);
+  }
+  $("save").disabled = false;
+  $("save").textContent = entry.id ? "Save changes" : "Save";
+  $("nil").style.display = entry.id ? "none" : "";
+}
+function editor(f) {
+  const r = entry.record;
+  const commit = (v) => {
+    // Only a value actually typed is held against what is said later; a
+    // column tapped and left alone is not.
+    const changed = String(isBlank(v) ? "" : v) !== String(isBlank(r[f.key]) ? "" : r[f.key]);
+    r[f.key] = isBlank(v) ? null : v;
+    if (changed && !isBlank(v) && !entry.locked.includes(f.key)) entry.locked.push(f.key);
+    if (isBlank(v)) entry.locked = entry.locked.filter((k) => k !== f.key);
+    if (changed) entry.carried = entry.carried.filter((k) => k !== f.key);
+    if (f.key === "faunaType") r.species = null;
+    entry.record = settle(r, { latDec: r.latDec, lonDec: r.lonDec, tzHours });
+    editing = null;
+    pendingQuestion = nextQuestion(entry.record);
+    render();
+    if (!pendingQuestion) { $("question").classList.remove("show"); $("done").textContent = "That is everything. Check it and save."; $("done").classList.add("show"); }
+    else { $("done").classList.remove("show"); }
+  };
+  let el;
+  if (f.kind === "yesno") {
+    el = document.createElement("div"); el.className = "yn";
+    for (const o of ["Yes", "No"]) { const b = document.createElement("button"); b.type = "button"; b.textContent = o; if (r[f.key] === o) b.classList.add("on"); b.onclick = (e) => { e.stopPropagation(); commit(o); }; el.append(b); }
+    const x = document.createElement("button"); x.type = "button"; x.textContent = "–"; x.onclick = (e) => { e.stopPropagation(); commit(null); }; el.append(x);
+    return el;
+  }
+  const options = f.key === "species" ? (SPECIES[r.faunaType] || []) : f.options;
+  if (f.kind === "list" && options) {
+    el = document.createElement("select");
+    const blank = document.createElement("option"); blank.value = ""; blank.textContent = "—"; el.append(blank);
+    for (const o of options) { const op = document.createElement("option"); op.value = o; op.textContent = o; if (r[f.key] === o) op.selected = true; el.append(op); }
+    if (!isBlank(r[f.key]) && !options.includes(r[f.key])) { const op = document.createElement("option"); op.value = r[f.key]; op.textContent = r[f.key]; op.selected = true; el.append(op); }
+    el.onchange = () => commit(el.value);
+    el.onblur = () => { if (editing === f.key) { editing = null; render(); } };
+    setTimeout(() => el.focus(), 0);
+    return el;
+  }
+  el = document.createElement("input");
+  el.type = f.kind === "number" ? "text" : f.kind === "time" ? "time" : f.kind === "date" ? "date" : "text";
+  if (f.kind === "number") el.inputMode = "decimal";
+  el.value = isBlank(r[f.key]) ? "" : String(r[f.key]);
+  el.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); commit(el.value); } if (e.key === "Escape") { editing = null; render(); } };
+  el.onchange = () => { if (editing === f.key) commit(el.value); };
+  el.onblur = () => { if (editing === f.key) commit(el.value); };
+  setTimeout(() => { el.focus(); el.select && el.select(); }, 0);
+  return el;
+}
+
+/* -------------------------------------------------------------- saving -- */
+async function saveEntry() {
+  const r = settle(entry.record, { latDec: entry.record.latDec, lonDec: entry.record.lonDec, tzHours });
+  if (!r.time || !r.date) stampNow();
+  const missing = missingFields(r);
+  if (missing.length) {
+    const first = FIELD[missing[0]];
+    if (!confirm(`${missing.length} column${missing.length > 1 ? "s are" : " is"} still empty (${first.label}${missing.length > 1 ? " and more" : ""}). Save anyway?`)) return;
+  }
+  const record = { ...r, id: entry.id || undefined, transcript: entry.transcript || null };
+  $("save").disabled = true;
+  try {
+    const res = await fetch("/api/fauna/sightings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ record }) });
+    if (res.status === 401) { location.href = "/login"; return; }
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.error || res.status);
+    toast(entry.id ? "Saved the changes." : "Saved.");
+    await say("Saved.");
+    finishEntry(out.record);
+  } catch (e) {
+    // Kept on the phone and sent the next time the server can be reached.
+    const id = record.id || ("local-" + Math.random().toString(36).slice(2, 12));
+    queue = queue.filter((q) => q.id !== id);
+    queue.push({ ...record, id, pending: true });
+    store.set("fauna.queue", queue);
+    toast("No connection - kept on the phone, it will save when back in range.");
+    finishEntry({ ...record, id, pending: true });
+  }
+}
+function finishEntry(savedRecord) {
+  const m = String(savedRecord.date || "").slice(0, 7);
+  if (m === month) { saved = saved.filter((s) => s.id !== savedRecord.id); saved.push(savedRecord); saved.sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`)); }
+  entry = newEntry(); store.del("fauna.draft");
+  pendingQuestion = null; editing = null;
+  $("question").classList.remove("show"); $("done").classList.remove("show"); showHeard("", ""); setState("");
+  render(); renderList();
+}
+async function flushQueue() {
+  if (!queue.length || !navigator.onLine) return;
+  const left = [];
+  for (const q of queue) {
+    try {
+      const record = { ...q }; delete record.pending; if (String(record.id).startsWith("local-")) delete record.id;
+      const res = await fetch("/api/fauna/sightings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ record }) });
+      if (!res.ok) throw new Error(String(res.status));
+      const out = await res.json();
+      saved = saved.filter((s) => s.id !== q.id);
+      if (String(out.record.date || "").slice(0, 7) === month) saved.push(out.record);
+    } catch { left.push(q); }
+  }
+  queue = left; store.set("fauna.queue", queue);
+  saved.sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`));
+  renderList();
+  if (!left.length) toast("The entries kept on the phone have been saved.");
+}
+window.addEventListener("online", flushQueue);
+
+$("save").onclick = saveEntry;
+$("nil").onclick = () => {
+  stampNow();
+  entry.record = settle({ ...entry.record, kind: "nil" }, { latDec: entry.record.latDec, lonDec: entry.record.lonDec, tzHours });
+  carryOver();
+  render();
+  askNext();
+};
+$("discard").onclick = () => {
+  if (entry.transcript || entry.id || entry.locked.length) { if (!confirm(entry.id ? "Drop the changes to this entry?" : "Clear this entry?")) return; }
+  entry = newEntry(); store.del("fauna.draft"); pendingQuestion = null; editing = null;
+  $("question").classList.remove("show"); $("done").classList.remove("show"); showHeard("", ""); setState("");
+  render();
+};
+
+function carryOver() {
+  if (entry.id) return;
+  const last = lastConditions();
+  if (!last) return;
+  for (const [k, v] of Object.entries(last)) {
+    if (isBlank(entry.record[k]) && !entry.locked.includes(k)) { entry.record[k] = v; if (!entry.carried.includes(k)) entry.carried.push(k); }
+  }
+}
+
+/* --------------------------------------------------------- the month -- */
+function monthOptions() {
+  const sel = $("monthPick"); sel.innerHTML = "";
+  const d = new Date(); d.setDate(1);
+  for (let i = 0; i < 12; i++) {
+    const ym = localDate(d).slice(0, 7);
+    const o = document.createElement("option"); o.value = ym; o.textContent = `${monthName(ym)} ${ym.slice(0, 4)}`; if (ym === month) o.selected = true; sel.append(o);
+    d.setMonth(d.getMonth() - 1);
+  }
+  sel.onchange = () => { month = sel.value; loadMonth(); };
+}
+async function loadMonth() {
+  $("download").href = `/api/fauna/export?month=${month}`;
+  try {
+    const res = await fetch(`/api/fauna/sightings?month=${month}`, { cache: "no-store" });
+    if (res.status === 401) { location.href = "/login"; return; }
+    const out = await res.json();
+    saved = (out.entries || []);
+  } catch { saved = saved.filter((s) => String(s.date || "").slice(0, 7) === month); }
+  for (const q of queue) if (String(q.date || "").slice(0, 7) === month && !saved.some((s) => s.id === q.id)) saved.push(q);
+  saved.sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`));
+  renderList();
+}
+function renderList() {
+  const ul = $("list"); ul.innerHTML = "";
+  if (!saved.length) { const li = document.createElement("li"); li.className = "empty"; li.textContent = "Nothing logged this month yet."; ul.append(li); return; }
+  for (const s of [...saved].reverse()) {
+    const li = document.createElement("li"); if (s.pending) li.classList.add("pending");
+    const t = document.createElement("span"); t.className = "t"; t.textContent = `${(s.date || "").slice(8, 10)}/${(s.date || "").slice(5, 7)} ${s.time || ""}`;
+    const d = document.createElement("span"); d.className = "d";
+    d.textContent = s.kind === "nil" ? "Nil sightings" : [s.species || s.faunaType, s.total != null ? "×" + s.total : "", s.distance != null ? s.distance + " m" : "", s.bearing != null ? s.bearing + "°" : ""].filter(Boolean).join(" · ");
+    const st = document.createElement("span"); st.className = "s"; st.textContent = s.pending ? "on the phone" : (s.observer || "");
+    li.append(t, d, st);
+    li.onclick = () => openSaved(s);
+    ul.append(li);
+  }
+}
+function openSaved(s) {
+  if ((entry.transcript || entry.locked.length) && !confirm("Drop the entry you are on and open this one?")) return;
+  entry = { record: { ...blankRecord(), ...s }, locked: FIELDS.map((f) => f.key).filter((k) => !isBlank(s[k])), carried: [], transcript: s.transcript || "", id: s.id };
+  delete entry.record.pending;
+  pendingQuestion = null; editing = null;
+  $("question").classList.remove("show"); $("done").classList.remove("show");
+  showHeard(entry.transcript, ""); setState(s.pending ? "Not yet on the server." : "Saved entry - tap a column to change it.");
+  render();
+  const del = document.createElement("button"); del.className = "link"; del.textContent = "Remove this entry"; del.style.color = "#C0281F";
+  del.onclick = async () => {
+    if (!confirm("Remove this entry from the log?")) return;
+    if (String(s.id).startsWith("local-")) { queue = queue.filter((q) => q.id !== s.id); store.set("fauna.queue", queue); }
+    else { try { await fetch(`/api/fauna/sightings/${encodeURIComponent(s.id)}`, { method: "DELETE" }); } catch { toast("No connection - try again in range."); return; } }
+    saved = saved.filter((x) => x.id !== s.id);
+    entry = newEntry(); pendingQuestion = null; showHeard("", ""); setState(""); render(); renderList(); toast("Removed.");
+  };
+  $("state").append(document.createTextNode(" "), del);
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+/* ---------------------------------------------------------------- boot -- */
+async function boot() {
+  try {
+    const res = await fetch("/api/me", { cache: "no-store" });
+    if (res.status === 401) { location.href = "/login?next=" + encodeURIComponent("/fauna/"); return; }
+    me = await res.json();
+    $("who").textContent = observerName(me.name);
+  } catch { $("who").textContent = ""; }
+  monthOptions();
+  await loadMonth();
+  flushQueue();
+  const draft = store.get("fauna.draft", null);
+  if (draft && draft.record) {
+    // An entry that was under way when the app was closed carries on, with
+    // the question it was up to shown but not spoken.
+    entry = { ...newEntry(), ...draft };
+    showHeard(entry.transcript, "");
+    pendingQuestion = nextQuestion(entry.record);
+    if (pendingQuestion) {
+      const qEl = $("question"); qEl.innerHTML = "";
+      const k = document.createElement("span"); k.className = "k"; k.textContent = "Still needed";
+      qEl.append(k, document.createTextNode(pendingQuestion.text)); qEl.classList.add("show");
+    }
+  }
+  else carryOver();
+  render();
+  if ("speechSynthesis" in window) speechSynthesis.getVoices();
+}
+setInterval(() => { if (entry.transcript || entry.locked.length) store.set("fauna.draft", entry); }, 2000);
+boot();
+</script>
+</body></html>
