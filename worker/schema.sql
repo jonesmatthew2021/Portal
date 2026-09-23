@@ -69,7 +69,15 @@ CREATE TABLE IF NOT EXISTS documents (
   read_title TEXT,
   read_at INTEGER,
   removed_at INTEGER,
-  removed_by TEXT
+  removed_by TEXT,
+  -- Whose file this is in the library. adopted_from_folder = 1 where the
+  -- sync took it on from a folder the office put it in; such a file is never
+  -- moved by the portal, and when it is replaced its row is marked removed
+  -- with the bytes left where they are, kept_in_place = 1. Added 24 Sep
+  -- 2026; the worker adds them itself to an existing table
+  -- (ensureDocumentColumns in src/db/documents.ts).
+  adopted_from_folder INTEGER,
+  kept_in_place INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS documents_category_idx ON documents (category, bucket);

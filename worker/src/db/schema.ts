@@ -86,6 +86,15 @@ export const documents = sqliteTable(
 
     removedAt: integer("removed_at", { mode: "timestamp" }),
     removedBy: text("removed_by"),
+
+    /* Whose file this is in the library. 1 where the sync took it on from
+       a folder the office put it in: such a file is never moved by the
+       portal, so when it is replaced its row is marked removed with its
+       bytes left exactly where they are, and keptInPlace = 1 says so. Both
+       nullable and added lazily (ensureDocumentColumns in documents.ts), so
+       the live database needed no hand-run migration. */
+    adoptedFromFolder: integer("adopted_from_folder"),
+    keptInPlace: integer("kept_in_place"),
   },
   (t) => [
     index("documents_category_idx").on(t.category, t.bucket),

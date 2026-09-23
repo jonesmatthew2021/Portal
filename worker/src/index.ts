@@ -2,6 +2,7 @@ import { setEnv, type PortalEnv } from "./env.js";
 import { gate, logLoginEvent } from "./auth.js";
 import { allowed, crewStateBody, denied } from "./authz.js";
 import { fileStore } from "./files/store.js";
+import { ensureDocumentColumns } from "./db/documents.js";
 import users from "./routes/users.js";
 import traffic from "./routes/traffic.js";
 import sharepoint from "./routes/sharepoint.js";
@@ -42,6 +43,10 @@ export default {
       // their level allows, decided here for every request.
       const { barred, user } = await gate(req, path);
       if (barred) return barred;
+      // The documents table has two columns the worker adds itself; every
+      // ORM read of the table names them, so they are there before any
+      // route runs. One look per isolate.
+      if (path.startsWith("/api/")) await ensureDocumentColumns();
       if (user && path.startsWith("/api/") && !allowed(user, req.method, path)) {
         // A refused action goes in the sign-in book too — someone reaching
         // past their level is exactly what the traffic view is for.
@@ -149,6 +154,7 @@ export default {
     const outcome = { read: 0, refiled: 0, syncError: null as string | null, readError: null as string | null };
     const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
     try {
+      await ensureDocumentColumns();
       await runSync("hourly schedule");
     } catch (e) {
       outcome.syncError = said(e);

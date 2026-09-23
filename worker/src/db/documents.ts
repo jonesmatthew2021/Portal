@@ -3,8 +3,35 @@ export { fileStore };
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "./index.js";
 import { documents } from "./schema.js";
+import { getEnv } from "../env.js";
 
 export type DocumentRow = typeof documents.$inferSelect;
+
+/**
+ * The two columns added on 24 Sep 2026 (adopted_from_folder, kept_in_place),
+ * put on an existing table the first time the worker needs them, the way
+ * the history table is made: one look at the table per isolate, and an
+ * ALTER only where a column is missing. The front door awaits this before
+ * any /api route runs, because every ORM read of the table names them.
+ */
+let columnsReady: Promise<unknown> | null = null;
+export function ensureDocumentColumns() {
+  if (!columnsReady) {
+    columnsReady = (async () => {
+      const d1 = getEnv().DB;
+      const info = await d1.prepare("PRAGMA table_info(documents)").all<{ name: string }>();
+      const have = new Set((info.results || []).map((c) => c.name));
+      for (const col of ["adopted_from_folder", "kept_in_place"]) {
+        if (!have.has(col)) await d1.prepare(`ALTER TABLE documents ADD COLUMN ${col} INTEGER`).run();
+      }
+    })().catch((e) => {
+      // A failed attempt must not be remembered as done.
+      columnsReady = null;
+      throw e;
+    });
+  }
+  return columnsReady;
+}
 
 // Crew certificates are kept apart from everything else in the store, one folder
 // per person, so a person's certificates can be found as a set:

@@ -16,6 +16,7 @@ import {
   singleFileCategory,
   withSuffix,
 } from "../db/documents.js";
+import { replaceSingleFile } from "../db/single-file.js";
 
 // A function request body is capped at 6 MB once multipart overhead is counted,
 // so files are held a little under that. The portal enforces the same number.
@@ -325,7 +326,7 @@ async function uploadCertificate(form: FormData, file: File) {
   } catch (e) {
     // The database still shows the old certificates as live, so the blobs are
     // put back to match before the error goes out. The ordering guarantee: the
-    // archive copy at removed/<id>/ is written once and never overwritten; a
+    // parked copy under removed/ is written once and never overwritten; a
     // failed save puts the live key back the way it was. Restoring is a copy,
     // not a move — the archive copy stays for the retry, which skips
     // re-archiving over it. Best-effort only: a failure here mustn't mask the
@@ -370,8 +371,6 @@ async function uploadCertificate(form: FormData, file: File) {
  * without the portal ever being without one.
  */
 async function uploadSingleFile(form: FormData, file: File, category: string) {
-  const { folder } = singleFileCategory(category)!;
-
   const existing = await db
     .select()
     .from(documents)
@@ -401,94 +400,19 @@ async function uploadSingleFile(form: FormData, file: File, category: string) {
     return Response.json({ skipped: true }, { status: 200 });
   }
 
-  // The one already on file has its bytes moved aside first — a blob-store
-  // move, nothing in the database touched yet — which is what leaves the
-  // folder free for a replacement filed under the very same name, and keeps
-  // the archived copy holding the bytes being superseded rather than whatever
-  // the new upload writes over them.
-  const uploadedBy = field(form, "uploadedBy");
-  const archived = await Promise.all(
-    existing.map(async (r) => ({ row: r, blobKey: await relocateToRemovedBlob(r) })),
-  );
-
-  const id = crypto.randomUUID();
-  const filename = safeName(file.name);
-  // Everything uploaded from the portal lands in OPMS Documents, where the
-  // office keeps its own copies. The two spreadsheet homes already inside it
-  // keep their sub-folders; the rest go in at the top, beside the office's
-  // qualification-expiry sheet. Old keys elsewhere still serve what they hold.
-  const uploadRoot = folder.startsWith("opms/") || folder.startsWith("certification/") ? folder : "opms";
-  const blobKey = `${uploadRoot}/${filename}`;
-
-  // Written before anything in the database changes — if this throws, nothing
-  // has changed yet, rather than leaving the old copy marked removed with no
-  // new one in its place. Once it lands, the old row(s) are marked removed and
-  // the new one is inserted together in a single transaction, so a reader can
-  // never see a moment with zero live copies of a document the portal calls
-  // mandatory-on-file. (Two replacements racing each other can still both
-  // succeed and leave two live rows — avoiding that needs a lock this driver
-  // doesn't offer over HTTP, so it's left as a residual, rarer race.)
-  await fileStore().set(blobKey, await file.arrayBuffer());
-
-  const replaced: { id: string; filename: string }[] = [];
-  let row: Row;
-  try {
-    // Same shape as the certificate save: one atomic D1 batch in place of the
-    // interactive transaction the earlier Postgres driver had.
-    const marks = archived.map(({ row: r, blobKey: archivedKey }) =>
-      db
-        .update(documents)
-        .set({ removedAt: new Date(), removedBy: uploadedBy, blobKey: archivedKey })
-        .where(eq(documents.id, r.id)),
-    );
-    archived.forEach(({ row: r }) => replaced.push({ id: r.id, filename: r.filename }));
-
-    const insert = db
-      .insert(documents)
-      .values({
-        id,
-        category,
-        blobKey,
-        filename,
-        contentType: safeContentType(file.type),
-        sizeBytes: file.size,
-        title: field(form, "title"),
-        uploadedBy,
-        filedOn: filedOnFrom(form),
-        sessionId: field(form, "session"),
-      })
-      .returning();
-
-    const results = await db.batch([...marks, insert] as any);
-    row = (results[results.length - 1] as Row[])[0];
-  } catch (e) {
-    // The database still shows the old copy as live, so the blobs are put back
-    // to match before the error goes out. The ordering guarantee: the archive
-    // copy at removed/<id>/ is written once and never overwritten; a failed
-    // save puts the live key back the way it was. Restoring is a copy, not a
-    // move — the archive copy stays for the retry, which skips re-archiving
-    // over it. Best-effort only: a failure here mustn't mask the error the
-    // uploader actually needs to see.
-    try {
-      const store = fileStore();
-      const liveKeys = new Set<string>();
-      for (const { row: r, blobKey: archivedKey } of archived) {
-        if (archivedKey === r.blobKey) continue;
-        liveKeys.add(r.blobKey);
-        const old = await store.get(archivedKey, { type: "arrayBuffer" });
-        if (old) await store.set(r.blobKey, old);
-      }
-      // The new upload's blob is an orphan unless it landed on a live key that
-      // the copy above has already put right.
-      if (!liveKeys.has(blobKey)) await store.delete(blobKey);
-    } catch (undoErr) {
-      console.error(
-        `files: couldn't restore the ${category} blobs after a failed save:`,
-        undoErr,
-      );
-    }
-    throw e;
-  }
+  // The replace itself - the new bytes first, the old copy parked, one
+  // batch on the books, and the old copy put back if anything fails - is
+  // in db/single-file.ts, where the hourly round runs the same steps.
+  const { row, replaced } = await replaceSingleFile({
+    category,
+    bytes: await file.arrayBuffer(),
+    filename: file.name,
+    contentType: safeContentType(file.type),
+    uploadedBy: field(form, "uploadedBy"),
+    filedOn: filedOnFrom(form),
+    title: field(form, "title"),
+    sessionId: field(form, "session"),
+  });
 
   return Response.json(
     { category: row.category, replaced, record: toRecord(row) },

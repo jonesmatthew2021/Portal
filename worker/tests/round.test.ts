@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import { setEnv } from "../src/env.js";
 import { compareMatrix } from "../src/routes/analyse.js";
 import { relocateToRemovedBlob } from "../src/db/documents.js";
+import { replaceSingleFile } from "../src/db/single-file.js";
 import { asKnownPerson } from "../../source/shared/names.js";
 
 /* ------------------------------------------------------------------------ *
@@ -168,4 +169,106 @@ test("a removed copy is parked flat under removed/, and no folder is made", asyn
   assert.equal(bucket.text(parked), "old workbook", "the bytes went with it");
   assert.equal(bucket.text(row.blobKey), null, "and the live name is free");
   assert.deepEqual(bucket.made, [], "no folder was made for it");
+});
+
+/* ------------------------------------------------------------------------ *
+ * Replacing the one workbook on file. The old copy is never lost.
+ * ------------------------------------------------------------------------ */
+const liveRow = (id: string, key: string, adopted = 0) => ({
+  id, category: "training-matrix", bucket: null, blobKey: key, filename: key.split("/").pop(),
+  contentType: null, sizeBytes: 3, title: null, uploadedBy: "the office", tag: null, source: null,
+  party: null, rank: null, swing: null, filedOn: "2026-09-01", sessionId: null, person: null,
+  folder: null, qualCode: null, expiresOn: null, checksum: null, createdAt: 1, removedAt: null,
+  removedBy: null, adoptedFromFolder: adopted, keptInPlace: null,
+});
+
+/* A database holding these live rows and answering the replace's own
+   statements: the column check, the live rows, who holds an address, and
+   the writes. */
+function documentsDb(rows: ReturnType<typeof liveRow>[]) {
+  const asked: Asked[] = [];
+  const db = fakeDb((sql, args) => {
+    if (/PRAGMA table_info/.test(sql)) return { results: [{ name: "adopted_from_folder" }, { name: "kept_in_place" }] };
+    if (/FROM documents WHERE category = \?1 AND removed_at IS NULL/.test(sql)) return { results: rows.filter((r) => r.category === args[0]) };
+    if (/SELECT id FROM documents WHERE blob_key = \?1/.test(sql)) return { results: rows.filter((r) => r.blobKey === args[0]).map((r) => ({ id: r.id })) };
+    if (/^UPDATE documents|^INSERT INTO documents/.test(sql)) return { changes: 1 };
+    return undefined;
+  }, asked);
+  return db;
+}
+const writes = (db: { asked: Asked[] }) => db.asked.filter((a) => /^UPDATE|^INSERT/.test(a.sql));
+const bytesOf = (s: string) => new TextEncoder().encode(s).buffer as ArrayBuffer;
+const todaysWorkbook = (over: Partial<Parameters<typeof replaceSingleFile>[0]> = {}) => ({
+  category: "training-matrix", bytes: bytesOf("new workbook"), filename: "20260924 - CREW QUALIFICATION EXPIRY.xlsx",
+  contentType: "application/x", uploadedBy: "the round on the hour", filedOn: "2026-09-24", ...over,
+});
+
+test("a replace that fails halfway leaves the old workbook live and where it was", async () => {
+  const key = "opms/CREW QUALIFICATION EXPIRY.xlsx";
+  const bucket = fakeBucket({ [key]: "old workbook" });
+  const db = documentsDb([liveRow("tm1", key)]);
+  setEnv({ DB: db, FILES: bucket, FILE_STORE: "r2" } as never);
+  // The first write is the new bytes to a pending address (the old copy holds
+  // the name); the second is the old copy being parked - and that one fails.
+  bucket.failOn = 2;
+  await assert.rejects(
+    replaceSingleFile(todaysWorkbook({ filename: "CREW QUALIFICATION EXPIRY.xlsx" })),
+    /refused the write/,
+  );
+  assert.equal(bucket.text(key), "old workbook", "the live address still holds the old bytes");
+  assert.deepEqual(bucket.keys(), [key], "the pending copy was cleaned up and nothing was parked");
+  assert.deepEqual(writes(db), [], "nothing on the books changed");
+  assert.deepEqual(bucket.made, [], "no folder was made");
+});
+
+test("a clean replace parks the old copy flat and lands the new one in one batch", async () => {
+  const old = "opms/20260901 - CREW QUALIFICATION EXPIRY.xlsx";
+  const bucket = fakeBucket({ [old]: "old workbook" });
+  const db = documentsDb([liveRow("tm1", old)]);
+  setEnv({ DB: db, FILES: bucket, FILE_STORE: "r2" } as never);
+  const { row, replaced } = await replaceSingleFile(todaysWorkbook());
+  assert.equal(row.blobKey, "opms/20260924 - CREW QUALIFICATION EXPIRY.xlsx");
+  assert.equal(bucket.text(row.blobKey), "new workbook");
+  assert.equal(bucket.text("removed/tm1 - 20260901 - CREW QUALIFICATION EXPIRY.xlsx"), "old workbook", "parked flat");
+  assert.equal(bucket.text(old), null, "the old address is free");
+  assert.deepEqual(bucket.made, [], "no folder was made");
+  assert.deepEqual(replaced, [{ id: "tm1", filename: "20260901 - CREW QUALIFICATION EXPIRY.xlsx" }]);
+  const w = writes(db);
+  assert.equal(w.length, 2, "one mark and one insert");
+  assert.deepEqual(w[0].args.slice(3), ["removed/tm1 - 20260901 - CREW QUALIFICATION EXPIRY.xlsx", null], "the row points at the parked copy");
+  assert.equal(w[1].args[2], row.blobKey, "the new row points at the new bytes");
+});
+
+test("the database refusing the batch puts the old bytes back", async () => {
+  const old = "opms/20260901 - CREW QUALIFICATION EXPIRY.xlsx";
+  const bucket = fakeBucket({ [old]: "old workbook" });
+  const db = documentsDb([liveRow("tm1", old)]);
+  db.batch = async () => { throw new Error("D1 is having a bad morning"); };
+  setEnv({ DB: db, FILES: bucket, FILE_STORE: "r2" } as never);
+  await assert.rejects(replaceSingleFile(todaysWorkbook()), /bad morning/);
+  assert.equal(bucket.text(old), "old workbook", "the old copy is back on its live address");
+  assert.equal(bucket.text("opms/20260924 - CREW QUALIFICATION EXPIRY.xlsx"), null, "the new bytes are gone");
+});
+
+test("a file the office put in the folder is never moved", async () => {
+  const theirs = "opms/CREW QUALIFICATION EXPIRY.xlsx";
+  const bucket = fakeBucket({ [theirs]: "the office's copy" });
+  const db = documentsDb([liveRow("tm1", theirs, 1)]);
+  setEnv({ DB: db, FILES: bucket, FILE_STORE: "r2" } as never);
+  const { row } = await replaceSingleFile(todaysWorkbook({ keepOutgoing: true }));
+  assert.equal(bucket.text(theirs), "the office's copy", "their file is exactly where it was");
+  assert.equal(bucket.text(row.blobKey), "new workbook");
+  assert.deepEqual(bucket.keys(), [row.blobKey, theirs].sort(), "nothing parked");
+  const mark = writes(db)[0];
+  assert.deepEqual([mark.args[3], mark.args[4]], [theirs, 1], "its row is off the books, key unchanged, kept in place");
+});
+
+test("the new file takes a suffix rather than writing over the office's file of the same name", async () => {
+  const theirs = "opms/20260924 - CREW QUALIFICATION EXPIRY.xlsx";
+  const bucket = fakeBucket({ [theirs]: "the office's copy" });
+  const db = documentsDb([liveRow("tm1", theirs, 1)]);
+  setEnv({ DB: db, FILES: bucket, FILE_STORE: "r2" } as never);
+  const { row } = await replaceSingleFile(todaysWorkbook());
+  assert.equal(row.filename, "20260924 - CREW QUALIFICATION EXPIRY (2).xlsx");
+  assert.equal(bucket.text(theirs), "the office's copy");
 });
