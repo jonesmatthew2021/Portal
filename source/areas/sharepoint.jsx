@@ -72,7 +72,7 @@ function SharePointPage() {
     const when = new Date(h.at).toLocaleString("en-AU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
     const bad = [h.syncError, h.readError, h.roundError].filter(Boolean).join("; ");
     if (bad) return { bad: true, text: "Hourly round " + when + " failed: " + bad };
-    const aside = [h.roundSkipped, h.held].filter(Boolean).join("; ");
+    const aside = [h.roundSkipped, h.held, h.validityProblem].filter(Boolean).join("; ");
     return { bad: false, text: "Hourly round " + when + ": " + h.read + " certificate" + (h.read === 1 ? "" : "s") +
       " read, " + h.refiled + " refiled" +
       (h.applied ? ", " + h.applied + " date" + (h.applied === 1 ? "" : "s") + " applied" : "") +

@@ -175,6 +175,31 @@ test("applied-and-blanks: a blank cell takes the matrix's date, and a row the of
   assert.ok(xml.includes("bRENTON"), "the office's spelling stays on the sheet");
 });
 
+test("applied-and-blanks: two rows the register reads as one man - the date lands on the row spelt as the matrix has it", async () => {
+  /* The office's sheet carries Evans twice, as bRENTON on row 3 and as
+     EVANS, Brenton on row 4. The matrix settled his date against the row
+     spelt EVANS, Brenton, so that is the line the workbook takes it on -
+     the same rule applySettled used to pick the row, not the other one. */
+  const twice = sheetXml
+    .replace('<c r="E3" t="n"><v>48000</v></c>', "").replace("EVANS, Brenton", "bRENTON")
+    .replace('<c r="E4" t="n"><v>48100</v></c>', "").replace("FARMER, Evan", "EVANS, Brenton");
+  const buf = await writeZip(workbook(twice, workbookXml)).arrayBuffer();
+  const two = {
+    cols: quals.cols,
+    rows: [
+      ["bRENTON", "Master", "", ["", ""]],
+      ["EVANS, Brenton", "Master", "", ["2031-05-26", ""]],
+    ] as [string, string, string, string[]][],
+  };
+  const nameOf = (n: string) => (["BRENTON", "EVANS, BRENTON"].includes(n.toUpperCase()) ? "EVANS, Brenton" : n);
+  const out = await updateFiledWorkbook(buf, two, null, null, { mode: "applied-and-blanks", keys: new Set(["EVANS, BRENTON|QL-01"]), nameOf });
+  if (!out.blob) throw new Error("nothing was written: " + JSON.stringify(out.report));
+  const xml = await partText(partOf(readZip(await out.blob.arrayBuffer()), "xl/worksheets/sheet1.xml"));
+  assert.ok(/<c r="E4"[^>]*><is><t[^>]*>2031-05-26<\/t>/.test(xml), "the EVANS, Brenton row took the date");
+  assert.ok(!/<c r="E3"[^>]*><is><t[^>]*>2031-05-26<\/t>/.test(xml), "the bRENTON row did not");
+  assert.deepEqual(out.report.addedRows, [], "nobody was added");
+});
+
 test("applied-and-blanks: nothing to write is nothing written", async () => {
   const buf = await writeZip(workbook(sheetXml, workbookXml)).arrayBuffer();
   const agree = {

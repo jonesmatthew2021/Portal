@@ -168,7 +168,19 @@ export function applySettled(quals, settled, nameOf = (n) => n) {
   /** @param {string} n */
   const as = (n) => { const k = nameOf(n); return k == null || k === "" ? n : k; };
   const rows = (quals.rows || []).map((r) => /** @type {MatrixRow} */ ([r[0], r[1], r[2], (r[3] || []).slice()]));
-  const rowAt = new Map(rows.map((r, i) => [String(as(r[0])).trim().toUpperCase(), i]));
+  /* Where two rows answer to one register name, the first of them is the
+     row - the same rule the workbook writer uses to find a row, so a date
+     lands on the same man's line here and in the office's file. A row
+     spelt exactly as the settled name is preferred over both. */
+  /** @type {Map<string, number>} */
+  const rowAt = new Map();
+  rows.forEach((r, i) => { const k = String(as(r[0])).trim().toUpperCase(); if (!rowAt.has(k)) rowAt.set(k, i); });
+  const rowSpelt = new Map(rows.map((r, i) => [String(r[0]).trim().toUpperCase(), i]));
+  /** @param {string} person */
+  const rowFor = (person) => {
+    const exact = rowSpelt.get(person.trim().toUpperCase());
+    return exact !== undefined ? exact : rowAt.get(String(as(person)).trim().toUpperCase());
+  };
   const cols = quals.cols || [];
   const colAt = new Map(cols.map((c, i) => [c[0], i]));
 
@@ -177,7 +189,7 @@ export function applySettled(quals, settled, nameOf = (n) => n) {
   const only = new Set();
 
   (settled || []).forEach((s) => {
-    const r = rowAt.get(String(as(s.person || "")).trim().toUpperCase());
+    const r = rowFor(String(s.person || ""));
     const c = colAt.get(s.code);
     if (r === undefined || c === undefined) return;
 
@@ -306,6 +318,16 @@ export function settleRound({ filledFromCert, claimed, unread, settled, seenBefo
     seenNow[k] = String(now || "");
     return false;
   });
+  /* A round that is still reading (or holding its clearing) is no sighting
+     at all, either way: what was noted stays noted, so the clock neither
+     runs nor starts again, and a held hour changes nothing on the note. A
+     cell claimed or valued again in the meantime still drops out. */
+  if (stillReading && twoSightings) {
+    Object.keys(seenBefore || {}).forEach((k) => {
+      const nk = normKey(k);
+      if (wasFilled[nk] && !backed.has(nk) && !valued.has(nk)) seenNow[nk] = String((seenBefore || {})[k]);
+    });
+  }
 
   /** @type {{ person: string, code: string, value?: string, clear?: boolean }[]} */
   const clears = orphans.map((k) => {

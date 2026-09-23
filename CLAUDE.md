@@ -88,3 +88,7 @@ modules. Edit that code there and only there.
 Several sessions can work different areas at once. Before starting, `git pull`;
 when finished, run the checks, commit, deploy and push. Two sessions editing
 `source/index.html` will still collide — that part is shared.
+
+`portal.html.src.md5` is the one built file that is tracked: it is the stamp
+the server checks `portal.html` against, and the build rewrites it. Commit it
+with a change; never edit it.

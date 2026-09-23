@@ -165,6 +165,10 @@ export default {
     // A batch of four reads is a few seconds; forty batches an hour keeps
     // the model bill and the hour's wall clock both inside reason.
     const MAX_EXTRACT_BATCHES = 40;
+    // Refiling renames files in the library, a call or two each. Six lots
+    // of fifty an hour keeps a backlog of renames inside the hour's budget
+    // of calls, with the round's own share left over; the rest wait an hour.
+    const MAX_REFILE_CALLS = 6;
     // Whatever happens below is written down at the end: the counts on a
     // good hour, the error on a bad one. A round that fails in silence is
     // how the matrix once sat empty for three hours with nobody told.
@@ -185,12 +189,18 @@ export default {
     // name the round will look for it by.
     let codes: [string, string][] = [];
     let names: string[] = [];
+    // The round's word on the hour, when it did not get to run at all: a
+    // matrix that could not be read, or one with nothing on it. Written
+    // into the record either way, so the hour never reads as a clean one.
+    let round: Record<string, unknown> = {};
     try {
       const cur = await readDocument();
       const quals = cur ? crewRowsOnly(cur.doc.quals as never, cur.doc.people) as { cols?: string[][]; rows?: string[][] } | null : null;
       codes = (quals?.cols || []).map((c) => [c[0], c[1]]);
       names = (quals?.rows || []).map((r) => r[0]).filter(Boolean);
+      if (!codes.length || !names.length) round = { roundSkipped: "the crew matrix has no items" };
     } catch (e) {
+      round = { roundError: "the crew matrix could not be read: " + said(e) };
       console.error("the crew matrix could not be read for the hour:", e);
     }
 
@@ -207,7 +217,8 @@ export default {
             if (out.remaining <= 0 || out.attempted === 0) break;
             if (out.extracted === 0 && ++stalled >= 2) break;
           }
-          while (names.length && loopsLeft()) {
+          let refiles = 0;
+          while (names.length && loopsLeft() && refiles++ < MAX_REFILE_CALLS) {
             const out = (await (await refile(names, 50)).json()) as {
               moved: unknown[]; remaining: number;
             };
@@ -227,7 +238,6 @@ export default {
     // The round needs stored readings and a matrix with items on it, not the
     // model: an hour with no key still puts what has already been read onto
     // the matrix. It catches everything itself; this try is for the plumbing.
-    let round = {};
     if (codes.length && names.length) {
       try {
         round = await runMatrixRound({ by: "the round on the hour", timeLeft, mirroredThisHour });

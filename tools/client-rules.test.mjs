@@ -275,6 +275,39 @@ const is = (got, want, what) => {
   is(laid.next.rows[0][3][0], "2031-02-17", "the cell keeps the value");
 }
 
+/* ---- a held or half-read round is no sighting either way: the note of
+        orphans seen carries through unchanged ---- */
+{
+  const filled = { "A::QL-01": true, "B::QL-02": true, "C::QL-03": true };
+  const seen = { "B::QL-02": "2026-09-24T03", "C::QL-03": "2026-09-24T03" };
+  const held = rules.settleRound({ filledFromCert: filled, claimed: ["A::QL-01"], unread: 1, settled: [], seenBefore: seen, now: "2026-09-24T04" });
+  is(held.orphans, [], "nothing is cleared while anything is unread");
+  is(held.seenNow, seen, "…and the sightings are carried through, not forgotten");
+  const claimedBack = rules.settleRound({ filledFromCert: filled, claimed: ["A::QL-01", "C::QL-03"], unread: 1, settled: [], seenBefore: seen, now: "2026-09-24T04" });
+  is(claimedBack.seenNow, { "B::QL-02": "2026-09-24T03" }, "a cell claimed again in the meantime still drops out of the sightings");
+  const reg = names.crewRegister([{ name: "SITTIYOS, Kachin", aliases: ["bILLY"] }]);
+  const respelt = rules.settleRound({ filledFromCert: { "BILLY::QL-01": true }, claimed: [], unread: 1, settled: [],
+    seenBefore: { "BILLY::QL-01": "2026-09-24T03" }, now: "2026-09-24T04", nameOf: reg.nameOf });
+  is(respelt.seenNow, { "SITTIYOS, KACHIN::QL-01": "2026-09-24T03" }, "…carried through under the register's name");
+}
+
+/* ---- two rows the register reads as one man: the row spelt as the settled
+        name, else the first - the rule the workbook writer uses too ---- */
+{
+  const reg = names.crewRegister([{ name: "EVANS, Brenton", aliases: ["bRENTON"] }]);
+  const quals = {
+    cols: [["QL-01", "Master"]],
+    rows: [
+      ["bRENTON", "Master", "", [""]],
+      ["EVANS, Brenton", "Master", "", [""]],
+    ],
+  };
+  const exact = rules.applySettled(quals, [{ person: "EVANS, Brenton", code: "QL-01", value: "2031-05-26" }], reg.nameOf);
+  is(exact.next.rows.map((r) => r[3][0]), ["", "2031-05-26"], "the row spelt as the settled name takes the date");
+  const first = rules.applySettled(quals, [{ person: "Brenton Evans", code: "QL-01", value: "2031-05-26" }], reg.nameOf);
+  is(first.next.rows.map((r) => r[3][0]), ["2031-05-26", ""], "with neither spelt that way, the first of his rows takes it");
+}
+
 /* ---- a settled date finds its row through the register's name ---- */
 {
   /* The real register, not a stand-in: its nameOf answers null for anyone it

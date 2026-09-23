@@ -837,13 +837,22 @@ export async function updateFiledWorkbook(buf, quals, only = null, blank = null,
   const crewRows = sheet.rows.filter((r) => r.num > codesRow.num + 1 && says(cellAt(r, NAME_COL)).trim() !== "");
   /** @type {Map<string, Row>} */
   const rowForName = new Map();
+  /** @type {Map<string, Row>} */
+  const rowSpelt = new Map();
   crewRows.forEach((r) => {
-    const key = as(says(cellAt(r, NAME_COL)).trim()).trim().toUpperCase();
+    const own = says(cellAt(r, NAME_COL)).trim().toUpperCase();
+    if (!rowSpelt.has(own)) rowSpelt.set(own, r);
+    const key = as(own).trim().toUpperCase();
     if (!rowForName.has(key)) rowForName.set(key, r);
   });
-  /** The workbook row for a matrix name, read through the register.
+  /** The workbook row for a matrix name: the row spelt exactly that way
+   * where there is one, otherwise the first the register reads as him -
+   * the same rule applySettled uses, so both land on the same line.
    * @param {unknown} name */
-  const rowOf = (name) => rowForName.get(as(String(name == null ? "" : name).trim()).trim().toUpperCase());
+  const rowOf = (name) => {
+    const want = String(name == null ? "" : name).trim().toUpperCase();
+    return rowSpelt.get(want) || rowForName.get(as(want).trim().toUpperCase());
+  };
 
   // Only the people and items the write actually concerns. With no `only`
   // everything on the matrix is in scope, which is what the matrix-driven
