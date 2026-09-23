@@ -214,8 +214,9 @@ if (!existsSync(rulesTest)) {
 } else {
   run("The worker's rules answer correctly", () => {
     try {
-      // The rules, and the shared workbook code as the worker imports it.
-      const out = execFileSync("npx", ["tsx", "--test", "tests/rules.test.ts", "tests/workbook.test.ts"], {
+      // The rules, the shared workbook code as the worker imports it, and
+      // the hourly round piece by piece.
+      const out = execFileSync("npx", ["tsx", "--test", "tests/rules.test.ts", "tests/workbook.test.ts", "tests/round.test.ts"], {
         cwd: join(ROOT, "worker"), stdio: "pipe", shell: true, timeout: 180000, encoding: "utf8",
       });
       const m = /(?:#|ℹ)\s*pass (\d+)/.exec(out);

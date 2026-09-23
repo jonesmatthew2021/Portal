@@ -650,7 +650,44 @@ async function validityPeriodList() {
   return Response.json({ filename: row.filename, read: true, periods });
 }
 
-async function compare(matrix: Matrix, sheet: { filename?: string; rows?: { name: string; vals: (string | null)[] }[] } | null) {
+type Sheet = { filename?: string; rows?: { name: string; vals: (string | null)[] }[] } | null;
+
+/** What the comparison hands back: the route wraps it in a Response, the
+ *  hourly round reads it as it is. */
+export type CompareResult = {
+  at: string;
+  model: string;
+  items: Item[];
+  notes: Note[];
+  settled: { person: string; code: string; value: string; clear?: boolean }[];
+  claimed: string[];
+  noted: number;
+  summary: {
+    certificates: number; read: number; unread: number; compared: number; agree: number;
+    discrepancies: number; fromCertificates: number; fromSheet: number; sheetTotal: number;
+    sheetCapped: number; uncertified: number; sheetFilename: string | null;
+    validitySheet: string | null; derived: number;
+  };
+};
+
+async function compare(matrix: Matrix, sheet: Sheet) {
+  return Response.json(await compareMatrix(matrix, sheet));
+}
+
+/**
+ * The comparison itself. `nameOf` is how a certificate's person is read
+ * before it is looked for on the matrix: the crew register's, where the
+ * round passes one, so a certificate filed under "bILLY" claims the row the
+ * matrix calls "SITTIYOS, Kachin". A spelling the register does not know
+ * stays itself, the same fallback applySettled uses. The route passes
+ * nothing and compares names as they are, as it always has.
+ */
+export async function compareMatrix(
+  matrix: Matrix,
+  sheet: Sheet,
+  nameOf: (name: string) => string | null | undefined = (n) => n,
+): Promise<CompareResult> {
+  const as = (n: string) => { const k = nameOf(n); return k == null || k === "" ? n : k; };
   const certs = await liveCertificates();
   const held = await allReadings();
 
@@ -717,7 +754,9 @@ async function compare(matrix: Matrix, sheet: { filename?: string; rows?: { name
       continue;
     }
 
-    if (!row.person || !rowAt.has(row.person.trim().toUpperCase())) {
+    // Whose row this certificate speaks for, as the register names him.
+    const person = row.person ? as(row.person) : "";
+    if (!person || !rowAt.has(person.trim().toUpperCase())) {
       notes.push({
         kind: "not-on-matrix",
         person: row.person,
@@ -729,9 +768,11 @@ async function compare(matrix: Matrix, sheet: { filename?: string; rows?: { name
 
     // The name on the document against the person it was filed under. A scan
     // filed against the wrong crew member is worse than one not filed at all.
+    // The register's name for him counts as his too: a certificate filed
+    // under "bILLY" and printed "Kachin Sittiyos" is the same man.
     if (reading.holderName) {
       const on = words(reading.holderName);
-      const filed = words(row.person);
+      const filed = [...words(row.person), ...words(person)];
       if (on.length && !filed.some((w) => on.includes(w))) {
         notes.push({
           kind: "name-mismatch",
@@ -743,7 +784,7 @@ async function compare(matrix: Matrix, sheet: { filename?: string; rows?: { name
       }
     }
 
-    const key = `${row.person.trim().toUpperCase()}::${code.trim().toUpperCase()}`;
+    const key = `${person.trim().toUpperCase()}::${code.trim().toUpperCase()}`;
     const sitting = claim.get(key);
     if (sitting) {
       // The one that runs the longer is the certificate in force; the other is
@@ -799,7 +840,9 @@ async function compare(matrix: Matrix, sheet: { filename?: string; rows?: { name
 
   for (const [key, { row, reading }] of claim) {
     const code = key.split("::")[1];
-    const at = rowAt.get(row.person!.trim().toUpperCase())!;
+    // The key was built from the register's name for him, so it is what
+    // finds his row.
+    const at = rowAt.get(key.slice(0, key.indexOf("::")))!;
     const col = colAt.get(code.trim().toUpperCase())!;
     const matrixRow = matrix.rows[at];
     const cell = matrixRow[3][col] || "";
@@ -883,6 +926,9 @@ async function compare(matrix: Matrix, sheet: { filename?: string; rows?: { name
     }
 
     if (expiry) {
+      // A cell that already agrees stays in `settled`: the round's workbook
+      // step writes the office's file from this list, and the workbook may
+      // still be missing a date the matrix already has.
       settled.push({ person: matrixRow[0], code, value: expiry });
       if (isDate(cell) && normDate(cell) === expiry) {
         agree++;
@@ -1061,7 +1107,7 @@ async function compare(matrix: Matrix, sheet: { filename?: string; rows?: { name
   // the office wrote itself is never touched.
   for (const r of rehomed) {
     if (!r.person || !r.expiry) continue;
-    const personKey = r.person.trim().toUpperCase();
+    const personKey = as(r.person).trim().toUpperCase();
     if (claim.has(`${personKey}::${r.old}`)) continue;
     const at = rowAt.get(personKey);
     const col = colAt.get(r.old);
@@ -1107,7 +1153,7 @@ async function compare(matrix: Matrix, sheet: { filename?: string; rows?: { name
     }
   }
 
-  return Response.json({
+  return {
     at: new Date().toISOString(),
     model: MODEL,
     items,
@@ -1140,7 +1186,7 @@ async function compare(matrix: Matrix, sheet: { filename?: string; rows?: { name
       validitySheet: validity ? validity.filename : null,
       derived,
     },
-  });
+  };
 }
 
 /**
