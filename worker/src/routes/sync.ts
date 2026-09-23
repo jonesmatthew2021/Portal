@@ -453,7 +453,14 @@ export default async (req: Request, by = "Import new files") => {
     try {
       return Response.json(await runSync(who));
     } finally {
-      await dropLease(lease.token);
+      // The sync is done by now and its record written. A drop that fails
+      // must not turn that into a 502 - the lease runs out on its own after
+      // LEASE_MS.
+      try {
+        await dropLease(lease.token);
+      } catch (e) {
+        console.error("the sync's lease was not dropped:", e);
+      }
     }
   } catch (e) {
     return Response.json(

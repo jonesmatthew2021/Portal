@@ -432,7 +432,14 @@ async function uploadSingleFile(form: FormData, file: File, category: string) {
       { status: 201 },
     );
   } finally {
-    await dropLease(lease.token);
+    // The replace is done by now: the books and the library have changed.
+    // A drop that fails must not turn that into an error the page reads
+    // as "couldn't be filed" - the lease runs out on its own after LEASE_MS.
+    try {
+      await dropLease(lease.token);
+    } catch (e) {
+      console.error("the upload's lease was not dropped:", e);
+    }
   }
 }
 

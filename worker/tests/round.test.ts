@@ -1004,6 +1004,62 @@ test("the workbook upload takes the lease too, and is refused while somebody hol
   assert.equal(lease.until, 0, "…and gave it back");
 });
 
+/** The store's conditional write on the lease - the drop - refused by the
+ *  database, the way a D1 hiccup refuses it; every other statement answers
+ *  as before. */
+function refuseLeaseDrop(portal: { db: ReturnType<typeof fakeDb> }) {
+  const plain = portal.db.prepare;
+  portal.db.prepare = (sql: string) => {
+    const s = plain(sql);
+    if (!/^UPDATE blobs SET value/.test(sql)) return s;
+    const bind = s.bind;
+    s.bind = (...a: unknown[]) => {
+      const b = bind(...a);
+      // The drop is the write that runs the lease out; a take writes a
+      // fresh one and goes through.
+      if (a[1] !== "round-lease" || JSON.parse(String(a[2])).until !== 0) return b;
+      b.run = async () => { throw new Error("D1 is having a bad morning"); };
+      return b;
+    };
+    return s;
+  };
+  return () => { portal.db.prepare = plain; };
+}
+
+test("a completed replace or sync is not turned into an error by a lease drop that fails", async () => {
+  /* No lease row yet, so the take is the insert and the drop the
+     conditional write - which the database refuses. The work is done by
+     then: the page must hear that, not a 500. */
+  const { portal, bucket } = await oneManPortal();
+  const quiet = console.error;
+  console.error = () => {};
+  const restore = refuseLeaseDrop(portal);
+  try {
+    const form = new FormData();
+    form.append("file", new File([bytesOf("uploaded workbook")], "20260930 - CREW QUALIFICATION EXPIRY.xlsx", { type: "application/x" }));
+    form.append("category", "training-matrix");
+    form.append("onDuplicate", "replace");
+    form.append("uploadedBy", "Matthew");
+    const res = await files(new Request("http://portal/api/files", { method: "POST", body: form }));
+    assert.equal(res.status, 201, await res.text());
+    assert.equal(bucket.text("opms/20260930 - CREW QUALIFICATION EXPIRY.xlsx"), "uploaded workbook", "the replace landed");
+    const lease = JSON.parse(portal.blobs.get("sync|round-lease")!);
+    assert.equal(lease.by, "Matthew");
+    assert.ok(lease.until > Date.now(), "the lease was not dropped, and runs out on its own");
+
+    // The lease's row is left run out by hand, so the sync can take it.
+    portal.blobs.set("sync|round-lease", JSON.stringify({ ...lease, until: 0 }));
+    const synced = await sync(new Request("http://portal/api/sync", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ by: "Update portal" }),
+    }));
+    assert.equal(synced.status, 200, await synced.text());
+    assert.equal(JSON.parse(portal.blobs.get("sync|last-run")!).by, "Update portal", "the sync ran and is on the record");
+  } finally {
+    restore();
+    console.error = quiet;
+  }
+});
+
 test("the hour runs the sync and the round under one lease, taken once and run out at the end", async () => {
   const { portal, bucket } = await oneManPortal();
   const env = { DB: portal.db, FILES: bucket, FILE_STORE: "r2" };
