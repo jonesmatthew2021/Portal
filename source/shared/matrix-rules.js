@@ -301,8 +301,10 @@ export function settleRound({ filledFromCert, claimed, unread, settled, seenBefo
   const seenNow = {};
   const orphans = candidates.filter((k) => {
     if (!twoSightings) return true;
+    if (Object.prototype.hasOwnProperty.call(seenBefore, k)) return true;
+    // First sighting: noted for next round, left alone this one.
     seenNow[k] = String(now || "");
-    return Object.prototype.hasOwnProperty.call(seenBefore, k);
+    return false;
   });
 
   /** @type {{ person: string, code: string, value?: string, clear?: boolean }[]} */
