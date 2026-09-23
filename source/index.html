@@ -12453,6 +12453,18 @@ function shouldTabRound({ lastDocUpdate, now, pending, online, last, unanswered 
   return !own || isNaN(own) || now - own > TAB_ROUND_AFTER;
 }
 
+/* How many asks in a row have got no answer, the tick's count moved on by
+   one ask. Only the asks the tab made because it wanted to round count:
+   the tab also asks, without wanting to, while the last answer said the
+   hour was running, so its buttons come back when it stops. A miss on one
+   of those, counted, would sit in the count for hours and make the first
+   miss of a wanting ask read as the second - and one bad second on the
+   line would send the tab off on a round behind an hour that did the
+   work. `last` is the portal's answer, or null where none came. */
+function missesInARow(before, wants, last) {
+  return last || !wants ? 0 : (before || 0) + 1;
+}
+
 function UpdateDocumentation() {
   const { admin, lastDocUpdate, setLastDocUpdate, log, pending, roundRunning, setRoundRunning,
     quals: QUALS, setQuals, trainingMatrix,
@@ -12648,7 +12660,10 @@ function UpdateDocumentation() {
      asks the portal what the hour did (shouldTabRound): the tab is the
      fallback for an hour that did not run, not a second hour. A portal
      that cannot be asked twice running leaves the tab to its own clock, as
-     before; one ask that got no answer waits for the next. */
+     before; one ask that got no answer waits for the next. Only asks the
+     tab wanted to round on count as misses (missesInARow): the asks made
+     only to see a running hour finish do not, and a tick that does not ask
+     at all starts the count again. */
   React.useEffect(() => {
     if (!admin) return undefined;
     const LEASE = "coolibah-hourly-lease";
@@ -12669,7 +12684,7 @@ function UpdateDocumentation() {
       const wants = due(null) && !going.current && !heldElsewhere();
       // Asked all the same while the last answer said the hour was running,
       // so the buttons held down for it come back when it stops.
-      if (!wants && !roundRunning) return;
+      if (!wants && !roundRunning) { unanswered.current = 0; return; }
       let last = null;
       try {
         const r = await fetch("/api/sync/last", { cache: "no-store" });
@@ -12677,7 +12692,7 @@ function UpdateDocumentation() {
       } catch (e) { last = null; }
       // A portal that cannot say holds nothing: the buttons come back.
       setRoundRunning(!!(last && last.running));
-      unanswered.current = last ? 0 : unanswered.current + 1;
+      unanswered.current = missesInARow(unanswered.current, wants, last);
       if (!wants || !due(last, unanswered.current) || going.current || heldElsewhere()) return;
       take();
       const renew = setInterval(take, 60000);

@@ -56,7 +56,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, saveTryAgainIn, settledKeys };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, saveTryAgainIn, settledKeys, missesInARow };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -543,6 +543,18 @@ const is = (got, want, what) => {
   is(ask({ last: null, unanswered: 1 }), false, "one ask that got no answer: the tab waits for the next rather than round behind an hour that may have done the work");
   is(ask({ last: null, unanswered: 2 }), true, "two in a row: the portal cannot be asked, the tab's own clock stands in");
   is(ask({ last: { running: false, hourly: hourly(30) }, unanswered: 1 }), false, "an answer in hand is read as ever, whatever went before");
+
+  /* The count itself: only a miss on an ask the tab wanted to round on
+     counts, and an answer of any kind clears it. */
+  const answered = { running: false, hourly: hourly(30) };
+  is(lib.missesInARow(0, true, null), 1, "a wanting ask that got no answer is one miss");
+  is(lib.missesInARow(1, true, null), 2, "…and a second in a row is two");
+  is(lib.missesInARow(2, true, answered), 0, "an answer clears the count");
+  is(lib.missesInARow(1, false, null), 0, "a miss on an ask made only to see a running hour finish does not count, and clears what went before");
+  is(lib.missesInARow(undefined, true, null), 1, "a count never started begins at one");
+  const afterHours = lib.missesInARow(lib.missesInARow(0, false, null), true, null);
+  is(afterHours, 1, "a miss while only watching the hour, then one wanting miss hours later, is one miss, not two");
+  is(ask({ last: null, unanswered: afterHours }), false, "…so the tab waits for the next ask rather than round off one bad second");
 }
 
 /* ---- the copy spliced into the page answers exactly as the module does ---- */
