@@ -464,19 +464,22 @@ async function saveEntry() {
     const first = FIELD[missing[0]];
     if (!confirm(`${missing.length} column${missing.length > 1 ? "s are" : " is"} still empty (${first.label}${missing.length > 1 ? " and more" : ""}). Save anyway?`)) return;
   }
-  const record = { ...r, id: entry.id || undefined, transcript: entry.transcript || null };
+  // An entry still waiting on the phone has a local id the server never sees.
+  const localId = entry.id && String(entry.id).startsWith("local-") ? entry.id : null;
+  const record = { ...r, id: entry.id && !localId ? entry.id : undefined, transcript: entry.transcript || null };
   $("save").disabled = true;
   try {
     const res = await fetch("/api/fauna/sightings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ record }) });
     if (res.status === 401) { location.href = "/login"; return; }
     const out = await res.json();
     if (!res.ok) throw new Error(out.error || res.status);
-    toast(entry.id ? "Saved the changes." : "Saved.");
+    if (localId) { queue = queue.filter((q) => q.id !== localId); store.set("fauna.queue", queue); saved = saved.filter((s) => s.id !== localId); }
+    toast(entry.id && !localId ? "Saved the changes." : "Saved.");
     await say("Saved.");
     finishEntry(out.record);
   } catch (e) {
     // Kept on the phone and sent the next time the server can be reached.
-    const id = record.id || ("local-" + Math.random().toString(36).slice(2, 12));
+    const id = localId || record.id || ("local-" + Math.random().toString(36).slice(2, 12));
     queue = queue.filter((q) => q.id !== id);
     queue.push({ ...record, id, pending: true });
     store.set("fauna.queue", queue);
