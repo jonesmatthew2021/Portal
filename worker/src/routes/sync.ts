@@ -600,11 +600,16 @@ export async function apply(
   if (result.trainingSheet && !liveKeys.has(result.trainingSheet.key)) {
     const cand = result.trainingSheet;
     const candName = safeName(cand.key.split("/").pop() || "");
-    const [cur] = await db
+    /* Every live row, newest first. There should be one; the candidate is
+       weighed against the newest, and if it wins every one of them steps
+       down - a swap that stepped down only the newest left an older twin
+       live beside the new one. */
+    const current = await db
       .select()
       .from(documents)
       .where(and(eq(documents.category, "training-matrix"), isNull(documents.removedAt)))
       .orderBy(desc(documents.createdAt));
+    const cur = current[0];
     /* The current one as the listing saw it - or, where the listing did not
        (a workbook still filed under the old matrices/training address), as
        old as the day it was filed, so a newer drop can still take over. */
@@ -612,15 +617,15 @@ export async function apply(
       ? (result.sheetSeen[cur.blobKey] || { key: cur.blobKey, modified: cur.createdAt ? new Date(cur.createdAt).toISOString() : undefined })
       : { key: "" };
     if (!cur || outranks(cand, curSeen)) {
-      if (cur) {
+      for (const old of current) {
         /* The portal's own dated copy is parked flat, the way a replace parks
            it; a file the office put in the folder stays exactly where it is. */
-        const theirs = !!cur.adoptedFromFolder;
-        const blobKey = theirs ? cur.blobKey : await relocateToRemovedBlob(cur);
+        const theirs = !!old.adoptedFromFolder;
+        const blobKey = theirs ? old.blobKey : await relocateToRemovedBlob(old);
         await db
           .update(documents)
           .set({ removedAt: new Date(), removedBy: "SharePoint sync", blobKey, keptInPlace: theirs ? 1 : null })
-          .where(eq(documents.id, cur.id));
+          .where(eq(documents.id, old.id));
       }
       await db.insert(documents).values({
         id: crypto.randomUUID(),

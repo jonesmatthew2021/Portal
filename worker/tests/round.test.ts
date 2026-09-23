@@ -1176,6 +1176,34 @@ test("Import from SharePoint over the portal's own dated copy parks it flat, and
   assert.deepEqual(bucket.made, [], "no folder was made");
 });
 
+test("the sync's swap steps down every live training matrix, not only the newest", async () => {
+  /* Two live rows - the portal's own dated copy, newest, and behind it the
+     office's adopted file that should have stepped down long ago - and a
+     newer export dropped in the folder. */
+  const { portal, bucket, tmKey } = await oneManPortal();
+  const theirs = "opms/CREW QUALIFICATION EXPIRY.xlsx";
+  await bucket.put(theirs, bytesOf("the office's own"));
+  portal.rows.push({ ...liveRow("tm0", theirs, 1), createdAt: 0 });
+  const newer = "opms/20260923 - CREW QUALIFICATION EXPIRY.xlsx";
+  await bucket.put(newer, bytesOf("the office's newer export"));
+  bucket.made.length = 0;
+
+  const seen = await survey();
+  assert.equal(seen.trainingSheet?.key, newer);
+  const done = await apply(seen);
+  assert.deepEqual(done.adopted.map((a) => a.key), [newer]);
+  const live = portal.rows.filter((r) => r.category === "training-matrix" && !r.removedAt);
+  assert.deepEqual(live.map((r) => r.blobKey), [newer], "exactly one live");
+  const mine = portal.rows.find((r) => r.id === "tm1")!;
+  assert.equal(mine.blobKey, "removed/tm1 - 20260901 - CREW QUALIFICATION EXPIRY.xlsx", "the portal's own copy parked flat");
+  assert.equal(bucket.text(tmKey), null);
+  const office = portal.rows.find((r) => r.id === "tm0")!;
+  assert.ok(office.removedAt, "the older twin stepped down too");
+  assert.deepEqual([office.keptInPlace, office.blobKey], [1, theirs], "…the office's file kept in place");
+  assert.equal(bucket.text(theirs), "the office's own");
+  assert.deepEqual(bucket.made, [], "no folder was made");
+});
+
 test("a pending copy left by a replace that was cut off is nobody's training matrix", async () => {
   const { bucket } = await oneManPortal();
   await bucket.put("opms/~pending 1234abcd - 20260930 - CREW QUALIFICATION EXPIRY.xlsx", bytesOf("half a replace"));
