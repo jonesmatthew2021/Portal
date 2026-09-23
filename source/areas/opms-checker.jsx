@@ -411,8 +411,7 @@ function OPMSChecker() {
             </div>
           )}
           <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.6, marginTop: 7 }}>
-            Leave the page open. Every certificate reading is kept as it is made, so a run that stops
-            partway picks up where it left off rather than starting over.
+            Leave the page open; every certificate reading is kept as it is made.
           </div>
         </div>
       )}
@@ -592,8 +591,7 @@ function OPMSChecker() {
                   style={{ width: "100%", marginTop: 10, fontFamily: T.mono, fontSize: 11.5, lineHeight: 1.6,
                     color: T.text, background: T.raised, border: `1px solid ${T.rule}`, borderRadius: 2, padding: 10 }} />
                 <div style={{ fontFamily: T.body, fontSize: 12, color: T.muted, marginTop: 6 }}>
-                  Copy this into an email to PK, attach the PDF from above for the detail, and press
-                  Mark all as sent so next week's run remembers.
+                  Copy this into an email to PK, attach the PDF from above, and press Mark all as sent.
                 </div>
               </div>
             );

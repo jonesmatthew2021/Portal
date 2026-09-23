@@ -4586,13 +4586,6 @@ function TrainingMatrix() {
         <Choices value={group} onPick={setGroup} options={groups} compact />
       </div>
 
-      {/* Nothing on the grid says the names can be pressed, and a colour block
-          with no explanation is where most questions about the matrix start. */}
-      <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.6, marginBottom: 14 }}>
-        Press a name to see every certificate held against that person underneath the table — what each
-        code stands for, the date behind the colour, and the scan on file for it.
-      </div>
-
       {/* The grid works out what it asks of somebody from their position alone,
           so a person working in a position their ticket isn't for is read against
           the wrong set of requirements — and nothing on the grid used to say so.
@@ -5505,12 +5498,6 @@ function CrewRosters({ people, setPeople, board, setBoard, log, currentUser, vie
             Crew change. Everyone on the onboard swing goes to the off swing, and the off swing comes
             onboard. Only people on a rotation are carried across — a fill-in or anybody without a crew
             letter stays where they are and is moved by hand.
-          </div>
-          <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.7, marginTop: 9 }}>
-            Watches are left alone, so somebody who was on nights last trip comes back on nights and can
-            be changed on the board. By the pattern the next changeover is{" "}
-            {fmtDate(swingAt(currentSwingIndex()).flyHome)}, but the button is what moves the crew — press
-            it when the change actually happens.
           </div>
 
           <div style={{ background: T.raised, borderRadius: 2, padding: "11px 13px", margin: "14px 0",
@@ -7208,8 +7195,7 @@ function UploadCertificates() {
                 {auto.phase === "writing" && "Updating the crew matrix..."}
               </div>
               <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.6, marginTop: 8 }}>
-                This takes a few minutes on a large batch. Leave the page open — each certificate is kept
-                as it is read, so a lost connection costs the batch it was in rather than the whole run.
+                Leave the page open; each certificate is kept as it is read.
               </div>
             </>
           )}
@@ -7638,8 +7624,7 @@ function UploadCertificates() {
             <div style={{ fontFamily: T.mono, fontSize: 12.5, color: T.text, margin: "10px 0 4px",
               wordBreak: "break-word" }}>{whose.file.name}</div>
             <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, marginBottom: 14, lineHeight: 1.6 }}>
-              Neither the file name nor the folder it came from says. It is filed into that
-              person's own folder — the portal will not make a new one.
+              It is filed into that person's own folder — the portal will not make a new one.
             </div>
             <NameSelect value={whosePick} onPick={setWhosePick}
               options={[{ value: "", label: "Choose the crew member" },
@@ -10887,9 +10872,8 @@ function EverythingHidden({ admin, onRestoreAll }) {
         Every section of the portal has been removed from the tab bar.
       </div>
       <div style={{ fontFamily: T.body, fontSize: 14, color: T.muted, lineHeight: 1.7, marginTop: 10 }}>
-        Nothing has been deleted — the notes, documents, correspondence and crew
-        matrix are all still on the server exactly as they were. They are only
-        hidden, and they come back the moment the sections are restored.
+        Nothing has been deleted — everything is still on the server and comes back the moment the
+        sections are restored.
       </div>
       {admin ? (
         <div style={{ marginTop: 18 }}>
@@ -10986,10 +10970,8 @@ function RemovedFiles() {
       </div>
 
       <div style={{ fontFamily: T.body, fontSize: 14, color: T.muted, lineHeight: 1.6, marginBottom: 12 }}>
-        Removing a file takes it off the portal but doesn't destroy it. Anything removed by mistake —
-        or a certificate replaced by a renewal that turned out to be the wrong one — is put back from
-        here, exactly where it was. Deleting for good is the one thing the portal can't undo, so it is
-        kept separate and asks twice.
+        Removing a file takes it off the portal but doesn't destroy it; deleting for good is the one
+        thing the portal can't undo.
       </div>
 
       {state.status === "error" && (
@@ -11489,11 +11471,6 @@ function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, ca
         return (
           <FoldSection title="Certificates required by shift"
             tone={c ? (shortN ? T.bRed : T.teal) : T.accent} meta={meta}>
-            <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, lineHeight: 1.6, margin: "4px 0 10px" }}>
-              The office's guideline — how many holders of certain certificates each shift must
-              carry — read against what this swing's crew hold. Every position is listed with the
-              certifications its shift requires; upload a newer sheet whenever the office sends one.
-            </div>
             <SwingShiftAllocation here={here} />
           </FoldSection>
         );
@@ -14847,13 +14824,7 @@ function GenerateSwingCompliance({ results, here, setAt }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 4 }}><Eyebrow color={T.accent}>Generate swing compliance</Eyebrow></div>
-      <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, lineHeight: 1.6, marginBottom: 12 }}>
-        One button, one answer. The swing picked here — the same pick as the cards above — is
-        checked whole: its roster, including anything worked ahead on the board, read against the
-        crew matrix spreadsheets and the certificates on file, person by person. The report is
-        written down for everyone and says what it was made from.
-      </div>
+      <div style={{ marginBottom: 12 }}><Eyebrow color={T.accent}>Generate swing compliance</Eyebrow></div>
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 14 }}>
         <div style={{ flex: "1 1 320px" }}>
@@ -16493,11 +16464,6 @@ function CrewCertificateUpload() {
           OPEN OPMS
         </a>
       </div>
-      <div style={{ fontFamily: T.body, fontSize: 14, color: T.muted, lineHeight: 1.7, marginBottom: 16 }}>
-        Drop your certificate here with your name on it. It is filed straight into the company
-        SharePoint under you, converted to PDF and named the way OPMS wants it — then handed back so
-        you can save the finished file and upload that same copy to OPMS.
-      </div>
 
       {/* Who it is filed against. A crew member signed in with his own email
           is not asked — it is his certificate. Management, and anyone the
@@ -16752,28 +16718,11 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
             <Chip fg={r.role === "admin" ? T.accent : T.muted} bg={r.role === "admin" ? T.accentSoft : T.raised}>{r.role}</Chip>
           </div>
         ))}
-        <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.6, marginTop: 14 }}>
-          Admin accounts are set in the code at the top of the file. Picking your own name signs you
-          in with nothing else asked, so History records who did what. The shared ADMIN account signs
-          straight in the same way, but names nobody. None of this is real security - anyone who opens
-          the page can pick a name off the management team list. What it does is keep crew out of the
-          editing controls by keeping those controls off the crew screen.
-        </div>
       </div>
 
       {/* Everything below is portal plumbing rather than day-to-day admin: removing
           tabs for the whole crew, the file store, the save status and what still
           needs a redeploy. It is kept to the IT SUPPORT sign-in. */}
-      {!isITSupport(currentUser) && (
-        <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderLeft: `4px solid ${T.accent}`,
-          borderRadius: 2, padding: "13px 15px" }}>
-          <div style={{ fontFamily: T.body, fontSize: 14, color: T.muted, lineHeight: 1.7 }}>
-            Adding and removing tabs, the uploaded file store, the save status and the redeploy notes
-            are handled under the IT SUPPORT sign-in. Ask IT support if something there needs changing.
-          </div>
-        </div>
-      )}
-
       {isITSupport(currentUser) && (
         <>
           <div style={{ marginBottom: 10 }}><Eyebrow color={T.accent}>Tabs</Eyebrow></div>

@@ -637,8 +637,8 @@ function CrewDetails() {
             <Eyebrow color={T.bRed}>Take {dropping.name} off the register?</Eyebrow>
             <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.muted, margin: "9px 0 15px", lineHeight: 1.6 }}>
               His certificates, his row on the matrix and his stints on the roster all stay exactly as
-              they are. What goes is the register's entry — so every spelling that reached him through
-              it stops reaching anybody, and this page will start asking about them again.
+              they are. What goes is the register's entry, so every spelling that reached him through
+              it stops reaching anybody.
             </div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <Button variant="solid" onClick={() => takeOff(dropping)}>Take him off</Button>

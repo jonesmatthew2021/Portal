@@ -148,20 +148,6 @@ function AiChecker({ log }) {
   return (
     <div>
       <SectionHead title="AI Checker" meta={messages.length ? `${messages.filter((m) => m.role === "user").length} asked this visit` : "Ask anything"} />
-      <div style={{ fontFamily: T.body, fontSize: 14, color: T.muted, marginBottom: 18, lineHeight: 1.6 }}>
-        Ask the AI whatever you want — check a calculation, draft a message, explain a procedure,
-        or hand it something to read: paste text in, or attach a file and ask about it. It takes
-        images, PDFs and Excel spreadsheets (XLSX, XLSM, XLS, CSV) — drag them onto the box below
-        or use the button. A spreadsheet is opened here and its sheets go up as rows the AI can read.
-        It can also see the portal: the roster, notes, correspondence, comments, the crew matrix,
-        every file that has been uploaded and every certificate on file — including the scans
-        themselves — along with the answers the portal's own checks have already produced. So you can
-        ask it about a person, a document or a date and it will go and look. It reads the portal and
-        never changes anything on it, and it can't run the checks on the other pages — it reads the
-        answers those pages have already made, and will tell you when one is old.
-        The conversation isn't kept: it belongs to this browser, this visit, and the server
-        holds a question only for as long as it takes to answer it.
-      </div>
 
       {messages.length > 0 && (
         <div ref={boxRef} style={{ background: T.panel, border: `1px solid ${T.rule}`, borderRadius: 2,

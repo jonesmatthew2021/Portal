@@ -142,18 +142,6 @@ function ELearningStatus() {
         {tile("Unconfirmed", total("unconfirmed"), T.muted)}
       </div>
 
-      <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.6, marginBottom: 14 }}>
-        The inductions and online modules on the matrix — MinRes project inductions, the tug and barge
-        inductions and the project modules. A module counts as done when it is marked as held or carries
-        a date still to run; one marked open or not held counts as not done; a module nobody has asked
-        of that person is left out of their count. Module validity is how long each module stays valid,
-        read off the skills matrix
-        {validityPeriods && validityPeriods.filename ? ` (${validityPeriods.filename})` : ""}; Open at the
-        end of a line shows the certificate the dates were read from.
-        {!validityMatrix && " No skills matrix is on file yet, so that column is blank — upload one under Required Documents For Upload."}
-        {validityMatrix && validityPeriods && !validityPeriods.read && " The validity periods haven't been read off the skills matrix yet — press Update table and the column fills itself in."}
-      </div>
-
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14, alignItems: "center" }}>
         {[{ id: "crew", label: "By crew" }, { id: "module", label: "By module" }].map((v) => (
           <button key={v.id} className="um-btn" onClick={() => setView(v.id)}

@@ -147,16 +147,6 @@ function CertChecker() {
         {tile({ key: "foreign", label: "Not Australian", colour: T.violet, value: foreignCount })}
       </div>
 
-      <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.6, marginBottom: 14 }}>
-        Anything on the matrix that is past its date, marked as not held, or left with a question mark.
-        Upcoming expiries are on the Crew Matrix - this is what is already a problem today.
-        Certificates issued by a non-Australian authority are flagged in violet, going off the
-        issuer printed on each scan.{!issuersKnown &&
-          " No issuing authorities are on record yet - press Update table on the live portal and the flags fill in."}
-        {" "}Against each item, mark what has been done — Booked, Chased, or Evidence in — with a
-        line on where it stands. The mark shows here and on Today until the renewal is filed.
-      </div>
-
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
         <input className="um-in" style={{ flex: 1, minWidth: 170 }} value={q}
           onChange={(e) => setQ(e.target.value)} placeholder="Search crew or position" />
@@ -252,11 +242,6 @@ function CertChecker() {
             <div style={{ borderTop: `2px solid ${T.violet}`, paddingTop: 9, marginBottom: 11 }}>
               <div style={{ maxWidth: 640 }}>
                 <Eyebrow color={T.text}>Not Australian-certified · {foreignCount}</Eyebrow>
-                <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.6, marginTop: 3 }}>
-                  Certificates whose issuing authority doesn't read as Australian, going off the
-                  issuer the portal read from each scan. Valid ones are here too — the flag is
-                  about who issued the certificate, not when it runs out.
-                </div>
               </div>
             </div>
             <DateColsHead trail={248} validity />

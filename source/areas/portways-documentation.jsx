@@ -215,16 +215,6 @@ function CrewListFormPage({ people }) {
         <div style={{ fontFamily: T.body, fontSize: 15, fontWeight: 700, color: T.text, marginTop: 8 }}>
           Crew List &amp; Shift Allocation
         </div>
-        <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.muted, lineHeight: 1.7, marginTop: 6 }}>
-          Portways' own form, exactly as they issue it — it opens in its own tab with its layout,
-          checks, Print and Save editable copy buttons untouched. The portal fills its name
-          lists from the swing lists on Swing Compliance ({swingCrew.length} crew
-          across the swings right now), adds the fly-out dates it knows to the crew-change days,
-          and starts the planned crew list with the swing flying out at the next change — each
-          person in their position's row, watches following the swing's board where one has been
-          set on the roster. Check it over, finish it there, then use the form's own
-          {" "}<b>Save editable copy</b> to keep your work.
-        </div>
         <div style={{ marginTop: 12 }}>
           <Button onClick={open} disabled={busy || !swingCrew.length}>
             {busy ? "Preparing..." : "Open the form with today's crew"}
