@@ -20,15 +20,21 @@ export function ensureDocumentColumns() {
     columnsReady = (async () => {
       const d1 = getEnv().DB;
       const info = await d1.prepare("PRAGMA table_info(documents)").all<{ name: string }>();
-      const have = new Set((info.results || []).map((c) => c.name));
+      const cols = info.results || [];
+      // No rows is no table: a fresh local database that schema.sql has not
+      // been run against yet. Nothing to add a column to, and nothing to
+      // stop a request over - the route will say what is missing.
+      if (!cols.length) return;
+      const have = new Set(cols.map((c) => c.name));
       for (const col of ["adopted_from_folder", "kept_in_place"]) {
         if (have.has(col)) continue;
         try {
           await d1.prepare(`ALTER TABLE documents ADD COLUMN ${col} INTEGER`).run();
         } catch (e) {
           // Another isolate got there first in the same instant: the column
-          // is there, which is all that was wanted.
-          if (!/duplicate column/i.test(e instanceof Error ? e.message : String(e))) throw e;
+          // is there, which is all that was wanted. And a table that is not
+          // there is the case above, seen a moment later.
+          if (!/duplicate column|no such table/i.test(e instanceof Error ? e.message : String(e))) throw e;
         }
       }
     })().catch((e) => {
@@ -38,6 +44,12 @@ export function ensureDocumentColumns() {
     });
   }
   return columnsReady;
+}
+
+/** Forgets that the columns were looked at, so the next call looks again.
+ *  For the tests, which stand a fresh database behind each case. */
+export function forgetDocumentColumns() {
+  columnsReady = null;
 }
 
 // Crew certificates are kept apart from everything else in the store, one folder

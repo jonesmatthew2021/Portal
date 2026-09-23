@@ -15,7 +15,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setEnv } from "../src/env.js";
 import analyse, { compareMatrix, refile } from "../src/routes/analyse.js";
-import { KeptInPlace, purgeDocument, relocateToRemovedBlob, removeDocument, restoreDocument } from "../src/db/documents.js";
+import { KeptInPlace, ensureDocumentColumns, forgetDocumentColumns, purgeDocument, relocateToRemovedBlob, removeDocument, restoreDocument } from "../src/db/documents.js";
 import { replaceSingleFile } from "../src/db/single-file.js";
 import { saveDocument } from "../src/lib/shared-state.js";
 import { runMatrixRound, roundRunning, takeLease, dropLease } from "../src/lib/round.js";
@@ -1358,6 +1358,33 @@ test("the library driver refuses to make a folder outside the portal's own, and 
     globalThis.fetch = realFetch;
     console.log = realLog;
   }
+});
+
+/* ------------------------------------------------------------------------ *
+ * The two columns the worker adds itself, on a database that has no
+ * documents table yet: nothing to alter, and the request goes through.
+ * ------------------------------------------------------------------------ */
+test("a fresh database with no documents table is let through, not altered", async () => {
+  forgetDocumentColumns();
+  const db = fakeDb((sql) => {
+    if (/PRAGMA table_info/.test(sql)) return { results: [] };
+    return undefined;
+  });
+  setEnv({ DB: db } as never);
+  await ensureDocumentColumns();
+  assert.deepEqual(db.asked.filter((a) => /ALTER TABLE/.test(a.sql)), [], "no ALTER on a table that is not there");
+
+  // The table appears missing a moment later, to the ALTER itself.
+  forgetDocumentColumns();
+  const late = fakeDb((sql) => {
+    if (/PRAGMA table_info/.test(sql)) return { results: [{ name: "id" }] };
+    if (/ALTER TABLE/.test(sql)) throw new Error("D1_ERROR: no such table: documents");
+    return undefined;
+  });
+  setEnv({ DB: late } as never);
+  await ensureDocumentColumns();
+  assert.equal(late.asked.filter((a) => /ALTER TABLE/.test(a.sql)).length, 2, "both columns were tried, and neither stopped the request");
+  forgetDocumentColumns();
 });
 
 /* ------------------------------------------------------------------------ *
