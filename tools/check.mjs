@@ -143,6 +143,27 @@ run("Every rank has a heading to sit under", () => {
 });
 
 /* ---------------------------------------------------------------- 6 */
+run("New crew fit into the office's workbook", () => {
+  /* The training matrix keeps notes, totals and a legend under the crew, so a
+     new crew member means inserting rows and moving everything below down,
+     exactly as Excel's own insert does. Getting that wrong corrupts the
+     office's compliance workbook quietly, so it is proved on a real .xlsx on
+     every run: two men added mid-sheet, the notes and legend moved intact,
+     the totals formula still reading its rows, the merged cell and the
+     dimension moved with them. */
+  try {
+    const out = execFileSync("node", [join(ROOT, "tools", "insert-rows.test.mjs")], {
+      stdio: "pipe", timeout: 180000, encoding: "utf8",
+    });
+    if (!out.includes("ALL GOOD")) throw new Error(out.split("\n").filter((l) => /FAIL/.test(l)).join("; ") || "the insert test did not finish");
+  } catch (e) {
+    const said = String(e.stdout || e.message || e);
+    throw new Error(said.split("\n").filter((l) => /FAIL|Error/.test(l)).slice(0, 4).join("\n      ") || said.slice(0, 200));
+  }
+  return "rows inserted mid-sheet, everything below moved intact";
+});
+
+/* ---------------------------------------------------------------- 7 */
 run("The worker's types are clean", () => {
   try {
     execFileSync("npx", ["tsc", "--noEmit"], {
@@ -158,7 +179,7 @@ run("The worker's types are clean", () => {
   return "no type errors";
 });
 
-/* ---------------------------------------------------------------- 7 */
+/* ---------------------------------------------------------------- 8 */
 const rulesTest = join(ROOT, "worker", "tests", "rules.test.ts");
 if (!existsSync(rulesTest)) {
   skip("The worker's rules answer correctly", "no rule tests written yet");

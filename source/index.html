@@ -8748,6 +8748,54 @@ function extendRanges(xml, fromRow, toRow) {
       tag.replace(/ref="([^"]+)"/, (_w, v) => `ref="${bump(v)}"`));
 }
 
+/* -------- inserting rows into the middle of a sheet -----------------------
+ *
+ * The workbook keeps notes, totals and a legend underneath the crew, so a new
+ * crew member cannot just go on the end — everything below has to move down,
+ * exactly as Excel's own "insert row" moves it. That means three kinds of
+ * renumbering, and nothing else:
+ *
+ *   - a moved row's own number, and the address of every cell in it;
+ *   - inside every formula on the sheet, any reference to a row that moved,
+ *     so a total that read the notes row still reads the notes row;
+ *   - every range the sheet keeps outside its rows - the dimension, merged
+ *     cells, conditional formats - where an endpoint that moved moves with
+ *     it, and a range that spans the insertion grows to cover it.
+ *
+ * References to rows that did not move are left exactly as written: the cells
+ * they point at have not gone anywhere.
+ */
+
+/** Cell references in a formula, moved where they point below the insertion.
+ *  Text inside quotes is someone's words, not a reference, and is left alone. */
+function shiftFormulaRefs(text, afterRow, by) {
+  return text.split('"').map((seg, i) => (i % 2 ? seg
+    : seg.replace(/(\$?[A-Z]{1,3}\$?)(\d+)/g, (whole, col, n) =>
+        (Number(n) > afterRow ? col + (Number(n) + by) : whole)))).join('"');
+}
+
+/** One row's XML, moved down bodily: its own number, its cells' addresses,
+ *  and any shared-formula ranges it anchors. */
+function shiftRowXml(xml, by) {
+  return xml
+    .replace(/(<row\b[^>]*?\br=")(\d+)(")/, (_w, a, n, b) => a + (Number(n) + by) + b)
+    .replace(/(\br=")([A-Z]{1,3})(\d+)(")/g, (_w, a, col, n, b) => a + col + (Number(n) + by) + b);
+}
+
+/** Formulas anywhere in a row, re-pointed at rows that moved. */
+function remapRowFormulas(xml, afterRow, by) {
+  return xml
+    .replace(/(<f\b[^>]*>)([^<]*)(<\/f>)/g, (_w, a, t, b) => a + shiftFormulaRefs(t, afterRow, by) + b)
+    .replace(/(<f\b[^>]*\bref=")([^"]+)(")/g, (_w, a, v, b) => a + shiftFormulaRefs(v, afterRow, by) + b);
+}
+
+/** Every ref= and sqref= range outside the rows — dimension, merged cells,
+ *  conditional formats, filters — with moved endpoints moved. */
+function shiftRanges(xml, afterRow, by) {
+  return xml.replace(/((?:ref|sqref)=")([^"]+)(")/g, (_w, a, v, b) =>
+    a + shiftFormulaRefs(v, afterRow, by) + b);
+}
+
 /**
  * Which sheet in the workbook the matrix is on, and where its XML lives.
  *
@@ -9014,12 +9062,13 @@ async function updateFiledWorkbook(buf, quals, only = null, blank = null) {
   if (report.skippedRows.length && placed.length) {
     const lastCrew = placed.reduce((a, b) => (b.num > a.num ? b : a));
     const below = sheet.rows.filter((r) => r.num > lastCrew.num && r.cells.some((c) => says(c) !== ""));
-    if (!below.length) {
+    {
       const template = lastCrew;
       let num = lastCrew.num;
       const adding = report.skippedRows.slice();
       report.skippedRows = [];
 
+      const newRowXml = [];
       adding.forEach((name) => {
         const person = quals.rows.find((p) => p[0] === name);
         num += 1;
@@ -9060,20 +9109,57 @@ async function updateFiledWorkbook(buf, quals, only = null, blank = null) {
           return cellXml(ref, style, { kind: "blank" });
         }).join("");
 
-        sheet.added.push(`<row r="${num}">${cells}</row>`);
+        newRowXml.push(`<row r="${num}">${cells}</row>`);
         report.addedRows.push(person[0]);
         report.written++;
       });
 
-      sheet.head = extendRanges(sheet.head, lastCrew.num, num);
-      sheet.tail = extendRanges(sheet.tail, lastCrew.num, num);
+      if (!below.length) {
+        /* Nothing under the crew: the new rows go on the end, as ever. */
+        newRowXml.forEach((xml) => sheet.added.push(xml));
+        sheet.head = extendRanges(sheet.head, lastCrew.num, num);
+        sheet.tail = extendRanges(sheet.tail, lastCrew.num, num);
+      } else {
+        /* Notes, totals or a legend sit under the crew, so this is Excel's
+           own "insert rows": everything below moves down by as many rows as
+           are going in, and every reference to a moved row moves with it.
+           This used to stop here and ask for the rows to be added by hand,
+           which is not a thing a crewing system gets to ask. */
+        const by = adding.length;
+        const insertAt = lastCrew.num;
+
+        sheet.rows = sheet.rows.map((r) => {
+          let xml = rowXml(r);
+          xml = remapRowFormulas(xml, insertAt, by);
+          if (r.num > insertAt) xml = shiftRowXml(xml, by);
+          return { num: r.num > insertAt ? r.num + by : r.num, open: r.open,
+            cells: [], gaps: [""], raw: xml, dirty: false };
+        });
+
+        const at = sheet.rows.findIndex((r) => r.num > insertAt + by);
+        const fresh = newRowXml.map((xml, i) => ({
+          num: insertAt + 1 + i, open: "", cells: [], gaps: [""], raw: xml, dirty: false,
+        }));
+        if (at < 0) {
+          sheet.rows.push(...fresh);
+          fresh.forEach(() => sheet.gaps.splice(sheet.gaps.length - 1, 0, ""));
+        } else {
+          sheet.rows.splice(at, 0, ...fresh);
+          fresh.forEach(() => sheet.gaps.splice(at, 0, ""));
+        }
+
+        sheet.head = shiftRanges(sheet.head, insertAt, by);
+        sheet.tail = shiftRanges(sheet.tail, insertAt, by);
+      }
     }
   }
 
   if (!report.written) return { blob: null, report };
 
   await setPartText(sheetPart, writeSheet(sheet));
-  if (report.formulas) await dropCalcChain(entries);
+  // Replaced formulas and inserted rows both leave Excel's calculation order
+  // pointing at cells that have moved or gone; dropped, it is rebuilt on open.
+  if (report.formulas || report.addedRows.length) await dropCalcChain(entries);
   await setPartText(wbPart, recalcOnOpen(workbookXml));
 
   return { blob: writeZip(entries), report };
@@ -9148,7 +9234,7 @@ function workbookNotes(report) {
     notes.push(`${report.addedRows.join(", ")} had no row on the spreadsheet, so ${report.addedRows.length === 1 ? "one was" : "rows were"} added under the last crew member, formatted like the row above. Anything that column works out for itself is left blank on ${report.addedRows.length === 1 ? "it" : "them"}.`);
   }
   if (report.skippedRows && report.skippedRows.length) {
-    notes.push(`${report.skippedRows.join(", ")} ${report.skippedRows.length === 1 ? "has no row" : "have no rows"} on the spreadsheet and ${report.skippedRows.length === 1 ? "one couldn't be" : "they couldn't be"} added without moving what sits under the crew, so ${report.skippedRows.length === 1 ? "that person's dates were" : "those dates were"} not written into it. Add the ${report.skippedRows.length === 1 ? "row" : "rows"} in the spreadsheet and press this again.`);
+    notes.push(`${report.skippedRows.join(", ")} ${report.skippedRows.length === 1 ? "has no row" : "have no rows"} on the spreadsheet, and the sheet holds no crew rows at all to pattern a new one on, so ${report.skippedRows.length === 1 ? "that person's dates were" : "those dates were"} not written into it.`);
   }
   if (report.skippedCols && report.skippedCols.length) {
     notes.push(`The spreadsheet has no column for ${report.skippedCols.join(", ")}, so ${report.skippedCols.length === 1 ? "that item was" : "those items were"} not written into it. Add the ${report.skippedCols.length === 1 ? "column" : "columns"} to the spreadsheet and press this again.`);
