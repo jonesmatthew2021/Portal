@@ -364,7 +364,7 @@ export async function runSync(by: string) {
   }
 }
 
-export default async (req: Request, by = "Sync now") => {
+export default async (req: Request, by = "Import new files") => {
   if (req.method !== "GET" && req.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
   }
@@ -377,7 +377,13 @@ export default async (req: Request, by = "Sync now") => {
         { headers: { "Cache-Control": "no-store" } },
       );
     }
-    return Response.json(await runSync(by));
+    // The page says which button asked — Import new files, Update portal or
+    // the round on the hour — so the SharePoint page's "last read" line
+    // names a button that exists.
+    let who = by;
+    const sent = await req.json().catch(() => null) as { by?: unknown } | null;
+    if (sent && typeof sent.by === "string" && sent.by.trim()) who = sent.by.trim().slice(0, 40);
+    return Response.json(await runSync(who));
   } catch (e) {
     return Response.json(
       { error: e instanceof Error ? e.message : String(e) },

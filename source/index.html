@@ -13521,7 +13521,8 @@ function UpdateDocumentation() {
     setErr(""); setFound(null);
     try {
       setStep("Reading the SharePoint folders");
-      const r = await fetch("/api/sync", { method: "POST" });
+      const r = await fetch("/api/sync", { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ by: asked ? "Update portal" : "the round on the hour" }) });
       const out = await r.json();
       if (!r.ok) throw new Error(out.error || ("the folders couldn't be read (" + r.status + ")"));
 
@@ -16141,9 +16142,9 @@ function TodayScreen({ go }) {
   if (opmsOpen) attention.push({ n: opmsOpen, text: "OPMS disagreements nothing has been done about — fix ours, send theirs", target: "opms", act: "OPMS checker" });
   if (quiet.in60) attention.push({ n: quiet.in60, text: "expiring in 30 to 60 days — next month's bookings", target: "checker", act: "See them" });
   if (quiet.unknown) attention.push({ n: quiet.unknown, text: "marked with a question mark nobody has answered", target: "checker", act: "Settle them" });
-  if (quiet.misfiled) attention.push({ n: quiet.misfiled, text: "scans that look filed under the wrong person", target: "required-docs", act: "Check them" });
+  if (quiet.misfiled) attention.push({ n: quiet.misfiled, text: "scans that look filed under the wrong person", target: "documents", act: "Check them" });
   if (quiet.opmsAge != null && quiet.opmsAge > 9) attention.push({ n: `${quiet.opmsAge}d`, text: "since Portways refreshed the OPMS spreadsheet — chase the weekly export", target: "opms", act: "OPMS" });
-  if (quiet.sheetAge != null && quiet.sheetAge > 30) attention.push({ n: `${quiet.sheetAge}d`, text: "since the training matrix spreadsheet was updated — press Update the spreadsheet after your next batch", target: "required-docs", act: "Go" });
+  if (quiet.sheetAge != null && quiet.sheetAge > 30) attention.push({ n: `${quiet.sheetAge}d`, text: "since the training matrix spreadsheet was updated — press Update the spreadsheet after your next batch", target: "documents", act: "Go" });
 
   const stKind = { expired: { fg: T.bRed, bg: T.bRedBg }, soon: { fg: T.bRed, bg: T.bRedBg }, not: { fg: T.accent, bg: T.accentSoft } };
 
@@ -16574,9 +16575,13 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
   // here so switching between them doesn't reset the screen underneath.
   // Uploads come first — a portal with nothing filed can do nothing else on
   // this tab.
+  // An id is only worth remembering if it is a page, or moved to one — so
+  // nothing odd in the browser's storage can leave the tab blank.
+  const isPage = (v) => ADMIN_PAGES.some((p) => p.id === v);
+  const movedTo = (v) => (Object.prototype.hasOwnProperty.call(ADMIN_PAGE_MOVED, v) ? ADMIN_PAGE_MOVED[v] : null);
   const [heldPage, setPage] = useRemembered("admin-page", "crew-details",
-    (v) => ADMIN_PAGES.some((p) => p.id === v) || !!ADMIN_PAGE_MOVED[v]);
-  const page = ADMIN_PAGE_MOVED[heldPage] || heldPage;
+    (v) => isPage(v) || isPage(movedTo(v)));
+  const page = isPage(heldPage) ? heldPage : isPage(movedTo(heldPage)) ? movedTo(heldPage) : "crew-details";
 
   if (!isAdmin(currentUser)) {
     return (

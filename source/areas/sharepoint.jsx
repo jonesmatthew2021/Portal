@@ -41,7 +41,8 @@ function SharePointPage() {
       } catch (e) {}
     }, 700);
     try {
-      const r = await fetch("/api/sync", { method: "POST" });
+      const r = await fetch("/api/sync", { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ by: "Import new files" }) });
       const out = await r.json();
       if (!r.ok) throw new Error(out.error || `The sync failed (${r.status}).`);
       setSyncOut(out);

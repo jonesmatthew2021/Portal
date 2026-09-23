@@ -14,6 +14,16 @@ function CertChecker({ query }) {
   const validityFor = useValidityLookup();
   const [own, setOwn] = useState("");
   const q = query != null ? query : own;
+  // The same reading of the box the Crew Matrix grid gives it: several
+  // names at once, split on commas, each matched on any part of the name
+  // or the start of a word — so the grid and this list agree on who is shown.
+  const terms = String(q || "").toLowerCase().split(",").map((t) => t.trim()).filter(Boolean);
+  const hits = (text) => {
+    if (!terms.length) return true;
+    const hay = String(text || "").toLowerCase();
+    const words = hay.split(/[^a-z0-9]+/).filter(Boolean);
+    return terms.some((t) => hay.includes(t) || words.some((w) => w.startsWith(t)));
+  };
   // Hiding what is already in motion leaves the true to-do list: red items
   // nothing has been done about yet.
   const [onlyUntouched, setOnlyUntouched] = useState(false);
@@ -52,7 +62,7 @@ function CertChecker({ query }) {
       gaps: x.gaps.filter((g) => keep(g, x.row)),
     }))
     .filter((x) => x.gaps.length)
-    .filter((x) => !q || (x.row[0] + " " + x.row[1]).toLowerCase().includes(q.toLowerCase()))
+    .filter((x) => hits(x.row[0] + " " + x.row[1]))
     .sort((a, b) => b.gaps.length - a.gaps.length);
 
   // The unconfirmed section keeps its lines either way — marks are about
@@ -81,7 +91,7 @@ function CertChecker({ query }) {
         .filter((x) => x.foreignIssuer),
     }))
     .filter((x) => x.items.length)
-    .filter((x) => !q || (x.row[0] + " " + x.row[1]).toLowerCase().includes(q.toLowerCase()))
+    .filter((x) => hits(x.row[0] + " " + x.row[1]))
     .sort((a, b) => b.items.length - a.items.length);
   const foreignCount = foreign.reduce((n, x) => n + x.items.length, 0);
   // Whether any issuing authorities have been read into the table at all —
