@@ -1288,6 +1288,79 @@ test("taking the office's adopted file off the books leaves it where the office 
 });
 
 /* ------------------------------------------------------------------------ *
+ * The SharePoint driver makes a folder only under the portal's own, and
+ * says so; anywhere else in the library, a write that would need one is
+ * refused with the folder named.
+ * ------------------------------------------------------------------------ */
+test("the library driver refuses to make a folder outside the portal's own, and says when it makes one under it", async () => {
+  /* Graph, answered by hand: sign-in, the site, its one library, and a
+     folder listing in which the office's folders exist and nothing below
+     them does. Every request is written down. */
+  const calls: { method: string; path: string }[] = [];
+  const exists = new Set([
+    "United Operations Team",
+    "United Operations Team/OPMS Documents",
+    "United Operations Team/Crew Portal",
+  ]);
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = (init?.method || "GET").toUpperCase();
+    const path = decodeURIComponent(url.replace(/^https:\/\/[^/]+/, ""));
+    calls.push({ method, path });
+    const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+    if (path.includes("/oauth2/")) return json({ access_token: "t", expires_in: 3600 });
+    if (/^\/v1\.0\/sites\/[^/]+:\/sites\/\w+$/.test(path)) return json({ id: "site1" });
+    if (path === "/v1.0/sites/site1/drives") return json({ value: [{ id: "d1", name: "Documents" }] });
+    if (method === "GET") {
+      const m = /^\/v1\.0\/drives\/d1\/root:\/(.+)$/.exec(path);
+      return m && exists.has(m[1]) ? json({ id: "f", size: 0 }) : json({ error: "not found" }, 404);
+    }
+    if (method === "POST" && path.endsWith(":/children")) {
+      const parent = /root:\/(.+):\/children$/.exec(path)![1];
+      exists.add(`${parent}/${JSON.parse(String(init!.body)).name}`);
+      return json({ id: "new" }, 201);
+    }
+    if (method === "PUT") return json({ id: "put" });
+    return json({ error: "unexpected " + method + " " + path }, 500);
+  }) as typeof fetch;
+  const said: string[] = [];
+  const realLog = console.log;
+  console.log = (...a: unknown[]) => { said.push(a.map(String).join(" ")); };
+  try {
+    setEnv({
+      FILE_STORE: "sharepoint", MS_TENANT_ID: "tenant", MS_CLIENT_ID: "app", MS_CLIENT_SECRET: "secret",
+      SHAREPOINT_HOSTNAME: "x.sharepoint.com", SHAREPOINT_SITE_PATH: "/sites/Team", SHAREPOINT_LIBRARY: "Documents",
+      SHAREPOINT_ROOT: "United Operations Team/Crew Portal",
+      SHAREPOINT_MAP: JSON.stringify({ "opms/": "United Operations Team/OPMS Documents/" }),
+    } as never);
+    const { fileStore } = await import("../src/files/store.js");
+
+    // A certificate for somebody the library has no folder for: refused.
+    await assert.rejects(
+      fileStore().set("opms/NOBODY, Here/x.pdf", bytesOf("scan")),
+      /the folder United Operations Team\/OPMS Documents\/NOBODY, Here is not in the library/,
+    );
+    const made = () => calls.filter((c) => c.method === "POST" && c.path.endsWith(":/children")).map((c) => c.path);
+    assert.deepEqual(made(), [], "no folder was made");
+    assert.ok(!calls.some((c) => c.method === "PUT"), "and nothing was written");
+
+    // A parked copy under the portal's own folder: the folder is made, and said.
+    await fileStore().set("removed/tm1 - old.xlsx", bytesOf("parked"));
+    assert.deepEqual(
+      made(),
+      ["/v1.0/drives/d1/root:/United Operations Team/Crew Portal:/children"],
+      "one folder made, under the portal's own",
+    );
+    assert.ok(calls.some((c) => c.method === "PUT" && c.path.endsWith("/Crew Portal/removed/tm1 - old.xlsx:/content")), "then the file written");
+    assert.deepEqual(said, ["made the folder United Operations Team/Crew Portal/removed in the library"]);
+  } finally {
+    globalThis.fetch = realFetch;
+    console.log = realLog;
+  }
+});
+
+/* ------------------------------------------------------------------------ *
  * Which qualification expiry sheet is the newer: the date on the front,
  * then the library's modified time, and never the alphabet.
  * ------------------------------------------------------------------------ */

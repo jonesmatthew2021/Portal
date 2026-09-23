@@ -184,22 +184,34 @@ export const fromReal = (path: string) => {
 /** Graph's simple upload needs the parent folders to exist; make them, one
  * level at a time. Folders already seen this isolate aren't asked about
  * again — a bulk copy files hundreds of certificates into the same handful
- * of folders, and one existence check per folder is plenty. */
+ * of folders, and one existence check per folder is plenty.
+ *
+ * Only under the portal's own folder (SHAREPOINT_ROOT), though. The rest
+ * of the library is the office's - the crew folders, OPMS Documents, the
+ * Matrix folder - and a write that would have to make a folder there is
+ * refused with the folder named, rather than the library quietly growing
+ * one nobody asked for. Every folder that is made is said in the log. */
 const ensuredFolders = new Set<string>();
 async function ensureFolders(drive: string, key: string) {
   const parts = key.split("/").slice(0, -1);
+  const own = rooted("");
   let path = "";
   for (const part of parts) {
     const next = path ? `${path}/${part}` : part;
     if (ensuredFolders.has(`${drive}:${next}`)) { path = next; continue; }
     const there = await graph(`/drives/${drive}/root:/${encodePath(next)}`);
     if (there.status === 404) {
+      if (own && !(next + "/").startsWith(own)) {
+        throw new Error(`the folder ${next} is not in the library`);
+      }
       const parent = path ? `/drives/${drive}/root:/${encodePath(path)}:/children` : `/drives/${drive}/root/children`;
-      await graph(parent, {
+      const made = await graph(parent, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: part, folder: {}, "@microsoft.graph.conflictBehavior": "fail" }),
       });
+      if (!made.ok) throw new Error(`SharePoint would not make the folder ${next} (${made.status})`);
+      console.log(`made the folder ${next} in the library`);
     }
     ensuredFolders.add(`${drive}:${next}`);
     path = next;
