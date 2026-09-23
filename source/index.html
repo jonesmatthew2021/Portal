@@ -9309,6 +9309,100 @@ function applySettled(quals, settled) {
 }
 
 /**
+ * Three copies of the matrix, brought back to one.
+ *
+ * When a save lands on top of somebody else's, this tab used to take the
+ * server's copy and lay its own whole matrix back over it - so a tab that had
+ * changed one cell ten minutes ago wrote its ten-minute-old matrix over every
+ * cell anyone had filled in since. Now the tab remembers the matrix it last
+ * loaded or saved (base) and writes back only what it actually changed:
+ * theirs, with every cell where mine differs from base overwritten by mine.
+ *
+ * Rows are matched by name the way the register compares them and columns by
+ * code, so a moved column or a respelt name on one side doesn't read as a wall
+ * of changes. A row mine added that base never had is appended, and nothing
+ * of theirs is taken away. A cell mine changed on a row theirs no longer has
+ * has nowhere to land - taking a man off the matrix is a deliberate act, and
+ * a date typed against him is not a reason to put him back.
+ */
+function mergeQuals(base, mine, theirs) {
+  const shape = (q) => ({
+    cols: Array.isArray(q && q.cols) ? q.cols : [],
+    rows: Array.isArray(q && q.rows) ? q.rows : [],
+  });
+  const b = shape(base), m = shape(mine), t = shape(theirs);
+  const byName = (q) => new Map(q.rows.map((r) => [nameLetters(r[0]), r]));
+  const byCode = (q) => new Map(q.cols.map((c, i) => [String(c[0]), i]));
+  const bRows = byName(b), tRows = byName(t);
+  const bCols = byCode(b), mCols = byCode(m), tCols = byCode(t);
+  const cell = (row, at) =>
+    row && at !== undefined && Array.isArray(row[3]) && row[3][at] != null ? String(row[3][at]) : "";
+  const field = (row, i) => (row && row[i] != null ? String(row[i]) : "");
+
+  // Theirs is the shape of the answer. A column mine added that neither base
+  // nor theirs has is kept on the end, and every row is widened to fit it.
+  const cols = t.cols.slice();
+  m.cols.forEach((c) => {
+    if (!bCols.has(String(c[0])) && !tCols.has(String(c[0]))) cols.push(c);
+  });
+  const outCols = byCode({ cols });
+  const widened = cols.length !== t.cols.length;
+  const rows = t.rows.map((r) => {
+    if (!widened) return r;
+    const cells = (Array.isArray(r[3]) ? r[3] : []).slice();
+    while (cells.length < cols.length) cells.push("");
+    return [r[0], r[1], r[2], cells];
+  });
+  const rowAt = new Map(rows.map((r, i) => [nameLetters(r[0]), i]));
+
+  // Copy a row of theirs the first time something is written into it, so a
+  // row nothing touched is still the very object the server sent.
+  const written = new Set();
+  const own = (i) => {
+    if (written.has(i)) return rows[i];
+    const r = rows[i].slice();
+    r[3] = (Array.isArray(r[3]) ? r[3] : []).slice();
+    while (r[3].length < cols.length) r[3].push("");
+    rows[i] = r;
+    written.add(i);
+    return r;
+  };
+
+  m.rows.forEach((mr) => {
+    const key = nameLetters(mr[0]);
+    if (!key) return;
+    const br = bRows.get(key);
+    const at = rowAt.get(key);
+
+    if (at === undefined) {
+      // Theirs has no such man. Mine added him: he goes on the end, his cells
+      // put under the answer's columns by code. Otherwise theirs took him off
+      // and he stays off.
+      if (br || !tRows.has(key)) {
+        if (br) return;
+        rows.push([mr[0], mr[1], mr[2], cols.map((c) => cell(mr, mCols.get(String(c[0]))))]);
+      }
+      return;
+    }
+
+    // The same man on both sides: only what mine changed against base lands.
+    if (field(mr, 1) !== field(br, 1)) own(at)[1] = mr[1];
+    if (field(mr, 2) !== field(br, 2)) own(at)[2] = mr[2];
+    m.cols.forEach((c) => {
+      const code = String(c[0]);
+      const was = cell(br, bCols.get(code));
+      const now = cell(mr, mCols.get(code));
+      if (now === was) return;
+      const to = outCols.get(code);
+      if (to === undefined) return;
+      own(at)[3][to] = now;
+    });
+  });
+
+  return { ...(theirs && typeof theirs === "object" ? theirs : {}), cols, rows };
+}
+
+/**
  * Bring the spreadsheet on file up to date and file it back.
  *
  * The workbook that is already on the portal is the one that comes back out of
@@ -16255,6 +16349,7 @@ function CrewCertificateUpload() {
 
   const save = async (j) => {
     const r = await fetch(j.url);
+    if (!r.ok) throw new Error("The file couldn't be fetched (" + r.status + ").");
     const blob = await r.blob();
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -17229,6 +17324,11 @@ function CoolibahPortal({ role, onSignOut }) {
     return () => { alive = false; clearInterval(id); stopWatching(); };
   }, []);
 
+  // The matrix as this tab last loaded or saved it. A save that lands on
+  // top of somebody else's is merged against this rather than laid over
+  // theirs whole — see mergeQuals.
+  const baseline = useRef(null);
+
   // Load once, then keep checking for other people's changes.
   React.useEffect(() => {
     let alive = true;
@@ -17244,6 +17344,7 @@ function CoolibahPortal({ role, onSignOut }) {
 
         if (data && serverRev > rev.current && dirty.current.size === 0) {
           rev.current = serverRev;
+          baseline.current = data.quals || null;
           // Files always come from the file store, never from this document.
           setStore(withStoredFiles(data, storedFiles.current));
         } else if (!data && firstLoad.current) {
@@ -17251,6 +17352,7 @@ function CoolibahPortal({ role, onSignOut }) {
           // server so there is something for everyone else to load.
           const seeded = await saveState(withoutStoredFiles(store), 0);
           rev.current = seeded.rev;
+          baseline.current = (seeded.conflict && seeded.data ? seeded.data : store).quals || null;
           // Somebody beat us to it by a fraction of a second. Theirs wins.
           if (seeded.conflict && seeded.data) {
             setStore(withStoredFiles(seeded.data, storedFiles.current));
@@ -17293,15 +17395,23 @@ function CoolibahPortal({ role, onSignOut }) {
       const touched = [...dirty.current];
       try {
         const mine = withoutStoredFiles(store);
+        let sent = mine;
         let res = await saveState(mine, rev.current);
 
         if (res.conflict) {
           // Someone saved while this was being typed. Rather than throw either
           // version away, take theirs and lay only the slices touched here back
-          // on top of it.
+          // on top of it. The matrix is the exception: laid back whole, a tab
+          // that changed one cell ten minutes ago would write its ten-minute-old
+          // copy over every date anyone had filled in since. So only the cells
+          // this tab actually changed go back over theirs.
           const merged = { ...(res.data || mine) };
           touched.forEach((k) => { merged[k] = store[k]; });
-          res = await saveState(withoutStoredFiles(merged), res.rev);
+          if (touched.includes("quals") && res.data && res.data.quals) {
+            merged.quals = mergeQuals(baseline.current, store.quals, res.data.quals);
+          }
+          sent = withoutStoredFiles(merged);
+          res = await saveState(sent, res.rev);
 
           if (!res.conflict) {
             setStore((s) => {
@@ -17321,6 +17431,7 @@ function CoolibahPortal({ role, onSignOut }) {
         }
 
         rev.current = res.rev;
+        baseline.current = sent.quals || null;
         touched.forEach((k) => dirty.current.delete(k));
         if (dirty.current.size === 0) setPending(false);
         setSync({ state: "ok", at: new Date().toISOString().slice(11, 16) });

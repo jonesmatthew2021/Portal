@@ -164,6 +164,26 @@ run("New crew fit into the office's workbook", () => {
 });
 
 /* ---------------------------------------------------------------- 7 */
+run("The portal's own rules answer correctly", () => {
+  /* The names rule, the certificates' answer laid over the matrix, the
+     office's spelling of a name and the three-way merge on a save collision
+     are pure functions inside the page, and each has been got wrong once:
+     a spelling that stopped matching, a run that took back what it had just
+     filled in, a matrix that flipped between two tabs. They are run against
+     the cases that went wrong, on the code that ships. */
+  try {
+    const out = execFileSync("node", [join(ROOT, "tools", "client-rules.test.mjs")], {
+      stdio: "pipe", timeout: 180000, encoding: "utf8",
+    });
+    if (!out.includes("ALL GOOD")) throw new Error(out.split("\n").filter((l) => /FAIL/.test(l)).join("; ") || "the rules test did not finish");
+  } catch (e) {
+    const said = String(e.stdout || "") + String(e.stderr || "") || String(e.message || e);
+    throw new Error(said.split("\n").filter((l) => /FAIL|wanted|got |Error/.test(l)).slice(0, 8).join("\n      ") || said.slice(0, 200));
+  }
+  return "names, dates, spellings and the merge all answer as they should";
+});
+
+/* ---------------------------------------------------------------- 8 */
 run("The worker's types are clean", () => {
   try {
     execFileSync("npx", ["tsc", "--noEmit"], {
@@ -179,7 +199,7 @@ run("The worker's types are clean", () => {
   return "no type errors";
 });
 
-/* ---------------------------------------------------------------- 8 */
+/* ---------------------------------------------------------------- 9 */
 const rulesTest = join(ROOT, "worker", "tests", "rules.test.ts");
 if (!existsSync(rulesTest)) {
   skip("The worker's rules answer correctly", "no rule tests written yet");
