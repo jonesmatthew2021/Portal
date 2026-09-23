@@ -23,6 +23,7 @@ import { todayThere } from "../src/lib/analysis.js";
 import sync, { apply, outranks, sheetOrder, survey } from "../src/routes/sync.js";
 import files from "../src/routes/files.js";
 import renameFile from "../src/routes/rename-file.js";
+import importSingle from "../src/routes/import-single.js";
 import worker from "../src/index.js";
 import { writeZip, readZip, partOf, partText, datedWorkbookName } from "../../source/shared/workbook.js";
 import { asKnownPerson, crewRegister } from "../../source/shared/names.js";
@@ -131,13 +132,13 @@ function drizzleOn(rows: Row[]) {
       if (i >= 0) rows.splice(i, 1);
       return { changes: i >= 0 ? 1 : 0 };
     }
-    if ((m = /^insert into "documents" \((.+?)\) values \((.+?)\)$/.exec(sql))) {
+    if ((m = /^insert into "documents" \((.+?)\) values \((.+?)\)(?: returning (.+))?$/.exec(sql))) {
       const names = cols(m[1]);
       const slots = m[2].split(", ");
       const row: Row = {};
       names.forEach((c, i) => { row[c] = slots[i] === "?" ? a.shift() : null; });
       rows.push(row);
-      return { changes: 1 };
+      return m[3] ? { results: [row], columns: cols(m[3]), changes: 1 } : { changes: 1 };
     }
     return undefined;
   };
@@ -1048,6 +1049,58 @@ test("the office's workbook stays off the books after the round replaces it, syn
   assert.equal(again.roundSkipped, null);
   assert.equal(again.applied, 0);
   assert.equal(bucket.text(tmKey), theirs, "the office's file is still exactly where it was");
+});
+
+/* Import from SharePoint files the office's own file as the office's, and
+   steps the current one down the way a removal does - so the next sync
+   finds one live, revives nothing, and swaps nothing of the office's. */
+const importFrom = (key: string) => importSingle(
+  new Request("http://portal/api/import-single", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ category: "training-matrix", key }) }),
+  "Matthew",
+);
+
+test("Import from SharePoint over the office's live workbook: theirs kept in place, the new one theirs too, one live after the sync", async () => {
+  const { portal, bucket, tmKey } = await oneManPortal({ theirs: true });
+  const newer = "opms/20260923 - CREW QUALIFICATION EXPIRY.xlsx";
+  await bucket.put(newer, bytesOf("the office's newer export"));
+  const res = await importFrom(newer);
+  const out = (await res.json()) as { record: { filename: string }; restored: boolean; error?: string };
+  assert.equal(res.status, 200, out.error || "");
+  assert.equal(out.record.filename, "20260923 - CREW QUALIFICATION EXPIRY.xlsx");
+
+  const office = portal.rows.find((r) => r.id === "tm1")!;
+  assert.ok(office.removedAt, "the office's old row is off the books");
+  assert.equal(office.keptInPlace, 1, "…kept in place");
+  assert.equal(office.blobKey, tmKey, "…its file where the office put it");
+  assert.ok(bucket.text(tmKey), "and the bytes still there");
+  const taken = portal.rows.find((r) => r.blobKey === newer)!;
+  assert.equal(taken.adoptedFromFolder, 1, "the imported file is the office's: never to be moved");
+  assert.equal(taken.removedAt, null);
+
+  const seen = await survey();
+  assert.deepEqual(seen.returned, [], "the sync revives nothing");
+  await apply(seen);
+  const live = portal.rows.filter((r) => r.category === "training-matrix" && !r.removedAt);
+  assert.deepEqual(live.map((r) => r.blobKey), [newer], "exactly one training matrix is live");
+  assert.deepEqual(bucket.made, [], "no folder was made");
+});
+
+test("Import from SharePoint over the portal's own dated copy parks it flat, and refuses while the hour holds the workbook", async () => {
+  const { portal, bucket, tmKey } = await oneManPortal();
+  const loose = "opms/20260930 - CREW QUALIFICATION EXPIRY.xlsx";
+  await bucket.put(loose, bytesOf("dropped in by hand"));
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "the round on the hour", token: "x" }));
+  assert.equal((await importFrom(loose)).status, 409, "refused while the lease stands");
+  assert.equal(portal.rows.find((r) => r.id === "tm1")!.removedAt, null, "nothing stepped down");
+
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: 0, by: "the round on the hour", token: "x" }));
+  assert.equal((await importFrom(loose)).status, 200);
+  const mine = portal.rows.find((r) => r.id === "tm1")!;
+  assert.ok(mine.removedAt);
+  assert.equal(mine.keptInPlace, null);
+  assert.equal(mine.blobKey, "removed/tm1 - 20260901 - CREW QUALIFICATION EXPIRY.xlsx", "the portal's own copy is parked flat");
+  assert.equal(bucket.text(tmKey), null, "and its old name is free");
+  assert.deepEqual(bucket.made, [], "no folder was made");
 });
 
 test("a pending copy left by a replace that was cut off is nobody's training matrix", async () => {

@@ -1,9 +1,10 @@
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
-import { SINGLE_FILE_CATEGORIES, fileStore, safeName } from "../db/documents.js";
+import { SINGLE_FILE_CATEGORIES, fileStore, safeName, relocateToRemovedBlob } from "../db/documents.js";
 import { certHome } from "../db/cert-home.js";
 import { todayThere } from "../lib/analysis.js";
+import { roundRunning } from "../lib/round.js";
 import { looseIn } from "./sync.js";
 import { toRecord } from "./files.js";
 
@@ -30,6 +31,14 @@ import { toRecord } from "./files.js";
  * file and had marked it removed, the row is simply un-removed — that is the
  * 22 Sep case, and it is the whole file's history kept rather than a second
  * row for the same bytes.
+ *
+ * The file is the office's, and its row says so (adopted_from_folder), the
+ * same as one the sync takes from the folder: the portal never moves it
+ * afterwards, and the sync knows not to revive its row once the round has
+ * replaced it. The one it steps down comes off the books the way a removal
+ * does - the office's own file kept where it is, the portal's own copy
+ * parked flat - so the next sync does not find two live, and a restore
+ * moves nothing into a folder the portal would have to make.
  */
 
 /** What a file has to be called to be offered for each document. */
@@ -81,15 +90,23 @@ export default async (req: Request, by: string) => {
 
   // ---- file the one chosen ----
   if (key.includes("..") || key.startsWith("/")) return Response.json({ error: "That isn't a file." }, { status: 400 });
+  // The hour may be writing the workbook this would step down.
+  if (await roundRunning()) {
+    return Response.json({ error: "The hourly round is writing the workbook; try again in a minute." }, { status: 409 });
+  }
   const meta = (await fileStore().getMetadata(key)) as { size?: number; contentType?: string } | null;
   if (!meta) return Response.json({ error: "That file is no longer in the library." }, { status: 404 });
 
-  // Whatever is current steps down. Kept, marked removed, the way an upload
-  // that replaces it does — so the one before is still there to go back to.
+  // Whatever is current steps down, the way a removal takes a file off: the
+  // office's own file stays exactly where it is, kept in place; the portal's
+  // own copy is parked flat under removed/, so its name is free and the
+  // sync does not find it live. Either way it is there to go back to.
   const live = rows.filter((r) => !r.removedAt && r.blobKey !== key);
   for (const r of live) {
+    const theirs = !!r.adoptedFromFolder;
+    const blobKey = theirs ? r.blobKey : await relocateToRemovedBlob(r);
     await db.update(documents)
-      .set({ removedAt: new Date(), removedBy: by })
+      .set({ removedAt: new Date(), removedBy: by, blobKey, keptInPlace: theirs ? 1 : null })
       .where(eq(documents.id, r.id));
   }
 
@@ -97,9 +114,10 @@ export default async (req: Request, by: string) => {
   let row;
   if (had) {
     // The 22 Sep case: the portal already knew this file and had written it
-    // off. Its row comes back as it was.
+    // off. Its row comes back as it was - and as the office's file, which
+    // is what it is wherever it came from.
     [row] = await db.update(documents)
-      .set({ removedAt: null, removedBy: null })
+      .set({ removedAt: null, removedBy: null, keptInPlace: null, adoptedFromFolder: 1 })
       .where(eq(documents.id, had.id))
       .returning();
   } else {
@@ -113,6 +131,8 @@ export default async (req: Request, by: string) => {
       sizeBytes: meta.size ?? 0,
       uploadedBy: by,
       filedOn: todayThere(),
+      // Taken from the folder the office put it in: theirs, never moved.
+      adoptedFromFolder: 1,
     }).returning();
   }
 
