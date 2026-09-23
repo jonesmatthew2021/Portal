@@ -62,11 +62,12 @@ export default async (req: Request, by: string) => {
   if (!def) return Response.json({ error: "That isn't one of the documents the portal keeps one of." }, { status: 400 });
   const key = typeof body?.key === "string" ? body.key.trim() : "";
 
-  const rows = await db.select().from(documents).where(eq(documents.category, category));
-  const byKey = new Map(rows.map((r) => [r.blobKey, r]));
-
   if (!key) {
     // ---- list what the library holds that looks like this document ----
+    // A listing changes nothing, so it reads the rows without the lease:
+    // wasOnFile is only a hint on the button, and a moment stale is fine.
+    const rows = await db.select().from(documents).where(eq(documents.category, category));
+    const byKey = new Map(rows.map((r) => [r.blobKey, r]));
     const store = fileStore();
     const where = await certHome();
     const loose = looseIn(where.home);
@@ -98,6 +99,13 @@ export default async (req: Request, by: string) => {
     return Response.json({ error: "The hourly round is writing the workbook; try again in a minute." }, { status: 409 });
   }
   try {
+    // The rows are read only now, under the lease. Read before it, the
+    // picture could be the one the hour's round had just finished
+    // replacing: its new live row unseen (so two workbooks stay live) and
+    // the one it had already parked stepped down a second time.
+    const rows = await db.select().from(documents).where(eq(documents.category, category));
+    const byKey = new Map(rows.map((r) => [r.blobKey, r]));
+
     const meta = (await fileStore().getMetadata(key)) as { size?: number; contentType?: string } | null;
     if (!meta) return Response.json({ error: "That file is no longer in the library." }, { status: 404 });
 

@@ -46,15 +46,20 @@ export default async (req: Request, actor: PortalUser): Promise<Response> => {
   }
 
   const db = getEnv().DB;
-  const row = await db
+  type Found = { id: string; filename: string; blob_key: string; adopted_from_folder: number | null };
+  const findRow = () => db
     .prepare("SELECT id, filename, blob_key, adopted_from_folder FROM documents WHERE id = ?1 AND removed_at IS NULL")
     .bind(id)
-    .first<{ id: string; filename: string; blob_key: string; adopted_from_folder: number | null }>();
-  if (!row) return Response.json({ error: "That document isn't on the books." }, { status: 404 });
-  if (row.filename === to) return Response.json({ renamed: false, reason: "already called that" });
-  if (row.adopted_from_folder) {
+    .first<Found>();
+  // The answers that need no lease are given first, off a plain read, so a
+  // rename that was never going to move anything does not make the hour
+  // wait its turn.
+  const first = await findRow();
+  if (!first) return Response.json({ error: "That document isn't on the books." }, { status: 404 });
+  if (first.filename === to) return Response.json({ renamed: false, reason: "already called that" });
+  if (first.adopted_from_folder) {
     return Response.json(
-      { error: `${row.filename} is the office's own file, kept where the office put it; the portal will not move it. Rename it in SharePoint yourself.` },
+      { error: `${first.filename} is the office's own file, kept where the office put it; the portal will not move it. Rename it in SharePoint yourself.` },
       { status: 409 },
     );
   }
@@ -65,7 +70,18 @@ export default async (req: Request, actor: PortalUser): Promise<Response> => {
   if (!lease) {
     return Response.json({ error: "The hourly round is writing the workbook; try again in a minute." }, { status: 409 });
   }
+  const changed = () => Response.json({ error: "That document has changed; reload and try again." }, { status: 409 });
   try {
+    // The row again, now that the lease is held. Between the first read and
+    // the lease the hour's round can finish its replace: the row read is
+    // then the one it parked, and its file is no longer at that address.
+    // A rename worked out on that picture would move the parked copy, or
+    // nothing at all, and write the old name over a row that is off the
+    // books - so the row is taken as it is now, and only where it is the
+    // same row, still live and still at the same address.
+    const row = await findRow();
+    if (!row || row.blob_key !== first.blob_key || row.filename !== first.filename || row.adopted_from_folder) return changed();
+
     /* The folder the file is already in. It is never anything else.
        A rename used to be able to move the file to another folder, and where
        that folder did not exist SharePoint made it - so renaming was quietly
@@ -74,8 +90,15 @@ export default async (req: Request, actor: PortalUser): Promise<Response> => {
     const cut = row.blob_key.lastIndexOf("/");
     const folder = cut < 0 ? "" : row.blob_key.slice(0, cut + 1);
     const nextKey = folder + to;
+    // Both writes land only on a row that is still live: a removal does not
+    // take the lease, and a name written onto a parked row would give the
+    // parked copy a name its file does not carry.
     if (nextKey === row.blob_key) {
-      await db.prepare("UPDATE documents SET filename = ?2 WHERE id = ?1").bind(id, to).run();
+      const { meta } = await db
+        .prepare("UPDATE documents SET filename = ?2 WHERE id = ?1 AND removed_at IS NULL")
+        .bind(id, to)
+        .run();
+      if (!meta.changes) return changed();
       return Response.json({ renamed: true, key: nextKey });
     }
 
@@ -96,7 +119,21 @@ export default async (req: Request, actor: PortalUser): Promise<Response> => {
     if (!bytes) return Response.json({ error: "The file itself couldn't be found to move." }, { status: 404 });
 
     await store.set(nextKey, bytes);
-    await db.prepare("UPDATE documents SET filename = ?2, blob_key = ?3 WHERE id = ?1").bind(id, to, nextKey).run();
+    const { meta } = await db
+      .prepare("UPDATE documents SET filename = ?2, blob_key = ?3 WHERE id = ?1 AND removed_at IS NULL")
+      .bind(id, to, nextKey)
+      .run();
+    if (!meta.changes) {
+      // The row went off the books while the copy was being written. The
+      // books never pointed at the copy, so it is taken out again, and the
+      // old file - wherever the removal put it - is left as it is.
+      try {
+        await store.delete(nextKey);
+      } catch (e) {
+        console.error("the rename's copy was not taken back out:", e);
+      }
+      return changed();
+    }
     // The books already point at the new file, so a delete that fails leaves a
     // spare copy behind rather than a record pointing at nothing.
     try {

@@ -1028,6 +1028,39 @@ function refuseLeaseDrop(portal: { db: ReturnType<typeof fakeDb> }) {
   return () => { portal.db.prepare = plain; };
 }
 
+/** Somebody else's work landing in the gap: `hook` runs once, just before
+ *  the first statement `when` picks out goes to the database. The hour's
+ *  round finishing its replace in the instant a route takes the lease is
+ *  the case it is for. */
+function beforeStatement(
+  db: ReturnType<typeof fakeDb>,
+  when: (sql: string, args: unknown[]) => boolean,
+  hook: () => Promise<void>,
+) {
+  const plain = db.prepare;
+  let fired = false;
+  db.prepare = (sql: string) => {
+    const s = plain(sql);
+    const bind = s.bind;
+    s.bind = (...a: unknown[]) => {
+      const b = bind(...a);
+      if (fired || !when(sql, a)) return b;
+      for (const m of ["run", "all", "raw"] as const) {
+        const real = b[m].bind(b);
+        b[m] = (async () => {
+          if (!fired) { fired = true; await hook(); }
+          return real();
+        }) as never;
+      }
+      return b;
+    };
+    return s;
+  };
+  return () => { db.prepare = plain; };
+}
+const isLeaseTake = (sql: string, args: unknown[]) =>
+  /^(INSERT INTO|UPDATE) blobs/.test(sql) && args[1] === "round-lease" && JSON.parse(String(args[2])).until !== 0;
+
 test("a completed replace or sync is not turned into an error by a lease drop that fails", async () => {
   /* No lease row yet, so the take is the insert and the drop the
      conditional write - which the database refuses. The work is done by
@@ -1056,10 +1089,43 @@ test("a completed replace or sync is not turned into an error by a lease drop th
     }));
     assert.equal(synced.status, 200, await synced.text());
     assert.equal(JSON.parse(portal.blobs.get("sync|last-run")!).by, "Update portal", "the sync ran and is on the record");
+
+    // Import from SharePoint, the same way: the sync's lease run out by
+    // hand, the import's own take goes in, its drop is refused, and the
+    // page still hears that the file was taken.
+    portal.blobs.set("sync|round-lease", JSON.stringify({ ...JSON.parse(portal.blobs.get("sync|round-lease")!), until: 0 }));
+    const loose = "opms/20261001 - CREW QUALIFICATION EXPIRY.xlsx";
+    await bucket.put(loose, bytesOf("dropped in by hand"));
+    const imported = await importFrom(loose);
+    assert.equal(imported.status, 200, await imported.text());
+    const importLease = JSON.parse(portal.blobs.get("sync|round-lease")!);
+    assert.equal(importLease.by, "Matthew", "the import ran under its own lease");
+    assert.ok(importLease.until > Date.now(), "the drop was refused, so the lease runs out on its own");
+    const live = portal.rows.filter((r) => r.category === "training-matrix" && !r.removedAt);
+    assert.deepEqual(live.map((r) => r.blobKey), [loose], "and the import landed");
   } finally {
     restore();
     console.error = quiet;
   }
+
+  // And the rename, on a database that refuses the drop the same way.
+  const from = "opms/20260924 - CREW QUALIFICATION EXPIRY (2).xlsx";
+  const renames = fakeBucket({ [from]: "the round's" });
+  const db = renameDb([liveRow("tm2", from)], { until: 0, by: "the round on the hour", token: "x" }, { refuseDrop: true });
+  setEnv({ DB: db, FILES: renames, FILE_STORE: "r2" } as never);
+  console.error = () => {};
+  try {
+    const renamed = await renameTo("tm2", "20260924 - CREW QUALIFICATION EXPIRY.xlsx");
+    assert.equal(renamed.status, 200, await renamed.text());
+  } finally {
+    console.error = quiet;
+  }
+  assert.deepEqual(renames.keys(), ["opms/20260924 - CREW QUALIFICATION EXPIRY.xlsx"], "the move landed");
+  assert.equal(db.lease().by, "IT", "the rename ran under its own lease");
+  assert.ok(db.lease().until > Date.now(), "the drop was refused, so the lease runs out on its own");
+  const tried = leaseWrites(db).map((a) => JSON.parse(String(a.args[2])) as { until: number });
+  assert.equal(tried.length, 2, "the drop was tried");
+  assert.equal(tried[1].until, 0);
 });
 
 test("the hour runs the sync and the round under one lease, taken once and run out at the end", async () => {
@@ -1135,11 +1201,11 @@ test("a lease that runs out while the hour is waiting is taken on a later try", 
  * very name the replace had stepped round because the office's file, a
  * removed copy or a loose file holds it.
  * ------------------------------------------------------------------------ */
-function renameDb(rows: Row[], lease: unknown = null) {
+function renameDb(rows: Row[], lease: unknown = null, opts: { refuseDrop?: boolean } = {}) {
   // The one row of the sync store the rename touches, carried across
   // writes so the drop reads back what the take wrote.
-  let held = lease;
-  return fakeDb((sql, args) => {
+  let held = lease as { by: string; until: number } | null;
+  const db = fakeDb((sql, args) => {
     if (/SELECT id, filename, blob_key, adopted_from_folder FROM documents WHERE id = \?1 AND removed_at IS NULL/.test(sql)) {
       return { results: rows.filter((r) => r.id === args[0] && !r.removedAt).map((r) => ({ id: r.id, filename: r.filename, blob_key: r.blobKey, adopted_from_folder: r.adoptedFromFolder ?? null })) };
     }
@@ -1149,10 +1215,20 @@ function renameDb(rows: Row[], lease: unknown = null) {
     // The round lease, as the rename takes it: a row with its version mark
     // where one is given, and the take and the drop going in.
     if (/SELECT value, etag FROM blobs/.test(sql)) return { results: held ? [{ value: JSON.stringify(held), etag: "mark" }] : [] };
-    if (/^(INSERT INTO|UPDATE) blobs/.test(sql)) { held = JSON.parse(String(args[2])); return { changes: 1 }; }
-    if (/^UPDATE documents SET filename/.test(sql)) return { changes: 1 };
+    if (/^(INSERT INTO|UPDATE) blobs/.test(sql)) {
+      const next = JSON.parse(String(args[2])) as { by: string; until: number };
+      // The drop is the write that runs the lease out; a database having a
+      // bad morning refuses it, and the lease stays as the take left it.
+      if (opts.refuseDrop && next.until === 0) throw new Error("D1 is having a bad morning");
+      held = next;
+      return { changes: 1 };
+    }
+    // A write lands only on a row that is there and live, as the real
+    // database's "AND removed_at IS NULL" makes it.
+    if (/^UPDATE documents SET filename/.test(sql)) return { changes: rows.some((r) => r.id === args[0] && !r.removedAt) ? 1 : 0 };
     return undefined;
   });
+  return Object.assign(db, { lease: () => held! });
 }
 const renameTo = (id: string, to: string) => renameFile(
   new Request("http://portal/api/rename-file", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, to }) }),
@@ -1215,6 +1291,57 @@ test("a rename onto a free name moves the file and the row follows it, under a l
   assert.equal(lease[0].by, "IT", "taken in the renamer's name");
   assert.ok(lease[0].until > Date.now());
   assert.equal(lease[1].until, 0, "…and run out at the end");
+});
+
+test("a rename whose row went off the books between the read and the lease is refused, and nothing is written", async () => {
+  /* The row used to be read once, before the lease. The hour's round could
+     finish its replace in between - the row parked flat, its file moved -
+     and the rename then moved the parked copy, or nothing, and wrote the
+     new name onto a row that was off the books. Here the replace lands in
+     the instant the rename takes the lease. */
+  const from = "opms/20260924 - CREW QUALIFICATION EXPIRY (2).xlsx";
+  const parked = "removed/tm2 - 20260924 - CREW QUALIFICATION EXPIRY (2).xlsx";
+  const bucket = fakeBucket({ [from]: "the round's" });
+  const rows: Row[] = [liveRow("tm2", from)];
+  const db = renameDb(rows, { until: 0, by: "the round on the hour", token: "x" });
+  const restore = beforeStatement(db, isLeaseTake, async () => {
+    rows[0].removedAt = 5; rows[0].blobKey = parked;
+    await bucket.put(parked, bytesOf("the round's"));
+    await bucket.delete(from);
+  });
+  setEnv({ DB: db, FILES: bucket, FILE_STORE: "r2" } as never);
+  try {
+    const res = await renameTo("tm2", "20260924 - CREW QUALIFICATION EXPIRY.xlsx");
+    assert.equal(res.status, 409);
+    assert.match(((await res.json()) as { error: string }).error, /has changed; reload and try again/);
+  } finally {
+    restore();
+  }
+  assert.deepEqual(bucket.keys(), [parked], "nothing was written to the store");
+  assert.deepEqual(writes(db), [], "nothing on the books changed");
+  const lease = leaseWrites(db).map((a) => JSON.parse(String(a.args[2])) as { until: number });
+  assert.equal(lease.length, 2, "the lease was taken and given back");
+  assert.equal(lease[1].until, 0);
+
+  // The same row taken off the books later still - after the read under
+  // the lease, while the copy is being written. The books refuse the
+  // write, the copy is taken out again, and nothing is left pointing at it.
+  const again: Row[] = [liveRow("tm2", from)];
+  const later = renameDb(again, { until: 0, by: "the round on the hour", token: "x" });
+  const store = fakeBucket({ [from]: "the round's" });
+  const restoreLater = beforeStatement(later, (sql) => /^SELECT id FROM documents WHERE blob_key/.test(sql), async () => {
+    again[0].removedAt = 5;
+  });
+  setEnv({ DB: later, FILES: store, FILE_STORE: "r2" } as never);
+  try {
+    const res = await renameTo("tm2", "20260924 - CREW QUALIFICATION EXPIRY.xlsx");
+    assert.equal(res.status, 409);
+    assert.match(((await res.json()) as { error: string }).error, /has changed; reload and try again/);
+  } finally {
+    restoreLater();
+  }
+  assert.deepEqual(store.keys(), [from], "the copy written under the new name was taken out again");
+  assert.match(writes(later)[0].sql, /AND removed_at IS NULL/, "the write lands only on a live row");
 });
 
 /* ------------------------------------------------------------------------ *
@@ -1312,6 +1439,54 @@ test("Import from SharePoint over the portal's own dated copy parks it flat, and
   assert.equal(mine.keptInPlace, null);
   assert.equal(mine.blobKey, "removed/tm1 - 20260901 - CREW QUALIFICATION EXPIRY.xlsx", "the portal's own copy is parked flat");
   assert.equal(bucket.text(tmKey), null, "and its old name is free");
+  assert.deepEqual(bucket.made, [], "no folder was made");
+});
+
+test("Import from SharePoint reads the books under the lease, so a round that finished in the gap is seen", async () => {
+  /* The rows used to be read before the lease was taken. The hour's round
+     could finish its replace and drop its lease in between, and the import
+     then worked off a stale picture: it stepped down the row the round had
+     already parked, and never saw the round's own new row - so two
+     workbooks stayed live. Here the round's replace lands in the very
+     instant the import takes the lease. */
+  const { portal, bucket, tmKey } = await oneManPortal();
+  const loose = "opms/20260930 - CREW QUALIFICATION EXPIRY.xlsx";
+  await bucket.put(loose, bytesOf("dropped in by hand"));
+  const rounds = "opms/20260924 - CREW QUALIFICATION EXPIRY.xlsx";
+  const parked = "removed/tm1 - 20260901 - CREW QUALIFICATION EXPIRY.xlsx";
+  const restore = beforeStatement(portal.db, isLeaseTake, async () => {
+    // The round's replace: the portal's old copy parked flat, the round's
+    // own file filed live beside it.
+    const mine = portal.rows.find((r) => r.id === "tm1")!;
+    mine.removedAt = 5; mine.removedBy = "the round on the hour"; mine.blobKey = parked;
+    await bucket.put(parked, bytesOf("the old copy"));
+    await bucket.delete(tmKey);
+    portal.rows.push({ ...liveRow("tm2", rounds), uploadedBy: "the round on the hour" });
+    await bucket.put(rounds, bytesOf("the round's"));
+  });
+  const before = portal.db.asked.length;
+  try {
+    const res = await importFrom(loose);
+    assert.equal(res.status, 200, await res.text());
+  } finally {
+    restore();
+  }
+  const log = portal.db.asked.slice(before);
+  const take = log.findIndex((a) => isLeaseTake(a.sql, a.args));
+  const read = log.findIndex((a) => /^select .+ from "documents"/.test(a.sql));
+  assert.ok(take >= 0 && read > take, "the rows are read after the lease is taken, not before");
+
+  const live = portal.rows.filter((r) => r.category === "training-matrix" && !r.removedAt);
+  assert.deepEqual(live.map((r) => r.blobKey), [loose], "exactly one training matrix is live: the one imported");
+  const theirs = portal.rows.find((r) => r.id === "tm2")!;
+  assert.ok(theirs.removedAt, "the round's own row, the one actually live, is the one stepped down");
+  assert.equal(theirs.blobKey, "removed/tm2 - 20260924 - CREW QUALIFICATION EXPIRY.xlsx", "…parked flat");
+  assert.equal(bucket.text(theirs.blobKey), "the round's");
+  assert.equal(bucket.text(rounds), null, "and its name is free");
+  const mine = portal.rows.find((r) => r.id === "tm1")!;
+  assert.equal(mine.blobKey, parked, "the row the round parked is left as the round left it");
+  assert.equal(mine.removedBy, "the round on the hour", "…not stepped down a second time");
+  assert.equal(bucket.text(parked), "the old copy");
   assert.deepEqual(bucket.made, [], "no folder was made");
 });
 
