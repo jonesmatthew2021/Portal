@@ -16009,7 +16009,8 @@ function CoolibahPortal({ role, onSignOut }) {
   // The standing notes on the certification pages. Held in the shared state so
   // an admin can add or reword one and every device reads the same list; the
   // built-in notes seed it until somebody edits.
-  const certNotes = store.certNotes || CERT_PAGE_NOTES;
+  // A list, whatever an older save left here — the notes panel maps over it.
+  const certNotes = Array.isArray(store.certNotes) ? store.certNotes : CERT_PAGE_NOTES;
   const setCertNotes = put("certNotes");
   // What has been done about each OPMS disagreement, keyed by the finding —
   // "sent" (reported to OPMS, with the date) or "fixed" (corrected on our
