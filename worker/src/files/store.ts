@@ -27,7 +27,10 @@ export type FileStore = {
   set(key: string, value: ArrayBuffer): Promise<void>;
   delete(key: string): Promise<void>;
   getMetadata(key: string): Promise<{ key: string; size?: number } | null>;
-  list(opts?: { prefix?: string }): Promise<{ blobs: { key: string; size?: number }[] }>;
+  /** `modified` is when the library last touched the file, as an ISO
+   *  string, where the driver knows; the sync weighs two qualification
+   *  expiry sheets by it when neither name carries a date. */
+  list(opts?: { prefix?: string }): Promise<{ blobs: { key: string; size?: number; modified?: string }[] }>;
 };
 
 /* ---------------------------------------------------------------- R2 ---- */
@@ -51,11 +54,11 @@ function r2Store(): FileStore {
       return head ? { key, size: head.size } : null;
     },
     async list(opts) {
-      const out: { key: string; size?: number }[] = [];
+      const out: { key: string; size?: number; modified?: string }[] = [];
       let cursor: string | undefined;
       do {
         const page = await bucket().list({ prefix: opts?.prefix || "", cursor, limit: 1000 });
-        page.objects.forEach((o) => out.push({ key: o.key, size: o.size }));
+        page.objects.forEach((o) => out.push({ key: o.key, size: o.size, modified: o.uploaded ? new Date(o.uploaded).toISOString() : undefined }));
         cursor = page.truncated ? page.cursor : undefined;
       } while (cursor);
       return { blobs: out };
@@ -239,7 +242,7 @@ function sharepointStore(): FileStore {
       const drive = await driveId();
       const asked = (opts?.prefix || "").replace(/\/+$/, "");
       const prefix = asked ? toReal(asked + "/").replace(/\/+$/, "") : "";
-      const out: { key: string; size?: number }[] = [];
+      const out: { key: string; size?: number; modified?: string }[] = [];
       const walk = async (folder: string) => {
         let url: string | null = folder
           ? `/drives/${drive}/root:/${encodePath(folder)}:/children?$top=200`
@@ -249,13 +252,13 @@ function sharepointStore(): FileStore {
           if (res.status === 404) return;
           if (!res.ok) throw new Error(`SharePoint listing failed (${res.status}) under ${folder || "/"}`);
           const page = (await res.json()) as {
-            value: { name: string; folder?: unknown; size?: number }[];
+            value: { name: string; folder?: unknown; size?: number; lastModifiedDateTime?: string }[];
             "@odata.nextLink"?: string;
           };
           for (const item of page.value) {
             const path = folder ? `${folder}/${item.name}` : item.name;
             if (item.folder) await walk(path);
-            else out.push({ key: fromReal(path), size: item.size });
+            else out.push({ key: fromReal(path), size: item.size, modified: item.lastModifiedDateTime });
           }
           url = page["@odata.nextLink"]
             ? page["@odata.nextLink"].replace("https://graph.microsoft.com/v1.0", "")

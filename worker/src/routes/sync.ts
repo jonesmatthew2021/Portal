@@ -2,7 +2,7 @@ import { eq, and, isNull } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
 import {
-  CERT_ROOT, SINGLE_FILE_CATEGORIES, fileStore, safeName,
+  CERT_ROOT, SINGLE_FILE_CATEGORIES, fileStore, safeName, relocateToRemovedBlob,
   tokenForOpmsFolder, personForOpmsFolder, opmsFolderName,
 } from "../db/documents.js";
 import { certHome, type CertHome } from "../db/cert-home.js";
@@ -59,7 +59,38 @@ const typeFor = (name: string) =>
 // lookup table standing between them.
 const personFrom = (folder: string) => opmsFolderName(folder);
 
-type Found = { key: string; size?: number };
+type Found = { key: string; size?: number; modified?: string };
+
+/* ---- which qualification expiry sheet is the newer -------------------------
+ *
+ * The office dates its exports on the front - "20260922 - CREW QUALIFICATION
+ * EXPIRY.xlsx" - and so does the round when it files one. Where both names
+ * carry a date, the later date is the newer sheet. Where they do not, the
+ * library's own modified time decides, and where that is not known either
+ * nothing outranks anything: an undated export used to beat every dated one
+ * simply because "C" sorts after "2", and the sync swapped the current
+ * workbook for an older file on the strength of the alphabet. */
+const stampOf = (key: string) => (/^(\d{8})\s*-/.exec(key.split("/").pop() || "") || [])[1] || null;
+
+/** Whether `cand` is a newer sheet than `cur`. */
+export function outranks(cand: Found, cur: Found): boolean {
+  if (cand.key === cur.key) return false;
+  const a = stampOf(cand.key);
+  const b = stampOf(cur.key);
+  if (a && b && a !== b) return a > b;
+  if (cand.modified && cur.modified) return cand.modified > cur.modified;
+  return false;
+}
+
+/** Newest first, by the same rule; a dated name before an undated one, and
+ *  the alphabet only as a last resort between two the rule cannot tell apart. */
+export function sheetOrder(a: Found, b: Found): number {
+  if (outranks(a, b)) return -1;
+  if (outranks(b, a)) return 1;
+  const da = !!stampOf(a.key), db = !!stampOf(b.key);
+  if (da !== db) return da ? -1 : 1;
+  return a.key < b.key ? 1 : -1;
+}
 
 /**
  * The crew folder a filed certificate sits in, or null where it sits somewhere
@@ -215,8 +246,12 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
   const loose = looseIn(where.home);
   const sheetCandidates = opmsListing.blobs
     .filter((f) => loose(f.key) && /qualification\s*expiry/i.test(f.key));
-  sheetCandidates.sort((a, b) => (a.key < b.key ? 1 : -1));
+  sheetCandidates.sort(sheetOrder);
   const trainingSheet = sheetCandidates[0] || null;
+  // Every loose sheet the listing showed, with when the library last touched
+  // it, so the current one's own modified time is to hand when it is weighed.
+  const sheetSeen: Record<string, Found> = {};
+  sheetCandidates.forEach((f) => { sheetSeen[f.key] = f; });
 
   // --- the single-file documents ------------------------------------------
   await tick(55, "Certificates read — checking the single documents");
@@ -286,7 +321,7 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
   ).length;
 
   const people = [...folks.entries()].map(([folder, name]) => ({ folder, name })).sort((a, b) => a.name.localeCompare(b.name));
-  return { newCertificates, singles, strays, missing, returned, scannedLive, moved, trainingSheet, people };
+  return { newCertificates, singles, strays, missing, returned, scannedLive, moved, trainingSheet, sheetSeen, people };
 }
 
 /** What the last applied sync did — shown on the SharePoint page. */
@@ -523,8 +558,10 @@ async function apply(
   }
 
   // The newest qualification-expiry sheet replaces the training matrix when a
-  // newer one has been dropped in — dated filenames make newest a plain
-  // comparison — and stands as it the first time.
+  // newer one has been dropped in (outranks, above: the date on the front,
+  // then the library's modified time) and stands as it the first time. A
+  // file taken from the folder is the office's: it is marked so, and never
+  // moved by the portal afterwards.
   let sheetTaken: { key: string } | null = null;
   if (result.trainingSheet) {
     const cand = result.trainingSheet;
@@ -533,11 +570,16 @@ async function apply(
       .select()
       .from(documents)
       .where(and(eq(documents.category, "training-matrix"), isNull(documents.removedAt)));
-    if (!cur || (cur.blobKey !== cand.key && candName > cur.filename)) {
+    const curSeen: Found = cur ? (result.sheetSeen[cur.blobKey] || { key: cur.blobKey }) : { key: "" };
+    if (!cur || outranks(cand, curSeen)) {
       if (cur) {
+        /* The portal's own dated copy is parked flat, the way a replace parks
+           it; a file the office put in the folder stays exactly where it is. */
+        const theirs = !!cur.adoptedFromFolder;
+        const blobKey = theirs ? cur.blobKey : await relocateToRemovedBlob(cur);
         await db
           .update(documents)
-          .set({ removedAt: new Date(), removedBy: "SharePoint sync" })
+          .set({ removedAt: new Date(), removedBy: "SharePoint sync", blobKey, keptInPlace: theirs ? 1 : null })
           .where(eq(documents.id, cur.id));
       }
       await db.insert(documents).values({
@@ -549,6 +591,7 @@ async function apply(
         sizeBytes: cand.size ?? 0,
         uploadedBy: "SharePoint sync",
         filedOn: todayThere(),
+        adoptedFromFolder: 1,
       });
       sheetTaken = { key: cand.key };
     }
@@ -568,6 +611,8 @@ async function apply(
       sizeBytes: f.size ?? 0,
       uploadedBy: "SharePoint sync",
       filedOn: today,
+      // Taken from the folder the office put it in: theirs, never moved.
+      adoptedFromFolder: 1,
     });
     adopted.push({ category, key: f.key });
   }

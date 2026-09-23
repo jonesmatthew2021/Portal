@@ -20,6 +20,7 @@ import { replaceSingleFile } from "../src/db/single-file.js";
 import { saveDocument } from "../src/lib/shared-state.js";
 import { runMatrixRound, roundRunning } from "../src/lib/round.js";
 import { todayThere } from "../src/lib/analysis.js";
+import { outranks, sheetOrder } from "../src/routes/sync.js";
 import { writeZip, readZip, partOf, partText, datedWorkbookName } from "../../source/shared/workbook.js";
 import { asKnownPerson, crewRegister } from "../../source/shared/names.js";
 import { settleRound, applySettled } from "../../source/shared/matrix-rules.js";
@@ -558,4 +559,34 @@ test("a round that finds another running stands down", async () => {
   assert.equal(out.roundSkipped, "another round is still running");
   assert.equal(portal.state.rev, 1, "nothing written");
   assert.ok(await roundRunning(), "and the other's lease is left alone");
+});
+
+/* ------------------------------------------------------------------------ *
+ * Which qualification expiry sheet is the newer: the date on the front,
+ * then the library's modified time, and never the alphabet.
+ * ------------------------------------------------------------------------ */
+test("a dated sheet beats an undated one whatever the alphabet says", () => {
+  const dated = { key: "opms/20260901 - CREW QUALIFICATION EXPIRY.xlsx", modified: "2026-09-01T00:00:00Z" };
+  const undated = { key: "opms/CREW QUALIFICATION EXPIRY.xlsx", modified: "2026-08-01T00:00:00Z" };
+  assert.equal(outranks(undated, dated), false, "an older undated export does not outrank the dated one");
+  assert.equal(outranks(dated, undated), true, "the newer dated one outranks it");
+  assert.deepEqual([undated, dated].sort(sheetOrder).map((f) => f.key), [dated.key, undated.key], "and sorts first");
+});
+
+test("two dated sheets: the later date wins; the same date falls to the modified time", () => {
+  const a = { key: "opms/20260901 - X.xlsx", modified: "2026-09-24T00:00:00Z" };
+  const b = { key: "opms/20260924 - X.xlsx", modified: "2026-09-01T00:00:00Z" };
+  assert.equal(outranks(b, a), true, "the later date on the front wins, whatever was touched last");
+  assert.equal(outranks(a, b), false);
+  const c = { key: "opms/20260924 - X (2).xlsx", modified: "2026-09-24T05:00:00Z" };
+  assert.equal(outranks(c, b), true, "the same date: the one touched later is the newer");
+});
+
+test("neither dated: the later modified time wins, and with none known nothing does", () => {
+  const older = { key: "opms/Z qualification expiry.xlsx", modified: "2026-09-01T00:00:00Z" };
+  const newer = { key: "opms/A qualification expiry.xlsx", modified: "2026-09-20T00:00:00Z" };
+  assert.equal(outranks(newer, older), true);
+  assert.equal(outranks(older, newer), false, "'Z' after 'A' counts for nothing");
+  assert.equal(outranks({ key: "opms/A.xlsx" }, { key: "opms/B.xlsx" }), false, "unknown times: no swap");
+  assert.equal(outranks(newer, newer), false, "a sheet never outranks itself");
 });
