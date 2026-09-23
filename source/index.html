@@ -16513,20 +16513,28 @@ function CoolibahPortal({ role, onSignOut }) {
           // minutes ago would write its ten-minute-old copy over every date
           // the hour had filled in since. So only what this tab actually
           // changed goes back over theirs - see mergeSaved.
-          const merged = mergeSaved({
-            touched, mine: store, theirs: res.data,
-            base: { quals: baseline.current, filled: baselineFilled.current,
-              seen: baselineSeen.current, pending: baselinePending.current,
-              history: baselineHistory.current },
-          });
+          // What this tab last loaded or saved, taken now: rebase moves it
+          // on once the merged copy lands, and the edits made in the
+          // meantime were built on this one.
+          const base = { quals: baseline.current, filled: baselineFilled.current,
+            seen: baselineSeen.current, pending: baselinePending.current,
+            history: baselineHistory.current };
+          const merged = mergeSaved({ touched, mine: store, theirs: res.data, base });
           sent = withoutStoredFiles(merged);
           res = await saveState(sent, res.rev);
 
           if (!res.conflict) {
             setStore((s) => {
-              const next = { ...merged };
-              // Anything edited while the save was in flight stays as it is here.
-              dirty.current.forEach((k) => { next[k] = s[k]; });
+              // Anything edited while the merged copy was in the air is
+              // laid back over it the same way: only what that edit changed
+              // since base. Kept raw, the local copy would be the one built
+              // before the merge, without the hour's line and dates - and
+              // the next save, on a rev that now matches, would write it
+              // over them.
+              const inFlight = [...dirty.current];
+              const next = inFlight.length
+                ? mergeSaved({ touched: inFlight, mine: s, theirs: merged, base })
+                : { ...merged };
               return withStoredFiles(next, storedFiles.current);
             });
           }

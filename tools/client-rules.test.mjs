@@ -496,6 +496,24 @@ const is = (got, want, what) => {
   is(lib.mergeSaved({ touched, mine, theirs: undefined, base }).filledFromCert, { A: true }, "…however the nothing is spelt");
   const page = lib.mergeHistory(base.history, mine.history, theirs.history);
   is(page, rules.mergeHistory(base.history, mine.history, theirs.history), "mergeHistory in the page answers as the module does");
+
+  /* An edit made while the merged copy was still in the air is laid back
+     over it the same way, not raw: the local copy was built before the
+     merge, so laid back whole it would take the hour's work off again. */
+  const inFlightLog = lib.mergeHistory(
+    [e("m1", "2026-09-24T09:00")],
+    [e("m3", "2026-09-24T10:40"), e("m2", "2026-09-24T10:30"), e("m1", "2026-09-24T09:00")],
+    [e("m2", "2026-09-24T10:30"), e("s1", "2026-09-24T10:00"), e("m1", "2026-09-24T09:00")],
+  );
+  is(inFlightLog.map((x) => x.id), ["m3", "m2", "s1", "m1"],
+    "a line logged while the merged log was in the air lands beside the hour's line, which stays");
+  const landed = { ...out, quals: { cols: [["QL-01", "Master"], ["QL-17", "Medical"]],
+    rows: [["EVANS, Brenton", "Master", "", ["2032-01-01", "2029-03-03"]], ["ROSE, Matthew", "Mate", "", ["", ""]]] } };
+  const typedMeanwhile = { ...mine, quals: { cols: quals.cols, rows: [["EVANS, Brenton", "Master", "", ["2033-06-06"]]] } };
+  const laidBack = lib.mergeSaved({ touched: ["quals"], mine: typedMeanwhile, theirs: landed, base });
+  is(laidBack.quals.rows.map((r) => r[0] + ":" + r[3].join("|")), ["EVANS, Brenton:2033-06-06|2029-03-03", "ROSE, Matthew:|"],
+    "a cell edited while the merged matrix was in the air lands on it; the date the hour filled in and the man it added stay");
+  is(laidBack.history.map((x) => x.id), ["m1", "s1"], "…and a slice not edited in the meantime is the merged copy as it landed");
   is(lib.mergeFilled(base.filled, mine.filledFromCert, theirs.filledFromCert),
     rules.mergeFilled(base.filled, mine.filledFromCert, theirs.filledFromCert), "mergeFilled in the page answers as the module does");
 }
