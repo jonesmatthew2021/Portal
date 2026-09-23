@@ -21,9 +21,11 @@ const NL = String.fromCharCode(10);
  * ships. Same harness as insert-rows.test.mjs. */
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..").replace(/\\/g, "/");
 const { portalJsx } = await import("file:///" + ROOT.replaceAll(" ", "%20") + "/tools/source.mjs");
-/* The matrix rules the worker imports, imported the same way, so what a round
- * takes back is proved on the module and not only through the page. */
+/* The matrix rules and the register the worker imports, imported the same
+ * way, so what a round takes back is proved on the module and not only
+ * through the page. */
 const rules = await import(pathToFileURL(join(ROOT, "source", "shared", "matrix-rules.js")).href);
+const names = await import(pathToFileURL(join(ROOT, "source", "shared", "names.js")).href);
 const require = createRequire(ROOT + "/tools/package.json");
 const babel = require("@babel/standalone");
 const js = babel.transform(portalJsx(), { presets: ["react"], compact: false }).code;
@@ -54,7 +56,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -223,15 +225,56 @@ const is = (got, want, what) => {
 
 /* ---- a settled date finds its row through the register's name ---- */
 {
+  /* The real register, not a stand-in: its nameOf answers null for anyone it
+     does not know, and a stand-in that never did once hid a bug where every
+     stranger's row was keyed "NULL" and their dates all fell on one row. */
+  const reg = names.crewRegister([{ name: "SITTIYOS, Kachin", aliases: ["bILLY"] }]);
+  is(reg.nameOf("SMITH, John"), null, "the register answers null for a stranger");
   const quals = {
     cols: [["QL-01", "Master"], ["QL-17", "Medical"]],
-    rows: [["bILLY", "Cook", "", ["", "2026-01-11"]]],
+    rows: [
+      ["SMITH, John", "Master", "", ["2026-01-01", ""]],     // not on the register
+      ["JONES, Ann", "Mate", "", ["2027-01-01", ""]],        // not on the register either
+      ["bILLY", "Cook", "", ["", "2026-01-11"]],             // the register's SITTIYOS, Kachin
+    ],
   };
-  const nameOf = (n) => (n === "bILLY" ? "SITTIYOS, Kachin" : n);
-  const out = rules.applySettled(quals, [{ person: "SITTIYOS, Kachin", code: "QL-01", value: "2031-02-17" }], nameOf);
-  is(out.next.rows[0][3][0], "2031-02-17", "the date lands on the row the spreadsheet calls bILLY");
-  is(out.next.rows[0][0], "bILLY", "the row keeps its name as written");
-  is(out.applied.map((a) => a.person), ["bILLY"], "what moved is reported under the row's own name");
+  const out = rules.applySettled(quals, [
+    { person: "SITTIYOS, Kachin", code: "QL-01", value: "2031-02-17" },
+    { person: "SMITH, John", code: "QL-01", value: "2031-01-01" },
+  ], reg.nameOf);
+  is(out.next.rows[2][3][0], "2031-02-17", "the date lands on the row the spreadsheet calls bILLY");
+  is(out.next.rows[2][0], "bILLY", "the row keeps its name as written");
+  is(out.next.rows[0][3][0], "2031-01-01", "a man the register does not know keeps his own row");
+  is(out.next.rows[1][3][0], "2027-01-01", "…and the other stranger's row is not written on");
+  is(out.applied.map((a) => a.person), ["bILLY", "SMITH, John"], "what moved is reported under the row's own name");
+  is([...out.only].sort(), ["BILLY|QL-01", "SMITH, JOHN|QL-01"],
+    "only is keyed by the row's name, which is the name the workbook writer looks for");
+}
+
+/* ---- the copy spliced into the page answers exactly as the module does ---- */
+{
+  /* The page has no bundler: the build folds the shared files in by taking
+     "export" off each declaration. The tests above run the module; this one
+     runs the same fixture through the page's copy and expects the same
+     answer, so a fold that mangled a body could not pass unnoticed. */
+  const quals = {
+    cols: [["QL-01", "Master"], ["QL-17", "Medical"]],
+    rows: [
+      ["EVANS, Brenton", "Master", "", ["2031-05-26", "2028-02-02"]],
+      ["ROSE, Matthew", "CHIEF OFFICER", "", ["", "2027-01-30"]],
+    ],
+  };
+  const settled = [
+    { person: "rose, matthew", code: "QL-01", value: "2030-09-11" },
+    { person: "EVANS, Brenton", code: "QL-17", clear: true },
+  ];
+  const page = lib.applySettled(quals, settled);
+  const mod = rules.applySettled(quals, settled);
+  is({ next: page.next, applied: page.applied, only: [...page.only] },
+    { next: mod.next, applied: mod.applied, only: [...mod.only] },
+    "applySettled in the page answers as the module does");
+  const round = { filledFromCert: { "A::QL-01": true, "B::QL-02": true }, claimed: ["A::QL-01"], unread: 0, settled: [] };
+  is(lib.settleRound(round), rules.settleRound(round), "settleRound in the page answers as the module does");
 }
 
 if (failed) {

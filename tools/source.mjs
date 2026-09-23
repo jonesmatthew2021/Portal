@@ -107,14 +107,27 @@ function withShared(shell) {
     const body = readFileSync(join(SHARED, n), "utf8").replace(/\r\n/g, "\n");
     // Only a plain "export" in front of a declaration can be folded back into
     // page code. Anything else would need a bundler, so it is refused here
-    // rather than compiled into a page that breaks on load.
-    if (/^\s*import\b/m.test(body) || /\bexport\s+default\b/.test(body) || /\bexport\s*\{/.test(body)) {
+    // rather than compiled into a page that breaks on load. The comments are
+    // taken out before looking, so a comment that mentions an import does not
+    // stop the build; the file itself is folded with its comments intact.
+    const noComments = (t) => t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    const code = noComments(body);
+    if (/^\s*import\b/m.test(code) || /\bexport\s+default\b/.test(code) || /\bexport\s*\{/.test(code)) {
       throw new Error(
         "source/shared/" + n + " uses an import, an export default or an export { } — " +
         "shared files may only put \"export\" in front of a function, const or let.",
       );
     }
     const folded = body.replace(/^export\s+(?=(async\s+)?function\b|const\b|let\b)/gm, "");
+    // Whatever the fold did not take (an export class, an export var) would
+    // reach the page as is and only be found by the compile, with Babel's
+    // message rather than this one.
+    if (/^\s*export\b/m.test(noComments(folded))) {
+      throw new Error(
+        "source/shared/" + n + " has an export the page cannot fold: only export function, " +
+        "export async function, export const and export let are allowed.",
+      );
+    }
     // A header per file, so a stack trace or a search says which file to open.
     return "/* ---- source/shared/" + n + " ---- */\n" + folded.replace(/\n+$/, "") + "\n";
   }).join("\n");

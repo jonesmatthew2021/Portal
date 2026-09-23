@@ -32,6 +32,7 @@
  * crew member their card lasts four years when it lasts two would put them
  * ashore at a gate, and the other way round only costs a renewal reminder.
  * @param {unknown} said
+ * @returns {Omit<ExpiryRule, "code" | "title" | "category" | "by"> | null}
  */
 export function expiryRule(said) {
   const text = String(said || "").replace(/\s+/g, " ").trim();
@@ -154,14 +155,20 @@ export function readExpiryRules(rows) {
  * `nameOf` is how a name is read before it is compared: the crew register's
  * nameOf, where there is one, so a settled date for "SITTIYOS, Kachin" lands
  * on the row the spreadsheet still calls "bILLY". The row keeps its name as
- * written. Left out, names are compared as they are.
+ * written. A spelling the register does not know (its nameOf answers null)
+ * is compared as it is, so a stranger's row stays his own and never falls
+ * in with another stranger's. Left out, names are compared as they are.
+ * The page's callers leave it out today; the worker's round is the first
+ * caller meant to pass it.
  * @param {Quals} quals
  * @param {Settled[] | null | undefined} settled
- * @param {(name: string) => string} [nameOf]
+ * @param {(name: string) => string | null | undefined} [nameOf]
  */
 export function applySettled(quals, settled, nameOf = (n) => n) {
+  /** @param {string} n */
+  const as = (n) => { const k = nameOf(n); return k == null || k === "" ? n : k; };
   const rows = (quals.rows || []).map((r) => /** @type {MatrixRow} */ ([r[0], r[1], r[2], (r[3] || []).slice()]));
-  const rowAt = new Map(rows.map((r, i) => [String(nameOf(r[0])).trim().toUpperCase(), i]));
+  const rowAt = new Map(rows.map((r, i) => [String(as(r[0])).trim().toUpperCase(), i]));
   const cols = quals.cols || [];
   const colAt = new Map(cols.map((c, i) => [c[0], i]));
 
@@ -170,12 +177,15 @@ export function applySettled(quals, settled, nameOf = (n) => n) {
   const only = new Set();
 
   (settled || []).forEach((s) => {
-    const r = rowAt.get(String(nameOf(s.person || "")).trim().toUpperCase());
+    const r = rowAt.get(String(as(s.person || "")).trim().toUpperCase());
     const c = colAt.get(s.code);
     if (r === undefined || c === undefined) return;
 
     const before = rows[r][3][c] == null ? "" : String(rows[r][3][c]);
-    const key = String(s.person).trim().toUpperCase() + "|" + s.code;
+    /* Keyed by the row's own name, not the settled spelling: the workbook
+       writer narrows its write by the row it finds, so a key in another
+       spelling would move the matrix and leave the office's file untouched. */
+    const key = String(rows[r][0]).trim().toUpperCase() + "|" + s.code;
     /** @param {string} to */
     const moved = (to) => applied.push({
       person: rows[r][0], code: s.code, title: (cols[c] || [])[1] || "", from: before, to,

@@ -966,7 +966,9 @@ export async function updateFiledWorkbook(buf, quals, only = null, blank = null)
       const newRowXml = [];
       adding.forEach((name) => {
         const person = quals.rows.find((p) => p[0] === name);
-        if (!person) return;      // every name here came off quals.rows, so this never fires
+        // Every name here came off quals.rows, so this never fires - and if it
+        // ever did, a man quietly left off the workbook is worse than no write.
+        if (!person) throw new Error("row to add is not on the matrix: " + name);
         num += 1;
 
         // The row above is the pattern for the new one, but a column it happens
@@ -1066,11 +1068,14 @@ export async function updateFiledWorkbook(buf, quals, only = null, blank = null)
    the front of it, so whoever opens the folder can see at a glance how old the
    copy in their hands is. Anything already dated has its date replaced rather
    than another one stuck on the front. `on` is the day as YYYY-MM-DD; the
-   caller says which day, because only the page knows the vessel's clock.
+   caller says which day, because only the page knows the vessel's clock. A
+   caller that forgets is refused rather than obliged: stamping whatever came
+   in would rename the office's spreadsheet to nonsense on SharePoint.
  * @param {string} filename
  * @param {string} on
  */
 export function datedWorkbookName(filename, on) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(on || ""))) throw new Error("datedWorkbookName needs the day as YYYY-MM-DD");
   const stamp = String(on).replace(/-/g, "");
   const name = String(filename || "CREW QUALIFICATION EXPIRY.xlsx");
   return /^\d{8}\s*-\s*/.test(name) ? name.replace(/^\d{8}\s*-\s*/, stamp + " - ") : stamp + " - " + name;

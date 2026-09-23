@@ -65,7 +65,7 @@ const quals = {
 test("new crew fit into the office's workbook, through the worker's import", async () => {
   const buf = await writeZip(workbook(sheetXml, workbookXml)).arrayBuffer();
   const out = await updateFiledWorkbook(buf, quals);
-  assert.ok(out.blob, "nothing was written: " + JSON.stringify(out.report));
+  if (!out.blob) throw new Error("nothing was written: " + JSON.stringify(out.report));
 
   const outEntries = readZip(await out.blob.arrayBuffer());
   const outXml = await partText(partOf(outEntries, "xl/worksheets/sheet1.xml"));
@@ -85,6 +85,9 @@ test("new crew fit into the office's workbook, through the worker's import", asy
 test("the filed workbook carries the day it was written on the front", () => {
   assert.equal(datedWorkbookName("20260918 - X.xlsx", "2026-09-23"), "20260923 - X.xlsx");
   assert.equal(datedWorkbookName("X.xlsx", "2026-09-23"), "20260923 - X.xlsx");
+  // A caller that forgets the day is refused, not obliged with "undefined - X.xlsx".
+  assert.throws(() => datedWorkbookName("X.xlsx", undefined as unknown as string), /YYYY-MM-DD/);
+  assert.throws(() => datedWorkbookName("X.xlsx", "23/09/2026"), /YYYY-MM-DD/);
 });
 
 /* ---- the office's rule book, as a sheet ---- */
@@ -104,7 +107,7 @@ test("the expiry rules read off the Guidance Information sheet", async () => {
   const entries = readZip(await writeZip(workbook(guidanceXml, guidanceWorkbookXml)).arrayBuffer());
   const sheets = listSheets(await partText(partOf(entries, "xl/workbook.xml")), await partText(partOf(entries, "xl/_rels/workbook.xml.rels")));
   const guidance = sheets.find((s) => /guidance information/i.test(s.name));
-  assert.ok(guidance, "the sheet is found by name");
+  if (!guidance) throw new Error("the sheet is not found by name");
 
   const rows = await readSheetRows(entries, guidance.path);
   assert.deepEqual(rows[0], ["Certification ID", "Name", "Category", "Timeframe", "Expiry"], "the header row reads as row 1");
