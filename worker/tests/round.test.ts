@@ -1299,6 +1299,14 @@ test("a dated sheet beats an undated one whatever the alphabet says", () => {
   assert.deepEqual([undated, dated].sort(sheetOrder).map((f) => f.key), [dated.key, undated.key], "and sorts first");
 });
 
+test("an undated drop never outranks a dated current sheet, however recently it was touched", () => {
+  const dated = { key: "opms/20260901 - CREW QUALIFICATION EXPIRY.xlsx", modified: "2026-09-01T00:00:00Z" };
+  const touched = { key: "opms/CREW QUALIFICATION EXPIRY.xlsx", modified: "2026-09-24T09:00:00Z" };
+  assert.equal(outranks(touched, dated), false, "touched this morning, still not the newer sheet");
+  assert.equal(outranks(touched, { key: dated.key }), false, "…nor when the current one's time is unknown");
+  assert.deepEqual([touched, dated].sort(sheetOrder).map((f) => f.key), [dated.key, touched.key], "the dated one still sorts first");
+});
+
 test("two dated sheets: the later date wins; the same date falls to the modified time", () => {
   const a = { key: "opms/20260901 - X.xlsx", modified: "2026-09-24T00:00:00Z" };
   const b = { key: "opms/20260924 - X.xlsx", modified: "2026-09-01T00:00:00Z" };

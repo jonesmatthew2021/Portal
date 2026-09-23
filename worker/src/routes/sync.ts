@@ -67,11 +67,15 @@ type Found = { key: string; size?: number; modified?: string };
  *
  * The office dates its exports on the front - "20260922 - CREW QUALIFICATION
  * EXPIRY.xlsx" - and so does the round when it files one. Where both names
- * carry a date, the later date is the newer sheet. Where they do not, the
- * library's own modified time decides, and where that is not known either
- * nothing outranks anything: an undated export used to beat every dated one
- * simply because "C" sorts after "2", and the sync swapped the current
- * workbook for an older file on the strength of the alphabet. */
+ * carry a date, the later date is the newer sheet. An undated candidate
+ * never outranks a dated current one: the office's undated export is
+ * whatever it was last saved as, and the dated file is the one the round or
+ * the office filed on purpose - an undated drop is adopted only where
+ * nothing is live. Where neither carries a date, the library's own modified
+ * time decides, and where that is not known either nothing outranks
+ * anything: an undated export used to beat every dated one simply because
+ * "C" sorts after "2", and the sync swapped the current workbook for an
+ * older file on the strength of the alphabet. */
 const stampOf = (key: string) => (/^(\d{8})\s*-/.exec(key.split("/").pop() || "") || [])[1] || null;
 
 /** Whether `cand` is a newer sheet than `cur`. */
@@ -80,6 +84,7 @@ export function outranks(cand: Found, cur: Found): boolean {
   const a = stampOf(cand.key);
   const b = stampOf(cur.key);
   if (a && b && a !== b) return a > b;
+  if (!a && b) return false;
   if (cand.modified && cur.modified) return cand.modified > cur.modified;
   return false;
 }
