@@ -7,6 +7,8 @@ import {
   safeName,
 } from "../db/documents.js";
 import { imageToPdf } from "../lib/pdf-wrap.js";
+import { readDocument } from "../lib/shared-state.js";
+import { asKnownPerson } from "../../../source/shared/names.js";
 import { getEnv } from "../env.js";
 import {
   askJson,
@@ -670,8 +672,13 @@ export type CompareResult = {
   };
 };
 
+/* The page's comparison reads names through the crew register, the same
+   as the round on the hour does: a certificate still filed under the
+   office's spelling of a man claims the row the register names, so the
+   two never disagree about which cells the certificates stand behind. */
 async function compare(matrix: Matrix, sheet: Sheet) {
-  return Response.json(await compareMatrix(matrix, sheet));
+  const cur = await readDocument();
+  return Response.json(await compareMatrix(matrix, sheet, asKnownPerson(cur?.doc.people || [])));
 }
 
 /**

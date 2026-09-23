@@ -1,12 +1,14 @@
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, desc, isNull } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
 import {
   CERT_ROOT, SINGLE_FILE_CATEGORIES, fileStore, safeName, relocateToRemovedBlob,
   tokenForOpmsFolder, personForOpmsFolder, opmsFolderName,
 } from "../db/documents.js";
+import { isPendingName } from "../db/single-file.js";
 import { certHome, type CertHome } from "../db/cert-home.js";
 import { todayThere } from "../lib/analysis.js";
+import { roundRunning } from "../lib/round.js";
 import { getStore } from "../compat/blobs.js";
 
 /**
@@ -140,7 +142,7 @@ export function whoseFolder(where: CertHome, folderKey: string, folderName: stri
     : { token: tokenForOpmsFolder(folderName), person: personForOpmsFolder(folderName) };
 }
 
-async function survey(tick: (pct: number, word: string) => Promise<void> = async () => {}) {
+export async function survey(tick: (pct: number, word: string) => Promise<void> = async () => {}) {
   const store = fileStore();
   const rows = await db.select().from(documents);
   const known = new Set(rows.map((r) => r.blobKey));
@@ -243,9 +245,11 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
 
   // The office drops the crew qualification expiry spreadsheet loose in OPMS
   // Documents; the newest one there is the training matrix to hold.
+  // Never a replace's pending copy: a round cut off mid-replace leaves one
+  // loose, and it is the newest file in the folder.
   const loose = looseIn(where.home);
   const sheetCandidates = opmsListing.blobs
-    .filter((f) => loose(f.key) && /qualification\s*expiry/i.test(f.key));
+    .filter((f) => loose(f.key) && /qualification\s*expiry/i.test(f.key) && !isPendingName(f.key));
   sheetCandidates.sort(sheetOrder);
   const trainingSheet = sheetCandidates[0] || null;
   // Every loose sheet the listing showed, with when the library last touched
@@ -303,10 +307,16 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
    * listing can see is not missing, whatever the books say, so its row comes
    * back. A row somebody removed through the portal can never match here: its
    * bytes were parked under removed/ when it went, and nothing under
-   * removed/ is ever in this listing. */
+   * removed/ is ever in this listing.
+   *
+   * Except the office's own file, which is never parked. The round replaces
+   * the office's adopted workbook by writing its own beside it and marking
+   * the office's row removed, kept in place - the bytes stay exactly where
+   * the office put them, and so stay in this listing. That row is off the
+   * books on purpose, and reviving it every hour put two workbooks live. */
   const liveKeys = new Set(rows.filter((r) => !r.removedAt).map((r) => r.blobKey));
   const returned = rows
-    .filter((r) => r.removedAt && seen.has(r.blobKey))
+    .filter((r) => r.removedAt && seen.has(r.blobKey) && !r.keptInPlace)
     /* Not where a live row already holds the same address. A file wiped and
        re-uploaded has two rows pointing at one address — the old removed one
        and the new live one — and reviving the old row would put the same file
@@ -429,6 +439,10 @@ export default async (req: Request, by = "Import new files") => {
     let who = by;
     const sent = await req.json().catch(() => null) as { by?: unknown } | null;
     if (sent && typeof sent.by === "string" && sent.by.trim()) who = sent.by.trim().slice(0, 40);
+    // The sync can swap the workbook, and the round may be writing it now.
+    if (await roundRunning()) {
+      return Response.json({ error: "The hourly round is writing the workbook; try again in a minute." }, { status: 409 });
+    }
     return Response.json(await runSync(who));
   } catch (e) {
     return Response.json(
@@ -438,7 +452,7 @@ export default async (req: Request, by = "Import new files") => {
   }
 };
 
-async function apply(
+export async function apply(
   result: Awaited<ReturnType<typeof survey>>,
   tick: (pct: number, word: string) => Promise<void> = async () => {},
 ) {
@@ -490,8 +504,8 @@ async function apply(
    * about); ties go to the newer. The other goes back to removed, which is
    * where it was. */
   let deduped = 0;
+  const live = await db.select().from(documents).where(isNull(documents.removedAt));
   {
-    const live = await db.select().from(documents).where(isNull(documents.removedAt));
     const byKey = new Map<string, typeof live>();
     for (const r of live) {
       byKey.set(r.blobKey, [...(byKey.get(r.blobKey) || []), r]);
@@ -574,14 +588,23 @@ async function apply(
   // file taken from the folder is the office's: it is marked so, and never
   // moved by the portal afterwards.
   let sheetTaken: { key: string } | null = null;
-  if (result.trainingSheet) {
+  // A file already live on the books, under any category, is nobody's
+  // candidate: it is the workbook, or it is somebody else's document.
+  const liveKeys = new Set(live.map((r) => r.blobKey));
+  if (result.trainingSheet && !liveKeys.has(result.trainingSheet.key)) {
     const cand = result.trainingSheet;
     const candName = safeName(cand.key.split("/").pop() || "");
     const [cur] = await db
       .select()
       .from(documents)
-      .where(and(eq(documents.category, "training-matrix"), isNull(documents.removedAt)));
-    const curSeen: Found = cur ? (result.sheetSeen[cur.blobKey] || { key: cur.blobKey }) : { key: "" };
+      .where(and(eq(documents.category, "training-matrix"), isNull(documents.removedAt)))
+      .orderBy(desc(documents.createdAt));
+    /* The current one as the listing saw it - or, where the listing did not
+       (a workbook still filed under the old matrices/training address), as
+       old as the day it was filed, so a newer drop can still take over. */
+    const curSeen: Found = cur
+      ? (result.sheetSeen[cur.blobKey] || { key: cur.blobKey, modified: cur.createdAt ? new Date(cur.createdAt).toISOString() : undefined })
+      : { key: "" };
     if (!cur || outranks(cand, curSeen)) {
       if (cur) {
         /* The portal's own dated copy is parked flat, the way a replace parks

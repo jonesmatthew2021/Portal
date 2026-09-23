@@ -63,13 +63,15 @@ export function getStore(opts: { name: string; consistency?: string } | string):
 
   // The compare-and-swap the earlier blob store offered: the row only moves if it
   // still carries the etag the caller read. D1 runs the statement atomically,
-  // so of two racers only one can find the etag standing.
+  // so of two racers only one can find the etag standing. A row written
+  // before etags existed carries none; the stand-in getWithMetadata hands
+  // out for it matches exactly that, so such a row can still be taken.
   const writeIfMatch = async (key: string, value: string, onlyIfMatch: string) => {
     const etag = crypto.randomUUID();
     const res = await d1()
       .prepare(
         "UPDATE blobs SET value = ?3, updated_at = ?4, etag = ?5 " +
-          "WHERE store = ?1 AND key = ?2 AND etag = ?6",
+          "WHERE store = ?1 AND key = ?2 AND (etag = ?6 OR (etag IS NULL AND ?6 = 'pre-etag'))",
       )
       .bind(store, key, value, Date.now(), etag, onlyIfMatch)
       .run();

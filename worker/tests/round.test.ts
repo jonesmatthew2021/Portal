@@ -14,13 +14,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setEnv } from "../src/env.js";
-import { compareMatrix } from "../src/routes/analyse.js";
-import { relocateToRemovedBlob } from "../src/db/documents.js";
+import analyse, { compareMatrix } from "../src/routes/analyse.js";
+import { KeptInPlace, purgeDocument, relocateToRemovedBlob, removeDocument, restoreDocument } from "../src/db/documents.js";
 import { replaceSingleFile } from "../src/db/single-file.js";
 import { saveDocument } from "../src/lib/shared-state.js";
 import { runMatrixRound, roundRunning } from "../src/lib/round.js";
 import { todayThere } from "../src/lib/analysis.js";
-import { outranks, sheetOrder } from "../src/routes/sync.js";
+import { apply, outranks, sheetOrder, survey } from "../src/routes/sync.js";
 import { writeZip, readZip, partOf, partText, datedWorkbookName } from "../../source/shared/workbook.js";
 import { asKnownPerson, crewRegister } from "../../source/shared/names.js";
 import { settleRound, applySettled } from "../../source/shared/matrix-rules.js";
@@ -34,7 +34,7 @@ import { settleRound, applySettled } from "../../source/shared/matrix-rules.js";
  * thought about. Drizzle's own reads go through .raw(), which is refused
  * outright - the code under test reads with plain statements.
  * ------------------------------------------------------------------------ */
-type Answer = { results?: unknown[]; changes?: number };
+type Answer = { results?: unknown[]; changes?: number; columns?: string[] };
 type Asked = { sql: string; args: unknown[] };
 
 function fakeDb(answer: (sql: string, args: unknown[]) => Answer | undefined, asked: Asked[] = []) {
@@ -56,8 +56,15 @@ function fakeDb(answer: (sql: string, args: unknown[]) => Answer | undefined, as
       if (!a) throw new Error("the test's database was not told how to answer: " + sql.slice(0, 80));
       return { results: a.results || [], meta: { changes: a.changes || 0 } };
     },
+    /* Drizzle reads rows by position, in the order the statement names the
+       columns; an answer that names them (drizzleOn, below) is laid out
+       that way, and one that does not is refused. */
     async raw() {
-      throw new Error("drizzle reads are not faked here");
+      asked.push({ sql, args });
+      const a = answer(sql, args);
+      if (!a) throw new Error("the test's database was not told how to answer: " + sql.slice(0, 80));
+      if (!a.columns) throw new Error("drizzle asked for rows by position and the answer named no columns: " + sql.slice(0, 80));
+      return (a.results || []).map((r) => a.columns!.map((c) => (r as Record<string, unknown>)[c]));
     },
   });
   return {
@@ -68,6 +75,68 @@ function fakeDb(answer: (sql: string, args: unknown[]) => Answer | undefined, as
       return out;
     },
     asked,
+  };
+}
+
+/* ------------------------------------------------------------------------ *
+ * Drizzle's own SQL, for the sync and the file routes, which read and write
+ * the documents table through the ORM. The shapes it uses are few - a
+ * select whose where is "col = ?", "is null" and "is not null" joined by
+ * and, with an order by and a limit; an update by id, with or without
+ * returning; a delete by id; an insert - so they are read here against the
+ * same rows the plain statements answer from, rather than refused.
+ * ------------------------------------------------------------------------ */
+type Row = Record<string, unknown>;
+const camel = (c: string) => c.replace(/_([a-z])/g, (_, x: string) => x.toUpperCase());
+function drizzleOn(rows: Row[]) {
+  const cols = (list: string) => [...list.matchAll(/"(\w+)"/g)].map((m) => camel(m[1]));
+  return (sql: string, args: unknown[]): Answer | undefined => {
+    const a = [...args];
+    const where = (clause: string | undefined) => {
+      const tests = clause ? clause.replace(/[()]/g, "").split(" and ") : [];
+      const checks = tests.map((t): ((r: Row) => boolean) => {
+        const m = /^"documents"\."(\w+)" (= \?|is null|is not null)$/.exec(t.trim());
+        if (!m) throw new Error("the test's database cannot read: " + t);
+        const col = camel(m[1]);
+        if (m[2] === "= ?") { const v = a.shift(); return (r) => r[col] === v; }
+        return m[2] === "is null" ? (r) => r[col] == null : (r) => r[col] != null;
+      });
+      return (r: Row) => checks.every((c) => c(r));
+    };
+    let m: RegExpExecArray | null;
+    if ((m = /^select (.+?) from "documents"(?: where (.+?))?(?: order by "documents"\."(\w+)" (asc|desc))?( limit \?)?$/.exec(sql))) {
+      const columns = cols(m[1]);
+      let out = rows.filter(where(m[2]));
+      if (m[3]) {
+        const col = camel(m[3]);
+        const sign = m[4] === "desc" ? -1 : 1;
+        out = [...out].sort((x, y) => (Number(x[col] ?? 0) - Number(y[col] ?? 0)) * sign);
+      }
+      if (m[5]) out = out.slice(0, Number(a.shift()));
+      return { results: out, columns };
+    }
+    if ((m = /^update "documents" set (.+?) where "documents"\."id" = \?(?: returning (.+))?$/.exec(sql))) {
+      const sets = cols(m[1]);
+      const values = sets.map(() => a.shift());
+      const id = a.shift();
+      const row = rows.find((r) => r.id === id);
+      if (row) sets.forEach((c, i) => { row[c] = values[i]; });
+      return m[2] ? { results: row ? [row] : [], columns: cols(m[2]), changes: row ? 1 : 0 } : { changes: row ? 1 : 0 };
+    }
+    if (/^delete from "documents" where "documents"\."id" = \?$/.test(sql)) {
+      const i = rows.findIndex((r) => r.id === a[0]);
+      if (i >= 0) rows.splice(i, 1);
+      return { changes: i >= 0 ? 1 : 0 };
+    }
+    if ((m = /^insert into "documents" \((.+?)\) values \((.+?)\)$/.exec(sql))) {
+      const names = cols(m[1]);
+      const slots = m[2].split(", ");
+      const row: Row = {};
+      names.forEach((c, i) => { row[c] = slots[i] === "?" ? a.shift() : null; });
+      rows.push(row);
+      return { changes: 1 };
+    }
+    return undefined;
   };
 }
 
@@ -188,15 +257,20 @@ const liveRow = (id: string, key: string, adopted = 0) => ({
   removedBy: null, adoptedFromFolder: adopted, keptInPlace: null,
 });
 
-/* A database holding these live rows and answering the replace's own
+/* A removed row of the office's own workbook, kept where the office put it. */
+const keptRow = (id: string, key: string) => ({ ...liveRow(id, key, 1), removedAt: 5, keptInPlace: 1 });
+
+/* A database holding these rows and answering the replace's own
    statements: the column check, the live rows, who holds an address, and
    the writes. */
-function documentsDb(rows: ReturnType<typeof liveRow>[]) {
+function documentsDb(rows: (ReturnType<typeof liveRow> | ReturnType<typeof keptRow>)[]) {
   const asked: Asked[] = [];
   const db = fakeDb((sql, args) => {
     if (/PRAGMA table_info/.test(sql)) return { results: [{ name: "adopted_from_folder" }, { name: "kept_in_place" }] };
-    if (/FROM documents WHERE category = \?1 AND removed_at IS NULL/.test(sql)) return { results: rows.filter((r) => r.category === args[0]) };
-    if (/SELECT id FROM documents WHERE blob_key = \?1/.test(sql)) return { results: rows.filter((r) => r.blobKey === args[0]).map((r) => ({ id: r.id })) };
+    if (/FROM documents WHERE category = \?1 AND removed_at IS NULL/.test(sql)) return { results: rows.filter((r) => r.category === args[0] && !r.removedAt) };
+    if (/SELECT id, removed_at AS removedAt, kept_in_place AS keptInPlace FROM documents WHERE blob_key = \?1/.test(sql)) {
+      return { results: rows.filter((r) => r.blobKey === args[0]).map((r) => ({ id: r.id, removedAt: r.removedAt ?? null, keptInPlace: r.keptInPlace ?? null })) };
+    }
     if (/^UPDATE documents|^INSERT INTO documents/.test(sql)) return { changes: 1 };
     return undefined;
   }, asked);
@@ -209,6 +283,10 @@ const todaysWorkbook = (over: Partial<Parameters<typeof replaceSingleFile>[0]> =
   contentType: "application/x", uploadedBy: "the round on the hour", filedOn: "2026-09-24", ...over,
 });
 
+/* The new file under the SAME name the live one holds - the round's second
+   write of a day - goes through the pending address: (a) the new bytes to
+   "~pending <id> - <name>", (b) the old copy parked and the new bytes moved
+   onto the name, (c) the books. These four pull the floor out at each step. */
 test("a replace that fails halfway leaves the old workbook live and where it was", async () => {
   const key = "opms/CREW QUALIFICATION EXPIRY.xlsx";
   const bucket = fakeBucket({ [key]: "old workbook" });
@@ -225,6 +303,67 @@ test("a replace that fails halfway leaves the old workbook live and where it was
   assert.deepEqual(bucket.keys(), [key], "the pending copy was cleaned up and nothing was parked");
   assert.deepEqual(writes(db), [], "nothing on the books changed");
   assert.deepEqual(bucket.made, [], "no folder was made");
+});
+
+test("the same name again: the new bytes wait at a pending address, then take the name in one move", async () => {
+  const key = "opms/20260924 - CREW QUALIFICATION EXPIRY.xlsx";
+  const bucket = fakeBucket({ [key]: "this morning's" });
+  const db = documentsDb([liveRow("tm1", key)]);
+  setEnv({ DB: db, FILES: bucket, FILE_STORE: "r2" } as never);
+  const { row } = await replaceSingleFile(todaysWorkbook());
+  assert.equal(row.blobKey, key, "the new row holds the same name");
+  assert.equal(bucket.text(key), "new workbook", "…with the new bytes under it");
+  assert.equal(bucket.text("removed/tm1 - 20260924 - CREW QUALIFICATION EXPIRY.xlsx"), "this morning's", "the old copy is parked flat");
+  assert.ok(!bucket.keys().some((k) => k.includes("~pending")), "no pending copy is left behind");
+  assert.deepEqual(bucket.made, [], "no folder was made");
+});
+
+test("the same name again, and the move onto it fails: the old copy is back and the pending copy gone", async () => {
+  const key = "opms/20260924 - CREW QUALIFICATION EXPIRY.xlsx";
+  const bucket = fakeBucket({ [key]: "this morning's" });
+  const db = documentsDb([liveRow("tm1", key)]);
+  setEnv({ DB: db, FILES: bucket, FILE_STORE: "r2" } as never);
+  // Write 1 the pending copy, 2 the old copy parked, 3 the move onto the name.
+  bucket.failOn = 3;
+  await assert.rejects(replaceSingleFile(todaysWorkbook()), /refused the write/);
+  assert.equal(bucket.text(key), "this morning's", "the live address holds the old bytes again");
+  assert.ok(!bucket.keys().some((k) => k.includes("~pending")), "the pending copy is gone");
+  assert.deepEqual(writes(db), [], "nothing on the books changed");
+});
+
+test("the same name again, and the books refuse the batch: the old bytes are back on the name", async () => {
+  const key = "opms/20260924 - CREW QUALIFICATION EXPIRY.xlsx";
+  const bucket = fakeBucket({ [key]: "this morning's" });
+  const db = documentsDb([liveRow("tm1", key)]);
+  db.batch = async () => { throw new Error("D1 is having a bad morning"); };
+  setEnv({ DB: db, FILES: bucket, FILE_STORE: "r2" } as never);
+  await assert.rejects(replaceSingleFile(todaysWorkbook()), /bad morning/);
+  assert.equal(bucket.text(key), "this morning's", "the old copy is back on its live address");
+  assert.ok(!bucket.keys().some((k) => k.includes("~pending")), "no pending copy is left behind");
+});
+
+/* Nothing is ever written over: not the office's file kept in place after
+   the round replaced it, and not a file the office dropped in the folder
+   that is on no row at all. Both push the new one to the next suffix. */
+test("the office's workbook, kept in place after a replace, is not written over by the next", async () => {
+  const theirs = "opms/20260924 - CREW QUALIFICATION EXPIRY.xlsx";
+  const bucket = fakeBucket({ [theirs]: "OFFICE", "opms/20260923 - CREW QUALIFICATION EXPIRY.xlsx": "yesterday's" });
+  const db = documentsDb([keptRow("old", theirs), liveRow("tm2", "opms/20260923 - CREW QUALIFICATION EXPIRY.xlsx")]);
+  setEnv({ DB: db, FILES: bucket, FILE_STORE: "r2" } as never);
+  const { row } = await replaceSingleFile(todaysWorkbook());
+  assert.equal(row.filename, "20260924 - CREW QUALIFICATION EXPIRY (2).xlsx", "the next suffix");
+  assert.equal(bucket.text(theirs), "OFFICE", "the office's bytes are untouched");
+  assert.equal(bucket.text(row.blobKey), "new workbook");
+});
+
+test("a file in the folder that is on no row is not written over either", async () => {
+  const loose = "opms/20260924 - CREW QUALIFICATION EXPIRY.xlsx";
+  const bucket = fakeBucket({ [loose]: "dropped in by hand", "opms/20260923 - CREW QUALIFICATION EXPIRY.xlsx": "yesterday's" });
+  const db = documentsDb([liveRow("tm2", "opms/20260923 - CREW QUALIFICATION EXPIRY.xlsx")]);
+  setEnv({ DB: db, FILES: bucket, FILE_STORE: "r2" } as never);
+  const { row } = await replaceSingleFile(todaysWorkbook());
+  assert.equal(row.filename, "20260924 - CREW QUALIFICATION EXPIRY (2).xlsx", "the next suffix");
+  assert.equal(bucket.text(loose), "dropped in by hand", "the loose file is untouched");
 });
 
 test("a clean replace parks the old copy flat and lands the new one in one batch", async () => {
@@ -416,10 +555,30 @@ const smallWorkbook = () => writeZip([
 function portalDb(doc: Record<string, unknown>, rows: Record<string, unknown>[], readings: Record<string, unknown>) {
   const state = { data: JSON.stringify(doc), rev: 1 };
   const blobs = new Map<string, string>();
+  // The version mark the store stamps on every write, for the lease's take.
+  const etags = new Map<string, string>();
   Object.entries(readings).forEach(([k, v]) => blobs.set("certificate-readings|" + k, JSON.stringify(v)));
+  const drizzle = drizzleOn(rows);
   const db = fakeDb((sql, args) => {
     if (/PRAGMA table_info/.test(sql)) return { results: [{ name: "adopted_from_folder" }, { name: "kept_in_place" }] };
     if (/SELECT data, rev FROM portal_state/.test(sql)) return { results: [{ ...state }] };
+    if (/SELECT data FROM portal_state/.test(sql)) return { results: [{ data: state.data }] };
+    if (/SELECT folder, blob_key AS blobKey FROM documents/.test(sql)) {
+      return { results: rows.filter((r) => r.category === "certificate" && !r.removedAt && r.folder).map((r) => ({ folder: r.folder, blobKey: r.blobKey })) };
+    }
+    if (/SELECT value, etag FROM blobs WHERE store = \?1 AND key = \?2/.test(sql)) {
+      const v = blobs.get(args[0] + "|" + args[1]);
+      return { results: v === undefined ? [] : [{ value: v, etag: etags.get(args[0] + "|" + args[1]) ?? null }] };
+    }
+    if (/^UPDATE blobs SET value = \?3/.test(sql)) {
+      const k = args[0] + "|" + args[1];
+      // A row written before etags existed matches the store's stand-in for one.
+      const mark = etags.get(k);
+      const matches = mark === args[5] || (mark === undefined && args[5] === "pre-etag");
+      if (!blobs.has(k) || !matches) return { changes: 0 };
+      blobs.set(k, String(args[2])); etags.set(k, String(args[4]));
+      return { changes: 1 };
+    }
     if (/UPDATE portal_state SET data/.test(sql)) {
       if (args[3] !== state.rev) return { changes: 0 };
       state.data = String(args[1]); state.rev++;
@@ -435,12 +594,13 @@ function portalDb(doc: Record<string, unknown>, rows: Record<string, unknown>[],
     if (/SELECT key, value FROM blobs WHERE store = \?1/.test(sql)) {
       return { results: [...blobs.entries()].filter(([k]) => k.startsWith(args[0] + "|")).map(([k, value]) => ({ key: k.slice(k.indexOf("|") + 1), value })) };
     }
-    if (/^INSERT INTO blobs/.test(sql)) { blobs.set(args[0] + "|" + args[1], String(args[2])); return { changes: 1 }; }
+    if (/^INSERT INTO blobs/.test(sql)) { blobs.set(args[0] + "|" + args[1], String(args[2])); etags.set(args[0] + "|" + args[1], String(args[4])); return { changes: 1 }; }
     if (/^DELETE FROM blobs/.test(sql)) { blobs.delete(args[0] + "|" + args[1]); return { changes: 1 }; }
     if (/FROM documents WHERE category = 'certificate' AND removed_at IS NULL/.test(sql)) return { results: rows.filter((r) => r.category === "certificate" && !r.removedAt) };
     if (/FROM documents WHERE category = \?1 AND removed_at IS NULL/.test(sql)) return { results: rows.filter((r) => r.category === args[0] && !r.removedAt) };
-    if (/SELECT id FROM documents WHERE blob_key = \?1 AND removed_at IS NULL/.test(sql)) return { results: rows.filter((r) => r.blobKey === args[0] && !r.removedAt).map((r) => ({ id: r.id })) };
-    if (/SELECT id FROM documents WHERE blob_key = \?1 AND removed_at IS NOT NULL/.test(sql)) return { results: rows.filter((r) => r.blobKey === args[0] && !!r.removedAt).map((r) => ({ id: r.id })) };
+    if (/SELECT id, removed_at AS removedAt, kept_in_place AS keptInPlace FROM documents WHERE blob_key = \?1/.test(sql)) {
+      return { results: rows.filter((r) => r.blobKey === args[0]).map((r) => ({ id: r.id, removedAt: r.removedAt ?? null, keptInPlace: r.keptInPlace ?? null })) };
+    }
     if (/UPDATE documents\s+SET read_code/.test(sql)) return { changes: 1 };
     if (/^UPDATE documents SET removed_at/.test(sql)) {
       const r = rows.find((x) => x.id === args[0]);
@@ -452,14 +612,18 @@ function portalDb(doc: Record<string, unknown>, rows: Record<string, unknown>[],
         title: args[6], uploadedBy: args[7], filedOn: args[8], sessionId: args[9], createdAt: args[10], removedAt: null, adoptedFromFolder: null, keptInPlace: null });
       return { changes: 1 };
     }
-    return undefined;
+    return drizzle(sql, args);
   });
-  return { db, state, blobs, doc: () => JSON.parse(state.data), rows };
+  return { db, state, blobs, etags, doc: () => JSON.parse(state.data), rows };
 }
 
-const oneManPortal = async (over: { orphanSeen?: Record<string, string>; filledFromCert?: Record<string, boolean> } = {}) => {
-  const tmKey = "opms/20260901 - CREW QUALIFICATION EXPIRY.xlsx";
-  const bucket = fakeBucket({});
+const oneManPortal = async (over: {
+  orphanSeen?: Record<string, string>; filledFromCert?: Record<string, boolean>;
+  /** The workbook as the office's own file, adopted from the folder. */
+  theirs?: boolean;
+} = {}) => {
+  const tmKey = over.theirs ? "opms/CREW QUALIFICATION EXPIRY.xlsx" : "opms/20260901 - CREW QUALIFICATION EXPIRY.xlsx";
+  const bucket = fakeBucket({ "opms/Brenton - OPMS/master.pdf": "a scan" });
   await bucket.put(tmKey, await smallWorkbook().arrayBuffer());
   bucket.made.length = 0;
   const portal = portalDb(
@@ -474,8 +638,8 @@ const oneManPortal = async (over: { orphanSeen?: Record<string, string>; filledF
       history: [],
     },
     [
-      { ...billysTicket, id: "c2", person: "bRENTON", checksum: "evans-master", blobKey: "opms/Brenton - OPMS/master.pdf" },
-      { ...liveRow("tm1", tmKey), sizeBytes: 5000 },
+      { ...billysTicket, id: "c2", person: "bRENTON", checksum: "evans-master", blobKey: "opms/Brenton - OPMS/master.pdf", sizeBytes: 6 },
+      { ...liveRow("tm1", tmKey, over.theirs ? 1 : 0), sizeBytes: 5000 },
     ],
     { "r1/evans-master.json": { ...reading, holderName: "Brenton Evans", expiresOn: "2031-05-26" } },
   );
@@ -510,7 +674,8 @@ test("the round puts a certificate's date on the matrix and writes the office's 
   assert.deepEqual(bucket.made, [], "no folder was made");
   const rowsNow = portal.rows.filter((r) => r.category === "training-matrix");
   assert.deepEqual(rowsNow.map((r) => [r.filename, !!r.removedAt]), [["20260901 - CREW QUALIFICATION EXPIRY.xlsx", true], [named, false]]);
-  assert.ok(![...portal.blobs.keys()].some((k) => k.endsWith("|round-lease")), "the lease is dropped at the end");
+  assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).until, 0, "the lease is run out at the end");
+  assert.equal(await roundRunning(), false);
 
   /* Read the written workbook back: E3 carries the date, F3 was left alone. */
   const written = await (await bucket.get("opms/" + named))!.arrayBuffer();
@@ -538,6 +703,34 @@ test("an hour in which files went off the books holds the clearing", async () =>
   assert.equal(out.held, "clearing held: 3 files went off the books this hour");
   assert.equal(out.cleared, 0, "nothing cleared while held");
   assert.equal(portal.doc().quals.rows[0][3][1], "2030-01-17", "the date stays");
+  assert.deepEqual(portal.doc().orphanSeen, { "EVANS, BRENTON::QL-17": "2026-09-24T02" }, "a held hour is no sighting, and forgets none");
+});
+
+test("a held hour with nothing else to do is an idle hour", async () => {
+  /* The same, but Evans's QL-01 is already on the matrix and noted as the
+     certificate's: nothing to apply, nothing to clear while held. The
+     sighting stays as it was and the document is not saved for nothing. */
+  const { portal } = await oneManPortal({
+    filledFromCert: { "EVANS, BRENTON::QL-01": true, "EVANS, BRENTON::QL-17": true },
+    orphanSeen: { "EVANS, BRENTON::QL-17": "2026-09-24T02" },
+  });
+  const doc = portal.doc(); doc.quals.rows[0][3][0] = "2031-05-26"; portal.state.data = JSON.stringify(doc);
+  const out = await runMatrixRound({ by: "the round on the hour", timeLeft: () => true, mirroredThisHour: 3 });
+  assert.equal(out.applied + out.cleared, 0);
+  assert.equal(portal.state.rev, 1, "no revision bump");
+  assert.deepEqual(portal.doc().orphanSeen, { "EVANS, BRENTON::QL-17": "2026-09-24T02" });
+});
+
+test("out of time before the workbook: the matrix is saved and the workbook waits", async () => {
+  const { portal, bucket, tmKey } = await oneManPortal();
+  let asked = 0;
+  // Time enough to compare, none left by the workbook.
+  const out = await runMatrixRound({ by: "the round on the hour", timeLeft: () => ++asked < 2, mirroredThisHour: 0 });
+  assert.equal(out.applied, 1, "the matrix took the date");
+  assert.equal(out.written, null, "the workbook was not touched");
+  assert.match(out.roundSkipped || "", /out of time before the workbook/);
+  assert.equal(portal.doc().quals.rows[0][3][0], "2031-05-26");
+  assert.ok(bucket.text(tmKey), "the workbook on file is where it was");
 });
 
 test("a second sighting clears the date, and the workbook follows", async () => {
@@ -559,6 +752,173 @@ test("a round that finds another running stands down", async () => {
   assert.equal(out.roundSkipped, "another round is still running");
   assert.equal(portal.state.rev, 1, "nothing written");
   assert.ok(await roundRunning(), "and the other's lease is left alone");
+});
+
+test("a lease that has run out is taken over, against its version mark", async () => {
+  const { portal } = await oneManPortal();
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: 0, by: "last hour", token: "x" }));
+  const out = await runMatrixRound({ by: "the round on the hour", timeLeft: () => true, mirroredThisHour: 0 });
+  assert.equal(out.roundSkipped, null, "the round ran");
+  const lease = JSON.parse(portal.blobs.get("sync|round-lease")!);
+  assert.equal(lease.by, "the round on the hour", "the lease was this round's");
+  assert.equal(lease.until, 0, "and is run out again at the end");
+  const took = portal.db.asked.filter((a) => /^UPDATE blobs SET value/.test(a.sql) && a.args[1] === "round-lease");
+  assert.ok(took.length >= 1, "it was taken by a conditional write, not written over");
+});
+
+test("a lease taken by somebody else in the same instant is not taken twice", async () => {
+  const { portal } = await oneManPortal();
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: 0, by: "last hour", token: "x" }));
+  // Between this round reading the lease free and writing its own, another
+  // isolate's write lands: the mark moves, and the conditional write misses.
+  const plain = portal.db.prepare;
+  let reads = 0;
+  portal.db.prepare = (sql: string) => {
+    const s = plain(sql);
+    if (!/SELECT value, etag FROM blobs/.test(sql)) return s;
+    const bind = s.bind;
+    s.bind = (...a: unknown[]) => {
+      const b = bind(...a);
+      if (++reads !== 1) return b;
+      const all = b.all.bind(b);
+      b.all = async () => {
+        const out = await all();
+        portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "the other", token: "y" }));
+        portal.etags.set("sync|round-lease", "the other's mark");
+        return out;
+      };
+      b.first = async () => (await b.all()).results[0] ?? null;
+      return b;
+    };
+    return s;
+  };
+  const out = await runMatrixRound({ by: "the round on the hour", timeLeft: () => true, mirroredThisHour: 0 });
+  assert.equal(out.roundSkipped, "another round is still running");
+  assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).by, "the other", "the other's lease stands");
+  assert.equal(portal.state.rev, 1, "nothing written");
+});
+
+/* ------------------------------------------------------------------------ *
+ * The office's own workbook, adopted from the folder, across the round and
+ * the next sync. The round writes its own beside it and marks the office's
+ * row removed, kept in place; the sync then finds the office's file still
+ * in the folder - and must not put it back on the books, or swap the
+ * round's own file for it.
+ * ------------------------------------------------------------------------ */
+test("the office's workbook stays off the books after the round replaces it, sync after sync", async () => {
+  const { portal, bucket, tmKey } = await oneManPortal({ theirs: true });
+  const theirs = bucket.text(tmKey);
+  const out = await runMatrixRound({ by: "the round on the hour", timeLeft: () => true, mirroredThisHour: 0 });
+  assert.equal(out.roundError, null);
+  assert.equal(out.applied, 1);
+  const named = datedWorkbookName("CREW QUALIFICATION EXPIRY.xlsx", todayThere());
+  assert.equal(out.workbook, named);
+  assert.equal(bucket.text(tmKey), theirs, "the office's file is exactly where it was");
+  const office = portal.rows.find((r) => r.id === "tm1")!;
+  assert.ok(office.removedAt, "the office's row is off the books");
+  assert.equal(office.keptInPlace, 1, "…kept in place");
+  assert.equal(office.blobKey, tmKey, "…still pointing at its own file");
+
+  // The sync, an hour later, over the same folder.
+  const seen = await survey();
+  assert.deepEqual(seen.returned, [], "the office's row is not written back on: it was removed on purpose");
+  assert.equal(seen.trainingSheet?.key, "opms/" + named, "the newest loose sheet is the round's own");
+  const done = await apply(seen);
+  assert.equal(done.returned, 0);
+  assert.deepEqual(done.adopted, [], "nothing adopted: the round's own file is already live");
+  const live = portal.rows.filter((r) => r.category === "training-matrix" && !r.removedAt);
+  assert.deepEqual(live.map((r) => r.filename), [named], "exactly one training matrix is live");
+  assert.equal(portal.rows.find((r) => r.id === "tm1")!.removedAt, office.removedAt, "the office's row is as the round left it");
+
+  // And the round again, with nothing new: an idle hour, no clash, no error.
+  const again = await runMatrixRound({ by: "the round on the hour", timeLeft: () => true, mirroredThisHour: 0 });
+  assert.equal(again.roundError, null);
+  assert.equal(again.roundSkipped, null);
+  assert.equal(again.applied, 0);
+  assert.equal(bucket.text(tmKey), theirs, "the office's file is still exactly where it was");
+});
+
+test("a pending copy left by a replace that was cut off is nobody's training matrix", async () => {
+  const { bucket } = await oneManPortal();
+  await bucket.put("opms/~pending 1234abcd - 20260930 - CREW QUALIFICATION EXPIRY.xlsx", bytesOf("half a replace"));
+  const seen = await survey();
+  assert.equal(seen.trainingSheet?.key, "opms/20260901 - CREW QUALIFICATION EXPIRY.xlsx", "the pending copy is passed over");
+  assert.ok(!Object.keys(seen.sheetSeen).some((k) => k.includes("~pending")));
+});
+
+/* ------------------------------------------------------------------------ *
+ * The page's Update the spreadsheet after the round: its comparison reads
+ * names through the register the way the round does, so a cell the round
+ * filled is claimed again and never taken for an orphan.
+ * ------------------------------------------------------------------------ */
+test("the page's comparison after the round claims the same cells, and its round clears nothing", async () => {
+  const { portal } = await oneManPortal();
+  await runMatrixRound({ by: "the round on the hour", timeLeft: () => true, mirroredThisHour: 0 });
+  const doc = portal.doc();
+  assert.deepEqual(doc.filledFromCert, { "EVANS, BRENTON::QL-01": true });
+
+  // The route, as the page calls it: the matrix as the page holds it, with
+  // the register's names on the rows.
+  const req = new Request("http://portal/api/analyse", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "compare", cols: doc.quals.cols, rows: doc.quals.rows, sheet: null }),
+  });
+  const res = await (await analyse(req)).json() as { claimed: string[]; settled: unknown[]; summary: { unread: number }; notes: { kind: string }[] };
+  assert.deepEqual(res.claimed, ["EVANS, BRENTON::QL-01"], "the certificate filed under bRENTON claims Evans's row");
+  assert.ok(!res.notes.some((n) => n.kind === "not-on-matrix"), "nobody is 'not on the matrix'");
+
+  // And the page's own settling over it, as UpdateTrainingMatrixInPlace runs it.
+  const round = settleRound({
+    filledFromCert: doc.filledFromCert, claimed: res.claimed, unread: res.summary.unread,
+    settled: res.settled as never, nameOf: asKnownPerson(doc.people),
+  });
+  assert.deepEqual(round.orphans, [], "nothing the round filled is an orphan to the page");
+  const laid = applySettled(doc.quals, round.settled);
+  assert.deepEqual(laid.applied.filter((a) => a.to === ""), [], "nothing is cleared");
+  assert.equal(laid.next.rows[0][3][0], "2031-05-26", "the date stands");
+});
+
+/* ------------------------------------------------------------------------ *
+ * The removed list's buttons on the office's own file: never deleted for
+ * good, never moved on restore, and taking it off the books leaves it be.
+ * ------------------------------------------------------------------------ */
+function officeFileDb(rows: Row[]) {
+  const drizzle = drizzleOn(rows);
+  return fakeDb((sql, args) => drizzle(sql, args));
+}
+
+test("delete for good refuses the office's file kept in place", async () => {
+  const theirs = "opms/CREW QUALIFICATION EXPIRY.xlsx";
+  const bucket = fakeBucket({ [theirs]: "the office's copy" });
+  const rows: Row[] = [keptRow("old", theirs)];
+  setEnv({ DB: officeFileDb(rows), FILES: bucket, FILE_STORE: "r2" } as never);
+  await assert.rejects(purgeDocument(rows[0] as never), KeptInPlace);
+  assert.equal(bucket.text(theirs), "the office's copy", "the office's file is untouched");
+  assert.equal(rows.length, 1, "and the row is still on the books");
+});
+
+test("restoring the office's file kept in place moves nothing", async () => {
+  const theirs = "opms/CREW QUALIFICATION EXPIRY.xlsx";
+  const bucket = fakeBucket({ [theirs]: "the office's copy" });
+  const rows: Row[] = [keptRow("old", theirs)];
+  setEnv({ DB: officeFileDb(rows), FILES: bucket, FILE_STORE: "r2" } as never);
+  const back = await restoreDocument(rows[0] as never);
+  assert.equal(back.blobKey, theirs, "the row points where it always did");
+  assert.equal(back.removedAt, null, "and is live again");
+  assert.equal(back.keptInPlace, null);
+  assert.deepEqual(bucket.keys(), [theirs], "nothing moved");
+  assert.deepEqual(bucket.made, [], "no folder was made");
+});
+
+test("taking the office's adopted file off the books leaves it where the office put it", async () => {
+  const theirs = "opms/spreadsheet/OPMS export.xlsx";
+  const bucket = fakeBucket({ [theirs]: "the office's export" }, ["opms", "opms/spreadsheet", "removed"]);
+  const rows: Row[] = [{ ...liveRow("op1", theirs, 1), category: "opms-sheet" }];
+  setEnv({ DB: officeFileDb(rows), FILES: bucket, FILE_STORE: "r2" } as never);
+  const gone = await removeDocument(rows[0] as never, "Matthew");
+  assert.equal(gone.blobKey, theirs, "the row still points at the office's file");
+  assert.equal(gone.keptInPlace, 1, "kept in place");
+  assert.deepEqual(bucket.keys(), [theirs], "nothing was parked");
 });
 
 /* ------------------------------------------------------------------------ *

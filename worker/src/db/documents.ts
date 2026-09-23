@@ -22,7 +22,14 @@ export function ensureDocumentColumns() {
       const info = await d1.prepare("PRAGMA table_info(documents)").all<{ name: string }>();
       const have = new Set((info.results || []).map((c) => c.name));
       for (const col of ["adopted_from_folder", "kept_in_place"]) {
-        if (!have.has(col)) await d1.prepare(`ALTER TABLE documents ADD COLUMN ${col} INTEGER`).run();
+        if (have.has(col)) continue;
+        try {
+          await d1.prepare(`ALTER TABLE documents ADD COLUMN ${col} INTEGER`).run();
+        } catch (e) {
+          // Another isolate got there first in the same instant: the column
+          // is there, which is all that was wanted.
+          if (!/duplicate column/i.test(e instanceof Error ? e.message : String(e))) throw e;
+        }
       }
     })().catch((e) => {
       // A failed attempt must not be remembered as done.
@@ -438,15 +445,27 @@ export async function relocateToRemovedBlob(row: DocumentRow) {
 export async function removeDocument(row: DocumentRow, by: string | null) {
   if (row.removedAt) return row;
 
-  const blobKey = await relocateToRemovedBlob(row);
+  // A file the office put in its folder stays exactly where it is; only
+  // the portal's account of it changes.
+  const theirs = !!row.adoptedFromFolder;
+  const blobKey = theirs ? row.blobKey : await relocateToRemovedBlob(row);
 
   const [updated] = await db
     .update(documents)
-    .set({ removedAt: new Date(), removedBy: by, blobKey })
+    .set({ removedAt: new Date(), removedBy: by, blobKey, keptInPlace: theirs ? 1 : null })
     .where(eq(documents.id, row.id))
     .returning();
 
   return updated;
+}
+
+/** A removed row whose bytes are the office's own file, where the office
+ *  put it. Thrown rather than the file being deleted or moved - the portal
+ *  never does either to the office's files. */
+export class KeptInPlace extends Error {
+  constructor(readonly filename: string) {
+    super(`${filename} is the office's own file, kept where the office put it; the portal will not delete or move it. Do that in SharePoint yourself.`);
+  }
 }
 
 /**
@@ -516,21 +535,25 @@ export async function restoreDocument(row: DocumentRow, fallbackHome?: string) {
     if (!home) throw new NoFolderForRestore(row.person || row.folder);
     filename = await freeCertName(row.folder, row.filename);
     blobKey = await moveBlob(row.blobKey, `${home}/${filename}`);
-  } else if (single) {
+  } else if (single && !row.keptInPlace) {
     blobKey = await moveBlob(row.blobKey, `${single.folder}/${filename}`);
   }
+  // A row kept in place goes back on the books where its bytes already
+  // are: the office's file was never moved, and is not moved now.
 
   const [updated] = await db
     .update(documents)
-    .set({ removedAt: null, removedBy: null, blobKey, filename })
+    .set({ removedAt: null, removedBy: null, blobKey, filename, keptInPlace: null })
     .where(eq(documents.id, row.id))
     .returning();
 
   return updated;
 }
 
-/** Destroy a file for good. Nothing calls this without a second, deliberate ask. */
+/** Destroy a file for good. Nothing calls this without a second, deliberate
+ *  ask - and never the office's own file, which was only ever kept in place. */
 export async function purgeDocument(row: DocumentRow) {
+  if (row.keptInPlace) throw new KeptInPlace(row.filename);
   await fileStore().delete(row.blobKey);
   await db.delete(documents).where(eq(documents.id, row.id));
 }

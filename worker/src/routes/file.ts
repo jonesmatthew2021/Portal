@@ -5,6 +5,7 @@ import { documents } from "../db/schema.js";
 import { certHome } from "../db/cert-home.js";
 import {
   fileStore,
+  KeptInPlace,
   liveSingleFileExists,
   purgeDocument,
   removeDocument,
@@ -79,7 +80,12 @@ export default async (req: Request, context: { params: { id: string } }) => {
           { status: 409 },
         );
       }
-      await purgeDocument(row);
+      try {
+        await purgeDocument(row);
+      } catch (e) {
+        if (e instanceof KeptInPlace) return Response.json({ error: e.message }, { status: 409 });
+        throw e;
+      }
       return new Response(null, { status: 204 });
     }
 

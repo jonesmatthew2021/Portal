@@ -8532,7 +8532,7 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
   const {
     quals: QUALS, setQuals, trainingMatrix, setTrainingMatrix,
     refileCertificates, setMatrixUpdated, validityMatrix, log, role,
-    setSkillsRequirements, filledFromCert, setFilledFromCert,
+    setSkillsRequirements, filledFromCert, setFilledFromCert, people,
   } = usePortal();
 
   const [run, setRun] = useState(null);   // null | { phase, read, total } | { phase: "failed", message }
@@ -8679,9 +8679,12 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
        * still on the books claims, and never while anything is unread. It
        * runs with the settled dates rather than after them, so the workbook
        * is written once and the cell that was cleared and the cell that was
-       * filled go in together. */
+       * filled go in together. Names are read through the register, as the
+       * round on the hour reads them, so a note the round kept under the
+       * register's name is the same cell here and never read as an orphan. */
       const { settled, orphans, noteNow } = settleRound({
         filledFromCert, claimed: res.claimed, unread: res.summary && res.summary.unread, settled: res.settled,
+        nameOf: asKnownPerson(people),
       });
 
       // The settled dates, laid over the crew matrix, and the exact cells they

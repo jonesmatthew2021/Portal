@@ -17,6 +17,7 @@ import {
   withSuffix,
 } from "../db/documents.js";
 import { replaceSingleFile } from "../db/single-file.js";
+import { roundRunning } from "../lib/round.js";
 
 // A function request body is capped at 6 MB once multipart overhead is counted,
 // so files are held a little under that. The portal enforces the same number.
@@ -400,6 +401,15 @@ async function uploadSingleFile(form: FormData, file: File, category: string) {
     return Response.json({ skipped: true }, { status: 200 });
   }
 
+  // Never two writers of the one workbook: the round on the hour holds a
+  // lease while it writes, and an upload waits for it.
+  if (await roundRunning()) {
+    return Response.json(
+      { error: "The hourly round is writing the workbook; try again in a minute." },
+      { status: 409 },
+    );
+  }
+
   // The replace itself - the new bytes first, the old copy parked, one
   // batch on the books, and the old copy put back if anything fails - is
   // in db/single-file.ts, where the hourly round runs the same steps.
@@ -443,6 +453,7 @@ export default async (req: Request) => {
               d.qual_code AS qualCode, d.expires_on AS expiresOn, d.checksum,
               d.read_code AS readCode, d.read_title AS readTitle,
               d.removed_at AS removedAt, d.removed_by AS removedBy,
+              d.kept_in_place AS keptInPlace,
               json_extract(b.value, '$.issuedOn') AS readIssued,
               json_extract(b.value, '$.expiresOn') AS readExpires,
               json_extract(b.value, '$.readable') AS readReadable
@@ -451,7 +462,7 @@ export default async (req: Request) => {
         AND b.key = 'r1/' || COALESCE(d.checksum, d.id) || '.json'
        WHERE d.removed_at IS ${wantRemoved ? "NOT" : ""} NULL
        ORDER BY ${wantRemoved ? "removed_at" : "created_at"} DESC`,
-    ).all<Row & { removedAt: number | null; readIssued: string | null; readExpires: string | null; readReadable: number | null }>();
+    ).all<Row & { removedAt: number | null; keptInPlace: number | null; readIssued: string | null; readExpires: string | null; readReadable: number | null }>();
 
     return Response.json(
       (listed.results || []).map((row) => ({
@@ -464,6 +475,9 @@ export default async (req: Request) => {
               removedBy: row.removedBy,
               person: row.person,
               title: row.title,
+              // The office's own file, left where the office put it: the
+              // portal will neither delete it for good nor move it back.
+              keptInPlace: !!row.keptInPlace,
             }
           : null),
       })),

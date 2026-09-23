@@ -32,6 +32,11 @@ import {
  *       the live address(es) and the new bytes are deleted. If that
  *       copy-back itself fails the error says where the parked copy is,
  *       rather than swallowing it - the next person needs the address.
+ *
+ * And nothing is ever written over. The address the new bytes take is
+ * looked at first - on the books and in the library itself - and where
+ * anything but this replace's own outgoing copy is there, the next suffix
+ * is taken instead (see the loop below).
  */
 export type ReplaceInput = {
   category: string;
@@ -57,6 +62,13 @@ export function singleFileKeyFor(category: string, filename: string) {
   return `${uploadRoot}/${filename}`;
 }
 
+/** The name the new bytes wait under while the outgoing copy still holds
+ *  the final one. Unique to the replace, so two replaces that overlap
+ *  never share one, and the sync never takes a leftover for a workbook. */
+export const PENDING_MARK = "~pending";
+const pendingName = (id: string, filename: string) => `${PENDING_MARK} ${id.slice(0, 8)} - ${filename}`;
+export const isPendingName = (key: string) => (key.split("/").pop() || "").startsWith(PENDING_MARK);
+
 /** The live rows of one single-file category, newest first. Plain
  *  statements rather than the ORM, so the round's tests can stand a fake
  *  database behind them. */
@@ -78,6 +90,15 @@ export async function liveRowsOf(category: string): Promise<DocumentRow[]> {
   return (res.results || []) as unknown as DocumentRow[];
 }
 
+/** Every row on the books at one address, live or removed. */
+async function rowsAt(blobKey: string) {
+  const res = await getEnv()
+    .DB.prepare("SELECT id, removed_at AS removedAt, kept_in_place AS keptInPlace FROM documents WHERE blob_key = ?1")
+    .bind(blobKey)
+    .all<{ id: string; removedAt: number | null; keptInPlace: number | null }>();
+  return res.results || [];
+}
+
 const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export async function replaceSingleFile(
@@ -91,39 +112,45 @@ export async function replaceSingleFile(
 
   const existing = await liveRowsOf(input.category);
   const stays = (r: DocumentRow) => !!input.keepOutgoing || !!r.adoptedFromFolder;
+  const outgoing = new Map(existing.map((r) => [r.id, r]));
 
-  /* The name the new bytes take. Where a file that stays in place already
-     holds it - the office dropped a copy dated today and the round is
-     writing today's - the new one takes the next free suffix rather than
-     writing over the office's file. */
-  const keptKeys = new Set(existing.filter(stays).map((r) => r.blobKey));
+  /* The name the new bytes take, and who holds it.
+   *
+   * Only this replace's own outgoing copy is expected at the address: it is
+   * parked at (b), with the new bytes waiting at a pending address until
+   * then. Anything else there means the name is taken and the next suffix
+   * is tried:
+   *   - an outgoing copy that stays where it is (the office's own file);
+   *   - a removed row still pointing there. The office's workbook after the
+   *     round replaced it is one - its bytes are still at that address and
+   *     a restore of its row would serve whatever was written over them;
+   *   - a file in the library on no row at all - one the office dropped in
+   *     the folder that the sync has not taken on yet.
+   * A live row of some other document at the address is refused outright:
+   * the books disagree with themselves, and a person looks. */
   let filename = safeName(input.filename);
   let finalKey = singleFileKeyFor(input.category, filename);
-  for (let n = 2; keptKeys.has(finalKey); n++) {
+  let occupied = false;
+  for (let n = 2; ; n++) {
+    const here = await rowsAt(finalKey);
+    const stranger = here.find((h) => !h.removedAt && !outgoing.has(h.id));
+    if (stranger) throw new Error(`${filename} is already on the books as another document; nothing was written`);
+    const taken = here.some((h) => !!h.removedAt || stays(outgoing.get(h.id)!));
+    occupied = !taken && here.length > 0;
+    if (!taken && (occupied || !(await store.getMetadata(finalKey)))) break;
     filename = withSuffix(safeName(input.filename), n);
     finalKey = singleFileKeyFor(input.category, filename);
   }
 
-  /* Who holds the final address now. An outgoing row of this category is
-     expected and is parked at (b); anything else on the books at that
-     address would be written over, so it is refused before a byte moves. */
-  const holders = await d1
-    .prepare("SELECT id FROM documents WHERE blob_key = ?1 AND removed_at IS NULL")
-    .bind(finalKey)
-    .all<{ id: string }>();
-  const outgoingIds = new Set(existing.map((r) => r.id));
-  const stranger = (holders.results || []).find((h) => !outgoingIds.has(h.id));
-  if (stranger) throw new Error(`${filename} is already on the books as another document; nothing was written`);
-  const occupied = (holders.results || []).length > 0;
-  const pendingKey = occupied ? singleFileKeyFor(input.category, `~pending - ${filename}`) : null;
+  const at = Math.floor(Date.now() / 1000);
+  const id = crypto.randomUUID();
+  const pendingKey = occupied ? singleFileKeyFor(input.category, pendingName(id, filename)) : null;
 
   // (a) the new bytes, before anything on the books is touched.
   await store.set(pendingKey ?? finalKey, input.bytes);
 
   const archivedKeys = new Map<string, string>();
   let landed = !pendingKey;
-  const at = Math.floor(Date.now() / 1000);
-  const id = crypto.randomUUID();
   try {
     // (b) the outgoing copies parked - or left where the office put them.
     for (const r of existing) {

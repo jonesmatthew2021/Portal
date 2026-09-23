@@ -8,8 +8,7 @@ import { readDocument, saveDocument, type SharedDocument } from "./shared-state.
 import { matrixReadingKey, matrixStore, todayThere, type Matrix } from "./analysis.js";
 import { getStore } from "../compat/blobs.js";
 import { fileStore, legacyRemovedKeyFor, removedKeyFor } from "../db/documents.js";
-import { liveRowsOf, replaceSingleFile, singleFileKeyFor } from "../db/single-file.js";
-import { getEnv } from "../env.js";
+import { liveRowsOf, replaceSingleFile } from "../db/single-file.js";
 
 /**
  * The round on the hour: the certificates' dates put on the crew matrix and
@@ -46,8 +45,15 @@ export type RoundOutcome = {
 
 /* Two rounds must never overlap - two writers of the one workbook is how a
    file gets lost. A lease in the sync store says one is running; it
-   outlives the round's own time budget by a margin, and is dropped as the
-   round ends whatever happened. */
+   outlives the round's own time budget by a margin, and is run out as the
+   round ends whatever happened.
+
+   It is taken against the version mark the store puts on every write, so
+   of two rounds that read it free in the same instant only one can take
+   it; the row is left in place when it runs out, rather than deleted, so
+   there is always a mark to take it against. The page's buttons and the
+   upload route ask roundRunning() before they write the workbook, and
+   stand aside while it is held. */
 const LEASE_KEY = "round-lease";
 const LEASE_MS = 15 * 60 * 1000;
 type Lease = { until: number; by: string; token: string };
@@ -56,6 +62,29 @@ type Lease = { until: number; by: string; token: string };
 export async function roundRunning(): Promise<boolean> {
   const lease = (await getStore("sync").get(LEASE_KEY, { type: "json" })) as Lease | null;
   return !!lease && lease.until > Date.now();
+}
+
+/** The lease taken, or null where another round holds it or took it first. */
+async function takeLease(by: string, token: string): Promise<Lease | null> {
+  const leases = getStore("sync");
+  const lease = { until: Date.now() + LEASE_MS, by, token } satisfies Lease;
+  const held = await leases.getWithMetadata(LEASE_KEY, { type: "json" });
+  const running = held ? (held.data as Lease | null) : null;
+  if (running && running.until > Date.now()) return null;
+  if (!held) {
+    // No mark yet to take it against: the first round ever.
+    await leases.setJSON(LEASE_KEY, lease);
+    return lease;
+  }
+  const { modified } = await leases.setJSON(LEASE_KEY, lease, { onlyIfMatch: held.etag });
+  return modified ? lease : null;
+}
+
+/** The lease run out - only where it is still this round's. */
+async function dropLease(token: string) {
+  const leases = getStore("sync");
+  const held = (await leases.get(LEASE_KEY, { type: "json" })) as Lease | null;
+  if (held && held.token === token) await leases.setJSON(LEASE_KEY, { ...held, until: 0 });
 }
 
 // The office's workbook is rewritten in memory, and a Worker has a fixed
@@ -137,12 +166,11 @@ export async function runMatrixRound(opts: {
   };
   const skip = (why: string) => { out.roundSkipped = why; return out; };
 
-  const leases = getStore("sync");
   const token = crypto.randomUUID();
+  let leased = false;
   try {
-    const running = (await leases.get(LEASE_KEY, { type: "json" })) as Lease | null;
-    if (running && running.until > Date.now()) return skip("another round is still running");
-    await leases.setJSON(LEASE_KEY, { until: Date.now() + LEASE_MS, by: opts.by, token } satisfies Lease);
+    if (!(await takeLease(opts.by, token))) return skip("another round is still running");
+    leased = true;
 
     // (a) the matrix as the register names people. No crew, no round.
     const cur = await readDocument();
@@ -225,6 +253,7 @@ export async function runMatrixRound(opts: {
 
     // (f) the office's workbook - only when a cell actually moved this hour.
     if (out.applied + out.cleared === 0) return out;
+    if (!opts.timeLeft()) return skip("out of time before the workbook; the next cell that changes writes it");
     await writeWorkbook(opts, out, changedKeys);
     return out;
   } catch (e) {
@@ -233,8 +262,7 @@ export async function runMatrixRound(opts: {
     return out;
   } finally {
     try {
-      const held = (await leases.get(LEASE_KEY, { type: "json" })) as Lease | null;
-      if (!held || held.token === token) await leases.delete(LEASE_KEY);
+      if (leased) await dropLease(token);
     } catch (e) {
       console.error("the round's lease was not dropped:", e);
     }
@@ -244,9 +272,11 @@ export async function runMatrixRound(opts: {
 /**
  * The workbook on file, written in place with the cells this round changed
  * and any it finds blank, then filed under today's date through
- * replaceSingleFile. Every reason not to is said in roundSkipped rather
- * than thrown; the matrix is already saved by now, and the page's own
- * button can always write the workbook from it.
+ * replaceSingleFile - which also decides the address it lands on, taking
+ * the next suffix where the wanted name is the office's file or a removed
+ * copy's. Every reason not to is said in roundSkipped rather than thrown;
+ * the matrix is already saved by now, and the page's own button can always
+ * write the workbook from it.
  */
 async function writeWorkbook(
   opts: { by: string }, out: RoundOutcome, changedKeys: Set<string>,
@@ -277,17 +307,6 @@ async function writeWorkbook(
 
   const today = todayThere();
   const named = datedWorkbookName(tm.filename, today);
-  const target = singleFileKeyFor("training-matrix", named);
-  /* A removed row still pointing at today's address would, if restored,
-     serve whatever this round writes there rather than its own bytes. */
-  const clash = await getEnv()
-    .DB.prepare("SELECT id FROM documents WHERE blob_key = ?1 AND removed_at IS NOT NULL LIMIT 1")
-    .bind(target)
-    .first<{ id: string }>();
-  if (clash) {
-    out.roundSkipped = `${named} is the address of a removed copy, so it was not written; a restore would serve the wrong bytes`;
-    return;
-  }
 
   // The matrix as it is now, after this round's save and anything since.
   const fresh = await readDocument();
