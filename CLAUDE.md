@@ -68,6 +68,18 @@ modules. Edit that code there and only there.
   `opmsCertPrefix(token)`, which works a name out and so makes new folders.
 - **No explainer text.** The UI carries what Matthew asked for and nothing else.
   Don't add helpful notes to the screen.
+- **The round on the hour is the worker's.** `worker/src/lib/round.ts` puts
+  the certificates' dates on the crew matrix and writes the office's CREW
+  QUALIFICATION EXPIRY workbook by itself, every hour, with no browser open
+  (`scheduled()` in `worker/src/index.ts`; the SharePoint page shows what it
+  did). It saves the shared document against the revision it read
+  (`lib/shared-state.ts`), replaces the workbook through
+  `db/single-file.ts` whose order of work is fixed so the old copy is never
+  lost, clears a date only on its second sighting as an orphan, and writes
+  only the cells it changed plus blanks — a figure the office typed is left
+  as typed. Removed copies are parked flat under `removed/` (no folder is
+  ever made), and a file the office itself put in a folder is never moved:
+  its row comes off the books with the bytes left where they are.
 - **The last 200 saves are kept** (`portal_state_history`) and any one of them
   can be put back from `Admin → Access Grants`, under Revisions.
 
