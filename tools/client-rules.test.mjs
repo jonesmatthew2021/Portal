@@ -306,6 +306,21 @@ const is = (got, want, what) => {
   is(exact.next.rows.map((r) => r[3][0]), ["", "2031-05-26"], "the row spelt as the settled name takes the date");
   const first = rules.applySettled(quals, [{ person: "Brenton Evans", code: "QL-01", value: "2031-05-26" }], reg.nameOf);
   is(first.next.rows.map((r) => r[3][0]), ["2031-05-26", ""], "with neither spelt that way, the first of his rows takes it");
+
+  /* The same spelling twice - a man pasted onto the matrix twice - lands on
+     the first of the two, which is the line the workbook writer finds too;
+     the second is never written on. */
+  const twice = {
+    cols: [["QL-01", "Master"]],
+    rows: [
+      ["EVANS, Brenton", "Master", "", [""]],
+      ["EVANS, Brenton", "Master", "", [""]],
+    ],
+  };
+  const dup = rules.applySettled(twice, [{ person: "EVANS, Brenton", code: "QL-01", value: "2031-05-26" }], reg.nameOf);
+  is(dup.next.rows.map((r) => r[3][0]), ["2031-05-26", ""], "a duplicated spelling takes the first row");
+  const dupPage = lib.applySettled(twice, [{ person: "EVANS, Brenton", code: "QL-01", value: "2031-05-26" }]);
+  is(dupPage.next.rows.map((r) => r[3][0]), ["2031-05-26", ""], "…in the page's copy as well");
 }
 
 /* ---- a settled date finds its row through the register's name ---- */

@@ -171,11 +171,16 @@ export function applySettled(quals, settled, nameOf = (n) => n) {
   /* Where two rows answer to one register name, the first of them is the
      row - the same rule the workbook writer uses to find a row, so a date
      lands on the same man's line here and in the office's file. A row
-     spelt exactly as the settled name is preferred over both. */
+     spelt exactly as the settled name is preferred over both; and where
+     two rows carry the very same spelling, the first of those, again as
+     the workbook writer has it - the last used to win here, so the date
+     went on one line in the document and another in the workbook. */
   /** @type {Map<string, number>} */
   const rowAt = new Map();
   rows.forEach((r, i) => { const k = String(as(r[0])).trim().toUpperCase(); if (!rowAt.has(k)) rowAt.set(k, i); });
-  const rowSpelt = new Map(rows.map((r, i) => [String(r[0]).trim().toUpperCase(), i]));
+  /** @type {Map<string, number>} */
+  const rowSpelt = new Map();
+  rows.forEach((r, i) => { const k = String(r[0]).trim().toUpperCase(); if (!rowSpelt.has(k)) rowSpelt.set(k, i); });
   /** @param {string} person */
   const rowFor = (person) => {
     const exact = rowSpelt.get(person.trim().toUpperCase());
