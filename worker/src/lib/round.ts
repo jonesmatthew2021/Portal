@@ -323,7 +323,9 @@ async function rememberOwed(by: string, owed: Set<string>) {
   await saveDocument((doc) => {
     const had = owedCells(doc);
     const next = owed.size ? [...new Set([...had, ...owed])].sort() : [];
-    if (next.length === had.length && next.every((k, i) => k === [...had].sort()[i])) return null;
+    // Nothing new owed: the same cells, in the same order, as already written.
+    const was = [...had].sort();
+    if (next.length === was.length && next.every((k, i) => k === was[i])) return null;
     doc.workbookPending = next;
     return doc;
   }, by);
