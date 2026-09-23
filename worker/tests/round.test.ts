@@ -247,6 +247,31 @@ test("the refile labels certificates in batches, not a statement each", async ()
   assert.equal(db.asked.filter((a) => /^UPDATE documents SET person/.test(a.sql)).length, 2, "…and nowhere else");
 });
 
+test("the comparison writes a certificate's row only where the row does not already say the same", async () => {
+  const nameOf = asKnownPerson([{ name: "SITTIYOS, Kachin", aliases: ["bILLY"] }]);
+  const noted = (db: { asked: Asked[] }) => db.asked.filter((a) => /UPDATE documents\s+SET read_code/.test(a.sql));
+
+  // A row that has never been written: one note goes down.
+  const fresh = certificatesDb();
+  setEnv({ DB: fresh, FILE_STORE: "r2" } as never);
+  await compareMatrix(matrix, null, nameOf);
+  assert.equal(noted(fresh).length, 1, "the reading is written onto the row");
+  assert.deepEqual(noted(fresh)[0].args.slice(0, 6), ["c1", "QL-01", "2031-02-17", "2026-02-17", "AMSA", "Master <500GT"]);
+
+  // The same row an hour later, already carrying exactly that: nothing written.
+  const already = { ...billysTicket, readCode: "QL-01", readExpires: "2031-02-17", readIssued: "2026-02-17", readIssuer: "AMSA", readTitle: "Master <500GT" };
+  const quiet = fakeDb((sql) => {
+    if (/FROM documents WHERE category = 'certificate'/.test(sql)) return { results: [already] };
+    if (/SELECT key, value FROM blobs/.test(sql)) return { results: [{ key: "r1/abc.json", value: JSON.stringify(reading) }] };
+    if (/SELECT value FROM blobs/.test(sql)) return { results: [] };
+    return undefined;
+  });
+  setEnv({ DB: quiet, FILE_STORE: "r2" } as never);
+  const out = await compareMatrix(matrix, null, nameOf);
+  assert.deepEqual(out.settled, [{ person: "SITTIYOS, Kachin", code: "QL-01", value: "2031-02-17" }], "the answer is the same");
+  assert.deepEqual(noted(quiet), [], "and a quiet hour writes nothing");
+});
+
 test("without a register the route compares names as they are", async () => {
   setEnv({ DB: certificatesDb(), FILE_STORE: "r2" } as never);
   const out = await compareMatrix(matrix, null);

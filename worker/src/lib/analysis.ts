@@ -529,6 +529,8 @@ export async function liveCertificates(): Promise<Row[]> {
               uploaded_by AS uploadedBy, tag, source, party, rank, swing,
               filed_on AS filedOn, session_id AS sessionId, person, folder,
               qual_code AS qualCode, expires_on AS expiresOn, checksum,
+              read_code AS readCode, read_expires AS readExpires, read_issued AS readIssued,
+              read_issuer AS readIssuer, read_title AS readTitle,
               created_at AS createdAt, removed_at AS removedAt,
               removed_by AS removedBy
        FROM documents WHERE category = 'certificate' AND removed_at IS NULL

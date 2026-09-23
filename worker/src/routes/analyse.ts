@@ -680,6 +680,8 @@ export type CompareResult = {
   notes: Note[];
   settled: { person: string; code: string; value: string; clear?: boolean }[];
   claimed: string[];
+  /** Certificate rows written down this pass - those not already saying
+   *  what the reading says. */
   noted: number;
   summary: {
     certificates: number; read: number; unread: number; compared: number; agree: number;
@@ -886,14 +888,20 @@ export async function compareMatrix(
       expires: expiry,
       title: reading.certificateTitle || null,
     };
-    noted.push({
+    const note = {
       id: row.id,
       code,
       expires: expiry || null,
       issued: reading.issuedOn || null,
       issuer: reading.issuer || null,
       title: reading.certificateTitle || null,
-    });
+    };
+    // Only where the row does not already say exactly this: a quiet hour
+    // then writes nothing, rather than every certificate's row every hour.
+    const same = (row.readCode ?? null) === note.code && (row.readExpires ?? null) === note.expires
+      && (row.readIssued ?? null) === note.issued && (row.readIssuer ?? null) === note.issuer
+      && (row.readTitle ?? null) === note.title;
+    if (!same) noted.push(note);
 
     const base = {
       id: `cert:${row.id}:${code}`,
