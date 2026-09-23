@@ -44,7 +44,7 @@ function SharePointPage() {
       const r = await fetch("/api/sync", { method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ by: "Import new files" }) });
       const out = await r.json();
-      if (!r.ok) throw new Error(out.error || `The sync failed (${r.status}).`);
+      if (!r.ok) throw new Error(out.error || `The import failed (${r.status}).`);
       setSyncOut(out);
       if (out && Array.isArray(out.people)) setPeopleSeen(out.people);
       await load(path);
@@ -84,7 +84,6 @@ function SharePointPage() {
 
   return (
     <div>
-      <div style={{ marginBottom: 10 }}><Eyebrow color={T.accent}>The company library, live</Eyebrow></div>
       {/* Folders → portal: what the hourly import last did, and a button to run it now. */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontFamily: T.body,
         fontSize: 12.5, color: T.muted, padding: "9px 12px", border: `1px solid ${T.rule}`, borderRadius: 2,

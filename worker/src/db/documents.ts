@@ -36,7 +36,7 @@ export const OPMS_FOLDER = "opms/spreadsheet";
 
 // The shift allocation guideline the office sends — not names, but how many
 // holders of certain certificates each shift (day and night) must carry, for
-// the swing and the swings after it. The Swing Compliance page holds the crew's
+// the swing and the swings after it. The Swings page holds the crew's
 // training matrix standing against it, so only the latest is kept, same as the
 // other office documents.
 export const SHIFT_ALLOCATION_FOLDER = "roster/shift-allocation";

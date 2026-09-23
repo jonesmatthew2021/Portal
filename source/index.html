@@ -3009,7 +3009,7 @@ function UpdateSpreadsheet({ label = "Upload or replace the spreadsheet", varian
       }}
       logAction="Spreadsheet uploaded"
       label={label}
-      footnote={`Date last updated now reads ${fmtDate(TODAY)}.`}
+      footnote={`Filed ${fmtDate(TODAY)}.`}
       variant={variant}
     />
   );
@@ -3046,7 +3046,7 @@ function BandTag({ band }) {
 /* The certification screens carry two date columns per item. The expiry is
    what the matrix cell itself holds; the issue date only exists on the
    certificates, so it comes from the readings the portal keeps of every scan
-   on file — fetched once, shared, and refreshed by Update table. */
+   on file — fetched once, shared, and refreshed by Update certificate list. */
 
 const colDate = (iso) =>
   iso && /^\d{4}-\d{2}-\d{2}/.test(String(iso)) ? String(iso).slice(0, 10).split("-").reverse().join("/") : "—";
@@ -3063,7 +3063,7 @@ const certDateFor = (dates, person, code) => {
 };
 
 // The certificate behind one line, as a link. First choice is the scan the
-// last Update table run settled the dates from; where that run predates the
+// last Update certificate list run settled the dates from; where that run predates the
 // link being kept (or hasn't run yet), the scan filed under that person with
 // that code picked at upload answers instead.
 const certLinkFor = (dates, certificates, person, code) => {
@@ -4572,7 +4572,7 @@ function TrainingMatrix() {
             read. Everything under Report writes the matrix out as it stands —
             the crew report, one person's report, or the spreadsheet itself,
             downloaded and opened — nothing read, nothing changed. */}
-        <GenerateLatestMatrix variant="quiet" />
+        {admin && <GenerateLatestMatrix variant="quiet" />}
         <Button onClick={() => setReportMenu(!reportMenu)}>{reportMenu ? "Report ▴" : "Report ▾"}</Button>
         {reportMenu && (
           <>
@@ -7526,7 +7526,7 @@ function UploadCertificates() {
 /* Whether the authority that issued a certificate reads as Australian.
 
    Goes off the issuing authority the portal read from each scan when the dates
-   were last brought up to date (Update table) — nothing here re-reads a
+   were last brought up to date (Update certificate list) — nothing here re-reads a
    certificate. The markers are generous on purpose: a line is only flagged
    when its issuer names nothing Australian at all, and the issuer is printed
    on the flag itself so a wrongly flagged line gives itself away at a glance.
@@ -9611,7 +9611,7 @@ function GenerateLatestMatrix({ variant = "solid", label = "Update matrix" }) {
     <div style={{ width: wide ? "100%" : "auto" }}>
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <Button variant={variant} onClick={go} disabled={running}>
-          {running ? "Generating…" : label}
+          {running ? "Updating…" : label}
         </Button>
         {running && (
           <span style={{ fontFamily: T.mono, fontSize: 11.5, color: T.muted }}>{where}</span>
@@ -9622,7 +9622,7 @@ function GenerateLatestMatrix({ variant = "solid", label = "Update matrix" }) {
           analysis: the figure and the clock both climb while it works. */}
       {run && !hidden && (
         <AnalysisWindow
-          eyebrow="Generating the latest training matrix"
+          eyebrow="Updating the matrix"
           pct={pct}
           elapsed={elapsed}
           failed={run.phase === "failed"}
@@ -10620,7 +10620,7 @@ function MatrixAutoWindow() {
         failed
         message={auto.message}
         failNote={fromButton
-          ? "Nothing has been lost. The certificates already read are kept, so pressing Update table again carries on from here rather than starting over."
+          ? "Nothing has been lost. The certificates already read are kept, so pressing Update certificate list again carries on from here rather than starting over."
           : "The spreadsheet is filed and nothing has been lost. The certificates already read are kept, so the next run — the next upload, or Update matrix — carries on from here rather than starting over."}
         onClose={clearMatrixAuto}
       />
@@ -11184,7 +11184,7 @@ function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, ca
 
   const usePattern = (k) => {
     setSwingDates((d) => { const now = { ...(d || {}) }; delete now[k]; return now; });
-    log("Swing Compliance", "Swing dates cleared",
+    log("Swings", "Swing dates cleared",
       `${swingLabel(swingAt(k))} follows the four-week pattern again`);
   };
 
@@ -11198,7 +11198,7 @@ function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, ca
     beforeEdit.current = after;
     if (!wasGiven(k) || backwards(k)) return;
     const s = swingWithDates(k, swingDates);
-    log("Swing Compliance", "Swing dates set",
+    log("Swings", "Swing dates set",
       `Crew ${s.crew} · out ${fmtDate(s.flyOut)}, home ${fmtDate(s.flyHome)}`);
   };
 
@@ -13258,7 +13258,7 @@ function SyncPeople({ found, onClose }) {
     // The folder they came out of is theirs from now on, whatever it is called.
     setFolderNames({ ...(folderNames || {}), [p.folder]: name });
 
-    log("SharePoint", name + " taken onto the portal",
+    log("Documents", name + " taken onto the portal",
       position + (swing ? " · " + fmtDate(swing.on) + " – " + fmtDate(swing.off) : " · no swing yet"));
 
     setDone((d) => [...d, p.folder]);
@@ -13445,7 +13445,7 @@ function SyncPeople({ found, onClose }) {
                 <div style={{ fontFamily: T.body, fontSize: 12.5, lineHeight: 1.6,
                   color: f.ok === false ? T.bRed : T.muted }}>
                   {f.word}
-                  {f.ok === false && <> — their dates go in when Update the spreadsheet is next pressed.</>}
+                  {f.ok === false && <> — their dates go in on the next update.</>}
                 </div>
               </div>
             ))}
@@ -14459,7 +14459,7 @@ function GenerateAllocations({ people, log }) {
     await new Promise((r) => setTimeout(r, 140));
     setSwingDates(dates);
     setSwingBoards(boards);
-    log("Swing Allocation", "Allocations generated from the roster",
+    log("Swings", "Swings updated from the roster",
       matchedSwings + " swings · " + placed + " placements"
       + (strangers.size ? " · " + strangers.size + " not on the crew list" : ""));
     setWork({ done: true, pct: 100, swings: matchedSwings, placed, strangers: [...strangers] });
@@ -14497,7 +14497,7 @@ function GenerateAllocations({ people, log }) {
       {work && (
         <div style={panel}>
           <div style={{ fontFamily: T.display, fontSize: 15, fontWeight: 700, color: T.text, marginBottom: 10 }}>
-            {work.done ? "Allocations generated" : "Generating allocations"}
+            {work.done ? "Swings updated" : "Updating swings"}
           </div>
           {!work.done && (
             <>
@@ -14678,7 +14678,7 @@ function GenerateSwingCompliance({ results, here, setAt }) {
       } : null,
     };
     setSwingReport(report);
-    log("Swing Compliance", "Swing compliance generated",
+    log("Swings", "Swing compliance generated",
       `${report.swing.label} · Crew ${report.swing.crew} · `
       + `${report.counts.blocked ? `${report.counts.blocked} not clear` : "all clear"}`
       + `${report.counts.unchecked ? ` · ${report.counts.unchecked} unchecked` : ""}`);
@@ -15230,7 +15230,7 @@ function SwingShiftAllocation({ here }) {
         check: res.check || null,
         problems: problem ? [problem] : [],
       });
-      log("Swing Compliance", "Shift allocation compared",
+      log("Swings", "Shift allocation compared",
         `${payload.swing.label} · ${shiftAllocation.filename} · ${toFix ? `${toFix} to look at` : "all requirements met"}`);
       setRun(null);
     } catch (e) {
@@ -16564,11 +16564,11 @@ const ADMIN_PAGE_MOVED = {
   "swing-compliance": "swings",
   "required-docs": "documents",
   "sharepoint": "documents",
-  "checker": "crew-details",
+  "checker": "access",
 };
 
 function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingBoard, setSwingBoard, notes, corrCount, history, allTabs, hiddenTabs, onHideTab, onRestoreTab, onRestoreAllTabs, files, sync, log }) {
-  // The Admin tab is seven pages now, not one: the documents the portal has to
+  // The Admin tab is eight pages now, not one: the documents the portal has to
   // be given, the certification work it started as, the pages that were being
   // asked for around them, and the AI Checker — moved here from the crew tab
   // bar so it sits with the rest of the admin tooling. The page is remembered
@@ -16675,23 +16675,6 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
         {stat("Notes filed", notes.length)}
         {stat("Correspondence", corrCount)}
         {stat("Changes logged", history.length)}
-      </div>
-
-      {/* Roles */}
-      <div style={{ marginBottom: 10 }}><Eyebrow color={T.accent}>Who can do what</Eyebrow></div>
-      <div style={{ marginBottom: 22 }}>
-        {[
-          { who: "Crew", what: "Read everything. Comment on any post. File handover notes, submit and vote on suggestions. Delete their own posts.", role: "crew" },
-          ...ADMINS.map((a) => ({ who: a, what: "Everything crew can do, plus edit the roster, post documents and correspondence, delete any post, and add or remove tabs.", role: "admin" })),
-        ].map((r) => (
-          <div key={r.who} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap", padding: "10px 13px", borderBottom: `1px solid ${T.rule}` }}>
-            <div style={{ flex: 1, minWidth: 240 }}>
-              <div style={tx.name}>{r.who}</div>
-              <div style={{ fontFamily: T.body, fontSize: 14, color: T.muted, marginTop: 4, lineHeight: 1.5 }}>{r.what}</div>
-            </div>
-            <Chip fg={r.role === "admin" ? T.accent : T.muted} bg={r.role === "admin" ? T.accentSoft : T.raised}>{r.role}</Chip>
-          </div>
-        ))}
       </div>
 
       {/* Everything below is portal plumbing rather than day-to-day admin: removing
@@ -17129,7 +17112,7 @@ function CoolibahPortal({ role, onSignOut }) {
     // The issue and expiry dates read off the certificates on file, keyed
     // "PERSON::CODE". The certification screens' date columns read from here.
     // Shared, because the dates belong to the certificates rather than to
-    // whoever pressed Update table.
+    // whoever pressed Update certificate list.
     certDates: null,
     // How long each item stays valid, as the validity periods matrix lists it —
     // what the Module validity column on the E-Learning Status page shows.
@@ -17535,7 +17518,7 @@ function CoolibahPortal({ role, onSignOut }) {
 
   // The date columns on the certification screens fill themselves in on first
   // load where certificates have already been read but nobody has pressed
-  // Update table on this portal yet. Once, and only for an admin — the answer
+  // Update certificate list on this portal yet. Once, and only for an admin — the answer
   // is shared, so after that everyone reads what is already held.
   const askedCertDates = useRef(false);
   React.useEffect(() => {
@@ -17695,7 +17678,7 @@ function CoolibahPortal({ role, onSignOut }) {
           origin === "certificates"
             ? "Updated from the certificates just filed"
             : origin === "update-table"
-            ? "Updated from an Update table check"
+            ? "Updated from an Update certificate list check"
             : "Updated after a spreadsheet was replaced",
           `${applied.length} ${applied.length === 1 ? "date" : "dates"} changed`);
       }

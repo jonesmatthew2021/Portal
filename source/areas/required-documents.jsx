@@ -152,7 +152,7 @@ function RequiredDocuments() {
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14, flexWrap: "wrap",
         marginBottom: libraryOpen ? 14 : 0 }}>
-        <Eyebrow color={T.accent}>SharePoint</Eyebrow>
+        <Eyebrow color={T.accent}>The company library</Eyebrow>
         <Button variant="quiet" onClick={() => setLibraryOpen(!libraryOpen)}>
           {libraryOpen ? "Hide the library" : "Show the library"}
         </Button>

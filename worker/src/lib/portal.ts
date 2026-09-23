@@ -996,7 +996,7 @@ async function toolAnalysisAnswers(input: Record<string, unknown>): Promise<Tool
     const held = (await shiftStore().get(shiftKeyFor(sheet.id), { type: "json" })) as ShiftHeld | null;
     if (!held) {
       return {
-        text: `The shift allocation sheet (${sheet.filename}) is on the portal but no check has been run against it. The check is run from the portal's Swing Compliance page.`,
+        text: `The shift allocation sheet (${sheet.filename}) is on the portal but no check has been run against it. The check is run from the portal's Swings page.`,
       };
     }
     return {

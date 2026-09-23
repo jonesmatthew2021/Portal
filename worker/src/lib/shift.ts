@@ -65,7 +65,7 @@ export async function shiftSheetRow() {
 }
 
 export const NO_SHIFT_SHEET =
-  "No shift allocation sheet is on the portal. Upload it on the Swing Compliance page and the comparison runs against it.";
+  "No shift allocation sheet is on the portal. Upload it on the Swings page and the comparison runs against it.";
 
 /** Raised where there is nothing to run against, rather than nothing that worked. */
 export class ShiftMissing extends Error {
