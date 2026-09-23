@@ -8338,6 +8338,31 @@ function mergeSaved({ touched, mine, theirs, base }) {
 }
 
 /**
+ * What the tab holds once a merged save has landed: the merged copy, with
+ * any slice edited while it was in the air laid back over it - against the
+ * copy the first save carried, not against what the tab had loaded before
+ * the collision. The edits were built on the carried copy, so that is the
+ * base they differ from; measured against the older copy instead, an edit
+ * that put a cell back to what it was showed no change at all and was
+ * dropped, the cell springing back on screen to the first save's value and
+ * a cell the tab had crossed off its note coming back on. Only what those
+ * edits changed lands, a cell put back to what it was included.
+ *
+ * `now` is the tab's copy as it stands, `merged` the copy that landed,
+ * `carried` the copy the first save went up with, `inFlight` the slices
+ * edited since. Pure, so the rule can be proved outright
+ * (tools/client-rules.test.mjs).
+ */
+function afterMergedSave(now, merged, carried, inFlight) {
+  if (!inFlight.length) return { ...merged };
+  return mergeSaved({
+    touched: inFlight, mine: now, theirs: merged,
+    base: { quals: carried.quals, filled: carried.filledFromCert, seen: carried.orphanSeen,
+      pending: carried.workbookPending, history: carried.history },
+  });
+}
+
+/**
  * Bring the spreadsheet on file up to date and file it back.
  *
  * The workbook that is already on the portal is the one that comes back out of
@@ -16543,19 +16568,14 @@ function CoolibahPortal({ role, onSignOut }) {
           res = await saveState(sent, res.rev);
 
           if (!res.conflict) {
-            setStore((s) => {
-              // Anything edited while the merged copy was in the air is
-              // laid back over it the same way: only what that edit changed
-              // since base. Kept raw, the local copy would be the one built
-              // before the merge, without the hour's line and dates - and
-              // the next save, on a rev that now matches, would write it
-              // over them.
-              const inFlight = [...dirty.current];
-              const next = inFlight.length
-                ? mergeSaved({ touched: inFlight, mine: s, theirs: merged, base })
-                : { ...merged };
-              return withStoredFiles(next, storedFiles.current);
-            });
+            // Anything edited while the merged copy was in the air is laid
+            // back over it the same way: only what that edit changed since
+            // the copy the first save carried, which is what the edit was
+            // built on. Kept raw, the local copy would be the one built
+            // before the merge, without the hour's line and dates - and
+            // the next save, on a rev that now matches, would write it
+            // over them. See afterMergedSave.
+            setStore((s) => withStoredFiles(afterMergedSave(s, merged, mine, [...dirty.current]), storedFiles.current));
           }
         }
 
