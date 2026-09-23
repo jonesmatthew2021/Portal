@@ -1,14 +1,19 @@
-/* Certification Checker — the Admin tab of that name.
+/* The gaps list — what is expired, not held or unconfirmed on the matrix,
+ * with the renewal marks against each. It was the Certification Checker,
+ * an Admin page of its own; it opens on the Crew Matrix now, under Needs
+ * attention, for management. The matrix's own search box drives it when it
+ * is shown there, so there is one box, not two.
  *
  * Spliced into source/index.html by the build, so there is no import or
  * export here: by the time it runs it is the same one file it always was.
  * The shell holds the theme, the shared components and the state; this
- * holds what is only this tab's. See tools/source.mjs.
+ * holds what is only this section's. See tools/source.mjs.
  */
-function CertChecker() {
-  const { quals: QUALS, certSheet, certDates, certificates, renewalMarks } = usePortal();
+function CertChecker({ query }) {
+  const { quals: QUALS, certDates, certificates, renewalMarks } = usePortal();
   const validityFor = useValidityLookup();
-  const [q, setQ] = useState("");
+  const [own, setOwn] = useState("");
+  const q = query != null ? query : own;
   // Hiding what is already in motion leaves the true to-do list: red items
   // nothing has been done about yet.
   const [onlyUntouched, setOnlyUntouched] = useState(false);
@@ -127,29 +132,16 @@ function CertChecker() {
 
   return (
     <div>
-      {/* Sits above the far right of the tiles, over Unconfirmed: the day the
-          crew certificates spreadsheet was last uploaded. The button that
-          re-checks every certificate moved to Documents,
-          renamed Update certificate list. */}
-      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 14,
-        flexWrap: "wrap", marginBottom: 7 }}>
-        <div style={{ textAlign: "right" }}>
-          <Eyebrow>Date last updated</Eyebrow>
-          <div style={{ fontFamily: T.mono, fontSize: 12, marginTop: 4,
-            color: certSheet && certSheet.uploaded ? T.text : T.muted }}>
-            {certSheet && certSheet.uploaded ? fmtDate(certSheet.uploaded) : "No spreadsheet uploaded yet"}
-          </div>
-        </div>
-      </div>
-
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
         {SECTIONS.map(tile)}
         {tile({ key: "foreign", label: "Not Australian", colour: T.violet, value: foreignCount })}
       </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-        <input className="um-in" style={{ flex: 1, minWidth: 170 }} value={q}
-          onChange={(e) => setQ(e.target.value)} placeholder="Search crew or position" />
+        {query == null && (
+          <input className="um-in" style={{ flex: 1, minWidth: 170 }} value={own}
+            onChange={(e) => setOwn(e.target.value)} placeholder="Search crew or position" />
+        )}
         <Button variant={onlyUntouched ? "solid" : "quiet"}
           title="Hide items already marked Booked, Chased, or Evidence in — what's left is the to-do list"
           onClick={() => setOnlyUntouched(!onlyUntouched)}>

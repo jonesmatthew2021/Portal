@@ -4401,6 +4401,15 @@ function TrainingMatrix() {
         <Choices value={group} onPick={setGroup} options={groups} compact />
       </div>
 
+      {/* The gaps list — expired, not held, unconfirmed, with the renewal
+          marks against each — opens under Needs attention for management.
+          It was an Admin page of its own, showing the same trouble the
+          filter shows a second way. Crew get the filter alone: the marks
+          are the office's notes about people's tickets. */}
+      {admin && only === "attention" && (
+        <div style={{ marginBottom: 20 }}><CertChecker query={q} /></div>
+      )}
+
       {/* The grid works out what it asks of somebody from their position alone,
           so a person working in a position their ticket isn't for is read against
           the wrong set of requirements — and nothing on the grid used to say so.
@@ -9655,7 +9664,7 @@ function GenerateLatestMatrix({ variant = "solid", label = "Update matrix" }) {
               : "Nothing the certificates say disagrees with the matrix, so nothing was changed."}
             {done.derived > 0 && ` ${done.derived} ${done.derived === 1 ? "expiry was" : "expiries were"} worked out from ${done.validitySheet || "the validity periods matrix"} — certificates that print an issue date but no expiry.`}
             {done.refiled > 0 && ` ${done.refiled} ${done.refiled === 1 ? "certificate was" : "certificates were"} filed under the wrong crew member and ${done.refiled === 1 ? "has" : "have"} been moved.`}
-            {done.left > 0 && ` ${done.left} ${done.left === 1 ? "difference has" : "differences have"} no certificate behind them — they are on the certificate review under Certification Checker, to be answered by hand.`}
+            {done.left > 0 && ` ${done.left} ${done.left === 1 ? "difference has" : "differences have"} no certificate behind them — they are on the Crew Matrix under Needs attention, to be answered by hand.`}
           </div>
           <div style={{ marginTop: 9 }}>
             <a href={done.download} download={done.filename}
@@ -16539,7 +16548,6 @@ const ADMIN_PAGES = [
   { id: "crew-details", label: "Crew Details" },
   { id: "swings", label: "Swings" },
   { id: "documents", label: "Documents" },
-  { id: "checker", label: "Certification Checker" },
   { id: "elearning", label: "E-Learning Status" },
   { id: "opms", label: "OPMS Checker" },
   { id: "portways-docs", label: "Portways Documentation" },
@@ -16555,6 +16563,7 @@ const ADMIN_PAGE_MOVED = {
   "swing-compliance": "swings",
   "required-docs": "documents",
   "sharepoint": "documents",
+  "checker": "crew-details",
 };
 
 function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingBoard, setSwingBoard, notes, corrCount, history, allTabs, hiddenTabs, onHideTab, onRestoreTab, onRestoreAllTabs, files, sync, log }) {
@@ -16643,7 +16652,6 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
         <SwingsPage currentUser={currentUser} people={people} setPeople={setPeople}
           overrides={overrides} swingBoard={swingBoard} setSwingBoard={setSwingBoard} log={log} />
       )}
-      {page === "access" && <AccessGrantsPage />}
       {page === "opms" && <OPMSChecker />}
       {/* Portways' Crew List & Shift Allocation form, kept where the OPMS
           work is done. The page once carried a document library under it;
@@ -16651,12 +16659,12 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
       {page === "portways-docs" && <CrewListFormPage people={people} />}
       {page === "ai-checker" && <AiChecker log={log} />}
 
-      {page === "checker" && (
+      {/* The portal's own numbers, who can do what, and — for IT support —
+          the plumbing: tabs, the file store, the save status, the redeploy
+          notes. They sat under the Certification Checker; they live here now,
+          above the grants, with Start again still last on the page. */}
+      {page === "access" && (
         <>
-      <CertChecker />
-
-      <div style={{ height: 1, background: T.rule, margin: "26px 0 22px" }} />
-
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 22 }}>
         {stat("On the roster", people.filter((p) => p.active).length)}
         {stat("Notes filed", notes.length)}
@@ -16797,6 +16805,9 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
           <DownloadEverything log={log} />
         </>
       )}
+
+      <div style={{ height: 1, background: T.rule, margin: "26px 0 22px" }} />
+      <AccessGrantsPage />
         </>
       )}
     </div>
