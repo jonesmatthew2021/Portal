@@ -140,7 +140,24 @@ export function safeContentType(type: string | null | undefined) {
 // person's folder and the filename, so leaving a removed one where it was would
 // keep that name occupied and push next year's renewal to "AMSA Medical (2).pdf".
 // Moving it here frees the name without throwing anything away.
-const REMOVED_ROOT = "removed";
+export const REMOVED_ROOT = "removed";
+
+/**
+ * The parked copy's address: flat, one file straight under removed/, named
+ * with the row's id in front so two removals of the same filename never
+ * collide.
+ *
+ * It used to be removed/<id>/<filename> - a folder per removed file. The
+ * portal makes no folders in the library: the folders are the office's, and
+ * every removal was quietly adding one. A row removed before this keeps the
+ * key written on it (restore and purge read the row, never work it out
+ * again), and legacyRemovedKeyFor is the old address for anything that
+ * still needs finding there.
+ */
+export const removedKeyFor = (row: { id: string; filename: string }) =>
+  `${REMOVED_ROOT}/${row.id} - ${row.filename}`;
+export const legacyRemovedKeyFor = (row: { id: string; filename: string }) =>
+  `${REMOVED_ROOT}/${row.id}/${row.filename}`;
 
 // One folder per person. The name is slugged so "EVANS, Brenton", "Evans,
 // Brenton" and "evans  brenton" all file into the same folder rather than
@@ -361,7 +378,7 @@ async function freeCertName(folder: string, filename: string, own?: string | nul
  * of writing the new blob, so the archived copy holds the bytes being
  * superseded rather than whatever lands on the key next.
  *
- * Idempotent on retry: the archive copy at `removed/<id>/` is written once and
+ * Idempotent on retry: the archive copy under removed/ is written once and
  * never overwritten. If an earlier attempt already parked the bytes there — a
  * replacement whose database save failed and was then retried — the live key
  * may by now hold the new upload's bytes instead, and copying it again would
@@ -371,7 +388,7 @@ async function freeCertName(folder: string, filename: string, own?: string | nul
 export async function relocateToRemovedBlob(row: DocumentRow) {
   if (!keyedByName(row)) return row.blobKey;
 
-  const dest = `${REMOVED_ROOT}/${row.id}/${row.filename}`;
+  const dest = removedKeyFor(row);
   const store = fileStore();
   if (await store.getMetadata(dest)) {
     // The archive copy is already in place; just free the live name, exactly

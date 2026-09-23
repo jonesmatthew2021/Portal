@@ -15,6 +15,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setEnv } from "../src/env.js";
 import { compareMatrix } from "../src/routes/analyse.js";
+import { relocateToRemovedBlob } from "../src/db/documents.js";
 import { asKnownPerson } from "../../source/shared/names.js";
 
 /* ------------------------------------------------------------------------ *
@@ -63,6 +64,49 @@ function fakeDb(answer: (sql: string, args: unknown[]) => Answer | undefined, as
   };
 }
 
+/* ------------------------------------------------------------------------ *
+ * An R2 bucket in memory, which is what fileStore() drives when FILE_STORE
+ * is "r2". It writes down every folder a write would have had to make -
+ * the office's library is SharePoint, where a write into a folder that is
+ * not there makes the folder, and the portal is not allowed to make one.
+ * `failOn` makes the nth write throw, for the tests that pull the floor
+ * out halfway through.
+ * ------------------------------------------------------------------------ */
+function fakeBucket(seed: Record<string, string>, folders: string[] = ["opms", "removed"]) {
+  const bytes = new Map<string, Uint8Array>();
+  const have = new Set(folders);
+  const made: string[] = [];
+  let writes = 0;
+  const enc = new TextEncoder();
+  Object.entries(seed).forEach(([k, v]) => bytes.set(k, enc.encode(v)));
+  const bucket = {
+    made,
+    failOn: 0,
+    text: (key: string) => { const b = bytes.get(key); return b ? new TextDecoder().decode(b) : null; },
+    keys: () => [...bytes.keys()].sort(),
+    async get(key: string) {
+      const b = bytes.get(key);
+      return b ? { arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength), body: null } : null;
+    },
+    async put(key: string, value: ArrayBuffer | Uint8Array) {
+      writes++;
+      if (bucket.failOn && writes === bucket.failOn) throw new Error("the library refused the write");
+      const folder = key.split("/").slice(0, -1).join("/");
+      if (folder && !have.has(folder)) { have.add(folder); made.push(folder); }
+      bytes.set(key, new Uint8Array(value instanceof Uint8Array ? value : new Uint8Array(value)));
+    },
+    async delete(key: string) { bytes.delete(key); },
+    async head(key: string) { const b = bytes.get(key); return b ? { size: b.length } : null; },
+    async list(opts: { prefix?: string }) {
+      const objects = [...bytes.entries()]
+        .filter(([k]) => k.startsWith(opts.prefix || ""))
+        .map(([k, v]) => ({ key: k, size: v.length, uploaded: new Date(0) }));
+      return { objects, truncated: false };
+    },
+  };
+  return bucket;
+}
+
 /* The one reading these tests need: a Master ticket printed in Kachin's
    name and filed, as the office files it, under "bILLY". */
 const reading = {
@@ -107,4 +151,21 @@ test("without a register the route compares names as they are", async () => {
   const out = await compareMatrix(matrix, null);
   assert.deepEqual(out.claimed, [], "bILLY is not on this matrix");
   assert.equal(out.notes[0]?.kind, "not-on-matrix");
+});
+
+/* ------------------------------------------------------------------------ *
+ * Removed copies are parked flat. The portal makes no folders.
+ * ------------------------------------------------------------------------ */
+test("a removed copy is parked flat under removed/, and no folder is made", async () => {
+  const bucket = fakeBucket({ "opms/20260901 - CREW QUALIFICATION EXPIRY.xlsx": "old workbook" });
+  setEnv({ DB: fakeDb(() => undefined), FILES: bucket, FILE_STORE: "r2" } as never);
+  const row = {
+    id: "tm1", category: "training-matrix", blobKey: "opms/20260901 - CREW QUALIFICATION EXPIRY.xlsx",
+    filename: "20260901 - CREW QUALIFICATION EXPIRY.xlsx",
+  };
+  const parked = await relocateToRemovedBlob(row as never);
+  assert.equal(parked, "removed/tm1 - 20260901 - CREW QUALIFICATION EXPIRY.xlsx", "one file straight under removed/");
+  assert.equal(bucket.text(parked), "old workbook", "the bytes went with it");
+  assert.equal(bucket.text(row.blobKey), null, "and the live name is free");
+  assert.deepEqual(bucket.made, [], "no folder was made for it");
 });
