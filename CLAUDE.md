@@ -66,6 +66,17 @@ The worker side is `worker/src/routes/fauna.ts`: the AI reads the sentence
 model cannot be reached), the entries live in `fauna_sightings`, and
 `GET /api/fauna/export?month=` hands back the month as the office's workbook.
 
+**The log in SharePoint.** `SHAREPOINT_FAUNA_FOLDER` (wrangler.toml) names
+the library folder the office's log workbook sits in; the newest `.xlsx`
+there whose name says "fauna" is the log. Every save writes the entry into
+its month's tab straight away (`settleLog` in the route, the workbook work
+in `worker/src/lib/fauna-log.ts`), the hour writes whatever could not be
+written then, and `fauna_sightings.written_tab/written_row` remember where
+each entry sits so a change rewrites its own row and a removal blanks it. A
+month with no tab gets one copied from the latest month's, put in after it.
+Rows the office typed by hand are never touched. The folder is Matthew's to
+make and the workbook his to put there — the portal makes neither.
+
 `source/shared/` holds the code the page and the worker both run: the workbook
 writer (`workbook.js`), the matrix rules (`matrix-rules.js`) and the names
 register (`names.js`). The build splices them into the page at `/* @shared */`

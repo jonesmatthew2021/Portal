@@ -38,6 +38,7 @@ sessionStorage setInterval setTimeout undefined window XLSX localStorage console
 Image Audio alert confirm atob btoa structuredClone AbortController Headers Request
 Symbol BigInt Proxy Reflect WeakMap WeakSet ArrayBuffer Uint16Array Int8Array
 Uint8ClampedArray Float64Array performance queueMicrotask history screen
+TypeError RangeError SyntaxError
 `.trim().split(/\s+/));
 
 const results = [];

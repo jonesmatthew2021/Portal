@@ -1,5 +1,8 @@
 import { getEnv } from "../env.js";
 import type { PortalUser } from "../auth.js";
+import { fileStore, fromReal, sharepointBrowse } from "../files/store.js";
+import { getStore } from "../compat/blobs.js";
+import { openLog, ensureMonthTab, writeRows, saveLog, type LogRow } from "../lib/fauna-log.js";
 import {
   FIELDS, blankRecord, settle, mergeParsed, missingFields, nextQuestion, modelSchema, fieldSpecText,
   monthName, sheetValue, windKmh, parseSpoken, isBlank,
@@ -17,11 +20,17 @@ import {
  *   PUT  /api/fauna/sightings        save one (new or changed)
  *   DELETE /api/fauna/sightings/:id  take one off
  *   GET  /api/fauna/export?month=    the month as the office's own workbook
+ *   GET  /api/fauna/log              the log in SharePoint, and what is owed to it
+ *   POST /api/fauna/log              write everything owed to it now
  *
  * The columns, the rules about which must be filled and the questions to ask
  * are in source/fauna/fields.js, which the phone runs too. The model reads the
  * sentence; where it can't be reached the phone reads it with the same rules
  * file and says so.
+ *
+ * Every saved entry is also written into the office's workbook in SharePoint
+ * (SHAREPOINT_FAUNA_FOLDER, lib/fauna-log.ts): straight away on the save, and
+ * on the hour for anything that could not be written then.
  */
 
 type FaunaRecord = Record<string, unknown>;
@@ -36,16 +45,31 @@ const MAX_TOKENS = 4000;
 /* --------------------------------------------------------------- store --- */
 
 let ready: Promise<unknown> | null = null;
-function ensureTable() {
+export function ensureTable() {
   if (!ready) {
-    ready = getEnv()
-      .DB.prepare(
-        "CREATE TABLE IF NOT EXISTS fauna_sightings (" +
-          "id TEXT PRIMARY KEY, month TEXT NOT NULL, at TEXT NOT NULL, observer TEXT, " +
-          "data TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER)",
-      )
-      .run()
-      .catch((e) => { ready = null; throw e; });
+    ready = (async () => {
+      const d1 = getEnv().DB;
+      await d1
+        .prepare(
+          "CREATE TABLE IF NOT EXISTS fauna_sightings (" +
+            "id TEXT PRIMARY KEY, month TEXT NOT NULL, at TEXT NOT NULL, observer TEXT, " +
+            "data TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER, " +
+            "written_at INTEGER, written_tab TEXT, written_row INTEGER, write_error TEXT)",
+        )
+        .run();
+      // A table made before the log in SharePoint was thought of gets the
+      // columns that say where each entry was written.
+      const info = await d1.prepare("PRAGMA table_info(fauna_sightings)").all<{ name: string }>();
+      const have = new Set((info.results || []).map((c) => c.name));
+      for (const [col, type] of [["written_at", "INTEGER"], ["written_tab", "TEXT"], ["written_row", "INTEGER"], ["write_error", "TEXT"]]) {
+        if (have.has(col)) continue;
+        try {
+          await d1.prepare(`ALTER TABLE fauna_sightings ADD COLUMN ${col} ${type}`).run();
+        } catch (e) {
+          if (!/duplicate column/i.test(e instanceof Error ? e.message : String(e))) throw e;
+        }
+      }
+    })().catch((e) => { ready = null; throw e; });
   }
   return ready;
 }
@@ -54,14 +78,29 @@ const now = () => Math.floor(Date.now() / 1000);
 const monthOf = (r: FaunaRecord) => String(r.date || "").slice(0, 7);
 const atOf = (r: FaunaRecord) => `${r.date || ""}T${r.time || "00:00"}`;
 
+type Row = {
+  id: string; month: string; data: string; deleted_at: number | null;
+  written_at: number | null; written_tab: string | null; written_row: number | null; write_error: string | null;
+};
+const ROW_COLS = "id, month, data, deleted_at, written_at, written_tab, written_row, write_error";
+
+function entryOf(r: Row): FaunaRecord {
+  let data: FaunaRecord = {};
+  try { data = JSON.parse(r.data); } catch { /* an unreadable row still lists */ }
+  return {
+    ...data,
+    id: r.id,
+    inLog: r.written_row != null && !r.deleted_at ? { tab: r.written_tab, row: r.written_row, at: r.written_at } : null,
+    logError: r.write_error || null,
+  };
+}
+
 async function listMonth(month: string) {
   const rows = await getEnv()
-    .DB.prepare("SELECT id, data FROM fauna_sightings WHERE month = ?1 AND deleted_at IS NULL ORDER BY at ASC")
+    .DB.prepare(`SELECT ${ROW_COLS} FROM fauna_sightings WHERE month = ?1 AND deleted_at IS NULL ORDER BY at ASC`)
     .bind(month)
-    .all<{ id: string; data: string }>();
-  return (rows.results || []).map((r) => {
-    try { return { id: r.id, ...JSON.parse(r.data) } as FaunaRecord; } catch { return { id: r.id } as FaunaRecord; }
-  });
+    .all<Row>();
+  return (rows.results || []).map(entryOf);
 }
 
 /* --------------------------------------------------------------- model --- */
@@ -87,6 +126,8 @@ Read the transcript and return every column you can, as JSON matching the schema
 
 The columns:
 ${fieldSpecText()}`;
+
+class ModelUnavailable extends Error {}
 
 async function askModel(transcript: string, record: FaunaRecord, focus: string[] | null, lastConditions: FaunaRecord | null) {
   const env = getEnv();
@@ -149,8 +190,6 @@ async function askModel(transcript: string, record: FaunaRecord, focus: string[]
   }
 }
 
-class ModelUnavailable extends Error {}
-
 /* ------------------------------------------------------------- parsing --- */
 
 async function parse(req: Request) {
@@ -197,21 +236,216 @@ async function saveOne(req: Request, user: PortalUser) {
   const id = typeof raw.id === "string" && /^[a-z0-9-]{8,64}$/i.test(raw.id) ? raw.id : crypto.randomUUID();
   const month = monthOf(record);
   if (!/^\d{4}-\d{2}$/.test(month)) return json({ error: "The entry has no date." }, 400);
-  const stored = { ...record, id, savedBy: user.name, savedAt: new Date().toISOString() };
-  delete (stored as FaunaRecord).transcript;
+  const stored: FaunaRecord = { ...record, id, savedBy: user.name, savedAt: new Date().toISOString(), transcript: raw.transcript || null };
+  delete stored.inLog;
+  delete stored.logError;
   await getEnv()
     .DB.prepare(
       "INSERT INTO fauna_sightings (id, month, at, observer, data, created_at, updated_at, deleted_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, NULL) " +
         "ON CONFLICT (id) DO UPDATE SET month = ?2, at = ?3, observer = ?4, data = ?5, updated_at = ?6, deleted_at = NULL",
     )
-    .bind(id, month, atOf(record), String(record.observer || ""), JSON.stringify({ ...stored, transcript: raw.transcript || null }), now())
+    .bind(id, month, atOf(record), String(record.observer || ""), JSON.stringify(stored), now())
     .run();
-  return json({ saved: true, id, record: { ...stored, transcript: raw.transcript || null } });
+  // Into the office's workbook straight away; what cannot be written now is
+  // owed, and the hour pays it.
+  const log = await settleLog([id], user.name);
+  const row = await getEnv().DB.prepare(`SELECT ${ROW_COLS} FROM fauna_sightings WHERE id = ?1`).bind(id).first<Row>();
+  return json({ saved: true, id, record: row ? entryOf(row) : { ...stored }, log });
 }
 
-async function removeOne(id: string) {
-  await getEnv().DB.prepare("UPDATE fauna_sightings SET deleted_at = ?2 WHERE id = ?1").bind(id, now()).run();
-  return json({ removed: true, id });
+async function removeOne(id: string, user: PortalUser) {
+  await getEnv().DB.prepare("UPDATE fauna_sightings SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1").bind(id, now()).run();
+  const log = await settleLog([id], user.name);
+  return json({ removed: true, id, log });
+}
+
+/* -------------------------------------------------------- the log file --- */
+
+const LOG_LEASE_KEY = "fauna-log-lease";
+const LOG_LEASE_MS = 3 * 60 * 1000;
+const LOG_MAX_BYTES = 8 * 1024 * 1024;
+
+export type LogFile = { key: string; name: string; path: string; modified?: string };
+export type LogOutcome =
+  | { linked: false; why: string }
+  | { linked: true; file: string; written: number; blanked: number; made: string[]; error?: string };
+
+/** The folder the log lives in, as configured, or "" when the link is off. */
+const logFolder = () => (getEnv().SHAREPOINT_FAUNA_FOLDER || "").replace(/^\/+|\/+$/g, "");
+
+/**
+ * The log in the library: the newest workbook in the folder whose name says
+ * fauna. Null where the link is off or nothing is there yet.
+ */
+export async function findLog(): Promise<LogFile | null> {
+  const folder = logFolder();
+  if (!folder) return null;
+  if ((getEnv().FILE_STORE || "r2") !== "sharepoint") return null;
+  const entries = await sharepointBrowse(folder);
+  const files = entries.filter((e) => !e.folder && /fauna/i.test(e.name) && /\.xlsx$/i.test(e.name) && !/^~/.test(e.name));
+  if (!files.length) return null;
+  files.sort((a, b) => (b.modified || "").localeCompare(a.modified || ""));
+  const best = files[0];
+  return { key: fromReal(best.path), name: best.name, path: best.path, modified: best.modified };
+}
+
+/** The log held for one writer at a time, with the lease the round uses
+ *  for the qualification workbook as the model. */
+async function takeLogLease(by: string) {
+  const leases = getStore("sync");
+  const token = crypto.randomUUID();
+  const lease = { until: Date.now() + LOG_LEASE_MS, by, token };
+  const held = await leases.getWithMetadata(LOG_LEASE_KEY, { type: "json" });
+  const running = held ? (held.data as { until: number } | null) : null;
+  if (running && running.until > Date.now()) return null;
+  if (!held) return (await leases.setJSONIfAbsent(LOG_LEASE_KEY, lease)).written ? token : null;
+  return (await leases.setJSON(LOG_LEASE_KEY, lease, { onlyIfMatch: held.etag })).modified ? token : null;
+}
+async function dropLogLease(token: string) {
+  const leases = getStore("sync");
+  const held = await leases.getWithMetadata(LOG_LEASE_KEY, { type: "json" });
+  const lease = held ? (held.data as { token: string } | null) : null;
+  if (!held || !lease || lease.token !== token) return;
+  await leases.setJSON(LOG_LEASE_KEY, { ...lease, until: 0 }, { onlyIfMatch: held.etag });
+}
+
+const owedSql =
+  "(deleted_at IS NULL AND (written_at IS NULL OR updated_at > written_at)) OR (deleted_at IS NOT NULL AND written_row IS NOT NULL)";
+
+/** How many entries the log is still owed. */
+export async function owedCount() {
+  const row = await getEnv().DB.prepare(`SELECT COUNT(*) AS n FROM fauna_sightings WHERE ${owedSql}`).first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+/**
+ * The entries written into the log in SharePoint: the ones named, or every
+ * one still owed when none are. Each live entry lands in its month's tab —
+ * its own row where it has one, the first empty row otherwise — and each
+ * removed one has its row blanked. One writer at a time; a second waits a
+ * little and then leaves it to the hour.
+ */
+export async function settleLog(ids: string[] | null, by: string): Promise<LogOutcome> {
+  const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
+  const d1 = getEnv().DB;
+  const folder = logFolder();
+  if (!folder) return { linked: false, why: "no folder is set for the log (SHAREPOINT_FAUNA_FOLDER)" };
+  if ((getEnv().FILE_STORE || "r2") !== "sharepoint") return { linked: false, why: "this deploy has no SharePoint" };
+
+  const where = ids && ids.length
+    ? `id IN (${ids.map((_, i) => `?${i + 1}`).join(", ")}) AND (${owedSql})`
+    : owedSql;
+  const owed = (await d1.prepare(`SELECT ${ROW_COLS} FROM fauna_sightings WHERE ${where}`).bind(...(ids || [])).all<Row>()).results || [];
+
+  let file: LogFile | null;
+  try {
+    file = await findLog();
+  } catch (e) {
+    const why = `the log's folder could not be read: ${said(e)}`;
+    if (owed.length) await noteError(owed.map((r) => r.id), why);
+    return { linked: false, why };
+  }
+  if (!file) {
+    const why = `no Marine Fauna Observation Log workbook in ${folder}`;
+    if (owed.length) await noteError(owed.map((r) => r.id), why);
+    return { linked: false, why };
+  }
+  if (!owed.length) return { linked: true, file: file.name, written: 0, blanked: 0, made: [] };
+
+  let token: string | null = null;
+  for (let attempt = 0; attempt < 4 && !token; attempt++) {
+    token = await takeLogLease(by);
+    if (!token) await new Promise((r) => setTimeout(r, 1500));
+  }
+  if (!token) {
+    const why = "the log is being written by someone else; it will be tried again on the hour";
+    await noteError(owed.map((r) => r.id), why);
+    return { linked: true, file: file.name, written: 0, blanked: 0, made: [], error: why };
+  }
+
+  try {
+    const store = fileStore();
+    const bytes = await store.get(file.key, { type: "arrayBuffer" });
+    if (!bytes) throw new Error(`${file.name} could not be read from the library`);
+    if (bytes.byteLength > LOG_MAX_BYTES) throw new Error(`${file.name} is ${Math.round(bytes.byteLength / 1024 / 1024)} MB, too big to rewrite here`);
+    const log = await openLog(bytes);
+
+    // Month by month: the tab, the rows that go in it, the rows to blank.
+    const byMonth = new Map<string, Row[]>();
+    for (const r of owed) {
+      const key = r.deleted_at && r.written_tab ? tabMonth(r.written_tab, r.month) : r.month;
+      byMonth.set(key, [...(byMonth.get(key) || []), r]);
+    }
+    const made: string[] = [];
+    const placed = new Map<string, { tab: string; row: number }>();
+    const blanked: string[] = [];
+    for (const [month, rows] of byMonth) {
+      const tab = await ensureMonthTab(log, month);
+      if (tab.made) made.push(tab.name);
+      const live: LogRow[] = [];
+      const blank: number[] = [];
+      for (const r of rows) {
+        if (r.deleted_at) {
+          if (r.written_row != null && r.written_tab === tab.name) { blank.push(r.written_row); blanked.push(r.id); }
+          else blanked.push(r.id);
+          continue;
+        }
+        let values: FaunaRecord = {};
+        try { values = JSON.parse(r.data); } catch { /* written as blank */ }
+        live.push({ id: r.id, values, row: r.written_tab === tab.name ? r.written_row : null });
+      }
+      const out = await writeRows(log, tab.path, live, blank);
+      for (const [id, row] of Object.entries(out.placed)) placed.set(id, { tab: tab.name, row });
+    }
+
+    await store.set(file.key, await saveLog(log));
+
+    const at = now();
+    const marks = [
+      ...[...placed].map(([id, p]) =>
+        d1.prepare("UPDATE fauna_sightings SET written_at = ?2, written_tab = ?3, written_row = ?4, write_error = NULL WHERE id = ?1").bind(id, at, p.tab, p.row)),
+      ...blanked.map((id) =>
+        d1.prepare("UPDATE fauna_sightings SET written_at = ?2, written_tab = NULL, written_row = NULL, write_error = NULL WHERE id = ?1").bind(id, at)),
+    ];
+    if (marks.length) await d1.batch(marks);
+    return { linked: true, file: file.name, written: placed.size, blanked: blanked.length, made };
+  } catch (e) {
+    const why = said(e);
+    await noteError(owed.map((r) => r.id), why);
+    console.error("the fauna log could not be written:", e);
+    return { linked: true, file: file.name, written: 0, blanked: 0, made: [], error: why };
+  } finally {
+    await dropLogLease(token).catch(() => {});
+  }
+}
+
+/** A removed entry's tab as a month key, so its blanking is grouped with
+ *  that tab's writes; the entry's own month when the tab is not a month. */
+function tabMonth(tab: string, fallback: string) {
+  const idx = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]
+    .indexOf(tab.trim().toLowerCase());
+  return idx >= 0 ? `${fallback.slice(0, 4)}-${String(idx + 1).padStart(2, "0")}` : fallback;
+}
+
+async function noteError(ids: string[], why: string) {
+  if (!ids.length) return;
+  const d1 = getEnv().DB;
+  await d1.batch(ids.map((id) => d1.prepare("UPDATE fauna_sightings SET write_error = ?2 WHERE id = ?1").bind(id, why.slice(0, 400))));
+}
+
+/** What the SharePoint page and the app show about the link. */
+export async function logStatus() {
+  const folder = logFolder();
+  const owed = await owedCount();
+  if (!folder) return { linked: false, folder: "", file: null, owed, why: "no folder is set for the log" };
+  if ((getEnv().FILE_STORE || "r2") !== "sharepoint") return { linked: false, folder, file: null, owed, why: "this deploy has no SharePoint" };
+  try {
+    const file = await findLog();
+    if (!file) return { linked: false, folder, file: null, owed, why: `no Marine Fauna Observation Log workbook in ${folder}` };
+    return { linked: true, folder, file: file.name, modified: file.modified || null, owed };
+  } catch (e) {
+    return { linked: false, folder, file: null, owed, why: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 /* -------------------------------------------------------------- export --- */
@@ -299,7 +533,12 @@ export default async (req: Request, user: PortalUser, path: string): Promise<Res
     if (req.method === "PUT" || req.method === "POST") return await saveOne(req, user);
   }
   const one = /^\/api\/fauna\/sightings\/([a-z0-9-]+)$/i.exec(path);
-  if (one && req.method === "DELETE") return await removeOne(one[1]);
+  if (one && req.method === "DELETE") return await removeOne(one[1], user);
+
+  if (path === "/api/fauna/log") {
+    if (req.method === "GET") return json(await logStatus());
+    if (req.method === "POST") return json({ ...(await settleLog(null, user.name)), owed: await owedCount() });
+  }
 
   if (path === "/api/fauna/export" && req.method === "GET") {
     const month = url.searchParams.get("month") || new Date().toISOString().slice(0, 7);

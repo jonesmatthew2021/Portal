@@ -35,6 +35,7 @@ export type PortalEnv = {
   SHAREPOINT_LIBRARY?: string;
   SHAREPOINT_ROOT?: string;
   SHAREPOINT_MAP?: string;
+  SHAREPOINT_FAUNA_FOLDER?: string;
 };
 
 let current: PortalEnv | null = null;

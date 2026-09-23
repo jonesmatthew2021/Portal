@@ -134,9 +134,6 @@ export const FIELDS = [
 /** @type {Record<string, Field>} */
 export const FIELD = Object.fromEntries(FIELDS.map((f) => [f.key, f]));
 
-/** The conditions asked for in one breath when most of them are missing. */
-const CONDITIONS_TOGETHER = ["windSpeed", "windDir", "waveHeight", "cloud", "glare", "visibility", "seaState"];
-
 /* ---------------------------------------------------------------- records */
 
 export const NIL_COMMENT = "Nil sightings";
@@ -167,26 +164,15 @@ export function missingFields(r) {
 }
 
 /**
- * The next thing to ask, spoken plainly: the conditions all at once while most
- * of them are blank, otherwise the first empty column in the log's order.
+ * The next thing to ask, spoken plainly: the first empty column in the log's
+ * order, one at a time. The watchkeeper talks through the whole entry in one
+ * go; the questions only pick up what that left out.
  * @param {FaunaRecord} r
  * @returns {{ keys: string[], text: string } | null}
  */
 export function nextQuestion(r) {
   const missing = missingFields(r);
   if (!missing.length) return null;
-  // The vessel first, as the log has it, both halves in one question.
-  if (missing.includes("activity") && missing.includes("heading")) {
-    return { keys: ["activity", "heading"], text: "What is the vessel doing, and on what heading?" };
-  }
-  const together = CONDITIONS_TOGETHER.filter((k) => missing.includes(k));
-  if (together.length >= 3 && !missing.slice(0, 1).some((k) => k === "activity" || k === "heading")) {
-    const names = { windSpeed: "wind", windDir: "wind direction", waveHeight: "waves", cloud: "cloud",
-      glare: "glare", visibility: "visibility", seaState: "sea state" };
-    const list = together.map((k) => names[/** @type {keyof typeof names} */ (k)]);
-    if (list.includes("wind") && list.includes("wind direction")) list.splice(list.indexOf("wind direction"), 1);
-    return { keys: together, text: "What are the conditions? " + list.slice(0, -1).join(", ") + " and " + list[list.length - 1] + "." };
-  }
   const key = missing[0];
   const f = FIELD[key];
   if (key === "species" && r.faunaType) {

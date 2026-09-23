@@ -15,6 +15,7 @@ import {
   windKmh, compassOf, bearingOf, distanceOf, wordsToNumber, sunUp, sheetValue, modelSchema, monthName,
 } from "../../source/fauna/fields.js";
 import { exportMonth } from "../src/routes/fauna.js";
+import { openLog, ensureMonthTab, writeRows, saveLog, monthTabs } from "../src/lib/fauna-log.js";
 import { readZip, partOf, partText, listSheets, readSheetRows } from "../../source/shared/workbook.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -96,14 +97,15 @@ test("a bare answer lands in the column that was asked for", () => {
   assert.equal(parseSpoken("three", r, { focus: ["seaState"] }).seaState, "3");
 });
 
-test("the next question follows the log's order, with the conditions asked together", () => {
+test("the next question follows the log's order, one column at a time", () => {
   const empty = settle({ ...blankRecord(), time: "07:40", date: "2026-09-24", observer: "M. Jones", lat: "21°23.4'S", long: "114°52.1'E" });
   const q1 = nextQuestion(empty);
-  assert.ok(q1 && q1.keys.includes("activity") && q1.keys.includes("heading"), "the vessel first");
-  assert.equal(parseSpoken("discharging heading one two zero", empty, { focus: q1!.keys }).activity, "Discharging");
+  assert.deepEqual(q1 && q1.keys, ["activity"], "the vessel first");
+  assert.equal(parseSpoken("discharging", empty, { focus: q1!.keys }).activity, "Discharging");
   const withVessel = { ...empty, activity: "Transiting", heading: 270 };
   const q2 = nextQuestion(withVessel);
-  assert.ok(q2 && q2.keys.length >= 3 && q2.text.startsWith("What are the conditions?"), "then the conditions in one go");
+  assert.deepEqual(q2 && q2.keys, ["glare"], "then the first condition, on its own");
+  assert.equal(parseSpoken("one", withVessel, { focus: q2!.keys }).glare, "1");
   const nearlyDone = settle({ ...withVessel, glare: "1", visibility: "4", windSpeed: 20, windDir: "SW", waveHeight: 0.5, cloud: "2", light: "Full Light", weather: "Sunny", seaState: "2",
     faunaType: "Whale", species: "Humpback", total: 2, distance: 500, bearing: 45, behaviour: "Travelling", platformHeight: 6 });
   assert.equal(nextQuestion(nearlyDone), null, "everything else the rules settle themselves");
@@ -219,4 +221,56 @@ test("the month goes into the office's own log, tab renamed and rows filled", { 
   assert.equal(rows[16][1], "2026-09-24", "the date is a real Excel date");
   const sheetXml = await partText(partOf(out, sheets[0].path));
   assert.ok(/<c r="A17" s="54"><v>0\.3194/.test(sheetXml), "the time keeps the column's time style and is a fraction of the day");
+});
+
+test("a month with no tab gets one copied from the latest month, and rows keep their places", { skip: !existsSync(TEMPLATE) && "no template built yet (node tools/fauna-template.mjs)" }, async () => {
+  const template = readFileSync(TEMPLATE);
+  const log = await openLog(template.buffer.slice(template.byteOffset, template.byteOffset + template.byteLength));
+  assert.deepEqual(monthTabs(log).map((t) => t.name), ["August"]);
+
+  const sept = await ensureMonthTab(log, "2026-09");
+  assert.equal(sept.made, true);
+  assert.deepEqual(log.sheets.map((s) => s.name), ["August", "September", "Sheet1"], "straight after the tab it was copied from, before the hidden lists");
+  const again = await ensureMonthTab(log, "2026-09");
+  assert.equal(again.made, false, "the second time it is simply found");
+
+  const wbXml = await partText(partOf(log.entries, "xl/workbook.xml"));
+  assert.ok(/<definedName name="_xlnm\.Print_Area" localSheetId="1">September!\$A\$1:\$G\$29<\/definedName>/.test(wbXml), "the print area follows the new tab by position");
+  assert.ok(/<definedName name="_xlnm\.Print_Area" localSheetId="0">August!/.test(wbXml), "August keeps its own");
+  const types = await partText(partOf(log.entries, "[Content_Types].xml"));
+  assert.ok(types.includes(`PartName="/${sept.path}"`), "the new sheet is declared");
+  const tables = log.entries.filter((e) => /^xl\/tables\/table\d+\.xml$/.test(e.name));
+  assert.equal(tables.length, 2, "the tab brought its own table");
+  const names = await Promise.all(tables.map(async (t) => (/displayName="([^"]*)"/.exec(await partText(t)) || [])[1]));
+  assert.equal(new Set(names).size, 2, "with a name of its own: " + names.join(", "));
+  const septXml = await partText(partOf(log.entries, sept.path));
+  assert.ok(!/tabSelected="1"/.test(septXml), "not the selected tab");
+  const rows = await readSheetRows(log.entries, sept.path);
+  assert.equal(rows[14][0], "Time", "the header came across");
+
+  const base = { activity: "Transiting", heading: 270, glare: "1", visibility: "4", windSpeed: 28, windDir: "SW", waveHeight: 0.5, cloud: "2",
+    light: "Full Light", observer: "M. Jones", weather: "Sunny", seaState: "2", lat: "21°23.4'S", long: "114°52.1'E", platformHeight: 6 };
+  const a = settle({ ...blankRecord(), ...base, time: "07:40", date: "2026-09-24", faunaType: "Whale", species: "Humpback", total: 3, adults: 2, calves: 1, bearing: 45, distance: 500, behaviour: "Travelling" });
+  const b = settle({ ...blankRecord(), ...base, time: "09:15", date: "2026-09-24", faunaType: "Dolphin", species: "Bottlenose", total: 6, bearing: 270, distance: 30, behaviour: "Socialising" });
+  const first = await writeRows(log, sept.path, [{ id: "a", values: a, row: null }, { id: "b", values: b, row: null }]);
+  assert.deepEqual(first.placed, { a: 16, b: 17 });
+
+  // As the next save would do it: b changed, a removed, c new — b keeps its
+  // row, a's row is blanked and c takes the first empty row, which is a's.
+  const reopened = await openLog(await saveLog(log));
+  const tab = await ensureMonthTab(reopened, "2026-09");
+  assert.equal(tab.made, false);
+  const c = settle({ ...blankRecord(), ...base, time: "16:05", date: "2026-09-25", kind: "nil" });
+  const second = await writeRows(reopened, tab.path, [
+    { id: "b", values: { ...b, distance: 45 }, row: first.placed.b },
+    { id: "c", values: c, row: null },
+  ], [first.placed.a]);
+  assert.deepEqual(second.placed, { b: 17, c: 16 });
+  const after = await readSheetRows(reopened.entries, tab.path);
+  assert.equal(after[16][25], "45", "b rewritten in its own row");
+  assert.equal(after[15][30], "Nil sightings", "c in the row a left");
+  assert.equal(after[15][17], "", "with a's whale gone");
+  // An entry whose remembered row now holds something else is placed afresh.
+  const third = await writeRows(reopened, tab.path, [{ id: "d", values: { ...a, time: "18:00" }, row: 17 }]);
+  assert.equal(third.placed.d, 18, "row 17 is b's, so d goes to the next empty row");
 });

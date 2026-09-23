@@ -150,7 +150,16 @@ CREATE TABLE IF NOT EXISTS fauna_sightings (
   data TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  deleted_at INTEGER
+  deleted_at INTEGER,
+  -- Where the entry sits in the office's workbook in SharePoint
+  -- (SHAREPOINT_FAUNA_FOLDER): the tab and row it was written to and when,
+  -- so a change rewrites the same row and a removal blanks it. write_error
+  -- is why the last attempt failed; the hour tries again. The worker adds
+  -- these to an existing table itself.
+  written_at INTEGER,
+  written_tab TEXT,
+  written_row INTEGER,
+  write_error TEXT
 );
 
 -- The JSON records the earlier build kept in named blob stores. Strongly

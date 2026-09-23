@@ -22,7 +22,7 @@ import migrateCerts from "./routes/migrate-certs.js";
 import readOne from "./routes/read-one.js";
 import clearR2 from "./routes/clear-r2.js";
 import importSingle from "./routes/import-single.js";
-import fauna from "./routes/fauna.js";
+import fauna, { ensureTable as ensureFaunaTable, settleLog as settleFaunaLog } from "./routes/fauna.js";
 import { runMatrixRound, roundRunning, takeLease, dropLease, type Lease } from "./lib/round.js";
 import { readDocument } from "./lib/shared-state.js";
 import { crewRowsOnly } from "../../source/shared/names.js";
@@ -325,6 +325,22 @@ async function theHour(
     } catch (e) {
       round = { roundError: said(e) };
       console.error("the round on the hour failed outside its own catch:", e);
+    }
+  }
+
+  // The fauna log: whatever the phone saved that did not reach the office's
+  // workbook at the time (out of range, the file open elsewhere) is written
+  // now. Its own file and its own lease; nothing to do with the round's.
+  if (timeLeft()) {
+    try {
+      await ensureFaunaTable();
+      const log = await settleFaunaLog(null, "the round on the hour");
+      if (log.linked && (log.written || log.blanked || log.error)) {
+        round = { ...round, faunaLog: `${log.written} written, ${log.blanked} blanked into ${log.file}` + (log.made.length ? ` (${log.made.join(", ")} tab made)` : "") + (log.error ? ` — ${log.error}` : "") };
+      }
+    } catch (e) {
+      round = { ...round, faunaLogError: said(e) };
+      console.error("the fauna log could not be settled on the hour:", e);
     }
   }
   return round;
