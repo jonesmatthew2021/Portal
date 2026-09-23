@@ -244,6 +244,21 @@
          matrix items, the file names - to come up and be looked at. */
       if (p === "/api/sync")
         return json({ registered: [], mirrored: 0, followed: 0, moved: [], removed: [] });
+      /* The hourly round's last outcome: the preview has no cron, so nothing
+         has run and the page says so. */
+      if (p === "/api/sync/last") return json({ sync: null, hourly: null });
+      /* The undo list. The preview keeps no history, so the one version it
+         holds is the whole list, and putting a version back is a live-portal
+         job. */
+      if (p === "/api/state/history") {
+        const d = mem.data || {};
+        const rows = (d.quals && d.quals.rows) || [];
+        const dated = rows.reduce((n, r) => n + (r[3] || []).filter((v) => /^d{4}-d{2}-d{2}/.test(String(v || ""))).length, 0);
+        return json({ revisions: [{ rev: mem.rev, savedAt: Date.now(), savedBy: "Preview",
+          crew: (d.people || []).length, matrixRows: rows.length, datedCells: dated }] });
+      }
+      if (p === "/api/state/restore")
+        return json({ error: "Putting a version back only runs on the live portal." }, 503);
       if (p === "/api/rename-file" || p === "/api/rename")
         return json({ error: "Renaming moves the file in SharePoint, so it only runs on the live portal." }, 503);
       if (p === "/api/analyse" || p === "/api/ai-checker" || p === "/api/archive")

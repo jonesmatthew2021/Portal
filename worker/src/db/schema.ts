@@ -18,6 +18,25 @@ export const portalState = sqliteTable("portal_state", {
 });
 
 /**
+ * Every save of the row above, newest 200 kept, so an earlier version can be
+ * put back from the Access Grants page. The counts are worked out at save
+ * time, when the document is already parsed, so listing the history never
+ * reads the documents back. Made lazily by src/routes/state.ts rather than
+ * by a migration.
+ */
+export const portalStateHistory = sqliteTable("portal_state_history", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  portalId: text("portal_id").notNull(),
+  rev: integer().notNull(),
+  data: text().notNull(),
+  savedAt: integer("saved_at").notNull(),
+  savedBy: text("saved_by"),
+  crew: integer(),
+  matrixRows: integer("matrix_rows"),
+  datedCells: integer("dated_cells"),
+});
+
+/**
  * One row per file uploaded through the portal — the record of what each file
  * is and where in the portal it belongs. The bytes live in the file store
  * (SharePoint or R2, see src/files/store.ts) under `blobKey`.

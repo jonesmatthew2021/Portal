@@ -293,6 +293,10 @@ function AccessGrantsPage() {
         )}
       </div>
 
+      {/* The last saves the server kept, any of which can be put back. Above
+          Start again because it is the opposite of it: nothing here is lost. */}
+      <Revisions />
+
       {/* Start again, at the very bottom of the last page on the tab: the one
           thing on the portal that cannot be undone, as far from anything
           anybody presses in a hurry as it can be put. */}
@@ -300,6 +304,115 @@ function AccessGrantsPage() {
         borderLeft: `4px solid ${T.bRed}`, borderRadius: 2, padding: "13px 15px", marginTop: 18 }}>
         <StartAgain />
       </div>
+    </div>
+  );
+}
+
+/**
+ * The portal's undo. The server keeps the last 200 saves of the shared
+ * document (worker/src/routes/history.ts); this lists them, newest first,
+ * with what the portal held at each, and puts one back on a yes.
+ *
+ * Putting a version back is itself a save on top of everything, so every
+ * open tab picks it up on its next look, and the version being replaced
+ * stays on the list — a restore can be undone the same way. Certificates
+ * and documents live in the file store, not in this document, so they are
+ * never touched by it.
+ */
+function Revisions() {
+  const [revs, setRevs] = useState(null);
+  const [err, setErr] = useState("");
+  const [asking, setAsking] = useState(null);   // the version waiting on a yes
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState("");
+
+  const when = (ms) => new Date(ms).toLocaleString("en-AU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+
+  const load = async () => {
+    setErr("");
+    try {
+      const r = await fetch("/api/state/history");
+      const out = await r.json();
+      if (!r.ok) throw new Error(out.error || `The saves couldn't be read (${r.status}).`);
+      setRevs(out.revisions || []);
+    } catch (e) { setErr(String(e.message || e)); }
+  };
+  React.useEffect(() => { load(); }, []);
+
+  const restore = async (rv) => {
+    setBusy(true); setErr(""); setDone("");
+    try {
+      const r = await fetch("/api/state/restore", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rev: rv.rev }),
+      });
+      const out = await r.json();
+      if (!r.ok) throw new Error(out.error || `The version couldn't be put back (${r.status}).`);
+      setDone(`Back to how it was at ${when(rv.savedAt)}. Every open tab picks it up within a minute.`);
+      setAsking(null);
+      await load();
+    } catch (e) { setErr(String(e.message || e)); }
+    setBusy(false);
+  };
+
+  const th = { textAlign: "left", padding: "5px 10px", borderBottom: `2px solid ${T.rule}`,
+    fontFamily: T.body, fontSize: 11, color: T.muted, textTransform: "uppercase", letterSpacing: ".06em" };
+  const td = { padding: "5px 10px", whiteSpace: "nowrap" };
+
+  return (
+    <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderLeft: `4px solid ${T.accent}`,
+      borderRadius: 2, padding: "13px 15px", marginTop: 18 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+        <Eyebrow color={T.accent}>Revisions</Eyebrow>
+        <Button variant="quiet" onClick={load}>Refresh</Button>
+      </div>
+      {err && <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.bRed, marginBottom: 10 }}>{err}</div>}
+      {done && <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.teal, marginBottom: 10 }}>{done}</div>}
+      {!revs ? (!err && <Empty>Reading the saves...</Empty>) : revs.length === 0 ? (
+        <Empty>No saves kept yet.</Empty>
+      ) : (
+        <div style={{ overflowX: "auto", maxHeight: 420, overflowY: "auto" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", fontFamily: T.mono, fontSize: 11 }}>
+            <thead><tr>
+              {["When", "Who", "Crew", "Matrix rows", "Dated cells", ""].map((h, i) => <th key={i} style={th}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {revs.map((rv, i) => (
+                <tr key={rv.rev} style={{ borderBottom: `1px solid ${T.rule}` }}>
+                  <td style={{ ...td, color: T.muted }}>{when(rv.savedAt)}</td>
+                  <td style={{ ...td, color: T.text, whiteSpace: "normal" }}>{rv.savedBy || "—"}</td>
+                  <td style={{ ...td, color: T.text }}>{rv.crew}</td>
+                  <td style={{ ...td, color: T.text }}>{rv.matrixRows}</td>
+                  <td style={{ ...td, color: T.text }}>{rv.datedCells}</td>
+                  <td style={td}>
+                    {i === 0
+                      ? <span style={{ fontFamily: T.body, fontSize: 11.5, color: T.muted }}>current</span>
+                      : <Button variant="quiet" disabled={busy} onClick={() => setAsking(rv)}>Restore</Button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {asking && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(22,50,74,0.45)", zIndex: 78,
+          display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ background: T.panel, border: "1px solid " + T.rule, borderTop: "4px solid " + T.accent,
+            borderRadius: 3, padding: "20px 24px", width: "min(520px, 94vw)" }}>
+            <Eyebrow color={T.accent}>Go back to {when(asking.savedAt)}?</Eyebrow>
+            <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.muted, margin: "9px 0 15px", lineHeight: 1.6 }}>
+              The portal goes back to how it was then — {asking.crew} crew, {asking.matrixRows} on the matrix,
+              {" "}{asking.datedCells} dates. Everything saved since stays on this list and can be put back the
+              same way; certificates on file are not touched.
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <Button variant="solid" disabled={busy} onClick={() => restore(asking)}>{busy ? "Going back..." : "Yes, go back"}</Button>
+              <Button variant="quiet" disabled={busy} onClick={() => setAsking(null)}>No</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

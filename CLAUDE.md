@@ -63,6 +63,8 @@ filename order and a check confirms it arrived.
   `opmsCertPrefix(token)`, which works a name out and so makes new folders.
 - **No explainer text.** The UI carries what Matthew asked for and nothing else.
   Don't add helpful notes to the screen.
+- **The last 200 saves are kept** (`portal_state_history`) and any one of them
+  can be put back from `Admin → Access Grants`, under Revisions.
 
 ## Working in parallel
 

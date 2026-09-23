@@ -8,6 +8,7 @@ import sharepoint from "./routes/sharepoint.js";
 import rename from "./routes/rename.js";
 import renameFile from "./routes/rename-file.js";
 import state from "./routes/state.js";
+import { history, restore } from "./routes/history.js";
 import files from "./routes/files.js";
 import file from "./routes/file.js";
 import analyse, { extract, refile } from "./routes/analyse.js";
@@ -60,8 +61,12 @@ export default {
         // A crew save is rebuilt server-side to carry only their comments —
         // read-only means read-only whatever the page happened to send.
         const save = user && user.role === "crew" && req.method === "PUT" ? await crewStateBody(req) : req;
-        return await state(save);
+        // The name goes with the save, so the history says who made it.
+        return await state(save, user?.name || null);
       }
+      // The last 200 saves, and putting one of them back.
+      if (path === "/api/state/history") return await history(req, user!);
+      if (path === "/api/state/restore") return await restore(req, user!);
       if (path === "/api/files" && req.method === "POST" && user && user.role === "crew") {
         // Crew may file certificates and nothing else through this door.
         const form = await req.clone().formData().catch(() => null);

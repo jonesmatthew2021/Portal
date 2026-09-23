@@ -10,6 +10,24 @@ CREATE TABLE IF NOT EXISTS portal_state (
   updated_at INTEGER NOT NULL
 );
 
+-- Every save of the row above, newest 200 kept, so any of them can be put
+-- back from the Access Grants page. The three counts are what that page
+-- lists against each save; worked out at save time so listing the history
+-- never has to read the documents back. The worker creates this table
+-- itself the first time it is needed (src/routes/state.ts), so the live
+-- database needed no hand-run migration. Added 23 Sep 2026.
+CREATE TABLE IF NOT EXISTS portal_state_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  portal_id TEXT NOT NULL,
+  rev INTEGER NOT NULL,
+  data TEXT NOT NULL,
+  saved_at INTEGER NOT NULL,
+  saved_by TEXT,
+  crew INTEGER,
+  matrix_rows INTEGER,
+  dated_cells INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS documents (
   id TEXT PRIMARY KEY,
   category TEXT NOT NULL,
