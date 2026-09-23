@@ -12324,8 +12324,37 @@ function thisTab() {
   return TAB_NAME;
 }
 
+/* Whether an open admin tab should run the round itself this tick.
+ *
+ * The worker's hour does the round now; the tab is the fallback for an hour
+ * that did not, so it stands down whenever the server has the matter in
+ * hand. Never with unsaved changes in the tab (a round saves the document,
+ * and it would save them with it), never offline, never while the server's
+ * round holds the lease, and never when the server's last round is under
+ * seventy minutes old and went through without an error or a skip. Only
+ * then does the tab's own clock count, and it counts eighty minutes rather
+ * than sixty, so the hour always gets its turn first.
+ *
+ * `last` is the portal's answer to /api/sync/last, or null where it could
+ * not be asked - and then the tab's own clock is all there is. One pure
+ * function so the rule can be proved outright (tools/client-rules.test.mjs). */
+const TAB_ROUND_AFTER = 80 * 60000;
+function shouldTabRound({ lastDocUpdate, now, pending, online, last }) {
+  if (pending) return false;
+  if (online === false) return false;
+  if (last && last.running) return false;
+  const h = last && last.hourly;
+  if (h && h.at != null) {
+    const at = typeof h.at === "number" ? h.at : Date.parse(h.at);
+    const fresh = !isNaN(at) && now - at < 70 * 60000;
+    if (fresh && h.roundError == null && h.roundSkipped == null) return false;
+  }
+  const own = lastDocUpdate ? Date.parse(lastDocUpdate) : 0;
+  return !own || isNaN(own) || now - own > TAB_ROUND_AFTER;
+}
+
 function UpdateDocumentation() {
-  const { admin, lastDocUpdate, setLastDocUpdate, log,
+  const { admin, lastDocUpdate, setLastDocUpdate, log, pending,
     quals: QUALS, setQuals, trainingMatrix,
     rosterPlan, setRosterPlan, crewRoster,
     skillsMatrix, skillsRequirements, setSkillsRequirements,
@@ -12477,10 +12506,14 @@ function UpdateDocumentation() {
      storage and renews it while its round runs; the others see the lease
      and leave the round to it. Once the round has saved, lastDocUpdate is
      newer than an hour in every tab and nobody is due. A browser with
-     storage blocked runs the round regardless — twice is better than never. */
+     storage blocked runs the round regardless — twice is better than never.
+
+     The worker's hour does the round now, so before any of that the tab
+     asks the portal what the hour did (shouldTabRound): the tab is the
+     fallback for an hour that did not run, not a second hour. A portal
+     that cannot be asked leaves the tab to its own clock, as before. */
   React.useEffect(() => {
     if (!admin) return undefined;
-    const HOUR = 3600000;
     const LEASE = "coolibah-hourly-lease";
     const LEASE_MS = 10 * 60000;
     const me = thisTab();
@@ -12493,12 +12526,16 @@ function UpdateDocumentation() {
     const take = () => {
       try { localStorage.setItem(LEASE, JSON.stringify({ tab: me, until: Date.now() + LEASE_MS })); } catch (e) { /* storage blocked: run anyway */ }
     };
-    const due = () => {
-      const at = lastDocUpdate ? Date.parse(lastDocUpdate) : 0;
-      return !at || Date.now() - at > HOUR;
-    };
+    const due = (last) => shouldTabRound({ lastDocUpdate, now: Date.now(), pending, online: navigator.onLine, last });
     const tick = async () => {
-      if (!due() || going.current || heldElsewhere()) return;
+      // The tab's own reasons not to, before the portal is asked anything.
+      if (!due(null) || going.current || heldElsewhere()) return;
+      let last = null;
+      try {
+        const r = await fetch("/api/sync/last", { cache: "no-store" });
+        if (r.ok) last = await r.json();
+      } catch (e) { last = null; }
+      if (!due(last) || going.current || heldElsewhere()) return;
       take();
       const renew = setInterval(take, 60000);
       try { await go(false); } finally { clearInterval(renew); }
@@ -12506,7 +12543,7 @@ function UpdateDocumentation() {
     const t = setInterval(tick, 5 * 60000);
     const first = setTimeout(tick, 45000);
     return () => { clearInterval(t); clearTimeout(first); };
-  }, [admin, lastDocUpdate]);
+  }, [admin, lastDocUpdate, pending]);
 
   if (!admin) return null;
 
@@ -17066,7 +17103,7 @@ function CoolibahPortal({ role, onSignOut }) {
     return { ok: true, gone };
   };
 
-  const ctx = { role, admin, session: SESSION, removeCrew, renameCrew, setCrewRank, people, setPeople,
+  const ctx = { role, admin, session: SESSION, pending, removeCrew, renameCrew, setCrewRank, people, setPeople,
     notPeople, setNotPeople, certRoot, setCertRoot, writeCrewToWorkbooks, lastDocUpdate, setLastDocUpdate, folderNames, setFolderNames, filledFromCert, setFilledFromCert, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
 
   return (

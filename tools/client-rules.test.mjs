@@ -56,7 +56,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -382,6 +382,29 @@ const is = (got, want, what) => {
   is(looks, 3, "it looked until the portal said the round had finished");
   is(waited, 2, "…and said it was waiting each time it was not");
   is(await lib.waitForRound(), true, "a portal that cannot say counts as free: the request itself is what gets refused");
+}
+
+/* ---- an open tab runs the round only when the worker's hour has not:
+        never with unsaved changes, never offline, never while the hour
+        holds the lease, and never over a clean round under seventy
+        minutes old ---- */
+{
+  const now = Date.parse("2026-09-24T10:00:00Z");
+  const ago = (min) => new Date(now - min * 60000).toISOString();
+  const hourly = (min, more) => ({ at: now - min * 60000, roundError: null, roundSkipped: null, ...more });
+  const ask = (o) => lib.shouldTabRound({ lastDocUpdate: ago(90), now, pending: false, online: true, last: null, ...o });
+  is(ask({ pending: true }), false, "a tab with unsaved changes never runs the round");
+  is(ask({ online: false }), false, "an offline tab never runs the round");
+  is(ask({ last: { running: true, hourly: null } }), false, "while the hour holds the lease, the tab stands down");
+  is(ask({ last: { running: false, hourly: hourly(30) } }), false, "a clean server round thirty minutes ago: the server did this hour");
+  is(ask({ last: { running: false, hourly: hourly(80) } }), true, "a server round eighty minutes ago: the hour did not come, the tab is the fallback");
+  is(ask({ last: { running: false, hourly: hourly(30, { roundError: "the library refused" }) } }), true, "a server round thirty minutes ago that failed: the tab runs");
+  is(ask({ last: { running: false, hourly: hourly(30, { roundSkipped: "no training matrix on file" }) } }), true, "…or that was skipped");
+  is(ask({ last: { running: false, hourly: { ...hourly(30), at: ago(30) } } }), false, "the hour's stamp read as text answers the same");
+  is(ask({ lastDocUpdate: ago(90) }), true, "no server record and the tab's own stamp ninety minutes old: due");
+  is(ask({ lastDocUpdate: ago(70) }), false, "…seventy minutes old: not yet, the hour gets its turn first");
+  is(ask({ lastDocUpdate: null }), true, "…never updated: due");
+  is(ask({ last: { sync: null, hourly: null, running: false } }), true, "a portal that has no hour on record leaves the tab to its own clock");
 }
 
 /* ---- the copy spliced into the page answers exactly as the module does ---- */
