@@ -25,6 +25,10 @@ export type BlobStore = {
     value: unknown,
     opts?: { onlyIfMatch?: string },
   ): Promise<{ modified: boolean; etag: string | null }>;
+  /** Written only where nothing is under the key yet. `written` says
+   *  whether it was this call that put it there - of two callers that
+   *  both found the key empty, exactly one hears yes. */
+  setJSONIfAbsent(key: string, value: unknown): Promise<{ written: boolean; etag: string | null }>;
   delete(key: string): Promise<void>;
   getMetadata(key: string): Promise<{ key: string } | null>;
   getWithMetadata(
@@ -79,6 +83,23 @@ export function getStore(opts: { name: string; consistency?: string } | string):
     return { modified, etag: modified ? etag : null };
   };
 
+  // The insert half of the same idea: the row goes in only where there is
+  // no row, and the database says whether it went. Two takers of a lease
+  // that has never been taken both read nothing there; this is what lets
+  // exactly one of them have it.
+  const writeIfAbsent = async (key: string, value: string) => {
+    const etag = crypto.randomUUID();
+    const res = await d1()
+      .prepare(
+        "INSERT INTO blobs (store, key, value, updated_at, etag) VALUES (?1, ?2, ?3, ?4, ?5) " +
+          "ON CONFLICT (store, key) DO NOTHING",
+      )
+      .bind(store, key, value, Date.now(), etag)
+      .run();
+    const written = (res.meta?.changes ?? 0) > 0;
+    return { written, etag: written ? etag : null };
+  };
+
   return {
     async get(key, o) {
       const value = await read(key);
@@ -101,6 +122,9 @@ export function getStore(opts: { name: string; consistency?: string } | string):
     async setJSON(key, value, opts) {
       if (opts?.onlyIfMatch) return await writeIfMatch(key, JSON.stringify(value), opts.onlyIfMatch);
       return { modified: true, etag: await write(key, JSON.stringify(value)) };
+    },
+    async setJSONIfAbsent(key, value) {
+      return await writeIfAbsent(key, JSON.stringify(value));
     },
     async delete(key) {
       await d1()

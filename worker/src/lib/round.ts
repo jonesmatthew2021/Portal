@@ -43,48 +43,58 @@ export type RoundOutcome = {
   validityProblem: string | null;
 };
 
-/* Two rounds must never overlap - two writers of the one workbook is how a
-   file gets lost. A lease in the sync store says one is running; it
-   outlives the round's own time budget by a margin, and is run out as the
-   round ends whatever happened.
+/* Two writers of the one workbook is how a file gets lost. One lease in the
+   sync store says who is writing: the worker's hour takes it around the
+   whole of its work - the sync, which can swap the workbook, the reading,
+   and the round - and the page's Update portal, Import new files and
+   workbook upload each take it for their own turn and answer 409 while it
+   is held. It outlives the hour's own time budget by a margin, and is run
+   out at the end whatever happened.
 
    It is taken against the version mark the store puts on every write, so
-   of two rounds that read it free in the same instant only one can take
-   it; the row is left in place when it runs out, rather than deleted, so
-   there is always a mark to take it against. The page's buttons and the
-   upload route ask roundRunning() before they write the workbook, and
-   stand aside while it is held. */
+   of two takers that read it free in the same instant only one has it -
+   the very first take is an insert that only one can make, and every
+   take after is a conditional write against the mark it read. The row is
+   left in place when it runs out, rather than deleted, so there is always
+   a mark to take it against; and it is run out the same way, against the
+   mark, so a lease that has since passed to somebody else is never run
+   out under them. */
 const LEASE_KEY = "round-lease";
-const LEASE_MS = 15 * 60 * 1000;
-type Lease = { until: number; by: string; token: string };
+export const LEASE_MS = 15 * 60 * 1000;
+export type Lease = { until: number; by: string; token: string };
 
-/** Whether a round holds the lease right now - what GET /api/sync/last says. */
+/** Whether somebody holds the lease right now - what GET /api/sync/last says. */
 export async function roundRunning(): Promise<boolean> {
   const lease = (await getStore("sync").get(LEASE_KEY, { type: "json" })) as Lease | null;
   return !!lease && lease.until > Date.now();
 }
 
-/** The lease taken, or null where another round holds it or took it first. */
-async function takeLease(by: string, token: string): Promise<Lease | null> {
+/** The lease taken, or null where somebody holds it or took it first. */
+export async function takeLease(by: string, token = crypto.randomUUID()): Promise<Lease | null> {
   const leases = getStore("sync");
   const lease = { until: Date.now() + LEASE_MS, by, token } satisfies Lease;
   const held = await leases.getWithMetadata(LEASE_KEY, { type: "json" });
   const running = held ? (held.data as Lease | null) : null;
   if (running && running.until > Date.now()) return null;
   if (!held) {
-    // No mark yet to take it against: the first round ever.
-    await leases.setJSON(LEASE_KEY, lease);
-    return lease;
+    // No mark yet to take it against: the first take ever. An insert that
+    // only one of two takers can make.
+    const { written } = await leases.setJSONIfAbsent(LEASE_KEY, lease);
+    return written ? lease : null;
   }
   const { modified } = await leases.setJSON(LEASE_KEY, lease, { onlyIfMatch: held.etag });
   return modified ? lease : null;
 }
 
-/** The lease run out - only where it is still this round's. */
-async function dropLease(token: string) {
+/** The lease run out - only where it is still this holder's, and only
+ *  against the mark it was read at, so one that passed to somebody else
+ *  between the read and the write is left as theirs. */
+export async function dropLease(token: string) {
   const leases = getStore("sync");
-  const held = (await leases.get(LEASE_KEY, { type: "json" })) as Lease | null;
-  if (held && held.token === token) await leases.setJSON(LEASE_KEY, { ...held, until: 0 });
+  const held = await leases.getWithMetadata(LEASE_KEY, { type: "json" });
+  const lease = held ? (held.data as Lease | null) : null;
+  if (!held || !lease || lease.token !== token) return;
+  await leases.setJSON(LEASE_KEY, { ...lease, until: 0 }, { onlyIfMatch: held.etag });
 }
 
 // The office's workbook is rewritten in memory, and a Worker has a fixed
@@ -159,6 +169,10 @@ export async function runMatrixRound(opts: {
   by: string;
   timeLeft: () => boolean;
   mirroredThisHour: number;
+  /** The lease the caller already holds for the hour (scheduled() takes
+   *  one around the sync, the reading and the round together). Without
+   *  one the round takes a lease for itself and gives it back at the end. */
+  lease?: Lease;
 }): Promise<RoundOutcome> {
   const out: RoundOutcome = {
     applied: 0, cleared: 0, settled: 0, written: null, workbook: null, leftAsTyped: 0,
@@ -166,11 +180,12 @@ export async function runMatrixRound(opts: {
   };
   const skip = (why: string) => { out.roundSkipped = why; return out; };
 
-  const token = crypto.randomUUID();
-  let leased = false;
+  let own: Lease | null = null;
   try {
-    if (!(await takeLease(opts.by, token))) return skip("another round is still running");
-    leased = true;
+    if (!opts.lease) {
+      own = await takeLease(opts.by);
+      if (!own) return skip("another round is still running");
+    }
 
     // (a) the matrix as the register names people. No crew, no round.
     const cur = await readDocument();
@@ -262,7 +277,7 @@ export async function runMatrixRound(opts: {
     return out;
   } finally {
     try {
-      if (leased) await dropLease(token);
+      if (own) await dropLease(own.token);
     } catch (e) {
       console.error("the round's lease was not dropped:", e);
     }

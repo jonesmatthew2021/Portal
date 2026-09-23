@@ -17,7 +17,7 @@ import {
   withSuffix,
 } from "../db/documents.js";
 import { replaceSingleFile } from "../db/single-file.js";
-import { roundRunning } from "../lib/round.js";
+import { takeLease, dropLease } from "../lib/round.js";
 
 // A function request body is capped at 6 MB once multipart overhead is counted,
 // so files are held a little under that. The portal enforces the same number.
@@ -401,33 +401,39 @@ async function uploadSingleFile(form: FormData, file: File, category: string) {
     return Response.json({ skipped: true }, { status: 200 });
   }
 
-  // Never two writers of the one workbook: the round on the hour holds a
-  // lease while it writes, and an upload waits for it.
-  if (await roundRunning()) {
+  // Never two writers of the one workbook: the upload takes the same lease
+  // the round on the hour holds while it writes, and stands aside while
+  // that is held.
+  const lease = await takeLease(field(form, "uploadedBy") || "an upload");
+  if (!lease) {
     return Response.json(
       { error: "The hourly round is writing the workbook; try again in a minute." },
       { status: 409 },
     );
   }
 
-  // The replace itself - the new bytes first, the old copy parked, one
-  // batch on the books, and the old copy put back if anything fails - is
-  // in db/single-file.ts, where the hourly round runs the same steps.
-  const { row, replaced } = await replaceSingleFile({
-    category,
-    bytes: await file.arrayBuffer(),
-    filename: file.name,
-    contentType: safeContentType(file.type),
-    uploadedBy: field(form, "uploadedBy"),
-    filedOn: filedOnFrom(form),
-    title: field(form, "title"),
-    sessionId: field(form, "session"),
-  });
+  try {
+    // The replace itself - the new bytes first, the old copy parked, one
+    // batch on the books, and the old copy put back if anything fails - is
+    // in db/single-file.ts, where the hourly round runs the same steps.
+    const { row, replaced } = await replaceSingleFile({
+      category,
+      bytes: await file.arrayBuffer(),
+      filename: file.name,
+      contentType: safeContentType(file.type),
+      uploadedBy: field(form, "uploadedBy"),
+      filedOn: filedOnFrom(form),
+      title: field(form, "title"),
+      sessionId: field(form, "session"),
+    });
 
-  return Response.json(
-    { category: row.category, replaced, record: toRecord(row) },
-    { status: 201 },
-  );
+    return Response.json(
+      { category: row.category, replaced, record: toRecord(row) },
+      { status: 201 },
+    );
+  } finally {
+    await dropLease(lease.token);
+  }
 }
 
 export default async (req: Request) => {

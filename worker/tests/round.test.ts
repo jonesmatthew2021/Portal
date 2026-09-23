@@ -18,9 +18,11 @@ import analyse, { compareMatrix } from "../src/routes/analyse.js";
 import { KeptInPlace, purgeDocument, relocateToRemovedBlob, removeDocument, restoreDocument } from "../src/db/documents.js";
 import { replaceSingleFile } from "../src/db/single-file.js";
 import { saveDocument } from "../src/lib/shared-state.js";
-import { runMatrixRound, roundRunning } from "../src/lib/round.js";
+import { runMatrixRound, roundRunning, takeLease, dropLease } from "../src/lib/round.js";
 import { todayThere } from "../src/lib/analysis.js";
-import { apply, outranks, sheetOrder, survey } from "../src/routes/sync.js";
+import sync, { apply, outranks, sheetOrder, survey } from "../src/routes/sync.js";
+import files from "../src/routes/files.js";
+import worker from "../src/index.js";
 import { writeZip, readZip, partOf, partText, datedWorkbookName } from "../../source/shared/workbook.js";
 import { asKnownPerson, crewRegister } from "../../source/shared/names.js";
 import { settleRound, applySettled } from "../../source/shared/matrix-rules.js";
@@ -594,7 +596,14 @@ function portalDb(doc: Record<string, unknown>, rows: Record<string, unknown>[],
     if (/SELECT key, value FROM blobs WHERE store = \?1/.test(sql)) {
       return { results: [...blobs.entries()].filter(([k]) => k.startsWith(args[0] + "|")).map(([k, value]) => ({ key: k.slice(k.indexOf("|") + 1), value })) };
     }
-    if (/^INSERT INTO blobs/.test(sql)) { blobs.set(args[0] + "|" + args[1], String(args[2])); etags.set(args[0] + "|" + args[1], String(args[4])); return { changes: 1 }; }
+    if (/^INSERT INTO blobs/.test(sql)) {
+      const k = args[0] + "|" + args[1];
+      // The insert-if-absent: a row already there is left alone, and the
+      // database says nothing went in.
+      if (/DO NOTHING/.test(sql) && blobs.has(k)) return { changes: 0 };
+      blobs.set(k, String(args[2])); etags.set(k, String(args[4]));
+      return { changes: 1 };
+    }
     if (/^DELETE FROM blobs/.test(sql)) { blobs.delete(args[0] + "|" + args[1]); return { changes: 1 }; }
     if (/FROM documents WHERE category = 'certificate' AND removed_at IS NULL/.test(sql)) return { results: rows.filter((r) => r.category === "certificate" && !r.removedAt) };
     if (/FROM documents WHERE category = \?1 AND removed_at IS NULL/.test(sql)) return { results: rows.filter((r) => r.category === args[0] && !r.removedAt) };
@@ -796,6 +805,135 @@ test("a lease taken by somebody else in the same instant is not taken twice", as
   assert.equal(out.roundSkipped, "another round is still running");
   assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).by, "the other", "the other's lease stands");
   assert.equal(portal.state.rev, 1, "nothing written");
+});
+
+/* ------------------------------------------------------------------------ *
+ * One lease for everyone who writes the workbook: the hour, Update portal,
+ * Import new files and the upload. Two takers in the same instant never
+ * both hold it, and a lease that has passed to somebody else is never run
+ * out under them.
+ * ------------------------------------------------------------------------ */
+test("two takers with no lease ever taken: exactly one holds it", async () => {
+  const { portal } = await oneManPortal();
+  // Both read the store empty before either writes; the insert-if-absent
+  // lets one in and tells the other no.
+  const [a, b] = await Promise.all([takeLease("the round on the hour"), takeLease("Update portal")]);
+  assert.equal([a, b].filter(Boolean).length, 1, "one lease between them");
+  const held = JSON.parse(portal.blobs.get("sync|round-lease")!);
+  assert.equal(held.token, (a || b)!.token, "the store carries the winner's");
+  assert.ok(await roundRunning());
+  assert.equal(await takeLease("a third"), null, "and nobody else gets it while it stands");
+});
+
+test("a lease that has passed to somebody else is not run out under them", async () => {
+  const { portal } = await oneManPortal();
+  const mine = (await takeLease("the round on the hour"))!;
+  // A stale token: the lease is somebody else's now.
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "the other", token: "y" }));
+  await dropLease(mine.token);
+  assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).by, "the other", "the other's lease stands");
+  assert.ok(await roundRunning());
+
+  // The race: it is still mine when the drop reads it, and passes to the
+  // other between that read and the write. The conditional write misses.
+  portal.blobs.set("sync|round-lease", JSON.stringify(mine));
+  portal.etags.set("sync|round-lease", "my mark");
+  const plain = portal.db.prepare;
+  let reads = 0;
+  portal.db.prepare = (sql: string) => {
+    const s = plain(sql);
+    if (!/SELECT value, etag FROM blobs/.test(sql)) return s;
+    const bind = s.bind;
+    s.bind = (...a: unknown[]) => {
+      const b = bind(...a);
+      if (++reads !== 1) return b;
+      const all = b.all.bind(b);
+      b.all = async () => {
+        const out = await all();
+        portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "the other", token: "y" }));
+        portal.etags.set("sync|round-lease", "the other's mark");
+        return out;
+      };
+      b.first = async () => (await b.all()).results[0] ?? null;
+      return b;
+    };
+    return s;
+  };
+  await dropLease(mine.token);
+  portal.db.prepare = plain;
+  const now = JSON.parse(portal.blobs.get("sync|round-lease")!);
+  assert.equal(now.by, "the other");
+  assert.ok(now.until > Date.now(), "still running: the drop found the mark moved and left it");
+});
+
+/* The lease's shape from the outside: the sync, the upload and the hour. */
+const leaseWrites = (db: { asked: Asked[] }) =>
+  db.asked.filter((a) => /^(INSERT INTO|UPDATE) blobs/.test(a.sql) && a.args[1] === "round-lease");
+
+test("Update portal takes the lease for its turn and gives it back; while somebody holds it, it is refused", async () => {
+  const { portal } = await oneManPortal();
+  const post = () => new Request("http://portal/api/sync", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ by: "Update portal" }),
+  });
+  const res = await sync(post());
+  assert.equal(res.status, 200, await res.text());
+  const lease = JSON.parse(portal.blobs.get("sync|round-lease")!);
+  assert.equal(lease.by, "Update portal", "the sync ran under its own lease");
+  assert.equal(lease.until, 0, "…and gave it back");
+  assert.ok(leaseWrites(portal.db).length >= 2, "taken and run out through the store's conditional writes");
+
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "the round on the hour", token: "x" }));
+  const held = await sync(post());
+  assert.equal(held.status, 409);
+  assert.match(((await held.json()) as { error: string }).error, /try again in a minute/);
+  assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).by, "the round on the hour", "the hour's lease is untouched");
+});
+
+test("the workbook upload takes the lease too, and is refused while somebody holds it", async () => {
+  const { portal, bucket } = await oneManPortal();
+  const upload = () => {
+    const form = new FormData();
+    form.append("file", new File([bytesOf("uploaded workbook")], "20260930 - CREW QUALIFICATION EXPIRY.xlsx", { type: "application/x" }));
+    form.append("category", "training-matrix");
+    form.append("onDuplicate", "replace");
+    form.append("uploadedBy", "Matthew");
+    return new Request("http://portal/api/files", { method: "POST", body: form });
+  };
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "the round on the hour", token: "x" }));
+  const held = await files(upload());
+  assert.equal(held.status, 409);
+  assert.equal(bucket.text("opms/20260930 - CREW QUALIFICATION EXPIRY.xlsx"), null, "nothing was written");
+
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: 0, by: "the round on the hour", token: "x" }));
+  const res = await files(upload());
+  assert.equal(res.status, 201, await res.text());
+  assert.equal(bucket.text("opms/20260930 - CREW QUALIFICATION EXPIRY.xlsx"), "uploaded workbook");
+  const lease = JSON.parse(portal.blobs.get("sync|round-lease")!);
+  assert.equal(lease.by, "Matthew", "the upload ran under its own lease");
+  assert.equal(lease.until, 0, "…and gave it back");
+});
+
+test("the hour runs the sync and the round under one lease, taken once and run out at the end", async () => {
+  const { portal, bucket } = await oneManPortal();
+  const env = { DB: portal.db, FILES: bucket, FILE_STORE: "r2" };
+  await worker.scheduled({} as never, env as never);
+  const takes = leaseWrites(portal.db);
+  assert.equal(takes.length, 2, "one take and one drop for the whole hour");
+  const lease = JSON.parse(portal.blobs.get("sync|round-lease")!);
+  assert.equal(lease.by, "the round on the hour");
+  assert.equal(lease.until, 0, "run out at the end");
+  const hourly = JSON.parse(portal.blobs.get("sync|last-hourly")!);
+  assert.equal(hourly.syncError, null, "the sync ran");
+  assert.equal(hourly.applied, 1, "and the round ran under the same lease, not refused by it");
+  assert.equal(hourly.roundSkipped, null);
+  assert.equal(JSON.parse(portal.blobs.get("sync|last-run")!).by, "hourly schedule");
+
+  // An hour that finds the lease held stands down whole - no sync either.
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "Update portal", token: "y" }));
+  const before = portal.db.asked.length;
+  await worker.scheduled({} as never, env as never);
+  assert.equal(JSON.parse(portal.blobs.get("sync|last-hourly")!).roundSkipped, "another round is still running");
+  assert.ok(!portal.db.asked.slice(before).some((a) => /portal_state|FROM documents/.test(a.sql)), "nothing was read or written past the lease");
 });
 
 /* ------------------------------------------------------------------------ *

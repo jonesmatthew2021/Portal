@@ -22,7 +22,7 @@ import migrateCerts from "./routes/migrate-certs.js";
 import readOne from "./routes/read-one.js";
 import clearR2 from "./routes/clear-r2.js";
 import importSingle from "./routes/import-single.js";
-import { runMatrixRound, roundRunning } from "./lib/round.js";
+import { runMatrixRound, roundRunning, takeLease, dropLease, type Lease } from "./lib/round.js";
 import { readDocument } from "./lib/shared-state.js";
 import { crewRowsOnly } from "../../source/shared/names.js";
 
@@ -157,100 +157,140 @@ export default {
   async scheduled(_event: ScheduledEvent, env: PortalEnv) {
     setEnv(env);
     const t0 = Date.now();
-    // Nine minutes for the whole hour's work. The reading loops stop two and
-    // a half minutes short of that, so the round always has room to run
-    // after them; the round itself is checked against the full nine.
-    const timeLeft = () => Date.now() - t0 < 9 * 60 * 1000;
-    const loopsLeft = () => Date.now() - t0 < (9 - 2.5) * 60 * 1000;
-    // A batch of four reads is a few seconds; forty batches an hour keeps
-    // the model bill and the hour's wall clock both inside reason.
-    const MAX_EXTRACT_BATCHES = 40;
-    // Refiling renames files in the library, a call or two each. Six lots
-    // of fifty an hour keeps a backlog of renames inside the hour's budget
-    // of calls, with the round's own share left over; the rest wait an hour.
-    const MAX_REFILE_CALLS = 6;
-    // Whatever happens below is written down at the end: the counts on a
-    // good hour, the error on a bad one. A round that fails in silence is
-    // how the matrix once sat empty for three hours with nobody told.
+    // Whatever happens below is written down: the counts on a good hour,
+    // the error on a bad one. A round that fails in silence is how the
+    // matrix once sat empty for three hours with nobody told.
     const outcome = { read: 0, refiled: 0, syncError: null as string | null, readError: null as string | null };
     const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
-    let mirroredThisHour = 0;
+    const written = async (round: Record<string, unknown>) => {
+      try {
+        await recordHourly({ at: t0, durationMs: Date.now() - t0, ...outcome, ...round });
+      } catch (e) {
+        console.error("hourly outcome not written:", e);
+      }
+    };
+
+    // One lease for the whole hour. The sync can swap the workbook and the
+    // round writes it; a page's Update portal or an upload doing either at
+    // the same time is two writers of the one file, so they take the same
+    // lease for their turn and stand aside while this holds it.
+    let lease: Lease | null;
     try {
       await ensureDocumentColumns();
-      const synced = await runSync("hourly schedule");
-      mirroredThisHour = synced.mirrored;
+      lease = await takeLease("the round on the hour");
     } catch (e) {
-      outcome.syncError = said(e);
-      console.error("scheduled SharePoint sync failed:", e);
+      await written({ roundError: "the hour could not start: " + said(e) });
+      console.error("the hour could not start:", e);
+      return;
     }
-
-    // The matrix as the register names people - read once, for the refile
-    // and for the round alike, so a certificate is filed under the same
-    // name the round will look for it by.
-    let codes: [string, string][] = [];
-    let names: string[] = [];
-    // The round's word on the hour, when it did not get to run at all: a
-    // matrix that could not be read, or one with nothing on it. Written
-    // into the record either way, so the hour never reads as a clean one.
-    let round: Record<string, unknown> = {};
+    if (!lease) {
+      await written({ roundSkipped: "another round is still running" });
+      return;
+    }
     try {
-      const cur = await readDocument();
-      const quals = cur ? crewRowsOnly(cur.doc.quals as never, cur.doc.people) as { cols?: string[][]; rows?: string[][] } | null : null;
-      codes = (quals?.cols || []).map((c) => [c[0], c[1]]);
-      names = (quals?.rows || []).map((r) => r[0]).filter(Boolean);
-      if (!codes.length || !names.length) round = { roundSkipped: "the crew matrix has no items" };
-    } catch (e) {
-      round = { roundError: "the crew matrix could not be read: " + said(e) };
-      console.error("the crew matrix could not be read for the hour:", e);
-    }
-
-    if (env.ANTHROPIC_API_KEY) {
+      await written(await theHour(env, lease, t0, outcome));
+    } finally {
       try {
-        if (codes.length) {
-          let stalled = 0;
-          let batches = 0;
-          while (loopsLeft() && batches++ < MAX_EXTRACT_BATCHES) {
-            const out = (await (await extract(codes, 4)).json()) as {
-              remaining: number; attempted: number; extracted: number;
-            };
-            outcome.read += out.extracted;
-            if (out.remaining <= 0 || out.attempted === 0) break;
-            if (out.extracted === 0 && ++stalled >= 2) break;
-          }
-          let refiles = 0;
-          while (names.length && loopsLeft() && refiles++ < MAX_REFILE_CALLS) {
-            const out = (await (await refile(names, 50)).json()) as {
-              moved: unknown[]; remaining: number;
-            };
-            outcome.refiled += (out.moved || []).length;
-            if (!out.remaining) break;
-          }
-          if (outcome.read || outcome.refiled) {
-            console.log("hourly read: " + outcome.read + " certificates read, " + outcome.refiled + " refiled");
-          }
-        }
+        await dropLease(lease.token);
       } catch (e) {
-        outcome.readError = said(e);
-        console.error("scheduled certificate read failed:", e);
+        console.error("the hour's lease was not dropped:", e);
       }
-    }
-
-    // The round needs stored readings and a matrix with items on it, not the
-    // model: an hour with no key still puts what has already been read onto
-    // the matrix. It catches everything itself; this try is for the plumbing.
-    if (codes.length && names.length) {
-      try {
-        round = await runMatrixRound({ by: "the round on the hour", timeLeft, mirroredThisHour });
-      } catch (e) {
-        round = { roundError: said(e) };
-        console.error("the round on the hour failed outside its own catch:", e);
-      }
-    }
-
-    try {
-      await recordHourly({ at: t0, durationMs: Date.now() - t0, ...outcome, ...round });
-    } catch (e) {
-      console.error("hourly outcome not written:", e);
     }
   },
 };
+
+/**
+ * The hour's work under its lease: the sync, the reading, the round. What
+ * comes back is the round's own word on the hour, for the record.
+ */
+async function theHour(
+  env: PortalEnv, lease: Lease, t0: number,
+  outcome: { read: number; refiled: number; syncError: string | null; readError: string | null },
+): Promise<Record<string, unknown>> {
+  const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
+  // Nine minutes for the whole hour's work. The reading loops stop two and
+  // a half minutes short of that, so the round always has room to run
+  // after them; the round itself is checked against the full nine.
+  const timeLeft = () => Date.now() - t0 < 9 * 60 * 1000;
+  const loopsLeft = () => Date.now() - t0 < (9 - 2.5) * 60 * 1000;
+  // A batch of four reads is a few seconds; forty batches an hour keeps
+  // the model bill and the hour's wall clock both inside reason.
+  const MAX_EXTRACT_BATCHES = 40;
+  // Refiling renames files in the library, a call or two each. Six lots
+  // of fifty an hour keeps a backlog of renames inside the hour's budget
+  // of calls, with the round's own share left over; the rest wait an hour.
+  const MAX_REFILE_CALLS = 6;
+
+  let mirroredThisHour = 0;
+  try {
+    const synced = await runSync("hourly schedule");
+    mirroredThisHour = synced.mirrored;
+  } catch (e) {
+    outcome.syncError = said(e);
+    console.error("scheduled SharePoint sync failed:", e);
+  }
+
+  // The matrix as the register names people - read once, for the refile
+  // and for the round alike, so a certificate is filed under the same
+  // name the round will look for it by.
+  let codes: [string, string][] = [];
+  let names: string[] = [];
+  // The round's word on the hour, when it did not get to run at all: a
+  // matrix that could not be read, or one with nothing on it. Written
+  // into the record either way, so the hour never reads as a clean one.
+  let round: Record<string, unknown> = {};
+  try {
+    const cur = await readDocument();
+    const quals = cur ? crewRowsOnly(cur.doc.quals as never, cur.doc.people) as { cols?: string[][]; rows?: string[][] } | null : null;
+    codes = (quals?.cols || []).map((c) => [c[0], c[1]]);
+    names = (quals?.rows || []).map((r) => r[0]).filter(Boolean);
+    if (!codes.length || !names.length) round = { roundSkipped: "the crew matrix has no items" };
+  } catch (e) {
+    round = { roundError: "the crew matrix could not be read: " + said(e) };
+    console.error("the crew matrix could not be read for the hour:", e);
+  }
+
+  if (env.ANTHROPIC_API_KEY) {
+    try {
+      if (codes.length) {
+        let stalled = 0;
+        let batches = 0;
+        while (loopsLeft() && batches++ < MAX_EXTRACT_BATCHES) {
+          const out = (await (await extract(codes, 4)).json()) as {
+            remaining: number; attempted: number; extracted: number;
+          };
+          outcome.read += out.extracted;
+          if (out.remaining <= 0 || out.attempted === 0) break;
+          if (out.extracted === 0 && ++stalled >= 2) break;
+        }
+        let refiles = 0;
+        while (names.length && loopsLeft() && refiles++ < MAX_REFILE_CALLS) {
+          const out = (await (await refile(names, 50)).json()) as {
+            moved: unknown[]; remaining: number;
+          };
+          outcome.refiled += (out.moved || []).length;
+          if (!out.remaining) break;
+        }
+        if (outcome.read || outcome.refiled) {
+          console.log("hourly read: " + outcome.read + " certificates read, " + outcome.refiled + " refiled");
+        }
+      }
+    } catch (e) {
+      outcome.readError = said(e);
+      console.error("scheduled certificate read failed:", e);
+    }
+  }
+
+  // The round needs stored readings and a matrix with items on it, not the
+  // model: an hour with no key still puts what has already been read onto
+  // the matrix. It catches everything itself; this try is for the plumbing.
+  if (codes.length && names.length) {
+    try {
+      round = await runMatrixRound({ by: "the round on the hour", timeLeft, mirroredThisHour, lease });
+    } catch (e) {
+      round = { roundError: said(e) };
+      console.error("the round on the hour failed outside its own catch:", e);
+    }
+  }
+  return round;
+}

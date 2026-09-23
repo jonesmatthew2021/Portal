@@ -79,7 +79,11 @@ modules. Edit that code there and only there.
   only the cells it changed plus blanks — a figure the office typed is left
   as typed. Removed copies are parked flat under `removed/` (no folder is
   ever made), and a file the office itself put in a folder is never moved:
-  its row comes off the books with the bytes left where they are.
+  its row comes off the books with the bytes left where they are. One lease
+  (`takeLease`/`dropLease` in `round.ts`) covers everyone who writes the
+  workbook: the hour holds it around its sync, reading and round, and
+  `POST /api/sync`, the workbook upload and the round take the same one for
+  their turn or answer 409. Anything new that writes the workbook takes it.
 - **The last 200 saves are kept** (`portal_state_history`) and any one of them
   can be put back from `Admin → Access Grants`, under Revisions.
 

@@ -8,7 +8,7 @@ import {
 import { isPendingName } from "../db/single-file.js";
 import { certHome, type CertHome } from "../db/cert-home.js";
 import { todayThere } from "../lib/analysis.js";
-import { roundRunning } from "../lib/round.js";
+import { takeLease, dropLease } from "../lib/round.js";
 import { getStore } from "../compat/blobs.js";
 
 /**
@@ -439,11 +439,17 @@ export default async (req: Request, by = "Import new files") => {
     let who = by;
     const sent = await req.json().catch(() => null) as { by?: unknown } | null;
     if (sent && typeof sent.by === "string" && sent.by.trim()) who = sent.by.trim().slice(0, 40);
-    // The sync can swap the workbook, and the round may be writing it now.
-    if (await roundRunning()) {
+    // The sync can swap the workbook, so it takes the one lease the hour
+    // and the upload take, for its own turn - never two writers at once.
+    const lease = await takeLease(who);
+    if (!lease) {
       return Response.json({ error: "The hourly round is writing the workbook; try again in a minute." }, { status: 409 });
     }
-    return Response.json(await runSync(who));
+    try {
+      return Response.json(await runSync(who));
+    } finally {
+      await dropLease(lease.token);
+    }
   } catch (e) {
     return Response.json(
       { error: e instanceof Error ? e.message : String(e) },
