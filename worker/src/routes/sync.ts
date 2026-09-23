@@ -365,6 +365,17 @@ export type HourlyRecord = {
   refiled: number;
   syncError: string | null;
   readError: string | null;
+  // The round's own outcome (lib/round.ts), spread in when it ran.
+  applied?: number;
+  cleared?: number;
+  settled?: number;
+  written?: number | null;
+  workbook?: string | null;
+  leftAsTyped?: number;
+  held?: string | null;
+  roundError?: string | null;
+  roundSkipped?: string | null;
+  validityProblem?: string | null;
 };
 export const recordHourly = (r: HourlyRecord) => getStore("sync").setJSON("last-hourly", r);
 export const lastHourly = () => getStore("sync").get("last-hourly", { type: "json" }) as Promise<HourlyRecord | null>;

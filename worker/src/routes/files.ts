@@ -430,7 +430,7 @@ export default async (req: Request) => {
 
     // Raw D1 rather than the ORM here on purpose: this is the portal's
     // biggest read — every file row at once — and the ORM's per-row mapping
-    // was enough to put the request over the free plan's CPU allowance.
+    // was enough to put the request over its CPU budget.
     // Plain rows with aliased column names cost almost nothing.
     // Each certificate row rides out with its own reading's dates — joined by
     // the fingerprint the reading is keyed under — so a renewal shows what is

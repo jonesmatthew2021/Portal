@@ -1,8 +1,9 @@
 # The Coolibah crew portal on Cloudflare Workers.
 #
 # One worker carries the whole thing: the page itself (served from ./assets),
-# every /api route the page calls, and the engine behind them. The stores it
-# leans on are all on Cloudflare's free tier:
+# every /api route the page calls, and the engine behind them. The account is
+# Workers Paid, so the worker has the CPU time the hourly round needs (the
+# [limits] block below); the stores it leans on:
 #
 #   DB     (D1)  — the file index, the portal's shared state, and the AI
 #                  readings / job records (in one strongly consistent place)
@@ -44,6 +45,13 @@ name = "EMAIL"
 # folders from Teams are taken onto the portal's books (src/routes/sync.ts).
 [triggers]
 crons = ["10 * * * *"]
+
+# The hourly round rewrites the office's workbook and reads a batch of
+# certificates in one invocation, which is real CPU. Workers Paid allows up
+# to five minutes per invocation; two is plenty and leaves a wide margin
+# over a request that goes wrong.
+[limits]
+cpu_ms = 120000
 
 [[d1_databases]]
 binding = "DB"

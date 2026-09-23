@@ -22,6 +22,9 @@ import migrateCerts from "./routes/migrate-certs.js";
 import readOne from "./routes/read-one.js";
 import clearR2 from "./routes/clear-r2.js";
 import importSingle from "./routes/import-single.js";
+import { runMatrixRound } from "./lib/round.js";
+import { readDocument } from "./lib/shared-state.js";
+import { crewRowsOnly } from "../../source/shared/names.js";
 
 /**
  * The portal's front door on Cloudflare.
@@ -142,33 +145,56 @@ export default {
   // The hourly tick (wrangler.toml [triggers]): whatever people have dropped
   // into the SharePoint folders from Teams since last time is taken onto the
   // portal's books, then read by the AI and refiled under whoever each
-  // certificate names — nobody pressing anything. Reads already cached cost
-  // nothing, so a quiet hour is a few database looks and done.
+  // certificate names, and then the round (lib/round.ts) puts what the
+  // certificates say onto the crew matrix and into the office's workbook —
+  // nobody pressing anything. Reads already cached cost nothing, so a quiet
+  // hour is a few database looks and done.
   async scheduled(_event: ScheduledEvent, env: PortalEnv) {
     setEnv(env);
     const t0 = Date.now();
+    // Nine minutes for the whole hour's work. The reading loops stop two and
+    // a half minutes short of that, so the round always has room to run
+    // after them; the round itself is checked against the full nine.
     const timeLeft = () => Date.now() - t0 < 9 * 60 * 1000;
+    const loopsLeft = () => Date.now() - t0 < (9 - 2.5) * 60 * 1000;
+    // A batch of four reads is a few seconds; forty batches an hour keeps
+    // the model bill and the hour's wall clock both inside reason.
+    const MAX_EXTRACT_BATCHES = 40;
     // Whatever happens below is written down at the end: the counts on a
     // good hour, the error on a bad one. A round that fails in silence is
     // how the matrix once sat empty for three hours with nobody told.
     const outcome = { read: 0, refiled: 0, syncError: null as string | null, readError: null as string | null };
     const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
+    let mirroredThisHour = 0;
     try {
       await ensureDocumentColumns();
-      await runSync("hourly schedule");
+      const synced = await runSync("hourly schedule");
+      mirroredThisHour = synced.mirrored;
     } catch (e) {
       outcome.syncError = said(e);
       console.error("scheduled SharePoint sync failed:", e);
     }
+
+    // The matrix as the register names people - read once, for the refile
+    // and for the round alike, so a certificate is filed under the same
+    // name the round will look for it by.
+    let codes: [string, string][] = [];
+    let names: string[] = [];
+    try {
+      const cur = await readDocument();
+      const quals = cur ? crewRowsOnly(cur.doc.quals as never, cur.doc.people) as { cols?: string[][]; rows?: string[][] } | null : null;
+      codes = (quals?.cols || []).map((c) => [c[0], c[1]]);
+      names = (quals?.rows || []).map((r) => r[0]).filter(Boolean);
+    } catch (e) {
+      console.error("the crew matrix could not be read for the hour:", e);
+    }
+
     if (env.ANTHROPIC_API_KEY) {
       try {
-        const row = await env.DB.prepare("SELECT data FROM portal_state LIMIT 1").first<{ data: string }>();
-        const quals = row ? JSON.parse(row.data)?.quals : null;
-        const codes: [string, string][] = (quals?.cols || []).map((c: string[]) => [c[0], c[1]]);
-        const names: string[] = (quals?.rows || []).map((r: string[]) => r[0]).filter(Boolean);
         if (codes.length) {
           let stalled = 0;
-          while (timeLeft()) {
+          let batches = 0;
+          while (loopsLeft() && batches++ < MAX_EXTRACT_BATCHES) {
             const out = (await (await extract(codes, 4)).json()) as {
               remaining: number; attempted: number; extracted: number;
             };
@@ -176,7 +202,7 @@ export default {
             if (out.remaining <= 0 || out.attempted === 0) break;
             if (out.extracted === 0 && ++stalled >= 2) break;
           }
-          while (names.length && timeLeft()) {
+          while (names.length && loopsLeft()) {
             const out = (await (await refile(names, 50)).json()) as {
               moved: unknown[]; remaining: number;
             };
@@ -192,8 +218,22 @@ export default {
         console.error("scheduled certificate read failed:", e);
       }
     }
+
+    // The round needs stored readings and a matrix with items on it, not the
+    // model: an hour with no key still puts what has already been read onto
+    // the matrix. It catches everything itself; this try is for the plumbing.
+    let round = {};
+    if (codes.length && names.length) {
+      try {
+        round = await runMatrixRound({ by: "the round on the hour", timeLeft, mirroredThisHour });
+      } catch (e) {
+        round = { roundError: said(e) };
+        console.error("the round on the hour failed outside its own catch:", e);
+      }
+    }
+
     try {
-      await recordHourly({ at: t0, durationMs: Date.now() - t0, ...outcome });
+      await recordHourly({ at: t0, durationMs: Date.now() - t0, ...outcome, ...round });
     } catch (e) {
       console.error("hourly outcome not written:", e);
     }
