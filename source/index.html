@@ -299,11 +299,20 @@ async function loadState() {
 // in between, the server refuses and hands back what is currently stored, so a
 // change is never quietly written over one made a moment earlier.
 async function saveState(data, rev) {
-  const r = await fetch(STATE_API, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ rev, data }),
-  });
+  const body = JSON.stringify({ rev, data });
+  let r;
+  try {
+    r = await fetch(STATE_API, { method: "PUT", headers: { "Content-Type": "application/json" }, body });
+  } catch (cause) {
+    // The save never got there - the connection dropped, the tab is
+    // offline. The browser throws a TypeError for that, but so does a
+    // slip in the tab's own code, and the save loop must not go by the
+    // name: it marks the one that never left with a status of 0 instead
+    // (see saveTryAgainIn).
+    const e = new Error(cause && cause.message ? cause.message : "Couldn't reach the portal");
+    e.status = 0;
+    throw e;
+  }
   if (r.status === 409) return { ...(await r.json()), conflict: true };
   if (!r.ok) {
     // The status rides on the error, so the save loop can tell a change the
@@ -325,15 +334,18 @@ async function saveState(data, rev) {
    down either, until somebody happened to type in it. So a save that
    did not get through is tried again shortly - but only where the next go
    could come out differently: a server that fell over (a 5xx) or a fetch
-   that never got there (the browser throws a TypeError). A save the
-   server looked at and refused (a 4xx - signed out, too big) would be
+   that never got there (saveState marks that with a status of 0). A save
+   the server looked at and refused (a 4xx - signed out, too big) would be
    refused again, and so would anything that went wrong in the tab itself
    before the save left, which would go wrong the same way every fifteen
-   seconds with the badge flickering red for as long as the tab is open. */
+   seconds with the badge flickering red for as long as the tab is open.
+   The status is the only thing looked at: going by the error's name used
+   to retry a slip in the tab's own code forever, because the browser
+   throws the same TypeError for that as for a dropped connection. */
 const SAVE_RETRY_MS = 15000;
 function saveTryAgainIn(e) {
   const s = e && e.status;
-  return s >= 500 || (e && e.name === "TypeError") ? SAVE_RETRY_MS : 0;
+  return s === 0 || s >= 500 ? SAVE_RETRY_MS : 0;
 }
 
 /* Which of the slices a save carried are saved now that it has landed:

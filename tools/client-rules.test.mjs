@@ -394,21 +394,37 @@ const is = (got, want, what) => {
         unsaved ---- */
 {
   const answering = (status) => async () => ({ ok: false, status, json: async () => ({}) });
-  const page = (status) => fn(
+  const pageWith = (fetchStub) => fn(
     ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
-    windowStub.navigator, windowStub.location, sessionStub, sessionStub, () => {}, answering(status),
+    windowStub.navigator, windowStub.location, sessionStub, sessionStub, () => {}, fetchStub,
     () => 0, () => 0, () => {}, () => {}, () => 0, () => {}, () => false,
     function N() {}, function I() {}, function A() {}, class { observe() {} }, function F() {},
     function X() {}, { now: () => 0 }, {}, {},
   );
-  const tried = async (status) => { try { await page(status).saveState({}, 1); return null; } catch (e) { return e; } };
+  const page = (status) => pageWith(answering(status));
+  const thrown = async (p, data) => { try { await p.saveState(data, 1); return null; } catch (e) { return e; } };
+  const tried = (status) => thrown(page(status), {});
   const e500 = await tried(500);
   is(e500 && e500.status, 500, "a save the server fell over on carries the status");
   is(lib.saveTryAgainIn(e500), 15000, "…and is tried again in fifteen seconds");
   const e413 = await tried(413);
   is(e413 && e413.status, 413, "a save the server refused carries the status");
   is(lib.saveTryAgainIn(e413), 0, "…and is not tried again: it would be refused again");
-  is(lib.saveTryAgainIn(new TypeError("Failed to fetch")), 15000, "a save that never got there (offline) is tried again");
+  /* The browser throws a TypeError both for a fetch that never got there
+     and for a slip in the tab's own code, so the save loop cannot go by
+     the name: saveState marks the one that never left with a status of 0. */
+  const offline = pageWith(async () => { throw new TypeError("Failed to fetch"); });
+  const e0 = await thrown(offline, {});
+  is(e0 && e0.status, 0, "a save that never got there (offline) carries a status of 0");
+  is(e0 && e0.message, "Failed to fetch", "…and the browser's own words");
+  is(lib.saveTryAgainIn(e0), 15000, "…and is tried again in fifteen seconds");
+  const cyclic = {}; cyclic.self = cyclic;
+  const eCyclic = await thrown(offline, cyclic);
+  is(eCyclic && eCyclic.status, undefined, "a copy the tab could not write out fails before the save leaves, and carries no status");
+  is(lib.saveTryAgainIn(eCyclic), 0, "…and is not tried again: it would go wrong the same way every fifteen seconds");
+  let realCyclic = null; try { JSON.stringify(cyclic); } catch (e) { realCyclic = e; }
+  is(lib.saveTryAgainIn(realCyclic), 0, "…the browser's own error for it included");
+  is(lib.saveTryAgainIn(new TypeError("Cannot read properties of undefined")), 0, "…nor is a slip in the tab's own code, which the browser also calls a TypeError");
   is(lib.saveTryAgainIn(new Error("Converting circular structure to JSON")), 0, "something that went wrong in the tab before the save left would go wrong the same way again, so is not");
   is(lib.saveTryAgainIn(new SyntaxError("Unexpected token")), 0, "…nor is an answer the tab could not read");
   is(lib.saveTryAgainIn(null), 0, "…nor is nothing at all to go on");
