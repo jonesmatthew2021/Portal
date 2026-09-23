@@ -1,9 +1,10 @@
-/* SharePoint — the Admin tab of that name.
+/* SharePoint — the company library, live. Shown at the foot of the
+ * Documents page when it is asked for.
  *
  * Spliced into source/index.html by the build, so there is no import or
  * export here: by the time it runs it is the same one file it always was.
  * The shell holds the theme, the shared components and the state; this
- * holds what is only this tab's. See tools/source.mjs.
+ * holds what is only this section's. See tools/source.mjs.
  */
 function SharePointPage() {
   const [path, setPath] = useState("");

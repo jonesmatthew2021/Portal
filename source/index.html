@@ -4070,7 +4070,7 @@ function MatrixPerson({ row, onClose }) {
       {files.length === 0 ? (
         <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.6 }}>
           Nothing has been uploaded for {row[0]} yet. Scans are filed from the Admin
-          tab, under Required Documents For Upload.
+          tab, under Documents.
         </div>
       ) : files.map((f) => (
         <div key={f.id} className="um-row" style={{ display: "flex", gap: 12, alignItems: "center",
@@ -14125,7 +14125,7 @@ function RosterListPage() {
     return (
       <>
         <SectionHead title="Roster" />
-        <Empty>No crew roster is on file. Upload it under Required Documents For Upload.</Empty>
+        <Empty>No crew roster is on file. Upload it under Documents.</Empty>
       </>
     );
   }
@@ -16538,13 +16538,12 @@ function CrewCertificateUpload() {
 const ADMIN_PAGES = [
   { id: "crew-details", label: "Crew Details" },
   { id: "swings", label: "Swings" },
-  { id: "required-docs", label: "Required Documents For Upload" },
+  { id: "documents", label: "Documents" },
   { id: "checker", label: "Certification Checker" },
   { id: "elearning", label: "E-Learning Status" },
   { id: "opms", label: "OPMS Checker" },
   { id: "portways-docs", label: "Portways Documentation" },
   { id: "ai-checker", label: "AI Checker" },
-  { id: "sharepoint", label: "SharePoint" },
   { id: "access", label: "Access Grants" },
 ];
 
@@ -16554,6 +16553,8 @@ const ADMIN_PAGES = [
 const ADMIN_PAGE_MOVED = {
   "swing-allocation": "swings",
   "swing-compliance": "swings",
+  "required-docs": "documents",
+  "sharepoint": "documents",
 };
 
 function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingBoard, setSwingBoard, notes, corrCount, history, allTabs, hiddenTabs, onHideTab, onRestoreTab, onRestoreAllTabs, files, sync, log }) {
@@ -16632,7 +16633,7 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
       </div>
 
       {page === "crew-details" && <CrewDetails />}
-      {page === "required-docs" && <RequiredDocuments />}
+      {page === "documents" && <RequiredDocuments />}
       {page === "elearning" && <ELearningStatus />}
       {/* One page for the swing: the legend, the compliance cards — the swing
           that is on and the ones coming — then the board, which follows
@@ -16642,7 +16643,6 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
         <SwingsPage currentUser={currentUser} people={people} setPeople={setPeople}
           overrides={overrides} swingBoard={swingBoard} setSwingBoard={setSwingBoard} log={log} />
       )}
-      {page === "sharepoint" && <SharePointPage />}
       {page === "access" && <AccessGrantsPage />}
       {page === "opms" && <OPMSChecker />}
       {/* Portways' Crew List & Shift Allocation form, kept where the OPMS

@@ -33,13 +33,13 @@ One file per Admin tab, so two jobs on two tabs are two files:
 |---|---|
 | `crew-details.jsx` | Crew Details — the crew register |
 | `swing-allocation.jsx` | Swings (thin — the board and the compliance check are in the shell) |
-| `required-documents.jsx` | Required Documents For Upload |
+| `required-documents.jsx` | Documents — what the portal has to be given, with the library under it |
 | `certification-checker.jsx` | Certification Checker |
 | `elearning-status.jsx` | E-Learning Status |
 | `opms-checker.jsx` | OPMS Checker |
 | `portways-documentation.jsx` | Portways Documentation |
 | `ai-checker.jsx` | AI Checker |
-| `sharepoint.jsx` | SharePoint |
+| `sharepoint.jsx` | the SharePoint library browser, shown at the foot of Documents |
 | `access-grants.jsx` | Access Grants |
 
 An area file carries no import or export — by the time it runs it is the same

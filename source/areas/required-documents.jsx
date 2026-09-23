@@ -1,4 +1,4 @@
-/* Required Documents For Upload — the Admin tab of that name.
+/* Documents — the Admin tab of that name.
  *
  * Spliced into source/index.html by the build, so there is no import or
  * export here: by the time it runs it is the same one file it always was.
@@ -15,9 +15,15 @@
  * meant an admin setting up a fresh portal had to find each one somewhere else and
  * could not see, from any one of them, what was still outstanding. They are filed
  * here now, first thing on the tab, and the screens that read them only read them.
+ *
+ * Under them, the company library itself — the SharePoint folders those
+ * documents and the crew's certificates are imported from. It was a page of
+ * its own; it is the back door to what the boxes above show the front of, so
+ * it sits here, opened when it is wanted rather than read on every visit.
  */
 function RequiredDocuments() {
   const portal = usePortal();
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const { certSheet } = portal;
   const records = matrixRecords(portal);
   const setters = matrixSetters(portal);
@@ -141,6 +147,17 @@ function RequiredDocuments() {
         <UpdateTableButton />
       </div>
       <UploadCertificates />
+
+      <div style={{ height: 1, background: T.rule, margin: "22px 0" }} />
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14, flexWrap: "wrap",
+        marginBottom: libraryOpen ? 14 : 0 }}>
+        <Eyebrow color={T.accent}>SharePoint</Eyebrow>
+        <Button variant="quiet" onClick={() => setLibraryOpen(!libraryOpen)}>
+          {libraryOpen ? "Hide the library" : "Show the library"}
+        </Button>
+      </div>
+      {libraryOpen && <SharePointPage />}
     </div>
   );
 }

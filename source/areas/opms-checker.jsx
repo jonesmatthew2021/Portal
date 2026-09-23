@@ -344,7 +344,7 @@ function OPMSChecker() {
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
           {opmsSheet && <OpenLink url={opmsSheet.url} />}
           <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted }}>
-            Filed under Required Documents For Upload, with the rest of the spreadsheets.
+            Filed under Documents, with the rest of the spreadsheets.
           </span>
         </div>
       </div>
@@ -465,7 +465,7 @@ function OPMSChecker() {
         <Empty>
           {ready
             ? "Nothing has been compared yet. Analyse spreadsheets and certificates reads the certificates on file, then holds the OPMS export against them and against our skills matrix."
-            : "The OPMS export has to be on file before anything can be compared — upload it under Required Documents For Upload."}
+            : "The OPMS export has to be on file before anything can be compared — upload it under Documents."}
         </Empty>
       ) : (
         <>
