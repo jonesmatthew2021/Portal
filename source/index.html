@@ -9901,7 +9901,15 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
        * filled go in together. */
       const backed = new Set(res.claimed || []);
       const wasFilled = filledFromCert || {};
-      const orphans = Object.keys(wasFilled).filter((k) => !backed.has(k));
+      /* And never while anything is still unread. A certificate on the books
+         with no reading yet claims no cell, so with a backlog of unread scans
+         every cell they stand behind read as abandoned — the round filled the
+         matrix in, then cleared four hundred dates back out, over and over,
+         while the reading caught up. "Gone from the library" can only be told
+         from "not read yet" once everything on the books has been read, so
+         the clearing waits for that. */
+      const stillReading = !!(res.summary && res.summary.unread);
+      const orphans = stillReading ? [] : Object.keys(wasFilled).filter((k) => !backed.has(k));
       orphans.forEach((k) => {
         const cut = k.indexOf("::");
         if (cut < 0) return;

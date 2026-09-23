@@ -269,8 +269,15 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
    * back. A row somebody removed through the portal can never match here: its
    * bytes were parked under removed/ when it went, and nothing under
    * removed/ is ever in this listing. */
+  const liveKeys = new Set(rows.filter((r) => !r.removedAt).map((r) => r.blobKey));
   const returned = rows
     .filter((r) => r.removedAt && seen.has(r.blobKey))
+    /* Not where a live row already holds the same address. A file wiped and
+       re-uploaded has two rows pointing at one address — the old removed one
+       and the new live one — and reviving the old row would put the same file
+       on the books twice, which the first run of this did. One address, one
+       live row. */
+    .filter((r) => !liveKeys.has(r.blobKey))
     .map((r) => ({ id: r.id, key: r.blobKey, filename: r.filename, category: r.category }));
 
   // How much of the books the scan actually covered, for the guard below.
@@ -402,6 +409,39 @@ async function apply(
       .set({ removedAt: null, removedBy: null })
       .where(eq(documents.id, r.id));
     returned++;
+  }
+
+  /* One address, one live row.
+   *
+   * The first run of the resurrection revived rows for files that had been
+   * wiped and re-uploaded — the old row and the new both live, pointing at
+   * the same file, so the same certificate counted twice. Whichever row
+   * carries a reading is the one kept (it is the row the portal knows most
+   * about); ties go to the newer. The other goes back to removed, which is
+   * where it was. */
+  let deduped = 0;
+  {
+    const live = await db.select().from(documents).where(isNull(documents.removedAt));
+    const byKey = new Map<string, typeof live>();
+    for (const r of live) {
+      byKey.set(r.blobKey, [...(byKey.get(r.blobKey) || []), r]);
+    }
+    const at = new Date();
+    for (const [, twins] of byKey) {
+      if (twins.length < 2) continue;
+      const readOf = (r: (typeof live)[number]) =>
+        ((r as { readAt?: number | null }).readAt ? 2 : 0) + (r.createdAt ? 1 : 0);
+      const keep = [...twins].sort((a, b) =>
+        readOf(b) - readOf(a) || Number(b.createdAt ?? 0) - Number(a.createdAt ?? 0))[0];
+      for (const r of twins) {
+        if (r.id === keep.id) continue;
+        await db
+          .update(documents)
+          .set({ removedAt: at, removedBy: "the same file is already on the books" })
+          .where(eq(documents.id, r.id));
+        deduped++;
+      }
+    }
   }
 
   /* And the mirroring is held back when the shortfall is not believable.
