@@ -64,14 +64,23 @@ function SharePointPage() {
   };
 
   // The worker's own word on its last hourly round — in red when it fell over.
+  // The round's part (the dates put on the matrix, the workbook written)
+  // rides in the same record, so the one line says the whole hour.
   const hourlyLine = () => {
     const h = listing && listing.lastHourly;
     if (!h) return null;
     const when = new Date(h.at).toLocaleString("en-AU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
-    const bad = h.syncError || h.readError;
+    const bad = [h.syncError, h.readError, h.roundError].filter(Boolean).join("; ");
     if (bad) return { bad: true, text: "Hourly round " + when + " failed: " + bad };
+    const aside = [h.roundSkipped, h.held].filter(Boolean).join("; ");
     return { bad: false, text: "Hourly round " + when + ": " + h.read + " certificate" + (h.read === 1 ? "" : "s") +
-      " read, " + h.refiled + " refiled, " + Math.max(1, Math.round(h.durationMs / 1000)) + "s." };
+      " read, " + h.refiled + " refiled" +
+      (h.applied ? ", " + h.applied + " date" + (h.applied === 1 ? "" : "s") + " applied" : "") +
+      (h.cleared ? ", " + h.cleared + " cleared" : "") +
+      (h.workbook ? ", workbook written as " + h.workbook : "") +
+      (h.leftAsTyped ? ", " + h.leftAsTyped + " cell" + (h.leftAsTyped === 1 ? "" : "s") + " left as the office typed them" : "") +
+      ", " + Math.max(1, Math.round(h.durationMs / 1000)) + "s." +
+      (aside ? " (" + aside + ")" : "") };
   };
 
   const fmtBytes = (n) => n == null ? "" :

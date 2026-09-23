@@ -22,7 +22,7 @@ import migrateCerts from "./routes/migrate-certs.js";
 import readOne from "./routes/read-one.js";
 import clearR2 from "./routes/clear-r2.js";
 import importSingle from "./routes/import-single.js";
-import { runMatrixRound } from "./lib/round.js";
+import { runMatrixRound, roundRunning } from "./lib/round.js";
 import { readDocument } from "./lib/shared-state.js";
 import { crewRowsOnly } from "../../source/shared/names.js";
 
@@ -100,10 +100,15 @@ export default {
         });
       }
       // When the folders were last read and what the hourly round last did —
-      // the round's own word for it, error included.
+      // the round's own word for it, error included — and whether one holds
+      // the lease right now.
       if (path === "/api/sync/last") {
         return Response.json(
-          { sync: await lastSync().catch(() => null), hourly: await lastHourly().catch(() => null) },
+          {
+            sync: await lastSync().catch(() => null),
+            hourly: await lastHourly().catch(() => null),
+            running: await roundRunning().catch(() => false),
+          },
           { headers: { "Cache-Control": "no-store" } },
         );
       }

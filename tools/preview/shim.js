@@ -246,7 +246,7 @@
         return json({ registered: [], mirrored: 0, followed: 0, moved: [], removed: [] });
       /* The hourly round's last outcome: the preview has no cron, so nothing
          has run and the page says so. */
-      if (p === "/api/sync/last") return json({ sync: null, hourly: null });
+      if (p === "/api/sync/last") return json({ sync: null, hourly: null, running: false });
       /* The undo list. The preview keeps no history, so the one version it
          holds is the whole list, and putting a version back is a live-portal
          job. */
