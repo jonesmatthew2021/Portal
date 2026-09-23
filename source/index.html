@@ -9737,10 +9737,14 @@ function RemovedFiles() {
                   <>
                     <OpenLink url={r.url} />
                     <Button variant="quiet" onClick={() => restore(it)}>Restore</Button>
-                    <button className="um-btn" onClick={() => setConfirm(r.id)}
-                      style={{ background: "transparent", color: T.muted, fontSize: 10, fontWeight: 700, padding: "4px 0" }}>
-                      Delete for good
-                    </button>
+                    {/* The office's own file, kept where the office put it: the
+                        portal will not delete it, so it is not offered. */}
+                    {!it.keptInPlace && (
+                      <button className="um-btn" onClick={() => setConfirm(r.id)}
+                        style={{ background: "transparent", color: T.muted, fontSize: 10, fontWeight: 700, padding: "4px 0" }}>
+                        Delete for good
+                      </button>
+                    )}
                   </>
                 )}
               </div>
