@@ -77,7 +77,8 @@ modules. Edit that code there and only there.
   `db/single-file.ts` whose order of work is fixed so the old copy is never
   lost, clears a date only on its second sighting as an orphan, and writes
   only the cells it changed plus blanks — a figure the office typed is left
-  as typed. Removed copies are parked flat under `removed/` (no folder is
+  as typed. A cell that reaches the matrix but not the workbook is written
+  on the document (`workbookPending`) and paid the next hour. Removed copies are parked flat under `removed/` (no folder is
   ever made), and a file the office itself put in a folder is never moved:
   its row comes off the books with the bytes left where they are. One lease
   (`takeLease`/`dropLease` in `round.ts`) covers everyone who writes the

@@ -123,6 +123,10 @@ export type SharedDocument = Record<string, unknown> & {
   history?: unknown[] | null;
   matrixUpdated?: string;
   lastDocUpdate?: string;
+  /** Cells the round put on the matrix that have not reached the office's
+   *  workbook yet ("EVANS, BRENTON|QL-01"), kept by lib/round.ts until a
+   *  write lands. */
+  workbookPending?: string[] | null;
 };
 
 /** The document as it is now, with the revision it is at; null before the

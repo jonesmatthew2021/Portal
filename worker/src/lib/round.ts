@@ -223,7 +223,11 @@ export async function runMatrixRound(opts: {
     // the page left.
     const hour = new Date().toISOString().slice(0, 13);
     let changedKeys = new Set<string>();
+    // Cells an earlier hour put on the matrix that never reached the
+    // workbook - read from the same fresh copy the change is worked out on.
+    let owedBefore: string[] = [];
     const saved = await saveDocument((doc) => {
+      owedBefore = owedCells(doc);
       const nameOf = asKnownPerson(doc.people);
       const as = (n: string) => nameOf(n) || n;
       const live = doc.quals && Array.isArray(doc.quals.rows) && doc.quals.rows.length ? (doc.quals as Quals) : null;
@@ -266,11 +270,31 @@ export async function runMatrixRound(opts: {
     }, opts.by);
     if (!saved.changed) { out.applied = 0; out.cleared = 0; }
 
-    // (f) the office's workbook - only when a cell actually moved this hour.
-    if (out.applied + out.cleared === 0) return out;
-    if (!opts.timeLeft()) return skip("out of time before the workbook; the next cell that changes writes it");
-    await writeWorkbook(opts, out, changedKeys);
-    return out;
+    /* (f) the office's workbook - when a cell moved this hour, or one moved
+       in an earlier hour and never reached it.
+
+       The matrix is saved first and the workbook written after, so a write
+       that fails, or is skipped for time, leaves the workbook behind the
+       matrix. It used to stay behind until some other cell changed, with
+       every hour in between reporting clean. So what is still owed to the
+       workbook is written on the document (workbookPending) whenever the
+       write does not land, and taken off it in the same save that records
+       the workbook written. */
+    const owed = new Set([...changedKeys, ...owedBefore]);
+    if (!owed.size) return out;
+    let landed = false;
+    try {
+      if (!opts.timeLeft()) return skip("out of time before the workbook; the next hour writes it");
+      landed = await writeWorkbook(opts, out, owed);
+      return out;
+    } finally {
+      try {
+        if (!landed) await rememberOwed(opts.by, owed);
+        else if (!out.workbook && owedBefore.length) await rememberOwed(opts.by, new Set());
+      } catch (e) {
+        console.error("what the workbook is still owed was not written down:", e);
+      }
+    }
   } catch (e) {
     out.roundError = said(e);
     console.error("the round on the hour failed:", e);
@@ -284,27 +308,52 @@ export async function runMatrixRound(opts: {
   }
 }
 
+/** The cells the document says the workbook is still owed. */
+function owedCells(doc: SharedDocument): string[] {
+  return Array.isArray(doc.workbookPending)
+    ? doc.workbookPending.filter((k): k is string => typeof k === "string" && !!k)
+    : [];
+}
+
+/** What the workbook is still owed, written on the document: the cells
+ *  given, joined to any already there. An empty set clears it. Saved only
+ *  where that changes anything, so an hour that owes nothing new bumps no
+ *  revision. */
+async function rememberOwed(by: string, owed: Set<string>) {
+  await saveDocument((doc) => {
+    const had = owedCells(doc);
+    const next = owed.size ? [...new Set([...had, ...owed])].sort() : [];
+    if (next.length === had.length && next.every((k, i) => k === [...had].sort()[i])) return null;
+    doc.workbookPending = next;
+    return doc;
+  }, by);
+}
+
 /**
  * The workbook on file, written in place with the cells this round changed
- * and any it finds blank, then filed under today's date through
- * replaceSingleFile - which also decides the address it lands on, taking
- * the next suffix where the wanted name is the office's file or a removed
- * copy's. Every reason not to is said in roundSkipped rather than thrown;
- * the matrix is already saved by now, and the page's own button can always
- * write the workbook from it.
+ * (and any still owed from before) and any it finds blank, then filed
+ * under today's date through replaceSingleFile - which also decides the
+ * address it lands on, taking the next suffix where the wanted name is the
+ * office's file or a removed copy's. Every reason not to is said in
+ * roundSkipped rather than thrown; the matrix is already saved by now, and
+ * the page's own button can always write the workbook from it.
+ *
+ * Answers whether the workbook now carries every cell it was owed: yes
+ * when it was written, and yes when there was nothing to write because it
+ * already had them; no when the write was skipped.
  */
 async function writeWorkbook(
   opts: { by: string }, out: RoundOutcome, changedKeys: Set<string>,
-) {
+): Promise<boolean> {
   const [tm] = await liveRowsOf("training-matrix");
-  if (!tm) { out.roundSkipped = "no training matrix on file"; return; }
+  if (!tm) { out.roundSkipped = "no training matrix on file"; return false; }
   if (!/\.(xlsx|xlsm)$/i.test(tm.filename)) {
     out.roundSkipped = `${tm.filename} is not a workbook the server can write; press Update the spreadsheet in a tab`;
-    return;
+    return false;
   }
   if (tm.sizeBytes > MAX_WORKBOOK_BYTES) {
     out.roundSkipped = `${tm.filename} is ${(tm.sizeBytes / (1024 * 1024)).toFixed(1)} MB, too big to rewrite on the server; press Update the spreadsheet in a tab`;
-    return;
+    return false;
   }
 
   const store = fileStore();
@@ -317,7 +366,7 @@ async function writeWorkbook(
       const found = await store.get(parked, { type: "arrayBuffer" });
       if (found) { await store.set(tm.blobKey, found); bytes = found; break; }
     }
-    if (!bytes) { out.roundSkipped = "the workbook on file has no bytes"; return; }
+    if (!bytes) { out.roundSkipped = "the workbook on file has no bytes"; return false; }
   }
 
   const today = todayThere();
@@ -325,16 +374,17 @@ async function writeWorkbook(
 
   // The matrix as it is now, after this round's save and anything since.
   const fresh = await readDocument();
-  if (!fresh) { out.roundSkipped = "no shared document yet"; return; }
+  if (!fresh) { out.roundSkipped = "no shared document yet"; return false; }
   const next = crewRowsOnly(fresh.doc.quals as Quals | null, fresh.doc.people) as Quals | null;
-  if (!next || !(next.rows || []).length) { out.roundSkipped = "the crew matrix has no items"; return; }
+  if (!next || !(next.rows || []).length) { out.roundSkipped = "the crew matrix has no items"; return false; }
   const nameOf = asKnownPerson(fresh.doc.people);
 
   const { blob, report } = await updateFiledWorkbook(bytes, next, null, null, {
     mode: "applied-and-blanks", keys: changedKeys, nameOf,
   });
   out.leftAsTyped = report.leftAsTyped;
-  if (!blob) { out.written = 0; return; }
+  // Nothing to write: the workbook already carries every cell it was owed.
+  if (!blob) { out.written = 0; return true; }
 
   const { row } = await replaceSingleFile({
     category: "training-matrix",
@@ -348,6 +398,8 @@ async function writeWorkbook(
   out.written = report.written;
   out.workbook = row.filename;
 
+  // The workbook is written: the line in the log, and nothing owed to it
+  // any more, in the one save.
   await saveDocument((doc: SharedDocument) => {
     const entry = historyEntry(
       opts.by,
@@ -355,6 +407,8 @@ async function writeWorkbook(
       `${row.filename} · ${report.written} ${report.written === 1 ? "cell" : "cells"}`,
     );
     doc.history = [entry, ...(Array.isArray(doc.history) ? doc.history : [])].slice(0, HISTORY_LIMIT);
+    doc.workbookPending = [];
     return doc;
   }, opts.by);
+  return true;
 }

@@ -765,6 +765,49 @@ test("out of time before the workbook: the matrix is saved and the workbook wait
   assert.ok(bucket.text(tmKey), "the workbook on file is where it was");
 });
 
+test("a workbook write that fails is owed, and the next hour with nothing new pays it", async () => {
+  const { portal, bucket, tmKey } = await oneManPortal();
+  // The seed put was the bucket's first write; the round's first is the
+  // new workbook to its dated address, and that one is refused.
+  bucket.failOn = 2;
+  const out = await runMatrixRound({ by: "the round on the hour", timeLeft: () => true, mirroredThisHour: 0 });
+  assert.equal(out.applied, 1, "the matrix took the date");
+  assert.match(out.roundError || "", /refused the write/);
+  assert.equal(out.workbook, null);
+  assert.deepEqual(portal.doc().workbookPending, ["EVANS, BRENTON|QL-01"], "the cell is written down as owed to the workbook");
+  assert.ok(bucket.text(tmKey), "the workbook on file is where it was");
+
+  // The next hour: nothing new on the matrix, but the workbook is owed.
+  bucket.failOn = 0;
+  const again = await runMatrixRound({ by: "the round on the hour", timeLeft: () => true, mirroredThisHour: 0 });
+  assert.equal(again.roundError, null);
+  assert.equal(again.applied, 0, "nothing new this hour");
+  assert.equal(again.written, 1, "…and the owed cell reached the workbook");
+  const named = datedWorkbookName("20260901 - CREW QUALIFICATION EXPIRY.xlsx", todayThere());
+  assert.equal(again.workbook, named);
+  assert.deepEqual(portal.doc().workbookPending, [], "nothing owed any more");
+  assert.equal(portal.doc().history[0].action, "Updated the training matrix from the certificates");
+  const written = await (await bucket.get("opms/" + named))!.arrayBuffer();
+  const back = await partText(partOf(readZip(written), "xl/worksheets/sheet1.xml"));
+  assert.ok(/<c r="E3"[^>]*><is><t[^>]*>2031-05-26<\/t>/.test(back), "the office's row got the date an hour late");
+
+  // And the hour after that is idle: nothing owed, nothing written.
+  const idle = await runMatrixRound({ by: "the round on the hour", timeLeft: () => true, mirroredThisHour: 0 });
+  assert.equal(idle.written, null, "no workbook step");
+  assert.equal(idle.roundError, null);
+});
+
+test("out of time before the workbook is owed the same way", async () => {
+  const { portal } = await oneManPortal();
+  let asked = 0;
+  const out = await runMatrixRound({ by: "the round on the hour", timeLeft: () => ++asked < 2, mirroredThisHour: 0 });
+  assert.match(out.roundSkipped || "", /the next hour writes it/);
+  assert.deepEqual(portal.doc().workbookPending, ["EVANS, BRENTON|QL-01"]);
+  const again = await runMatrixRound({ by: "the round on the hour", timeLeft: () => true, mirroredThisHour: 0 });
+  assert.equal(again.written, 1);
+  assert.deepEqual(portal.doc().workbookPending, []);
+});
+
 test("a second sighting clears the date, and the workbook follows", async () => {
   const { portal } = await oneManPortal({
     filledFromCert: { "EVANS, BRENTON::QL-17": true },
