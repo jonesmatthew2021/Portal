@@ -8528,6 +8528,21 @@ async function renameFiledDocument(id, to) {
   return out;
 }
 
+/* Whether the name a document was filed under is the wanted name with a
+   " (2)" on it. The replace steps round a name that is taken - by the
+   office's own workbook kept in place, a removed copy, or a file in the
+   folder on no row - by filing under the next suffix, and that is the
+   document's name then. Renaming it back would write the new file over
+   whatever holds the name, so the round on the hour accepts the suffix and
+   the page does the same. */
+function filedUnderSuffix(wanted, actual) {
+  const dot = wanted.lastIndexOf(".");
+  const base = dot > 0 ? wanted.slice(0, dot) : wanted;
+  const ext = dot > 0 ? wanted.slice(dot) : "";
+  return actual.startsWith(base + " (") && actual.endsWith(")" + ext)
+    && /^\d+$/.test(actual.slice(base.length + 2, actual.length - ext.length - 1));
+}
+
 function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the spreadsheet", chrome = true, onRunner }) {
   const {
     quals: QUALS, setQuals, trainingMatrix, setTrainingMatrix,
@@ -8743,7 +8758,11 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
         if (up.record) {
           setTrainingMatrix(up.record);
           // The file in SharePoint follows the name the portal filed it under.
-          if (named !== up.record.filename) {
+          if (named === up.record.filename || filedUnderSuffix(named, up.record.filename)) {
+            // Filed as wanted, or under the next suffix because the wanted
+            // name is held: either way that is its name now.
+            renamed = up.record.filename;
+          } else {
             try {
               await renameFiledDocument(up.record.id, named);
               setTrainingMatrix({ ...up.record, filename: named });
@@ -8752,8 +8771,6 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
               renamed = "";
               failed = `It was filed as ${up.record.filename}, but couldn't be renamed to ${named}: ${e.message || String(e)}`;
             }
-          } else {
-            renamed = named;
           }
         }
       } catch (e) {
@@ -8761,10 +8778,10 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
       }
 
       log("Admin", "Updated the training matrix from the certificates",
-        `${named} · ${report.written} ${report.written === 1 ? "cell" : "cells"} changed on "${report.sheet}"`
+        `${renamed || named} · ${report.written} ${report.written === 1 ? "cell" : "cells"} changed on "${report.sheet}"`
         + (orphans.length ? ` · ${orphans.length} cleared, their certificates gone from the library` : "")
         + (renamed ? "" : " · the name was left as it was"));
-      setDone({ report, filename: named, download: URL.createObjectURL(file), failed,
+      setDone({ report, filename: renamed || named, download: URL.createObjectURL(file), failed,
         read: progress.read, total: progress.total, settled: only.size, derived,
         orphans: orphans.length, refiled: moved.length, validityProblem });
       setRun(null);

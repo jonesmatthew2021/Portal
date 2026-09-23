@@ -56,7 +56,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -334,6 +334,18 @@ const is = (got, want, what) => {
   is(out.applied.map((a) => a.person), ["bILLY", "SMITH, John"], "what moved is reported under the row's own name");
   is([...out.only].sort(), ["BILLY|QL-01", "SMITH, JOHN|QL-01"],
     "only is keyed by the row's name, which is the name the workbook writer looks for");
+}
+
+/* ---- a workbook filed under the next suffix keeps that name: the page
+        never renames it back onto the name the replace stepped round ---- */
+{
+  const wanted = "20260924 - CREW QUALIFICATION EXPIRY.xlsx";
+  is(lib.filedUnderSuffix(wanted, "20260924 - CREW QUALIFICATION EXPIRY (2).xlsx"), true, "the next suffix is the wanted name, taken");
+  is(lib.filedUnderSuffix(wanted, "20260924 - CREW QUALIFICATION EXPIRY (12).xlsx"), true, "…whatever the number");
+  is(lib.filedUnderSuffix(wanted, wanted), false, "the name itself is not a suffix of itself");
+  is(lib.filedUnderSuffix(wanted, "20260923 - CREW QUALIFICATION EXPIRY (2).xlsx"), false, "another day's name is not it");
+  is(lib.filedUnderSuffix(wanted, "20260924 - CREW QUALIFICATION EXPIRY (2).xlsm"), false, "nor another kind of file");
+  is(lib.filedUnderSuffix(wanted, "20260924 - CREW QUALIFICATION EXPIRY (two).xlsx"), false, "a bracket that is not a number is a different name");
 }
 
 /* ---- the copy spliced into the page answers exactly as the module does ---- */

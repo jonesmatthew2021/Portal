@@ -1,6 +1,7 @@
 import type { PortalUser } from "../auth.js";
 import { getEnv } from "../env.js";
 import { fileStore } from "../files/store.js";
+import { roundRunning } from "../lib/round.js";
 
 /**
  * POST /api/rename-file { id, to } — a filed document given a new name.
@@ -16,6 +17,15 @@ import { fileStore } from "../files/store.js";
  * spreadsheet and not two. The record follows it. If the write succeeds and
  * the delete does not, there are two files and the books point at the new one,
  * which is the safe way round to fail.
+ *
+ * And nothing is written over. The name asked for can be held by the
+ * office's own workbook, kept in place after the round replaced it, by a
+ * removed copy, or by a file in the folder on no row at all - the replace
+ * that filed this document under a suffix stepped round exactly that, and
+ * a rename back onto the name would put the new bytes over the file that
+ * holds it. So the address is looked at first, on the books and in the
+ * library, and a rename onto anything is refused. The office's own file is
+ * never moved at all, and nothing moves while the hour holds the workbook.
  *
  * Management and IT only, like every other change to what is on the books.
  */
@@ -37,11 +47,20 @@ export default async (req: Request, actor: PortalUser): Promise<Response> => {
 
   const db = getEnv().DB;
   const row = await db
-    .prepare("SELECT id, filename, blob_key FROM documents WHERE id = ?1 AND removed_at IS NULL")
+    .prepare("SELECT id, filename, blob_key, adopted_from_folder FROM documents WHERE id = ?1 AND removed_at IS NULL")
     .bind(id)
-    .first<{ id: string; filename: string; blob_key: string }>();
+    .first<{ id: string; filename: string; blob_key: string; adopted_from_folder: number | null }>();
   if (!row) return Response.json({ error: "That document isn't on the books." }, { status: 404 });
   if (row.filename === to) return Response.json({ renamed: false, reason: "already called that" });
+  if (row.adopted_from_folder) {
+    return Response.json(
+      { error: `${row.filename} is the office's own file, kept where the office put it; the portal will not move it. Rename it in SharePoint yourself.` },
+      { status: 409 },
+    );
+  }
+  if (await roundRunning()) {
+    return Response.json({ error: "The hourly round is writing the workbook; try again in a minute." }, { status: 409 });
+  }
 
   /* The folder the file is already in. It is never anything else.
      A rename used to be able to move the file to another folder, and where
@@ -57,6 +76,18 @@ export default async (req: Request, actor: PortalUser): Promise<Response> => {
   }
 
   const store = fileStore();
+  // Whoever holds the address, live or removed, keeps it: a removed copy
+  // is a file somebody may yet restore, and a live one is another document.
+  const holder = await db
+    .prepare("SELECT id FROM documents WHERE blob_key = ?1 AND id != ?2 LIMIT 1")
+    .bind(nextKey, id)
+    .first<{ id: string }>();
+  if (holder || (await store.getMetadata(nextKey))) {
+    return Response.json(
+      { error: `${to} is already in that folder; nothing was moved.` },
+      { status: 409 },
+    );
+  }
   const bytes = await store.get(row.blob_key);
   if (!bytes) return Response.json({ error: "The file itself couldn't be found to move." }, { status: 404 });
 

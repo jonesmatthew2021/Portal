@@ -22,6 +22,7 @@ import { runMatrixRound, roundRunning, takeLease, dropLease } from "../src/lib/r
 import { todayThere } from "../src/lib/analysis.js";
 import sync, { apply, outranks, sheetOrder, survey } from "../src/routes/sync.js";
 import files from "../src/routes/files.js";
+import renameFile from "../src/routes/rename-file.js";
 import worker from "../src/index.js";
 import { writeZip, readZip, partOf, partText, datedWorkbookName } from "../../source/shared/workbook.js";
 import { asKnownPerson, crewRegister } from "../../source/shared/names.js";
@@ -934,6 +935,79 @@ test("the hour runs the sync and the round under one lease, taken once and run o
   await worker.scheduled({} as never, env as never);
   assert.equal(JSON.parse(portal.blobs.get("sync|last-hourly")!).roundSkipped, "another round is still running");
   assert.ok(!portal.db.asked.slice(before).some((a) => /portal_state|FROM documents/.test(a.sql)), "nothing was read or written past the lease");
+});
+
+/* ------------------------------------------------------------------------ *
+ * Renaming a filed document never writes over anything. The page used to
+ * rename a workbook filed as "… (2).xlsx" back onto the wanted name - the
+ * very name the replace had stepped round because the office's file, a
+ * removed copy or a loose file holds it.
+ * ------------------------------------------------------------------------ */
+function renameDb(rows: Row[], lease: unknown = null) {
+  return fakeDb((sql, args) => {
+    if (/SELECT id, filename, blob_key, adopted_from_folder FROM documents WHERE id = \?1 AND removed_at IS NULL/.test(sql)) {
+      return { results: rows.filter((r) => r.id === args[0] && !r.removedAt).map((r) => ({ id: r.id, filename: r.filename, blob_key: r.blobKey, adopted_from_folder: r.adoptedFromFolder ?? null })) };
+    }
+    if (/SELECT id FROM documents WHERE blob_key = \?1 AND id != \?2/.test(sql)) {
+      return { results: rows.filter((r) => r.blobKey === args[0] && r.id !== args[1]).map((r) => ({ id: r.id })) };
+    }
+    if (/SELECT value FROM blobs/.test(sql)) return { results: lease ? [{ value: JSON.stringify(lease) }] : [] };
+    if (/^UPDATE documents SET filename/.test(sql)) return { changes: 1 };
+    return undefined;
+  });
+}
+const renameTo = (id: string, to: string) => renameFile(
+  new Request("http://portal/api/rename-file", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, to }) }),
+  { role: "it", email: "it@portal", name: "IT" } as never,
+);
+
+test("a rename onto a name a removed copy holds is refused, and nothing moves", async () => {
+  const wanted = "opms/20260924 - CREW QUALIFICATION EXPIRY.xlsx";
+  const bucket = fakeBucket({ [wanted]: "OFFICE", "opms/20260924 - CREW QUALIFICATION EXPIRY (2).xlsx": "the round's" });
+  const db = renameDb([keptRow("old", wanted), liveRow("tm2", "opms/20260924 - CREW QUALIFICATION EXPIRY (2).xlsx")]);
+  setEnv({ DB: db, FILES: bucket, FILE_STORE: "r2" } as never);
+  const res = await renameTo("tm2", "20260924 - CREW QUALIFICATION EXPIRY.xlsx");
+  assert.equal(res.status, 409);
+  assert.match(((await res.json()) as { error: string }).error, /already in that folder/);
+  assert.equal(bucket.text(wanted), "OFFICE", "the office's bytes are untouched");
+  assert.equal(bucket.text("opms/20260924 - CREW QUALIFICATION EXPIRY (2).xlsx"), "the round's", "and the round's file is where it was");
+  assert.deepEqual(writes(db), [], "nothing on the books changed");
+});
+
+test("a rename onto a file in the folder on no row is refused too", async () => {
+  const wanted = "opms/20260924 - CREW QUALIFICATION EXPIRY.xlsx";
+  const bucket = fakeBucket({ [wanted]: "dropped in by hand", "opms/20260924 - CREW QUALIFICATION EXPIRY (2).xlsx": "the round's" });
+  const db = renameDb([liveRow("tm2", "opms/20260924 - CREW QUALIFICATION EXPIRY (2).xlsx")]);
+  setEnv({ DB: db, FILES: bucket, FILE_STORE: "r2" } as never);
+  const res = await renameTo("tm2", "20260924 - CREW QUALIFICATION EXPIRY.xlsx");
+  assert.equal(res.status, 409);
+  assert.equal(bucket.text(wanted), "dropped in by hand");
+});
+
+test("the office's own file is never renamed, and nothing is renamed while the hour holds the workbook", async () => {
+  const theirs = "opms/CREW QUALIFICATION EXPIRY.xlsx";
+  const bucket = fakeBucket({ [theirs]: "the office's copy" });
+  setEnv({ DB: renameDb([liveRow("tm1", theirs, 1)]), FILES: bucket, FILE_STORE: "r2" } as never);
+  const office = await renameTo("tm1", "20260924 - CREW QUALIFICATION EXPIRY.xlsx");
+  assert.equal(office.status, 409);
+  assert.match(((await office.json()) as { error: string }).error, /the office's own file/);
+
+  setEnv({ DB: renameDb([liveRow("tm1", theirs)], { until: Date.now() + 60000, by: "the round on the hour", token: "x" }), FILES: bucket, FILE_STORE: "r2" } as never);
+  const held = await renameTo("tm1", "20260924 - CREW QUALIFICATION EXPIRY.xlsx");
+  assert.equal(held.status, 409);
+  assert.match(((await held.json()) as { error: string }).error, /try again in a minute/);
+  assert.deepEqual(bucket.keys(), [theirs], "nothing moved either time");
+});
+
+test("a rename onto a free name moves the file and the row follows it", async () => {
+  const from = "opms/20260924 - CREW QUALIFICATION EXPIRY (2).xlsx";
+  const bucket = fakeBucket({ [from]: "the round's" });
+  const db = renameDb([liveRow("tm2", from)]);
+  setEnv({ DB: db, FILES: bucket, FILE_STORE: "r2" } as never);
+  const res = await renameTo("tm2", "20260924 - CREW QUALIFICATION EXPIRY.xlsx");
+  assert.equal(res.status, 200, await res.text());
+  assert.deepEqual(bucket.keys(), ["opms/20260924 - CREW QUALIFICATION EXPIRY.xlsx"], "moved, not copied");
+  assert.deepEqual(writes(db)[0].args, ["tm2", "20260924 - CREW QUALIFICATION EXPIRY.xlsx", "opms/20260924 - CREW QUALIFICATION EXPIRY.xlsx"]);
 });
 
 /* ------------------------------------------------------------------------ *
