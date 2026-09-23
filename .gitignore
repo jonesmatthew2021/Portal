@@ -12,3 +12,6 @@ preview.html
 
 # The offline preview's crew snapshot: real crew data, not source code.
 tools/preview/data.json
+
+# Scratch copies made by Claude Code workflows
+.claude/worktrees/

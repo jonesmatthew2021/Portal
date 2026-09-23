@@ -13,11 +13,13 @@
     "allowJs": true,
     "checkJs": true,
     "types": [
-      "@cloudflare/workers-types"
+      "@cloudflare/workers-types",
+      "node"
     ]
   },
   "include": [
     "src/**/*.ts",
-    "../source/shared/*.js"
+    "../source/shared/*.js",
+    "tests/**/*.ts"
   ]
 }
