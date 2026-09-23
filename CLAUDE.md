@@ -104,7 +104,11 @@ modules. Edit that code there and only there.
   their turn or answer 409. Anything new that writes the workbook takes it.
   An open admin tab runs the round only when the server has not
   (`shouldTabRound`), and a save that lands on the hour's merges the log and
-  the round's notes (`mergeSaved`) rather than writing over them.
+  the round's notes (`mergeSaved`) rather than writing over them - each
+  three ways, against what the tab last loaded or saved, so a line or a
+  note the server took off since stays off. A save that never got there
+  is tried again by itself (`saveTryAgainIn`); a tab is never left holding
+  a change that nothing will send.
 - **The last 200 saves are kept** (`portal_state_history`) and any one of them
   can be put back from `Admin → Access Grants`, under Revisions.
 

@@ -305,8 +305,42 @@ async function saveState(data, rev) {
     body: JSON.stringify({ rev, data }),
   });
   if (r.status === 409) return { ...(await r.json()), conflict: true };
-  if (!r.ok) throw new Error(`Couldn't save the change (${r.status})`);
+  if (!r.ok) {
+    // The status rides on the error, so the save loop can tell a change the
+    // server refused from one that never got there (see saveTryAgainIn).
+    const e = new Error(`Couldn't save the change (${r.status})`);
+    e.status = r.status;
+    throw e;
+  }
   return r.json();                              // { rev }
+}
+
+/* How long a save that failed waits before it is tried again, in
+   milliseconds; 0 for never.
+
+   A tab whose save fell over once - the connection dropped, the server had
+   a bad second - used to sit with the change stuck in it: the badge red,
+   nothing going up and, because a tab with unsaved changes stands down
+   from the hourly round and skips other people's changes, nothing coming
+   down either, until somebody happened to type in it. So a save that
+   did not get through is tried again shortly. A save the server looked at
+   and refused (a 4xx - signed out, too big) would be refused again, so is
+   not. */
+const SAVE_RETRY_MS = 15000;
+function saveTryAgainIn(e) {
+  const s = e && e.status;
+  return s >= 400 && s < 500 ? 0 : SAVE_RETRY_MS;
+}
+
+/* Which of the slices a save carried are saved now that it has landed:
+   those changed no more times than when it left. A slice changed again
+   while the save was in the air is not among them, and stays unsaved.
+   Crossing it off used to lose the change: it went up on the next save
+   only as part of the whole, and a save that collided took the other
+   side's copy of any slice not on the list. `before` is the count per
+   slice when the save left; `now` is the count per slice as it stands. */
+function settledKeys(touched, before, now) {
+  return touched.filter((k) => before.get(k) === now.get(k));
 }
 
 
@@ -463,7 +497,8 @@ async function uploadSingleDocument(file, category, fields, decide = "ask") {
 
    `saw` is told what each look found, so the provider can hold whether the
    hour is running and keep the buttons that write the workbook out of its
-   way (see roundRunning) without a clock of its own. */
+   way (see roundRunning) without a clock of its own. A portal that cannot
+   say is told as free too, so the buttons never stay down on its account. */
 async function waitForRound(onWait, saw) {
   const until = Date.now() + 15 * 60000;
   for (;;) {
@@ -471,7 +506,7 @@ async function waitForRound(onWait, saw) {
     try {
       const r = await fetch("/api/sync/last", { cache: "no-store" });
       if (r.ok) running = !!(await r.json()).running;
-    } catch (e) { return true; }
+    } catch (e) { if (saw) saw(false); return true; }
     if (saw) saw(running);
     if (!running) return true;
     if (Date.now() > until) return false;
@@ -8270,26 +8305,30 @@ function mergeQuals(base, mine, theirs) {
  */
 function mergeSaved({ touched, mine, theirs, base }) {
   const t = theirs && typeof theirs === "object" ? theirs : null;
+  // A collision with nothing on the other side (the server's document has
+  // gone) has nothing to merge against: mine goes up whole. Running the
+  // merges against an empty document would take every note this tab held.
+  if (!t) return { ...mine };
   const b = base || {};
-  const merged = { ...(t || mine) };
+  const merged = { ...t };
   touched.forEach((k) => { merged[k] = mine[k]; });
-  if (touched.includes("quals") && t && t.quals) {
+  if (touched.includes("quals") && t.quals) {
     merged.quals = mergeQuals(b.quals, mine.quals, t.quals);
   }
   if (touched.includes("history")) {
-    merged.history = mergeHistory(mine.history || [], (t && t.history) || [], HISTORY_LIMIT);
+    merged.history = mergeHistory(b.history, mine.history || [], t.history || [], HISTORY_LIMIT);
   }
   if (touched.includes("filledFromCert")) {
-    merged.filledFromCert = mergeFilled(b.filled, mine.filledFromCert || {}, (t && t.filledFromCert) || {});
+    merged.filledFromCert = mergeFilled(b.filled, mine.filledFromCert || {}, t.filledFromCert || {});
   }
   if (touched.includes("orphanSeen")) {
-    merged.orphanSeen = mergeSeen(b.seen, mine.orphanSeen || {}, (t && t.orphanSeen) || {});
+    merged.orphanSeen = mergeSeen(b.seen, mine.orphanSeen || {}, t.orphanSeen || {});
   }
   if (touched.includes("workbookPending")) {
-    merged.workbookPending = mergePending(b.pending, mine.workbookPending || [], (t && t.workbookPending) || []);
+    merged.workbookPending = mergePending(b.pending, mine.workbookPending || [], t.workbookPending || []);
   }
   // ISO stamps compare as text; whichever side moved the document last is right.
-  const ours = String(mine.lastDocUpdate || ""), theirStamp = String((t && t.lastDocUpdate) || "");
+  const ours = String(mine.lastDocUpdate || ""), theirStamp = String(t.lastDocUpdate || "");
   merged.lastDocUpdate = (ours > theirStamp ? ours : theirStamp) || null;
   return merged;
 }
@@ -12384,16 +12423,25 @@ function thisTab() {
  * and it would save them with it), never offline, never while the server's
  * round holds the lease, and never when the server's last round is under
  * seventy minutes old and went through without an error or a skip. Only
- * then does the tab's own clock count, and it counts eighty minutes rather
- * than sixty, so the hour always gets its turn first.
+ * then does the tab's own clock count, and it counts seventy minutes
+ * rather than sixty, so the hour always gets its turn first. The same
+ * seventy as the server's record: the hour's stamp on the document is
+ * written some minutes after the hour began, so a longer window here
+ * would stack on top of that one and leave the vessel unattended for the
+ * best part of an hour and a half.
  *
  * `last` is the portal's answer to /api/sync/last, or null where it could
- * not be asked - and then the tab's own clock is all there is. One pure
- * function so the rule can be proved outright (tools/client-rules.test.mjs). */
-const TAB_ROUND_AFTER = 80 * 60000;
-function shouldTabRound({ lastDocUpdate, now, pending, online, last }) {
+ * not be asked. `unanswered` is how many asks in a row have got no answer:
+ * one is a bad second on the line and the tab waits for the next ask
+ * rather than run a round behind an hour that may well have done the work;
+ * only from the second does the tab's own clock stand in for the record.
+ * One pure function so the rule can be proved outright
+ * (tools/client-rules.test.mjs). */
+const TAB_ROUND_AFTER = 70 * 60000;
+function shouldTabRound({ lastDocUpdate, now, pending, online, last, unanswered = 0 }) {
   if (pending) return false;
   if (online === false) return false;
+  if (!last && unanswered === 1) return false;
   if (last && last.running) return false;
   const h = last && last.hourly;
   if (h && h.at != null) {
@@ -12424,6 +12472,8 @@ function UpdateDocumentation() {
   // and the hour's own save moves the stamp on while a tab's round runs.
   const docStamp = useRef(lastDocUpdate);
   docStamp.current = lastDocUpdate;
+  // How many asks of the portal in a row have got no answer (see shouldTabRound).
+  const unanswered = useRef(0);
 
   const stamp = (iso) => {
     if (!iso) return "never";
@@ -12536,20 +12586,33 @@ function UpdateDocumentation() {
       // pressed the button.
       if (asked) setAsking(true);
 
-      const at = new Date().toISOString();
-      /* The stamp is always written, whatever the round found - the clock
-         that decides when the next one is due reads it, and a round that
-         left it alone would be due again at once. */
-      setLastDocUpdate(at);
       /* The log line is not. An hourly round that found nothing to do while
          the hour's own save had already moved the document on (its stamp is
          newer than the one this round began from) was the fallback running
          behind a server that had done the work, and a line saying so an hour,
          every hour, is noise in the crew's change log. A press of the button
-         is always answered. */
+         is always answered.
+
+         The server is asked for the stamp outright rather than trusted to
+         the polls: a poll leaves the document alone while this tab has
+         changes on their way up, and a round has for most of its length, so
+         the hour's newer stamp would seldom have landed here in time. */
       const nothing = !(out.registered && out.registered.length) && !out.returned && !out.mirrored
         && !out.heldBack && !out.followed && !gone.length;
-      const movedOn = !!docStamp.current && docStamp.current > pulled;
+      let stampNow = docStamp.current || "";
+      if (!asked && nothing) {
+        try {
+          const head = await loadState();
+          const theirs = head && head.data && head.data.lastDocUpdate;
+          if (theirs && String(theirs) > stampNow) stampNow = String(theirs);
+        } catch (e) { /* the polls' copy is what there is */ }
+      }
+      const movedOn = !!stampNow && stampNow > pulled;
+      const at = new Date().toISOString();
+      /* The stamp is always written, whatever the round found - the clock
+         that decides when the next one is due reads it, and a round that
+         left it alone would be due again at once. */
+      setLastDocUpdate(at);
       if (asked || !(nothing && movedOn)) {
         log("Admin", asked ? "Portal updated" : "Portal updated on the hour",
           [(out.registered ? out.registered.length : 0) + " new certificates taken on",
@@ -12584,7 +12647,8 @@ function UpdateDocumentation() {
      The worker's hour does the round now, so before any of that the tab
      asks the portal what the hour did (shouldTabRound): the tab is the
      fallback for an hour that did not run, not a second hour. A portal
-     that cannot be asked leaves the tab to its own clock, as before. */
+     that cannot be asked twice running leaves the tab to its own clock, as
+     before; one ask that got no answer waits for the next. */
   React.useEffect(() => {
     if (!admin) return undefined;
     const LEASE = "coolibah-hourly-lease";
@@ -12599,7 +12663,7 @@ function UpdateDocumentation() {
     const take = () => {
       try { localStorage.setItem(LEASE, JSON.stringify({ tab: me, until: Date.now() + LEASE_MS })); } catch (e) { /* storage blocked: run anyway */ }
     };
-    const due = (last) => shouldTabRound({ lastDocUpdate, now: Date.now(), pending, online: navigator.onLine, last });
+    const due = (last, unanswered) => shouldTabRound({ lastDocUpdate, now: Date.now(), pending, online: navigator.onLine, last, unanswered });
     const tick = async () => {
       // The tab's own reasons not to, before the portal is asked anything.
       const wants = due(null) && !going.current && !heldElsewhere();
@@ -12611,8 +12675,10 @@ function UpdateDocumentation() {
         const r = await fetch("/api/sync/last", { cache: "no-store" });
         if (r.ok) last = await r.json();
       } catch (e) { last = null; }
-      if (last) setRoundRunning(!!last.running);
-      if (!wants || !due(last) || going.current || heldElsewhere()) return;
+      // A portal that cannot say holds nothing: the buttons come back.
+      setRoundRunning(!!(last && last.running));
+      unanswered.current = last ? 0 : unanswered.current + 1;
+      if (!wants || !due(last, unanswered.current) || going.current || heldElsewhere()) return;
       take();
       const renew = setInterval(take, 60000);
       try { await go(false); } finally { clearInterval(renew); }
@@ -16113,6 +16179,11 @@ function CoolibahPortal({ role, onSignOut }) {
   const [retry, setRetry] = useState(0);
   const rev = useRef(0);
   const dirty = useRef(new Set());
+  /* How many times each slice has been changed here. A save takes a while
+     to land, and a slice changed again while its save is in the air is
+     still unsaved when that save comes back; the count says so, where the
+     set of dirty slices alone would have it crossed off (see settledKeys). */
+  const gen = useRef(new Map());
   const saving = useRef(false);
   const firstLoad = useRef(true);
   const storedFiles = useRef([]);
@@ -16123,6 +16194,7 @@ function CoolibahPortal({ role, onSignOut }) {
   // over, so a roster edit and a posted note can't wipe each other out.
   const put = (key) => (v) => {
     dirty.current.add(key);
+    gen.current.set(key, (gen.current.get(key) || 0) + 1);
     setPending(true);
     setStore((s) => ({ ...s, [key]: typeof v === "function" ? v(s[key]) : v }));
   };
@@ -16350,11 +16422,16 @@ function CoolibahPortal({ role, onSignOut }) {
   const baselineFilled = useRef(null);
   const baselineSeen = useRef(null);
   const baselinePending = useRef(null);
+  // And the change log, so a line the server has since taken off (a saved
+  // version put back from Revisions) is not brought back by a tab that
+  // still held it - only the lines this tab wrote since go over.
+  const baselineHistory = useRef(null);
   const rebase = (data) => {
     baseline.current = (data && data.quals) || null;
     baselineFilled.current = (data && data.filledFromCert) || {};
     baselineSeen.current = (data && data.orphanSeen) || {};
     baselinePending.current = (data && data.workbookPending) || [];
+    baselineHistory.current = (data && data.history) || [];
   };
 
   // Load once, then keep checking for other people's changes.
@@ -16421,6 +16498,8 @@ function CoolibahPortal({ role, onSignOut }) {
       saving.current = true;
 
       const touched = [...dirty.current];
+      // Where each slice's count of changes stood when this save left.
+      const seen = new Map(touched.map((k) => [k, gen.current.get(k)]));
       try {
         const mine = withoutStoredFiles(store);
         let sent = mine;
@@ -16437,7 +16516,8 @@ function CoolibahPortal({ role, onSignOut }) {
           const merged = mergeSaved({
             touched, mine: store, theirs: res.data,
             base: { quals: baseline.current, filled: baselineFilled.current,
-              seen: baselineSeen.current, pending: baselinePending.current },
+              seen: baselineSeen.current, pending: baselinePending.current,
+              history: baselineHistory.current },
           });
           sent = withoutStoredFiles(merged);
           res = await saveState(sent, res.rev);
@@ -16461,11 +16541,18 @@ function CoolibahPortal({ role, onSignOut }) {
 
         rev.current = res.rev;
         rebase(sent);
-        touched.forEach((k) => dirty.current.delete(k));
+        // A slice changed again while this save was in the air is still
+        // unsaved, and stays on the list for the next one.
+        settledKeys(touched, seen, gen.current).forEach((k) => dirty.current.delete(k));
         if (dirty.current.size === 0) setPending(false);
+        else setRetry((n) => n + 1);
         setSync({ state: "ok", at: new Date().toISOString().slice(11, 16) });
       } catch (e) {
         setSync({ state: "error", msg: e.message });
+        // A save that never got there is tried again; one the server
+        // refused is left for the person to see (see saveTryAgainIn).
+        const again = saveTryAgainIn(e);
+        if (again) setTimeout(() => setRetry((n) => n + 1), again);
       } finally {
         saving.current = false;
       }
@@ -16473,6 +16560,16 @@ function CoolibahPortal({ role, onSignOut }) {
 
     return () => clearTimeout(id);
   }, [store, retry]);
+
+  // What this tab holds unsaved goes up the moment it can: when the
+  // connection comes back, and when a phone comes back to the portal after
+  // the timers inside it were stopped in the background.
+  React.useEffect(() => {
+    const flush = () => { if (dirty.current.size > 0) setRetry((n) => n + 1); };
+    window.addEventListener("online", flush);
+    const stopWatching = onWake(flush);
+    return () => { window.removeEventListener("online", flush); stopWatching(); };
+  }, []);
 
   // Unread counts per section, so tabs can show a dot and the app icon a number.
   const [unread, setUnread] = useState({});

@@ -355,30 +355,39 @@ export function settleRound({ filledFromCert, claimed, unread, settled, seenBefo
 }
 
 /**
- * Two change logs, brought back to one.
+ * Three copies of the change log, brought back to one.
  *
  * The round on the hour writes its own line into the shared document's
  * history, and a tab that saves on top of it used to lay its own copy of the
- * log back whole, so the hour's line went. Both are kept: the union by id,
- * newest first (the stamps are ISO minute strings, so they compare as text),
- * with mine's own order kept where two stamps tie, and capped at the length
- * the log keeps.
+ * log back whole, so the hour's line went. Now theirs is kept as it is and
+ * only the lines this tab wrote since it last loaded or saved (base) go in
+ * beside it. A line the tab held from base that theirs no longer has was
+ * taken off on purpose - a saved version put back from Revisions - and
+ * stays off, where a plain union of the two would have brought it back.
+ * Newest first (the stamps are ISO minute strings, so they compare as
+ * text), with mine's own order kept where two stamps tie, and capped at the
+ * length the log keeps.
+ * @param {{ id?: string, at?: string }[] | null | undefined} base
  * @param {{ id?: string, at?: string }[] | null | undefined} mine
  * @param {{ id?: string, at?: string }[] | null | undefined} theirs
  * @param {number} [limit]
  */
-export function mergeHistory(mine, theirs, limit = 500) {
+export function mergeHistory(base, mine, theirs, limit = 500) {
+  const known = new Set();
+  (Array.isArray(base) ? base : []).forEach((e) => { if (e && typeof e === "object" && e.id != null) known.add(e.id); });
   const seen = new Set();
   /** @type {{ id?: string, at?: string }[]} */
   const all = [];
-  [...(Array.isArray(mine) ? mine : []), ...(Array.isArray(theirs) ? theirs : [])].forEach((e) => {
+  const add = (/** @type {{ id?: string, at?: string }} */ e, /** @type {boolean} */ fresh) => {
     if (!e || typeof e !== "object") return;
     if (e.id != null) {
-      if (seen.has(e.id)) return;
+      if (seen.has(e.id) || (fresh && known.has(e.id))) return;
       seen.add(e.id);
     }
     all.push(e);
-  });
+  };
+  (Array.isArray(mine) ? mine : []).forEach((e) => add(e, true));
+  (Array.isArray(theirs) ? theirs : []).forEach((e) => add(e, false));
   // A stable sort, so entries with the same stamp keep the order they came in.
   const at = (/** @type {{ at?: string }} */ e) => String(e.at || "");
   return all

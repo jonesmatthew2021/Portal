@@ -56,7 +56,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, mergeHistory, mergeFilled, mergeSeen, mergePending };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, saveTryAgainIn, settledKeys };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -384,24 +384,62 @@ const is = (got, want, what) => {
   is(waited, 2, "…and said it was waiting each time it was not");
   is(seen, [true, true, false], "…and told the provider what every look found, the last look included, so the buttons come back");
   is(await lib.waitForRound(), true, "a portal that cannot say counts as free: the request itself is what gets refused");
+  const told = [];
+  is(await lib.waitForRound(undefined, (running) => told.push(running)), true, "…and the page may go on");
+  is(told, [false], "…and the provider is told it is free, so the buttons never stay down on a portal that cannot say");
+}
+
+/* ---- a save that never got there is tried again; one the server refused
+        is not; a slice changed again while its save was in the air stays
+        unsaved ---- */
+{
+  const answering = (status) => async () => ({ ok: false, status, json: async () => ({}) });
+  const page = (status) => fn(
+    ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
+    windowStub.navigator, windowStub.location, sessionStub, sessionStub, () => {}, answering(status),
+    () => 0, () => 0, () => {}, () => {}, () => 0, () => {}, () => false,
+    function N() {}, function I() {}, function A() {}, class { observe() {} }, function F() {},
+    function X() {}, { now: () => 0 }, {}, {},
+  );
+  const tried = async (status) => { try { await page(status).saveState({}, 1); return null; } catch (e) { return e; } };
+  const e500 = await tried(500);
+  is(e500 && e500.status, 500, "a save the server fell over on carries the status");
+  is(lib.saveTryAgainIn(e500), 15000, "…and is tried again in fifteen seconds");
+  const e413 = await tried(413);
+  is(e413 && e413.status, 413, "a save the server refused carries the status");
+  is(lib.saveTryAgainIn(e413), 0, "…and is not tried again: it would be refused again");
+  is(lib.saveTryAgainIn(new TypeError("Failed to fetch")), 15000, "a save that never got there (offline) is tried again");
+  is(lib.saveTryAgainIn(null), 15000, "…whatever the error looks like");
+
+  const before = new Map([["notes", 1], ["people", 2]]);
+  const now = new Map([["notes", 1], ["people", 3]]);
+  is(lib.settledKeys(["notes", "people"], before, now), ["notes"], "a slice changed again while its save was in the air is still unsaved; the rest are saved");
+  is(lib.settledKeys(["notes", "people"], before, before), ["notes", "people"], "nothing changed in flight: every slice the save carried is saved");
 }
 
 /* ---- the change log and the round's notes, three copies to one: what
         the hour wrote is kept, and only what this tab changed lands ---- */
 {
   const e = (id, at) => ({ id, at, by: "x", section: "Admin", action: id, detail: "" });
+  const base = [e("m1", "2026-09-24T09:00")];
   const mine = [e("m2", "2026-09-24T10:30"), e("m1", "2026-09-24T09:00")];
   const theirs = [e("s1", "2026-09-24T10:00"), e("m1", "2026-09-24T09:00")];
-  const out = rules.mergeHistory(mine, theirs);
+  const out = rules.mergeHistory(base, mine, theirs);
   is(out.map((x) => x.id), ["m2", "s1", "m1"], "the hour's line and the tab's line are both kept, newest first, and a line both hold appears once");
-  const tied = rules.mergeHistory([e("a", "2026-09-24T10:00"), e("b", "2026-09-24T10:00")], [e("c", "2026-09-24T10:00")]);
+  const restored = rules.mergeHistory(
+    [e("bad", "2026-09-24T10:00"), e("m1", "2026-09-24T09:00")],
+    [e("m2", "2026-09-24T10:30"), e("bad", "2026-09-24T10:00"), e("m1", "2026-09-24T09:00")],
+    [e("put-back", "2026-09-24T10:20"), e("m1", "2026-09-24T09:00")],
+  );
+  is(restored.map((x) => x.id), ["m2", "put-back", "m1"], "a line the server took off since this tab loaded (a version put back from Revisions) stays off; the tab's new line still lands");
+  const tied = rules.mergeHistory([], [e("a", "2026-09-24T10:00"), e("b", "2026-09-24T10:00")], [e("c", "2026-09-24T10:00")]);
   is(tied.map((x) => x.id), ["a", "b", "c"], "lines with the same stamp keep mine's order");
   const many = Array.from({ length: 480 }, (_, i) => e("m" + i, "2026-09-24T10:" + String(59 - (i % 60)).padStart(2, "0")));
   const more = Array.from({ length: 40 }, (_, i) => e("s" + i, "2026-09-24T11:00"));
-  const capped = rules.mergeHistory(many, more);
+  const capped = rules.mergeHistory(null, many, more);
   is(capped.length, 500, "the log is capped at five hundred");
   is(capped.slice(0, 40).every((x) => x.id.startsWith("s")), true, "…and the newest survive the cap");
-  is(rules.mergeHistory(null, undefined), [], "nothing on either side is an empty log");
+  is(rules.mergeHistory(undefined, null, undefined), [], "nothing on any side is an empty log");
 
   const keys = (o) => Object.keys(o).sort();
   is(keys(rules.mergeFilled({ A: true, B: true }, { A: true }, { A: true, B: true, C: true })), ["A", "C"],
@@ -421,7 +459,7 @@ const is = (got, want, what) => {
 {
   const e = (id, at) => ({ id, at, by: "x", section: "Admin", action: id, detail: "" });
   const quals = { cols: [["QL-01", "Master"]], rows: [["EVANS, Brenton", "Master", "", ["2031-05-26"]]] };
-  const base = { quals, filled: { A: true, B: true }, seen: { X: "h1" }, pending: ["P"] };
+  const base = { quals, filled: { A: true, B: true }, seen: { X: "h1" }, pending: ["P"], history: [] };
   const mine = {
     notes: ["mine"],
     quals: { cols: quals.cols, rows: [["EVANS, Brenton", "Master", "", ["2032-01-01"]]] },
@@ -453,8 +491,11 @@ const is = (got, want, what) => {
   const untouched = lib.mergeSaved({ touched: ["notes"], mine, theirs, base });
   is(untouched.history.map((x) => x.id), ["s1"], "a log this tab did not write to is theirs as it is");
   is(untouched.filledFromCert, theirs.filledFromCert, "…and so is the note");
-  const page = lib.mergeHistory(mine.history, theirs.history);
-  is(page, rules.mergeHistory(mine.history, theirs.history), "mergeHistory in the page answers as the module does");
+  const alone = lib.mergeSaved({ touched, mine, theirs: null, base });
+  is(alone, mine, "a collision with nothing on the other side (the server's document gone) sends mine up whole, every note kept");
+  is(lib.mergeSaved({ touched, mine, theirs: undefined, base }).filledFromCert, { A: true }, "…however the nothing is spelt");
+  const page = lib.mergeHistory(base.history, mine.history, theirs.history);
+  is(page, rules.mergeHistory(base.history, mine.history, theirs.history), "mergeHistory in the page answers as the module does");
   is(lib.mergeFilled(base.filled, mine.filledFromCert, theirs.filledFromCert),
     rules.mergeFilled(base.filled, mine.filledFromCert, theirs.filledFromCert), "mergeFilled in the page answers as the module does");
 }
@@ -478,8 +519,12 @@ const is = (got, want, what) => {
   is(ask({ last: { running: false, hourly: { ...hourly(30), at: ago(30) } } }), false, "the hour's stamp read as text answers the same");
   is(ask({ lastDocUpdate: ago(90) }), true, "no server record and the tab's own stamp ninety minutes old: due");
   is(ask({ lastDocUpdate: ago(70) }), false, "…seventy minutes old: not yet, the hour gets its turn first");
+  is(ask({ lastDocUpdate: ago(71) }), true, "…seventy-one: due, the same window as the server's record so the two do not stack");
   is(ask({ lastDocUpdate: null }), true, "…never updated: due");
   is(ask({ last: { sync: null, hourly: null, running: false } }), true, "a portal that has no hour on record leaves the tab to its own clock");
+  is(ask({ last: null, unanswered: 1 }), false, "one ask that got no answer: the tab waits for the next rather than round behind an hour that may have done the work");
+  is(ask({ last: null, unanswered: 2 }), true, "two in a row: the portal cannot be asked, the tab's own clock stands in");
+  is(ask({ last: { running: false, hourly: hourly(30) }, unanswered: 1 }), false, "an answer in hand is read as ever, whatever went before");
 }
 
 /* ---- the copy spliced into the page answers exactly as the module does ---- */
