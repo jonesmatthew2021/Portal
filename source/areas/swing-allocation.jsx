@@ -1,27 +1,40 @@
-/* Swing Allocation — the Admin tab of that name.
+/* Swings — the Admin tab of that name.
  *
  * Spliced into source/index.html by the build, so there is no import or
  * export here: by the time it runs it is the same one file it always was.
  * The shell holds the theme, the shared components and the state; this
  * holds what is only this tab's. See tools/source.mjs.
+ *
+ * One page for everything about a swing. It used to be two — Swing
+ * Allocation (the cards, the editable board, the archive) and Swing
+ * Compliance (the same cards again over a read-only copy of the board, with
+ * the legend, the details and the swing report under it). Read top to
+ * bottom now: the legend, the cards, the board — editable, and open — then
+ * who is clear and who isn't, the shift requirements, the swing report, and
+ * the swings gone by.
  */
-function RosterPage({ currentUser, people, setPeople, overrides, swingBoard, setSwingBoard, log }) {
+function SwingsPage({ currentUser, people, setPeople, overrides, swingBoard, setSwingBoard, log }) {
   const { swingArchive } = usePortal();
   const k0 = currentSwingIndex();
   const [at, setAt] = useState(k0);
   const [archived, setArchived] = useState(null);
-  const boardRef = useRef(null);
   // Swings gone by, newest first — the record of each as it stood when it
   // ended, kept five years.
   const past = Object.values(swingArchive || {}).filter((a) => a && a.k < k0).sort((a, b) => b.k - a.k);
   return (
     <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
-        <SectionHead title="Swing Allocation" />
+        <SectionHead title="Swings" />
         <GenerateAllocations people={people} log={log} />
       </div>
-      <SwingCompliance cardsOnly people={people} overrides={overrides} at={at} setAt={setAt}
-        onOpenSwing={() => { if (boardRef.current) boardRef.current.scrollIntoView({ behavior: "smooth", block: "start" }); }} />
+      <ComplianceLegend />
+      <SwingCompliance people={people} overrides={overrides} at={at} setAt={setAt} rosterOpen
+        roster={
+          <CrewRosters people={people} setPeople={setPeople} board={swingBoard}
+            setBoard={setSwingBoard} log={log} currentUser={currentUser}
+            viewSwing={at} overrides={overrides}
+            onShowNow={() => setAt(k0)} />
+        } />
       {past.length > 0 && (
         <div style={{ marginBottom: 18 }}>
           <div style={{ marginBottom: 8 }}>
@@ -36,12 +49,6 @@ function RosterPage({ currentUser, people, setPeople, overrides, swingBoard, set
           </div>
         </div>
       )}
-      <div ref={boardRef}>
-        <CrewRosters people={people} setPeople={setPeople} board={swingBoard}
-          setBoard={setSwingBoard} log={log} currentUser={currentUser}
-          viewSwing={at} overrides={overrides}
-          onShowNow={() => setAt(k0)} />
-      </div>
       {archived && (
         <SwingDayGrid snapshot={archived} people={people} onClose={() => setArchived(null)} />
       )}

@@ -11047,8 +11047,8 @@ function FoldSection({ title, meta, tone = T.accent, children, boxRef, right }) 
   );
 }
 
-function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, cardsOnly, compact }) {
-  const [rosterShown, setRosterShown] = useState(false);
+function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, cardsOnly, compact, rosterOpen }) {
+  const [rosterShown, setRosterShown] = useState(!!rosterOpen);
   const { shiftAnalysis: heldShift } = usePortal();
   const { quals: QUALS, swingDates, setSwingDates, log, certDates, swingBoard, swingBoards } = usePortal();
   const validityFor = useValidityLookup();
@@ -15531,7 +15531,7 @@ function SwingShiftAllocation({ here }) {
               category="shift-allocation"
               noun="shift allocation sheet"
               eyebrow="Shift allocation sheet"
-              blurb="One sheet is kept on the portal — the latest the office sent. It is a guideline rather than a crew list: how many holders of certain certificates each shift must carry, for this swing and the ones after it. The comparison on the Swing Compliance page runs against whichever is on file."
+              blurb="One sheet is kept on the portal — the latest the office sent. It is a guideline rather than a crew list: how many holders of certain certificates each shift must carry, for this swing and the ones after it. The comparison on the Swings page runs against whichever is on file."
               current={shiftAllocation || null}
               onFiled={(record) => {
                 setShiftAllocation(record);
@@ -16537,17 +16537,24 @@ function CrewCertificateUpload() {
    them and the page that is rendered can't disagree about what exists. */
 const ADMIN_PAGES = [
   { id: "crew-details", label: "Crew Details" },
-  { id: "swing-allocation", label: "Swing Allocation" },
+  { id: "swings", label: "Swings" },
   { id: "required-docs", label: "Required Documents For Upload" },
   { id: "checker", label: "Certification Checker" },
   { id: "elearning", label: "E-Learning Status" },
-  { id: "swing-compliance", label: "Swing Compliance" },
   { id: "opms", label: "OPMS Checker" },
   { id: "portways-docs", label: "Portways Documentation" },
   { id: "ai-checker", label: "AI Checker" },
   { id: "sharepoint", label: "SharePoint" },
   { id: "access", label: "Access Grants" },
 ];
+
+/* Pages that have been folded into another. The page somebody was on is
+   remembered by id, so a browser that remembers one of these lands on the
+   page that replaced it rather than on Crew Details. */
+const ADMIN_PAGE_MOVED = {
+  "swing-allocation": "swings",
+  "swing-compliance": "swings",
+};
 
 function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingBoard, setSwingBoard, notes, corrCount, history, allTabs, hiddenTabs, onHideTab, onRestoreTab, onRestoreAllTabs, files, sync, log }) {
   // The Admin tab is seven pages now, not one: the documents the portal has to
@@ -16557,8 +16564,9 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
   // here so switching between them doesn't reset the screen underneath.
   // Uploads come first — a portal with nothing filed can do nothing else on
   // this tab.
-  const [page, setPage] = useRemembered("admin-page", "crew-details",
-    (v) => ADMIN_PAGES.some((p) => p.id === v));
+  const [heldPage, setPage] = useRemembered("admin-page", "crew-details",
+    (v) => ADMIN_PAGES.some((p) => p.id === v) || !!ADMIN_PAGE_MOVED[v]);
+  const page = ADMIN_PAGE_MOVED[heldPage] || heldPage;
 
   if (!isAdmin(currentUser)) {
     return (
@@ -16626,15 +16634,12 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
       {page === "crew-details" && <CrewDetails />}
       {page === "required-docs" && <RequiredDocuments />}
       {page === "elearning" && <ELearningStatus />}
-      {/* One page for the swing: the compliance cards first — the swing that is
-          on and the three coming — then the roster, which follows whichever
-          card is clicked, then the compliance details read against it. */}
-      {page === "swing-allocation" && (
-        <RosterPage currentUser={currentUser} people={people} setPeople={setPeople}
-          overrides={overrides} swingBoard={swingBoard} setSwingBoard={setSwingBoard} log={log} />
-      )}
-      {page === "swing-compliance" && (
-        <SwingCompliancePage currentUser={currentUser} people={people} setPeople={setPeople}
+      {/* One page for the swing: the legend, the compliance cards — the swing
+          that is on and the ones coming — then the board, which follows
+          whichever card is clicked, then the compliance details read against
+          it and the swing report. */}
+      {page === "swings" && (
+        <SwingsPage currentUser={currentUser} people={people} setPeople={setPeople}
           overrides={overrides} swingBoard={swingBoard} setSwingBoard={setSwingBoard} log={log} />
       )}
       {page === "sharepoint" && <SharePointPage />}

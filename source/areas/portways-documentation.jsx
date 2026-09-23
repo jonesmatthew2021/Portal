@@ -234,7 +234,7 @@ function CrewListFormPage({ people }) {
         {!swingCrew.length && (
           <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, marginTop: 8 }}>
             The swing lists are empty, so there is nobody to put on the form yet — fill them in on
-            Swing Compliance first.
+            Swings first.
           </div>
         )}
       </div>

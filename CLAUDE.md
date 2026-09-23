@@ -32,11 +32,10 @@ One file per Admin tab, so two jobs on two tabs are two files:
 | File under `source/areas/` | Tab |
 |---|---|
 | `crew-details.jsx` | Crew Details — the crew register |
-| `swing-allocation.jsx` | Swing Allocation (thin — the roster itself is in the shell) |
+| `swing-allocation.jsx` | Swings (thin — the board and the compliance check are in the shell) |
 | `required-documents.jsx` | Required Documents For Upload |
 | `certification-checker.jsx` | Certification Checker |
 | `elearning-status.jsx` | E-Learning Status |
-| `swing-compliance.jsx` | Swing Compliance (thin — as above) |
 | `opms-checker.jsx` | OPMS Checker |
 | `portways-documentation.jsx` | Portways Documentation |
 | `ai-checker.jsx` | AI Checker |
