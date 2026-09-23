@@ -459,8 +459,12 @@ async function uploadSingleDocument(file, category, fields, decide = "ask") {
    409 - so it waits for the lease to be free instead: a look every fifteen
    seconds, up to the fifteen minutes the hour can hold it for. Answers
    whether the lease is free; a portal that cannot say counts as free, and
-   the request that follows is what gets refused, plainly. */
-async function waitForRound(onWait) {
+   the request that follows is what gets refused, plainly.
+
+   `saw` is told what each look found, so the provider can hold whether the
+   hour is running and keep the buttons that write the workbook out of its
+   way (see roundRunning) without a clock of its own. */
+async function waitForRound(onWait, saw) {
   const until = Date.now() + 15 * 60000;
   for (;;) {
     let running = false;
@@ -468,12 +472,16 @@ async function waitForRound(onWait) {
       const r = await fetch("/api/sync/last", { cache: "no-store" });
       if (r.ok) running = !!(await r.json()).running;
     } catch (e) { return true; }
+    if (saw) saw(running);
     if (!running) return true;
     if (Date.now() > until) return false;
     if (onWait) onWait();
     await new Promise((ok) => setTimeout(ok, 15000));
   }
 }
+
+// What a button that writes the workbook says, held down, while the hour has it.
+const ROUND_BUSY = "The round on the hour is writing the workbook";
 
 // The crew certificates spreadsheet is one of those documents.
 const uploadCertificateSheet = (file, fields, decide = "ask") =>
@@ -8342,7 +8350,7 @@ async function fileLatestMatrix(next, role, certSheet) {
 function GenerateLatestMatrix({ variant = "solid", label = "Update matrix" }) {
   const {
     quals: QUALS, setQuals, certSheet, setCertSheet, setCertAnalysis,
-    refileCertificates, setMatrixUpdated, validityMatrix, log, role,
+    refileCertificates, setMatrixUpdated, validityMatrix, log, role, roundRunning,
   } = usePortal();
 
   const [run, setRun] = useState(null);   // null | { phase, read, total } | { phase: "failed", message }
@@ -8478,7 +8486,8 @@ function GenerateLatestMatrix({ variant = "solid", label = "Update matrix" }) {
   return (
     <div style={{ width: wide ? "100%" : "auto" }}>
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <Button variant={variant} onClick={go} disabled={running}>
+        <Button variant={variant} onClick={go} disabled={running || roundRunning}
+          title={!running && roundRunning ? ROUND_BUSY : undefined}>
           {running ? "Updating…" : label}
         </Button>
         {running && (
@@ -8615,6 +8624,7 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
     quals: QUALS, setQuals, trainingMatrix, setTrainingMatrix,
     refileCertificates, setMatrixUpdated, validityMatrix, log, role,
     setSkillsRequirements, filledFromCert, setFilledFromCert, people,
+    roundRunning, setRoundRunning,
   } = usePortal();
 
   const [run, setRun] = useState(null);   // null | { phase, read, total } | { phase: "failed", message }
@@ -8754,7 +8764,7 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
       // now; comparing against a matrix it is halfway through, and then
       // uploading over its workbook, is what the lease is there to stop.
       const wait = { phase: "waiting", read: progress.read, total: progress.total };
-      await waitForRound(() => setRun(wait));
+      await waitForRound(() => setRun(wait), setRoundRunning);
 
       // What the certificates settle, cell by cell. The OPMS spreadsheet is
       // passed to none of this — the comparison is certificates against the
@@ -8839,7 +8849,7 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
           } catch (e) {
             if (e.status !== 409 || tries >= 3) throw e;
             setRun(wait);
-            if (!(await waitForRound())) throw e;
+            if (!(await waitForRound(undefined, setRoundRunning))) throw e;
             setRun({ phase: "writing", read: progress.read, total: progress.total });
           }
         }
@@ -8890,7 +8900,8 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
   return (
     <div style={{ width: run || err || done ? "100%" : "auto" }}>
       <div style={{ display: chrome ? "flex" : "none", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <Button variant={variant} onClick={go} disabled={running}>
+        <Button variant={variant} onClick={go} disabled={running || roundRunning}
+          title={!running && roundRunning ? ROUND_BUSY : undefined}>
           {running ? "Updating…" : label}
         </Button>
         {running && (
@@ -12395,7 +12406,7 @@ function shouldTabRound({ lastDocUpdate, now, pending, online, last }) {
 }
 
 function UpdateDocumentation() {
-  const { admin, lastDocUpdate, setLastDocUpdate, log, pending,
+  const { admin, lastDocUpdate, setLastDocUpdate, log, pending, roundRunning, setRoundRunning,
     quals: QUALS, setQuals, trainingMatrix,
     rosterPlan, setRosterPlan, crewRoster,
     skillsMatrix, skillsRequirements, setSkillsRequirements,
@@ -12433,14 +12444,14 @@ function UpdateDocumentation() {
       // The worker's hour holds the lease this takes; wait for it rather
       // than be refused, and if refused all the same, wait once more.
       setStep("Waiting for the round on the hour");
-      await waitForRound();
+      await waitForRound(undefined, setRoundRunning);
       setStep("Reading the SharePoint folders");
       const ask = () => fetch("/api/sync", { method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ by: asked ? "Update portal" : "the round on the hour" }) });
       let r = await ask();
       if (r.status === 409) {
         setStep("Waiting for the round on the hour");
-        await waitForRound();
+        await waitForRound(undefined, setRoundRunning);
         setStep("Reading the SharePoint folders");
         r = await ask();
       }
@@ -12591,13 +12602,17 @@ function UpdateDocumentation() {
     const due = (last) => shouldTabRound({ lastDocUpdate, now: Date.now(), pending, online: navigator.onLine, last });
     const tick = async () => {
       // The tab's own reasons not to, before the portal is asked anything.
-      if (!due(null) || going.current || heldElsewhere()) return;
+      const wants = due(null) && !going.current && !heldElsewhere();
+      // Asked all the same while the last answer said the hour was running,
+      // so the buttons held down for it come back when it stops.
+      if (!wants && !roundRunning) return;
       let last = null;
       try {
         const r = await fetch("/api/sync/last", { cache: "no-store" });
         if (r.ok) last = await r.json();
       } catch (e) { last = null; }
-      if (!due(last) || going.current || heldElsewhere()) return;
+      if (last) setRoundRunning(!!last.running);
+      if (!wants || !due(last) || going.current || heldElsewhere()) return;
       take();
       const renew = setInterval(take, 60000);
       try { await go(false); } finally { clearInterval(renew); }
@@ -12605,7 +12620,7 @@ function UpdateDocumentation() {
     const t = setInterval(tick, 5 * 60000);
     const first = setTimeout(tick, 45000);
     return () => { clearInterval(t); clearTimeout(first); };
-  }, [admin, lastDocUpdate, pending]);
+  }, [admin, lastDocUpdate, pending, roundRunning]);
 
   if (!admin) return null;
 
@@ -16088,6 +16103,11 @@ function CoolibahPortal({ role, onSignOut }) {
    * ref, and a ref changing does not redraw anything, so the fact has to be
    * held somewhere the screen watches. */
   const [pending, setPending] = useState(false);
+  /* Whether the worker's hour holds the workbook, as the portal last said
+     when this tab asked (/api/sync/last): asked by the hourly tick and by
+     every wait before a round, never on a clock of its own. The buttons
+     that write the workbook are held down while it is true. */
+  const [roundRunning, setRoundRunning] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [files, setFiles] = useState({ state: "loading" });
   const [retry, setRetry] = useState(0);
@@ -17178,7 +17198,7 @@ function CoolibahPortal({ role, onSignOut }) {
     return { ok: true, gone };
   };
 
-  const ctx = { role, admin, session: SESSION, pending, removeCrew, renameCrew, setCrewRank, people, setPeople,
+  const ctx = { role, admin, session: SESSION, pending, roundRunning, setRoundRunning, removeCrew, renameCrew, setCrewRank, people, setPeople,
     notPeople, setNotPeople, certRoot, setCertRoot, writeCrewToWorkbooks, lastDocUpdate, setLastDocUpdate, folderNames, setFolderNames, filledFromCert, setFilledFromCert, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
 
   return (

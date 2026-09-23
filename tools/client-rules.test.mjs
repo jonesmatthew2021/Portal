@@ -378,9 +378,11 @@ const is = (got, want, what) => {
     function X() {}, { now: () => 0 }, {}, {},
   );
   let waited = 0;
-  is(await page.waitForRound(() => waited++), true, "the lease came free and the page may go on");
+  const seen = [];
+  is(await page.waitForRound(() => waited++, (running) => seen.push(running)), true, "the lease came free and the page may go on");
   is(looks, 3, "it looked until the portal said the round had finished");
   is(waited, 2, "…and said it was waiting each time it was not");
+  is(seen, [true, true, false], "…and told the provider what every look found, the last look included, so the buttons come back");
   is(await lib.waitForRound(), true, "a portal that cannot say counts as free: the request itself is what gets refused");
 }
 

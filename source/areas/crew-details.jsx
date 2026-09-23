@@ -20,7 +20,7 @@
 function CrewDetails() {
   const { people, setPeople, quals: QUALS, setQuals, certificates, rosterPlan, setRosterPlan,
     renameCrew, setCrewRank, swingLists, setSwingLists, writeCrewToWorkbooks,
-    notPeople, setNotPeople, certRoot, setCertRoot, log } = usePortal();
+    notPeople, setNotPeople, certRoot, setCertRoot, log, roundRunning } = usePortal();
 
   const reg = useMemo(() => crewRegister(people), [people]);
   const [editing, setEditing] = useState(null);   // id of the person being renamed
@@ -393,7 +393,8 @@ function CrewDetails() {
         <Button variant="quiet" onClick={() => setPicking({ kind: "root" })}>Set certificate location</Button>
         {certRoot ? <span style={chip}>{certRoot}</span> : null}
         <span style={{ flex: 1 }} />
-        <Button variant="solid" disabled={!!syncing && !syncing.done}
+        <Button variant="solid" disabled={(!!syncing && !syncing.done) || roundRunning}
+          title={!(syncing && !syncing.done) && roundRunning ? ROUND_BUSY : undefined}
           onClick={syncEverything}>
           {syncing && !syncing.done ? syncing.word : "Update from register"}
         </Button>

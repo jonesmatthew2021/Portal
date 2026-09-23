@@ -7,6 +7,8 @@
  * holds what is only this section's. See tools/source.mjs.
  */
 function SharePointPage() {
+  // Whether the worker's hour holds the workbook: the import is held down while it does.
+  const { roundRunning } = usePortal();
   const [path, setPath] = useState("");
   const [listing, setListing] = useState(null);
   const [err, setErr] = useState("");
@@ -101,7 +103,8 @@ function SharePointPage() {
           <div>{syncLine()}</div>
           {hourlyLine() && <div style={{ color: hourlyLine().bad ? T.bRed : T.muted }}>{hourlyLine().text}</div>}
         </span>
-        <Button variant="quiet" disabled={syncing} onClick={syncNow}>{syncing ? "Importing..." : "Import new files"}</Button>
+        <Button variant="quiet" disabled={syncing || roundRunning} title={!syncing && roundRunning ? ROUND_BUSY : undefined}
+          onClick={syncNow}>{syncing ? "Importing..." : "Import new files"}</Button>
       </div>
       {/* The sync window: the worker's own percentage while it runs, and a
           plain answer when it is done — what was taken on, or why nothing was. */}
