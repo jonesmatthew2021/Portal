@@ -14,7 +14,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setEnv } from "../src/env.js";
-import analyse, { compareMatrix } from "../src/routes/analyse.js";
+import analyse, { compareMatrix, refile } from "../src/routes/analyse.js";
 import { KeptInPlace, purgeDocument, relocateToRemovedBlob, removeDocument, restoreDocument } from "../src/db/documents.js";
 import { replaceSingleFile } from "../src/db/single-file.js";
 import { saveDocument } from "../src/lib/shared-state.js";
@@ -224,6 +224,27 @@ test("a certificate filed under an alias claims the register's row", async () =>
   assert.deepEqual(out.settled, [{ person: "SITTIYOS, Kachin", code: "QL-01", value: "2031-02-17" }],
     "the date settles on the row under the row's own name");
   assert.equal(out.notes.length, 0, "nothing to note: the alias is the man");
+});
+
+test("the refile labels certificates in batches, not a statement each", async () => {
+  /* Two of Billy's scans read as Kachin's: two rows to label, one batch. */
+  const rows = [{ ...billysTicket }, { ...billysTicket, id: "c3", filename: "master again.pdf" }];
+  const batches: number[] = [];
+  const db = fakeDb((sql) => {
+    if (/FROM documents WHERE category = 'certificate'/.test(sql)) return { results: rows };
+    if (/SELECT key, value FROM blobs/.test(sql)) return { results: [{ key: "r1/abc.json", value: JSON.stringify(reading) }] };
+    if (/SELECT value FROM blobs/.test(sql)) return { results: [] };
+    if (/SELECT data FROM portal_state/.test(sql)) return { results: [] };
+    if (/^UPDATE documents SET person/.test(sql)) return { changes: 1 };
+    return undefined;
+  });
+  const plain = db.batch.bind(db);
+  db.batch = async (stmts) => { batches.push(stmts.length); return plain(stmts); };
+  setEnv({ DB: db, FILE_STORE: "r2" } as never);
+  const out = (await (await refile(["SITTIYOS, Kachin"])).json()) as { moved: { id: string; to: string }[] };
+  assert.deepEqual(out.moved.map((m) => [m.id, m.to]), [["c1", "SITTIYOS, Kachin"], ["c3", "SITTIYOS, Kachin"]]);
+  assert.deepEqual(batches, [2], "both labels went in one batch");
+  assert.equal(db.asked.filter((a) => /^UPDATE documents SET person/.test(a.sql)).length, 2, "…and nowhere else");
 });
 
 test("without a register the route compares names as they are", async () => {
@@ -929,6 +950,15 @@ test("the hour runs the sync and the round under one lease, taken once and run o
   assert.equal(hourly.applied, 1, "and the round ran under the same lease, not refused by it");
   assert.equal(hourly.roundSkipped, null);
   assert.equal(JSON.parse(portal.blobs.get("sync|last-run")!).by, "hourly schedule");
+  // The record is written twice: once before the reading can spend the
+  // hour's calls, saying the round has not run yet, and once at the end.
+  const records = portal.db.asked
+    .filter((a) => /^INSERT INTO blobs/.test(a.sql) && a.args[1] === "last-hourly")
+    .map((a) => JSON.parse(String(a.args[2])));
+  assert.equal(records.length, 2, "the hour is on the record before the reading and after the round");
+  assert.equal(records[0].roundSkipped, "round not yet run");
+  assert.equal(records[0].at, records[1].at, "the same hour both times");
+  assert.equal(records[1].applied, 1);
 
   // An hour that finds the lease held stands down whole - no sync either.
   portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "Update portal", token: "y" }));

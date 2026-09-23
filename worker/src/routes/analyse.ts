@@ -452,39 +452,56 @@ export async function refile(names: string[], limit = Infinity) {
   // Duplicates section for somebody to decide about - that call is the
   // office's, not the portal's.
 
-  // One at a time: each move is a copy, a delete and a row update in the blob
-  // store, and they are only worth doing carefully. A big backlog is taken a
-  // slice per request (limit + remaining), so no single request runs longer
-  // than its caller can wait.
+  /* Whose certificate each one is, written on its row. The file is not moved.
+   *
+   * Certificates the sync took on carry their folder's name as their person
+   * until a reading says otherwise, so they sit under Other with no rank
+   * against them; and a certificate can be in the wrong person's folder
+   * altogether. Both are the same answer now - the row is corrected and the
+   * file stays where the office filed it.
+   *
+   * It used to move the file into a folder worked out from the person's
+   * name. Where the library had never used that name, the move made the
+   * folder rather than renaming anything, so the library grew a second,
+   * near-empty folder for people who already had one. A label, not a move:
+   * a row update, no file touched, so it does not count against the slice.
+   *
+   * The labels go first, in a few batches, before any file is touched: a
+   * statement per certificate was a database round trip each, and a
+   * backlog of them spent the hour's budget of calls before the round
+   * could run. Eighty to a batch, the same as the comparison's notes. */
+  const named = new Map<string, string>();
   for (const row of certs) {
     const reading = readings.get(readingKey(row)) || null;
     if (!reading || !reading.readable || !reading.holderName) continue;
-
     const person = holderOnMatrix(reading.holderName, names);
     if (!person) continue;
-
-    /* Whose certificate this is, written on the row. The file is not moved.
-     *
-     * Certificates the sync took on carry their folder's name as their person
-     * until a reading says otherwise, so they sit under Other with no rank
-     * against them; and a certificate can be in the wrong person's folder
-     * altogether. Both are the same answer now - the row is corrected and the
-     * file stays where the office filed it.
-     *
-     * It used to move the file into a folder worked out from the person's
-     * name. Where the library had never used that name, the move made the
-     * folder rather than renaming anything, so the library grew a second,
-     * near-empty folder for people who already had one. A label, not a move:
-     * one row update, no file touched, so it does not count against the slice.
-     */
+    named.set(row.id, person);
     if ((row.person || "") !== person) {
-      await getEnv().DB.prepare("UPDATE documents SET person = ?2 WHERE id = ?1").bind(row.id, person).run();
       moved.push({ id: row.id, filename: row.filename, folder: row.folder || "", from: row.person, to: person });
       row.person = person;
     }
+  }
+  const labels = moved.map((m) => ({ id: m.id, person: m.to }));
+  const d1 = getEnv().DB;
+  for (let i = 0; i < labels.length; i += 80) {
+    await d1.batch(
+      labels.slice(i, i + 80).map((l) =>
+        d1.prepare("UPDATE documents SET person = ?2 WHERE id = ?1").bind(l.id, l.person),
+      ),
+    );
+  }
 
-    // Already with the right person: the file takes the one filing name,
-    // wrapped as a PDF where it is a photo.
+  // Then the files: each takes the one filing name, wrapped as a PDF where
+  // it is a photo. Each rename is a copy, a delete and a row update in the
+  // library, and they are only worth doing carefully. A big backlog is
+  // taken a slice per request (limit + remaining), so no single request
+  // runs longer than its caller can wait.
+  for (const row of certs) {
+    const reading = readings.get(readingKey(row)) || null;
+    const person = named.get(row.id);
+    if (!reading || !person) continue;
+
     const code = String(codeFor(row, reading, eqTable) || "").trim().toUpperCase();
     const title = code ? titles[code] : "";
     if (!code || !title || !/^[a-z0-9-]+$/.test(row.folder || "")) continue;

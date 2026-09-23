@@ -188,7 +188,7 @@ export default {
       return;
     }
     try {
-      await written(await theHour(env, lease, t0, outcome));
+      await written(await theHour(env, lease, t0, outcome, written));
     } finally {
       try {
         await dropLease(lease.token);
@@ -206,6 +206,7 @@ export default {
 async function theHour(
   env: PortalEnv, lease: Lease, t0: number,
   outcome: { read: number; refiled: number; syncError: string | null; readError: string | null },
+  written: (round: Record<string, unknown>) => Promise<void>,
 ): Promise<Record<string, unknown>> {
   const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
   // Nine minutes for the whole hour's work. The reading loops stop two and
@@ -213,13 +214,21 @@ async function theHour(
   // after them; the round itself is checked against the full nine.
   const timeLeft = () => Date.now() - t0 < 9 * 60 * 1000;
   const loopsLeft = () => Date.now() - t0 < (9 - 2.5) * 60 * 1000;
-  // A batch of four reads is a few seconds; forty batches an hour keeps
-  // the model bill and the hour's wall clock both inside reason.
-  const MAX_EXTRACT_BATCHES = 40;
-  // Refiling renames files in the library, a call or two each. Six lots
-  // of fifty an hour keeps a backlog of renames inside the hour's budget
-  // of calls, with the round's own share left over; the rest wait an hour.
-  const MAX_REFILE_CALLS = 6;
+  /* The other budget is calls: one invocation may make about a thousand
+     (every fetch to the model or the library, every database statement),
+     and an hour that spends them all on reading leaves none for the round
+     and none to write the hour's record - the page then shows a stale hour
+     with no error, which is the worst way to fail. So the loops are capped
+     at roughly six hundred between them, leaving the sync, the round and
+     the record their share:
+       a batch of four reads is four model calls, four file reads and a
+       few database looks - call it fifteen; twenty batches, three hundred;
+       one slice of forty renames is a copy, a delete, a folder check and
+       a row update each - call it a hundred and seventy, plus the labels
+       in a couple of batches. The rest wait for the next hour. */
+  const MAX_EXTRACT_BATCHES = 20;
+  const MAX_REFILE_CALLS = 1;
+  const REFILE_SLICE = 40;
 
   let mirroredThisHour = 0;
   try {
@@ -250,6 +259,11 @@ async function theHour(
     console.error("the crew matrix could not be read for the hour:", e);
   }
 
+  // The hour so far, on the record before the reading spends anything: if
+  // the reading runs the budget dry, the page still sees this hour and the
+  // word that the round did not get to run, never last hour's line.
+  await written({ ...round, roundSkipped: round.roundSkipped ?? round.roundError ?? "round not yet run" });
+
   if (env.ANTHROPIC_API_KEY) {
     try {
       if (codes.length) {
@@ -265,7 +279,7 @@ async function theHour(
         }
         let refiles = 0;
         while (names.length && loopsLeft() && refiles++ < MAX_REFILE_CALLS) {
-          const out = (await (await refile(names, 50)).json()) as {
+          const out = (await (await refile(names, REFILE_SLICE)).json()) as {
             moved: unknown[]; remaining: number;
           };
           outcome.refiled += (out.moved || []).length;
