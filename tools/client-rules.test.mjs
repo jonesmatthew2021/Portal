@@ -56,7 +56,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -361,6 +361,27 @@ const is = (got, want, what) => {
   is(lib.filedUnderSuffix(wanted, "20260923 - CREW QUALIFICATION EXPIRY (2).xlsx"), false, "another day's name is not it");
   is(lib.filedUnderSuffix(wanted, "20260924 - CREW QUALIFICATION EXPIRY (2).xlsm"), false, "nor another kind of file");
   is(lib.filedUnderSuffix(wanted, "20260924 - CREW QUALIFICATION EXPIRY (two).xlsx"), false, "a bracket that is not a number is a different name");
+}
+
+/* ---- the page waits for the worker's hour to let go of the workbook
+        before its own round, a look at a time, and goes on once it has ---- */
+{
+  /* The same compiled page, with a portal that says the round is running
+     for two looks and then not, and a clock that does not wait. */
+  let looks = 0;
+  const running = async () => ({ ok: true, json: async () => ({ running: ++looks < 3 }) });
+  const page = fn(
+    ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
+    windowStub.navigator, windowStub.location, sessionStub, sessionStub, () => {}, running,
+    () => 0, (f) => { f(); return 0; }, () => {}, () => {}, () => 0, () => {}, () => false,
+    function N() {}, function I() {}, function A() {}, class { observe() {} }, function F() {},
+    function X() {}, { now: () => 0 }, {}, {},
+  );
+  let waited = 0;
+  is(await page.waitForRound(() => waited++), true, "the lease came free and the page may go on");
+  is(looks, 3, "it looked until the portal said the round had finished");
+  is(waited, 2, "…and said it was waiting each time it was not");
+  is(await lib.waitForRound(), true, "a portal that cannot say counts as free: the request itself is what gets refused");
 }
 
 /* ---- the copy spliced into the page answers exactly as the module does ---- */

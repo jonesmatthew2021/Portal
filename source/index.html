@@ -444,9 +444,35 @@ async function uploadSingleDocument(file, category, fields, decide = "ask") {
   const data = await r.json().catch(() => null);
   if (r.status === 409 && data && data.overwrite) return data;    // { overwrite, existing }
   if (!r.ok) {
-    throw new Error((data && data.error) || `Upload failed (${r.status}). Nothing was saved.`);
+    const err = new Error((data && data.error) || `Upload failed (${r.status}). Nothing was saved.`);
+    // The status rides with it: a 409 is the hour holding the workbook,
+    // which is waited for rather than given up on.
+    err.status = r.status;
+    throw err;
   }
   return data;                                                    // { record, replaced } or { skipped }
+}
+
+/* The worker's hour holds one lease around its sync, its reading and its
+   round, and Update portal and the workbook upload take the same one. A
+   page that starts its round in the middle of the hour is refused with a
+   409 - so it waits for the lease to be free instead: a look every fifteen
+   seconds, up to the fifteen minutes the hour can hold it for. Answers
+   whether the lease is free; a portal that cannot say counts as free, and
+   the request that follows is what gets refused, plainly. */
+async function waitForRound(onWait) {
+  const until = Date.now() + 15 * 60000;
+  for (;;) {
+    let running = false;
+    try {
+      const r = await fetch("/api/sync/last", { cache: "no-store" });
+      if (r.ok) running = !!(await r.json()).running;
+    } catch (e) { return true; }
+    if (!running) return true;
+    if (Date.now() > until) return false;
+    if (onWait) onWait();
+    await new Promise((ok) => setTimeout(ok, 15000));
+  }
 }
 
 // The crew certificates spreadsheet is one of those documents.
@@ -8575,6 +8601,7 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
       : run.phase === "filing"
         ? 91 + (run.toFile ? Math.min(3, Math.round((run.filed / run.toFile) * 3)) : 0)
       : run.phase === "validity" ? 95
+      : run.phase === "waiting" ? 95
       : run.phase === "comparing" ? 96
       : 98;
 
@@ -8596,6 +8623,7 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
         ? `Filing each certificate under the person named on it — ${run.filed} of ${run.toFile}.`
         : "Filing each certificate under the person named on it."
     : run.phase === "validity" ? "Reading the validity periods off the skills matrix."
+    : run.phase === "waiting" ? "Waiting for the round on the hour to finish."
     : run.phase === "comparing" ? "Working out each expiry date."
     : run.phase === "writing" ? "Writing the dates into the training matrix workbook."
     : "Working…";
@@ -8681,6 +8709,12 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
         }
       }
 
+      // The worker's hour may be writing the matrix and the workbook right
+      // now; comparing against a matrix it is halfway through, and then
+      // uploading over its workbook, is what the lease is there to stop.
+      const wait = { phase: "waiting", read: progress.read, total: progress.total };
+      await waitForRound(() => setRun(wait));
+
       // What the certificates settle, cell by cell. The OPMS spreadsheet is
       // passed to none of this — the comparison is certificates against the
       // crew matrix, nothing else.
@@ -8752,9 +8786,22 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
       let failed = "";
       let renamed = "";
       try {
-        const up = await uploadSingleDocument(
-          file, "training-matrix", { uploadedBy: role, filedOn: on, session: SESSION }, "replace",
-        );
+        /* Refused because the hour holds the workbook: wait for it to let
+           go and file again, rather than settling for a download. */
+        let up;
+        for (let tries = 0; ; tries++) {
+          try {
+            up = await uploadSingleDocument(
+              file, "training-matrix", { uploadedBy: role, filedOn: on, session: SESSION }, "replace",
+            );
+            break;
+          } catch (e) {
+            if (e.status !== 409 || tries >= 3) throw e;
+            setRun(wait);
+            if (!(await waitForRound())) throw e;
+            setRun({ phase: "writing", read: progress.read, total: progress.total });
+          }
+        }
         if (up.record) {
           setTrainingMatrix(up.record);
           // The file in SharePoint follows the name the portal filed it under.
@@ -8824,6 +8871,7 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
               : "Looking at what is on file.")}
             {run.phase === "filing" && `All ${run.total} certificates read. Putting each one in the folder of the person named on it.`}
             {run.phase === "validity" && "Reading the validity periods off the skills matrix — how long each item stays valid once it has been done."}
+            {run.phase === "waiting" && "Waiting for the round on the hour to finish with the matrix and the workbook."}
             {run.phase === "comparing" && "Taking the expiry date each certificate prints, and working one out from the issue date and the validity period where it doesn't."}
             {run.phase === "writing" && "Writing the dates into the training matrix workbook, in place. Everything else in it stays as it is."}
           </>}
@@ -12305,9 +12353,20 @@ function UpdateDocumentation() {
     going.current = true;
     setErr(""); setFound(null);
     try {
+      // The worker's hour holds the lease this takes; wait for it rather
+      // than be refused, and if refused all the same, wait once more.
+      setStep("Waiting for the round on the hour");
+      await waitForRound();
       setStep("Reading the SharePoint folders");
-      const r = await fetch("/api/sync", { method: "POST", headers: { "content-type": "application/json" },
+      const ask = () => fetch("/api/sync", { method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ by: asked ? "Update portal" : "the round on the hour" }) });
+      let r = await ask();
+      if (r.status === 409) {
+        setStep("Waiting for the round on the hour");
+        await waitForRound();
+        setStep("Reading the SharePoint folders");
+        r = await ask();
+      }
       const out = await r.json();
       if (!r.ok) throw new Error(out.error || ("the folders couldn't be read (" + r.status + ")"));
 
