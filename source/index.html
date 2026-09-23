@@ -9641,7 +9641,9 @@ function GenerateLatestMatrix({ variant = "solid", label = "Generate latest trai
 
       if (filed && filed.id) setCertSheet(filed);
       if (applied.length) {
-        setQuals(next);
+        // Laid over the matrix as it is now, not the copy this run began from
+        // — see runMatrixAuto for the flip that writing the snapshot caused.
+        setQuals((q) => ((q.rows || []).length ? applySettled(q, res.settled).next : q));
         setMatrixUpdated(on);
         log("Crew Matrix", "Generated the latest matrix from the certificates",
           `${applied.length} ${applied.length === 1 ? "date" : "dates"} written in from the certificates on file`);
@@ -10038,7 +10040,10 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
        * being knowingly wrong is worse. */
       const on = todayISO();
       if (applied) {
-        setQuals(next);
+        // Laid over the matrix as it is now, not the copy this run began from
+        // — the hourly round runs this, and writing its snapshot back was the
+        // flip: fill in, then fifteen seconds later revert. See runMatrixAuto.
+        setQuals((q) => ((q.rows || []).length ? applySettled(q, settled).next : q));
         setMatrixUpdated(on);
       }
 
@@ -17736,7 +17741,13 @@ function CoolibahPortal({ role, onSignOut }) {
            crew and a thousand dates straight back on a portal somebody had
            just cleared, which is a thing you would press twice and blame
            yourself for. */
-        setQuals((q) => ((q.rows || []).length ? next : q));
+        /* And onto the matrix as it is at this instant, not the copy this run
+           began from. The run is minutes long; the matrix moves while it reads
+           - a refresh, the hourly round, a workbook read back in - and writing
+           a snapshot back over all of that was how the matrix filled in and
+           then, fifteen seconds later, went back to how an older run had left
+           it. The settled dates are laid over whatever is live now. */
+        setQuals((q) => ((q.rows || []).length ? applySettled(q, res.settled).next : q));
         setMatrixUpdated(todayISO());
         log("Crew Matrix",
           origin === "certificates"
