@@ -52,9 +52,9 @@ function SharePointPage() {
   };
   const syncLine = () => {
     const ls = listing && listing.lastSync;
-    if (!ls) return "Files dropped into these folders from Teams are taken onto the portal's books every hour — no sync has run yet.";
+    if (!ls) return "Files dropped into these folders from Teams are taken onto the portal's books every hour — none has run yet.";
     const when = new Date(ls.at).toLocaleString("en-AU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
-    if (ls.error) return `Last sync ${when} (${ls.by}) failed: ${ls.error}`;
+    if (ls.error) return `Last import ${when} (${ls.by}) failed: ${ls.error}`;
     return `Folders last read ${when} (${ls.by}): ${ls.registered} new certificate${ls.registered === 1 ? "" : "s"} taken on` +
       (ls.adopted ? `, ${ls.adopted} document${ls.adopted === 1 ? "" : "s"} adopted` : "") +
       (ls.missing ? `, ${ls.missing} on the books but gone from the folders` : "") +
@@ -83,7 +83,7 @@ function SharePointPage() {
   return (
     <div>
       <div style={{ marginBottom: 10 }}><Eyebrow color={T.accent}>The company library, live</Eyebrow></div>
-      {/* Folders → portal: what the hourly sync last did, and a button to run it now. */}
+      {/* Folders → portal: what the hourly import last did, and a button to run it now. */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontFamily: T.body,
         fontSize: 12.5, color: T.muted, padding: "9px 12px", border: `1px solid ${T.rule}`, borderRadius: 2,
         marginBottom: 12 }}>
@@ -91,7 +91,7 @@ function SharePointPage() {
           <div>{syncLine()}</div>
           {hourlyLine() && <div style={{ color: hourlyLine().bad ? T.bRed : T.muted }}>{hourlyLine().text}</div>}
         </span>
-        <Button variant="quiet" disabled={syncing} onClick={syncNow}>{syncing ? "Syncing..." : "Sync now"}</Button>
+        <Button variant="quiet" disabled={syncing} onClick={syncNow}>{syncing ? "Importing..." : "Import new files"}</Button>
       </div>
       {/* The sync window: the worker's own percentage while it runs, and a
           plain answer when it is done — what was taken on, or why nothing was. */}
@@ -100,7 +100,7 @@ function SharePointPage() {
           display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderTop: `4px solid ${T.accent}`,
             borderRadius: 3, padding: "22px 26px", width: "min(540px, 92vw)", maxHeight: "80vh", overflowY: "auto" }}>
-            <Eyebrow color={T.accent}>{syncing ? "Syncing with SharePoint" : "Sync finished"}</Eyebrow>
+            <Eyebrow color={T.accent}>{syncing ? "Importing from SharePoint" : "Import finished"}</Eyebrow>
             {syncing ? (
               <>
                 <div style={{ fontFamily: T.display, fontSize: 46, fontWeight: 700, color: T.text, margin: "10px 0 2px" }}>

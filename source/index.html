@@ -3327,10 +3327,10 @@ function UpdateTableButton() {
   const { matrixAuto, runMatrixAuto } = usePortal();
   const running = !!matrixAuto && matrixAuto.phase !== "done" && matrixAuto.phase !== "failed";
   return (
-    <Button variant="solid" disabled={running}
+    <Button variant="quiet" disabled={running}
       title="Check every certificate and expiry date against the spreadsheets and bring this list up to date"
       onClick={() => { if (!running) runMatrixAuto({ origin: "update-table" }); }}>
-      {running ? "Syncing…" : "Sync with SharePoint certification"}
+      {running ? "Updating…" : "Update certificate list"}
     </Button>
   );
 }
@@ -4163,6 +4163,8 @@ function TrainingMatrix() {
     return at !== undefined && String((row[3] || [])[at] || "").trim() !== "";
   });
   const [report, setReport] = useState(null);
+  // The three ways of writing the matrix out, behind one Report button.
+  const [reportMenu, setReportMenu] = useState(false);
   // The scan behind a pressed cell, opened in the same viewer the checker uses.
   const [cellScan, setCellScan] = useState(null);
   const [group, setGroup] = useState("All");
@@ -4555,16 +4557,21 @@ function TrainingMatrix() {
         </span>
       </div>
 
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18, marginBottom: 30 }}>
-        <Button onClick={() => setReport("crew")}>Generate crew report</Button>
-        <Button variant="quiet" onClick={() => setReport("individual")}>Generate individual report</Button>
-        {/* The third of them, and the only one that changes anything: the two
-            above report the matrix as it stands, this one brings it up to date
-            with the certificates that have gone up since it was last read. */}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18, marginBottom: 30, alignItems: "center" }}>
+        {/* The one button here that changes anything: it brings the matrix up
+            to date with the certificates that have gone up since it was last
+            read. Everything under Report writes the matrix out as it stands —
+            the crew report, one person's report, or the spreadsheet itself,
+            downloaded and opened — nothing read, nothing changed. */}
         <GenerateLatestMatrix variant="quiet" />
-        {/* And the fourth: the matrix exactly as it stands, written out as the
-            spreadsheet, downloaded and opened — nothing read, nothing changed. */}
-        <DownloadLatestMatrix variant="quiet" />
+        <Button onClick={() => setReportMenu(!reportMenu)}>{reportMenu ? "Report ▴" : "Report ▾"}</Button>
+        {reportMenu && (
+          <>
+            <Button variant="quiet" onClick={() => { setReportMenu(false); setReport("crew"); }}>Crew report</Button>
+            <Button variant="quiet" onClick={() => { setReportMenu(false); setReport("individual"); }}>Individual report</Button>
+            <DownloadLatestMatrix variant="quiet" />
+          </>
+        )}
       </div>
 
       {/* floats above everything, pinned to the bottom of the screen */}
@@ -4595,7 +4602,7 @@ const SHIFTS = [{ id: "day", label: "Day" }, { id: "night", label: "Night" }];
  *
  * It used to fall back on the pattern - the crew whose turn the calendar said
  * it was got shown onboard - so a portal nobody had set up still opened
- * looking right. That was before Generate latest allocations existed. Now the
+ * looking right. That was before Update swings from roster existed. Now the
  * allocations are read off the roster when management asks for it, and a board
  * that has not been generated is a board with nothing on it, not a guess: the
  * pattern quietly moving people on and off as the weeks roll over is exactly
@@ -8193,12 +8200,12 @@ function StartAgain() {
         maxWidth: 680 }}>
         Empties everything the portal read out of the library — the crew matrix, the roster, the
         requirements and every date against a name — and leaves SharePoint exactly as it is.
-        Press Update documentation afterwards and the portal reads back in whatever the library
+        Press Update portal afterwards and the portal reads back in whatever the library
         actually holds, from nothing.
       </div>
       {done ? (
         <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.teal }}>
-          Cleared. Press Update documentation to read the library back in.
+          Cleared. Press Update portal to read the library back in.
         </div>
       ) : asking ? (
         <div style={{ background: T.bRedBg, border: `1px solid ${T.bRed}`, borderRadius: 2,
@@ -9246,8 +9253,8 @@ async function readEverything({ quals, certSheet, validityMatrix = null, fresh, 
  * The certificates' answer, laid over the crew matrix. The only place it is
  * done.
  *
- * There were three: the automatic run after an upload, Generate latest
- * training matrix, and Update the spreadsheet. Each read the same certificates
+ * There were three: the automatic run after an upload, Update matrix (then
+ * called Generate latest training matrix), and Update the spreadsheet. Each read the same certificates
  * and then picked its own list out of the answer - two filtered the analysis's
  * items on slightly different conditions, the third used the server's settled
  * list - so the three could write different dates from the same evidence, and
@@ -9455,7 +9462,7 @@ async function fileLatestMatrix(next, role, certSheet) {
  * left exactly as they are and put on the certificate review to be answered by
  * hand, which is the one thing this button deliberately doesn't do for you.
  */
-function GenerateLatestMatrix({ variant = "solid", label = "Generate latest training matrix" }) {
+function GenerateLatestMatrix({ variant = "solid", label = "Update matrix" }) {
   const {
     quals: QUALS, setQuals, certSheet, setCertSheet, setCertAnalysis,
     refileCertificates, setMatrixUpdated, validityMatrix, log, role,
@@ -9731,7 +9738,7 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
   const [run, setRun] = useState(null);   // null | { phase, read, total } | { phase: "failed", message }
   const [done, setDone] = useState(null);
   const [err, setErr] = useState("");
-  // The same run, handed out so Update documentation at the top of the page can
+  // The same run, handed out so Update portal at the top of the page can
   // drive it. One piece of work, one place it is written down.
   const runner = useRef(null);
   React.useEffect(() => { if (onRunner) onRunner(() => runner.current && runner.current()); }, [onRunner]);
@@ -10036,7 +10043,7 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
         />
       )}
 
-      {/* Driven from Update documentation at the top of the page, the answer
+      {/* Driven from Update portal at the top of the page, the answer
           has nowhere of its own to sit, so it comes up over the page and is
           closed when it has been read. On Required Documents, where the button
           is, it stays under the button as it always did. */}
@@ -10062,7 +10069,7 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
               : "Spreadsheet updated"}
           </Eyebrow>
           <div style={{ fontFamily: T.body, fontSize: 14, color: T.text, lineHeight: 1.7, marginTop: 7 }}>
-            {done.noItems ? ("The crew matrix has no items on it, so there is nothing for the certificates to be read against. Add them from the skills matrix — Update documentation offers them the moment it sees they are missing — and press this again.") : (<>{done.read} of {done.total} {done.total === 1 ? "certificate" : "certificates"} on file were read.{" "}
+            {done.noItems ? ("The crew matrix has no items on it, so there is nothing for the certificates to be read against. Add them from the skills matrix — Update portal offers them the moment it sees they are missing — and press this again.") : (<>{done.read} of {done.total} {done.total === 1 ? "certificate" : "certificates"} on file were read.{" "}
             {done.nothing
               ? "None of them settles an expiry date for anyone on the crew matrix yet, so the training matrix was left exactly as it is."
               : `${done.settled} ${done.settled === 1 ? "expiry was" : "expiries were"} settled by the certificates.`}
@@ -10117,7 +10124,7 @@ function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the sp
  * file is handed to a new tab as well as to the downloads, so the browser
  * opens it with whatever reads spreadsheets on the machine.
  */
-function DownloadLatestMatrix({ variant = "quiet", label = "Download latest matrix" }) {
+function DownloadLatestMatrix({ variant = "quiet", label = "Matrix spreadsheet" }) {
   const { quals: QUALS, certSheet, log } = usePortal();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -10605,7 +10612,7 @@ function MatrixAutoWindow() {
         message={auto.message}
         failNote={fromButton
           ? "Nothing has been lost. The certificates already read are kept, so pressing Update table again carries on from here rather than starting over."
-          : "The spreadsheet is filed and nothing has been lost. The certificates already read are kept, so the next run — the next upload, or Generate latest training matrix — carries on from here rather than starting over."}
+          : "The spreadsheet is filed and nothing has been lost. The certificates already read are kept, so the next run — the next upload, or Update matrix — carries on from here rather than starting over."}
         onClose={clearMatrixAuto}
       />
     );
@@ -11386,8 +11393,7 @@ function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, ca
       {/* The last word on the page: one button that checks the picked swing
           whole — roster against spreadsheets and certificates — and writes the
           answer down for everyone. */}
-      <FoldSection title="Full swing report"
-        meta="one press checks the whole swing — roster, spreadsheets, certificates — and writes the answer down for everyone">
+      <FoldSection title="Swing report">
         <GenerateSwingCompliance results={results} here={here} setAt={setAt} />
       </FoldSection>
     </div>
@@ -13445,7 +13451,7 @@ function SyncPeople({ found, onClose }) {
   );
 }
 
-/* Update documentation: the whole round, behind one button.
+/* Update portal: the whole round, behind one button.
  *
  * Keeping the portal current used to be four jobs in four places - sync the
  * SharePoint folders, answer who has joined or left, read the new certificates
@@ -13590,7 +13596,7 @@ function UpdateDocumentation() {
 
       const at = new Date().toISOString();
       setLastDocUpdate(at);
-      log("Admin", asked ? "Documentation updated" : "Documentation updated on the hour",
+      log("Admin", asked ? "Portal updated" : "Portal updated on the hour",
         [(out.registered ? out.registered.length : 0) + " new certificates taken on",
           out.returned ? out.returned + " written off in error, back on the books" : null,
           out.mirrored ? out.mirrored + " gone from the library and off the books" : null,
@@ -13654,7 +13660,7 @@ function UpdateDocumentation() {
     <>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
         <Button variant="solid" disabled={!!step} onClick={() => go(true)}>
-          {step ? "Updating…" : "Update documentation"}
+          {step ? "Updating…" : "Update portal"}
         </Button>
         <span style={{ fontFamily: T.mono, fontSize: 9.5, color: err ? T.bRed : T.muted,
           letterSpacing: "0.04em", textTransform: "uppercase" }}>
@@ -14460,7 +14466,7 @@ function GenerateAllocations({ people, log }) {
   return (
     <>
       <Button disabled={!ready || !!work} onClick={() => setAsking(true)}>
-        {work && !work.done ? "Working…" : "Generate latest allocations"}
+        {work && !work.done ? "Working…" : "Update swings from roster"}
       </Button>
 
       {asking && (
@@ -14775,8 +14781,6 @@ function GenerateSwingCompliance({ results, here, setAt }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 12 }}><Eyebrow color={T.accent}>Generate swing compliance</Eyebrow></div>
-
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 14 }}>
         <div style={{ flex: "1 1 320px" }}>
           <ChoiceField label="Swing to check">
@@ -14785,7 +14789,7 @@ function GenerateSwingCompliance({ results, here, setAt }) {
                 label: `Crew ${x.swing.crew} · ${swingLabel(x.swing)}${x.swing.k <= currentSwingIndex() ? " · on now" : ""}` }))} />
           </ChoiceField>
         </div>
-        <Button onClick={generate}>Generate swing compliance</Button>
+        <Button onClick={generate}>Swing report</Button>
         {r && (
           <span style={{ fontFamily: T.mono, fontSize: 11, color: T.muted, paddingBottom: 9 }}>
             Last generated {when(r.at)}{r.by ? ` · ${r.by}` : ""} · {r.swing.label}
@@ -16456,7 +16460,7 @@ function CrewCertificateUpload() {
               Upload {shots.length} page{shots.length === 1 ? "" : "s"} as one certificate
             </Button>
           )}
-          {shots.length > 0 && <Button variant="quiet" onClick={clearShots}>Start again</Button>}
+          {shots.length > 0 && <Button variant="quiet" onClick={clearShots}>Discard photos</Button>}
         </div>
         {retake && <div style={{ fontFamily: T.body, fontSize: 13, fontWeight: 600, color: T.bRed, marginTop: 10 }}>{retake}</div>}
         {shots.length > 0 && (

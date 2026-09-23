@@ -130,7 +130,7 @@ function CertChecker() {
       {/* Sits above the far right of the tiles, over Unconfirmed: the day the
           crew certificates spreadsheet was last uploaded. The button that
           re-checks every certificate moved to Required Documents For Upload,
-          renamed Sync with SharePoint certification. */}
+          renamed Update certificate list. */}
       <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 14,
         flexWrap: "wrap", marginBottom: 7 }}>
         <div style={{ textAlign: "right" }}>

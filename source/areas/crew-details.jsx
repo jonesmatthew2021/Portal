@@ -252,7 +252,7 @@ function CrewDetails() {
       rosterFixed ? rosterFixed + " roster rows lined up" : null,
       listsFixed ? listsFixed + " swing list names lined up" : null,
     ].filter(Boolean);
-    log("Admin", "The register was synced through the portal",
+    log("Admin", "The register was pushed through the portal",
       (doneWords.join(" · ") || "everything already lined up") + " · " + workbooks);
     setSyncing({ done: { added, renamed, ranked, rosterFixed, listsFixed, workbooks, words: doneWords } });
   };
@@ -395,7 +395,7 @@ function CrewDetails() {
         <span style={{ flex: 1 }} />
         <Button variant="solid" disabled={!!syncing && !syncing.done}
           onClick={syncEverything}>
-          {syncing && !syncing.done ? syncing.word : "Sync entire document"}
+          {syncing && !syncing.done ? syncing.word : "Update from register"}
         </Button>
       </div>
 
@@ -747,7 +747,7 @@ function CertFolderPicker({ title, start, chosen, onPick, onAuto, onClose }) {
           {onAuto && (
             <Button variant="quiet" disabled={busy || !(folders || []).length}
               onClick={() => onAuto((folders || []).map((e) => e.name), path)}>
-              Auto assign
+              Match folders to crew
             </Button>
           )}
           {chosen ? <Button variant="quiet" onClick={() => onPick("")}>Clear it</Button> : null}

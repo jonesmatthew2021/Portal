@@ -89,7 +89,7 @@ function RequiredDocuments() {
   return (
     <div>
       {/* Straight to the documents. The spreadsheet is brought up to date by
-          Update documentation at the top of every page, which does this and
+          Update portal at the top of every page, which does this and
           the rest of the round; Start again is at the foot of Access Grants,
           with the other things nobody should press in a hurry. Each card
           carries its own state, so a summary above them said it twice. */}
