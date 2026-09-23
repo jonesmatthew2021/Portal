@@ -259,8 +259,27 @@ async function survey(tick: (pct: number, word: string) => Promise<void> = async
     .filter((r) => !seen.has(r.blobKey) && !followed.has(r.blobKey))
     .map((r) => ({ id: r.id, key: r.blobKey, filename: r.filename, category: r.category, checksum: r.checksum }));
 
+  /* Rows the books wrote off whose file the library plainly still holds.
+   *
+   * On 22 Sep one sync run got a bad view of the library and wrote off 791
+   * certificates and all three workbooks in a single pass — and because a
+   * written-off row's key still counted as "known", the next sync saw the
+   * file, said nothing, and the row stayed off the books for ever. A file the
+   * listing can see is not missing, whatever the books say, so its row comes
+   * back. A row somebody removed through the portal can never match here: its
+   * bytes were parked under removed/ when it went, and nothing under
+   * removed/ is ever in this listing. */
+  const returned = rows
+    .filter((r) => r.removedAt && seen.has(r.blobKey))
+    .map((r) => ({ id: r.id, key: r.blobKey, filename: r.filename, category: r.category }));
+
+  // How much of the books the scan actually covered, for the guard below.
+  const scannedLive = rows.filter(
+    (r) => !r.removedAt && scannedPrefixes.some((p) => r.blobKey.startsWith(p)),
+  ).length;
+
   const people = [...folks.entries()].map(([folder, name]) => ({ folder, name })).sort((a, b) => a.name.localeCompare(b.name));
-  return { newCertificates, singles, strays, missing, moved, trainingSheet, people };
+  return { newCertificates, singles, strays, missing, returned, scannedLive, moved, trainingSheet, people };
 }
 
 /** What the last applied sync did — shown on the SharePoint page. */
@@ -373,8 +392,30 @@ async function apply(
    * The listing having failed is not the same as the files having gone. A
    * Graph error throws out of the survey long before this, so reaching here
    * at all means the library answered and the file was genuinely not in it. */
+  /* First, anything written off in error comes back. The file is in the
+     listing, so the row is simply un-removed — same bytes, same history, same
+     reading where one survives. */
+  let returned = 0;
+  for (const r of result.returned) {
+    await db
+      .update(documents)
+      .set({ removedAt: null, removedBy: null })
+      .where(eq(documents.id, r.id));
+    returned++;
+  }
+
+  /* And the mirroring is held back when the shortfall is not believable.
+   *
+   * The same guard the crew list has had all along: one or two files gone is
+   * a file gone, but hundreds unaccounted for in one pass is a listing that
+   * went wrong — a renamed root, a translation slip, Graph having a bad
+   * morning — and acting on it is how 791 certificates went off the books in
+   * one run on 22 Sep. Nothing is mirrored off in that case; the count is
+   * reported and a human looks. */
+  const holdBack = result.missing.length > Math.max(25, Math.round(0.1 * (result.scannedLive || 0)));
+
   let mirrored = 0;
-  if (result.missing.length) {
+  if (result.missing.length && !holdBack) {
     const at = new Date();
     const readings = getStore({ name: "certificate-readings", consistency: "strong" });
     for (const m of result.missing) {
@@ -476,6 +517,12 @@ async function apply(
     followed: result.moved.length,
     // And files the library no longer holds, now off the books as well.
     mirrored,
+    // Files written off in error whose bytes the library plainly still holds,
+    // back on the books as the rows they always were.
+    returned,
+    // Missing files NOT written off, because the shortfall was too big to be
+    // anything but a listing gone wrong. A human reads this number.
+    heldBack: holdBack ? result.missing.length : 0,
     // Whose folders SharePoint keeps. The portal compares this with its own
     // crew list and asks; nobody is added or taken off out here.
     people: result.people,

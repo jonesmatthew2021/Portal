@@ -13591,7 +13591,9 @@ function UpdateDocumentation() {
       setLastDocUpdate(at);
       log("Admin", asked ? "Documentation updated" : "Documentation updated on the hour",
         [(out.registered ? out.registered.length : 0) + " new certificates taken on",
+          out.returned ? out.returned + " written off in error, back on the books" : null,
           out.mirrored ? out.mirrored + " gone from the library and off the books" : null,
+          out.heldBack ? out.heldBack + " unaccounted for in one pass — too many to believe, nothing was written off" : null,
           out.followed ? out.followed + " followed to a new folder" : null,
           gone.length ? gone.join(" and ") + " — the workbook has gone, asked what to do" : null,
         ].filter(Boolean).join(" · "));
