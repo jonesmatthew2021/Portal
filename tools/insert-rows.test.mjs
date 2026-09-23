@@ -4,64 +4,19 @@
  * Builds a small but honest .xlsx by hand: a header row of item codes, three
  * crew, and — the point of it — a NOTES line, a totals formula reading a crew
  * column, and a merged cell, all sitting UNDER the crew. Then runs the
- * portal's own updateFiledWorkbook (extracted verbatim from the built page)
- * to add two new crew, and reads the result back with the portal's own
- * readers to prove: the new rows are where the crew are, everything below
- * moved down intact, the formula still reads the same column but the wider
- * range, and the merged cell moved with its row.
+ * portal's own updateFiledWorkbook to add two new crew, and reads the result
+ * back with the portal's own readers to prove: the new rows are where the
+ * crew are, everything below moved down intact, the formula still reads the
+ * same column but the wider range, and the merged cell moved with its row.
  */
-import fs from "node:fs";
-import { createRequire } from "node:module";
-const NL = String.fromCharCode(10);
-
-/* The whole portal, compiled by the same Babel the checks use, run once with
- * the browser stubbed out, and the functions under test handed back. Nothing
- * is re-implemented or hand-extracted: the code under test is the code that
- * ships. */
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..").replace(/\\/g, "/");
-const { portalJsx } = await import("file:///" + ROOT.replaceAll(" ", "%20") + "/tools/source.mjs");
-const require = createRequire(ROOT + "/tools/package.json");
-const babel = require("@babel/standalone");
-const js = babel.transform(portalJsx(), { presets: ["react"], compact: false }).code;
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-const noop = () => stubEl;
-const stubEl = new Proxy(function () {}, { get: (t, k) => (k === Symbol.toPrimitive ? () => "" : stubEl), apply: () => stubEl });
-const hook = (v) => [v, () => {}];
-const ReactStub = {
-  Component: class {},
-  createContext: () => ({ Provider: stubEl, Consumer: stubEl }),
-  createElement: () => null, Fragment: {}, useState: hook, useEffect: () => {},
-  useMemo: (f) => { try { return f(); } catch (e) { return undefined; } },
-  useRef: (v) => ({ current: v }), useContext: () => ({}), useCallback: (f) => f,
-};
-const documentStub = {
-  getElementById: () => ({}), createElement: () => ({ style: {}, getContext: () => ({}) }),
-  addEventListener: () => {}, head: { appendChild: () => {} }, body: { appendChild: () => {} },
-  documentElement: { style: {} }, querySelectorAll: () => [], querySelector: () => null,
-};
-const windowStub = {
-  matchMedia: () => ({ matches: false, addEventListener: () => {}, addListener: () => {} }),
-  addEventListener: () => {}, location: { href: "", protocol: "https:", pathname: "/" },
-  history: {}, navigator: { onLine: true }, innerWidth: 1400,
-};
-const sessionStub = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
-const fn = new Function(
-  "React", "ReactDOM", "XLSX", "window", "document", "navigator", "location",
-  "sessionStorage", "localStorage", "addEventListener", "fetch", "setInterval",
-  "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
-  "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
-  "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { readZip, writeZip, updateFiledWorkbook, readSheet, partText, partOf };",
-);
-const lib = fn(
-  ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
-  windowStub.navigator, windowStub.location, sessionStub, sessionStub, () => {}, async () => ({ ok: false }),
-  () => 0, () => 0, () => {}, () => {}, () => 0, () => {}, () => false,
-  function N() {}, function I() {}, function A() {}, class { observe() {} }, function F() {},
-  function X() {}, { now: () => 0 }, {}, {},
-);
+/* The code under test is the code that ships: source/shared/workbook.js is
+ * the very file the page splices in and the worker imports. Imported as a
+ * module here, by URL because the folder's path has a space in it. */
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const lib = await import(pathToFileURL(join(ROOT, "source", "shared", "workbook.js")).href);
 
 /* ---- an honest little workbook: two-line header, crew on 3-5, and the
         notes, a totals formula and a merged legend UNDER them ---- */

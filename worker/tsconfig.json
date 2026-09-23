@@ -10,11 +10,14 @@
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": false,
+    "allowJs": true,
+    "checkJs": true,
     "types": [
       "@cloudflare/workers-types"
     ]
   },
   "include": [
-    "src/**/*.ts"
+    "src/**/*.ts",
+    "../source/shared/*.js"
   ]
 }

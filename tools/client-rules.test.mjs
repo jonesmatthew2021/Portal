@@ -12,7 +12,7 @@
  */
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 const NL = String.fromCharCode(10);
 
 /* The whole portal, compiled by the same Babel the checks use, run once with
@@ -21,6 +21,9 @@ const NL = String.fromCharCode(10);
  * ships. Same harness as insert-rows.test.mjs. */
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..").replace(/\\/g, "/");
 const { portalJsx } = await import("file:///" + ROOT.replaceAll(" ", "%20") + "/tools/source.mjs");
+/* The matrix rules the worker imports, imported the same way, so what a round
+ * takes back is proved on the module and not only through the page. */
+const rules = await import(pathToFileURL(join(ROOT, "source", "shared", "matrix-rules.js")).href);
 const require = createRequire(ROOT + "/tools/package.json");
 const babel = require("@babel/standalone");
 const js = babel.transform(portalJsx(), { presets: ["react"], compact: false }).code;
@@ -194,6 +197,41 @@ const is = (got, want, what) => {
   const out6 = lib.mergeQuals(null, mine6, theirs);
   is(out6.rows[0][3][1], "2029-01-01", "without a base, my filled cells still land");
   is(out6.rows[1][3][0], "2032-02-02", "…and an empty cell of mine does not blank theirs");
+}
+
+/* ---- what a round takes back: only what the portal filled and nothing
+        still claims, and never while anything is unread ---- */
+{
+  const filled = { "A::QL-01": true, "B::QL-02": true };
+
+  const waiting = rules.settleRound({ filledFromCert: filled, claimed: ["A::QL-01"], unread: 3, settled: [] });
+  is(waiting.orphans, [], "with scans still unread, nothing is called abandoned");
+  is(Object.keys(waiting.noteNow).sort(), ["A::QL-01", "B::QL-02"], "…and the note keeps every cell it had");
+  is(waiting.settled, [], "…and nothing is added to the settled list");
+
+  const done = rules.settleRound({ filledFromCert: filled, claimed: ["A::QL-01"], unread: 0, settled: [] });
+  is(done.orphans, ["B::QL-02"], "a filled cell no certificate claims is an orphan once everything is read");
+  is(done.settled, [{ person: "B", code: "QL-02", value: "", clear: true }], "the orphan is cleared in the same write");
+  is(Object.keys(done.noteNow), ["A::QL-01"], "the orphan drops out of the note");
+
+  const given = [{ person: "c", code: "ql-03", value: "2030-01-01" }];
+  const added = rules.settleRound({ filledFromCert: filled, claimed: ["A::QL-01", "B::QL-02"], unread: 0, settled: given });
+  is(Object.keys(added.noteNow).sort(), ["A::QL-01", "B::QL-02", "C::QL-03"], "a settled date is noted under its key, upper-cased");
+  is(added.settled.length, 1, "nothing was orphaned");
+  is(given.length, 1, "the settled list handed in is not written on");
+}
+
+/* ---- a settled date finds its row through the register's name ---- */
+{
+  const quals = {
+    cols: [["QL-01", "Master"], ["QL-17", "Medical"]],
+    rows: [["bILLY", "Cook", "", ["", "2026-01-11"]]],
+  };
+  const nameOf = (n) => (n === "bILLY" ? "SITTIYOS, Kachin" : n);
+  const out = rules.applySettled(quals, [{ person: "SITTIYOS, Kachin", code: "QL-01", value: "2031-02-17" }], nameOf);
+  is(out.next.rows[0][3][0], "2031-02-17", "the date lands on the row the spreadsheet calls bILLY");
+  is(out.next.rows[0][0], "bILLY", "the row keeps its name as written");
+  is(out.applied.map((a) => a.person), ["bILLY"], "what moved is reported under the row's own name");
 }
 
 if (failed) {

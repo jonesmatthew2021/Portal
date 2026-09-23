@@ -49,6 +49,12 @@ component directly.
 To add an area: drop a `.jsx` file in `source/areas/`. The build picks it up by
 filename order and a check confirms it arrived.
 
+`source/shared/` holds the code the page and the worker both run: the workbook
+writer (`workbook.js`), the matrix rules (`matrix-rules.js`) and the names
+register (`names.js`). The build splices them into the page at `/* @shared */`
+with the `export` taken off each declaration, and the worker imports them as
+modules. Edit that code there and only there.
+
 ## Things that have already been decided
 
 - **Crew names.** `Admin → Crew Details` is the crew register: each person named

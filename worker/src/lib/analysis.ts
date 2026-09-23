@@ -19,6 +19,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
 import { fileStore } from "../db/documents.js";
+import { NO_EXPIRY_CODES as NO_EXPIRY_LIST } from "../../../source/shared/names.js";
 
 // Certificates are read with a vision model — most of them are scans rather than
 // text PDFs, and a scan of a 1998 certificate of competency is not something a
@@ -50,13 +51,12 @@ export const IMAGE_TYPES: Record<string, string> = {
  * down here settles them for the whole crew whether or not a validity periods
  * matrix is on file, and whether or not the certificate itself thought to say so.
  *
- * The same list is mirrored in index.html, next to `useValidityLookup` — the
- * portal is a static page with no bundler, so it can't import from here. Change
- * one and change the other.
+ * The list itself lives in source/shared/names.js, which the page runs too, so
+ * the page and the server can never disagree about it.
  *
  *   VS-04  Helm CONNECT - Crew Basic + Jobs — e-learning, completed once, no expiry.
  */
-export const NO_EXPIRY_CODES = new Set(["VS-04"]);
+export const NO_EXPIRY_CODES = new Set(NO_EXPIRY_LIST);
 
 /**
  * Items whose expiry is printed on the certificate itself and only there. The

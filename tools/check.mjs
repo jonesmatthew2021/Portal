@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { buildPreview } from "./build-preview.mjs";
-import { portalJsx, areaFiles } from "./source.mjs";
+import { portalJsx, areaFiles, sharedFiles } from "./source.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(join(ROOT, "tools", "package.json"));
@@ -99,13 +99,14 @@ run("preview.html is in step with the portal", () => {
 });
 
 /* ---------------------------------------------------------------- 4 */
-run("Every area is in the portal", () => {
-  /* A file dropped into source/areas that the build does not pick up would be
-     work that never reaches the portal and never says so. The assembler goes
-     by what is in the folder, so this is really checking that each one was
-     found and that each one carries the component the switch asks for. */
+run("Every area and shared file is in the portal", () => {
+  /* A file dropped into source/areas or source/shared that the build does not
+     pick up would be work that never reaches the portal and never says so.
+     The assembler goes by what is in the folders, so this is really checking
+     that each one was found and spliced in under its own header. */
   const names = areaFiles();
-  if (!names.length) return "no areas — the shell is the whole portal";
+  const shared = sharedFiles();
+  if (!names.length && !shared.length) return "no areas or shared files — the shell is the whole portal";
   const jsx = portalJsx();
   const missing = names.filter((n) => !jsx.includes("/* ---- source/areas/" + n + " ---- */"));
   if (missing.length) {
@@ -114,7 +115,14 @@ run("Every area is in the portal", () => {
       "\n      Check the /* @areas */ marker is still in source/index.html.",
     );
   }
-  return names.length + " area(s), all spliced in";
+  const missingShared = shared.filter((n) => !jsx.includes("/* ---- source/shared/" + n + " ---- */"));
+  if (missingShared.length) {
+    throw new Error(
+      missingShared.length + " shared file(s) are not in the built portal: " + missingShared.join(", ") +
+      "\n      Check the /* @shared */ marker is still in source/index.html.",
+    );
+  }
+  return names.length + " area(s) and " + shared.length + " shared file(s), all spliced in";
 });
 
 /* ---------------------------------------------------------------- 5 */
@@ -206,7 +214,8 @@ if (!existsSync(rulesTest)) {
 } else {
   run("The worker's rules answer correctly", () => {
     try {
-      const out = execFileSync("npx", ["tsx", "--test", "tests/rules.test.ts"], {
+      // The rules, and the shared workbook code as the worker imports it.
+      const out = execFileSync("npx", ["tsx", "--test", "tests/rules.test.ts", "tests/workbook.test.ts"], {
         cwd: join(ROOT, "worker"), stdio: "pipe", shell: true, timeout: 180000, encoding: "utf8",
       });
       const m = /(?:#|ℹ)\s*pass (\d+)/.exec(out);
