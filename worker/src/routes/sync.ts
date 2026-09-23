@@ -317,6 +317,24 @@ export const syncProgress = () => getStore("sync").get("progress", { type: "json
 export const lastSync = () => getStore("sync").get("last-run", { type: "json" }) as Promise<SyncRecord | null>;
 
 /**
+ * What the hourly round last did on the worker, whole: the folders read,
+ * then the certificates read and refiled — and the error if any part fell
+ * over. Written every hour whatever happened, so the SharePoint page can
+ * say when the round last ran and whether it worked, instead of a failure
+ * going into a log nobody reads.
+ */
+export type HourlyRecord = {
+  at: number;
+  durationMs: number;
+  read: number;
+  refiled: number;
+  syncError: string | null;
+  readError: string | null;
+};
+export const recordHourly = (r: HourlyRecord) => getStore("sync").setJSON("last-hourly", r);
+export const lastHourly = () => getStore("sync").get("last-hourly", { type: "json" }) as Promise<HourlyRecord | null>;
+
+/**
  * The survey applied, by whoever asked — the hourly schedule or the Sync now
  * button — and the outcome written down either way, a failure included, so
  * the SharePoint page can always say when the folders were last read.

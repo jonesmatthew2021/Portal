@@ -15,7 +15,7 @@ import analyse, { extract, refile } from "./routes/analyse.js";
 import aiChecker from "./routes/ai-checker.js";
 import archive from "./routes/archive.js";
 import run from "./routes/run.js";
-import sync, { runSync, syncProgress } from "./routes/sync.js";
+import sync, { runSync, syncProgress, lastSync, lastHourly, recordHourly } from "./routes/sync.js";
 import migrate from "./routes/migrate.js";
 import migrateCerts from "./routes/migrate-certs.js";
 import readOne from "./routes/read-one.js";
@@ -91,6 +91,14 @@ export default {
           headers: { "Cache-Control": "no-store" },
         });
       }
+      // When the folders were last read and what the hourly round last did —
+      // the round's own word for it, error included.
+      if (path === "/api/sync/last") {
+        return Response.json(
+          { sync: await lastSync().catch(() => null), hourly: await lastHourly().catch(() => null) },
+          { headers: { "Cache-Control": "no-store" } },
+        );
+      }
       if (path === "/api/sync") return await sync(req);
       if (path === "/api/migrate-files") return await migrate(req);
       if (path === "/api/migrate-certs-opms") return await migrateCerts(req, user!);
@@ -135,43 +143,53 @@ export default {
     setEnv(env);
     const t0 = Date.now();
     const timeLeft = () => Date.now() - t0 < 9 * 60 * 1000;
+    // Whatever happens below is written down at the end: the counts on a
+    // good hour, the error on a bad one. A round that fails in silence is
+    // how the matrix once sat empty for three hours with nobody told.
+    const outcome = { read: 0, refiled: 0, syncError: null as string | null, readError: null as string | null };
+    const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
     try {
       await runSync("hourly schedule");
     } catch (e) {
+      outcome.syncError = said(e);
       console.error("scheduled SharePoint sync failed:", e);
     }
-    if (!env.ANTHROPIC_API_KEY) return;
+    if (env.ANTHROPIC_API_KEY) {
+      try {
+        const row = await env.DB.prepare("SELECT data FROM portal_state LIMIT 1").first<{ data: string }>();
+        const quals = row ? JSON.parse(row.data)?.quals : null;
+        const codes: [string, string][] = (quals?.cols || []).map((c: string[]) => [c[0], c[1]]);
+        const names: string[] = (quals?.rows || []).map((r: string[]) => r[0]).filter(Boolean);
+        if (codes.length) {
+          let stalled = 0;
+          while (timeLeft()) {
+            const out = (await (await extract(codes, 4)).json()) as {
+              remaining: number; attempted: number; extracted: number;
+            };
+            outcome.read += out.extracted;
+            if (out.remaining <= 0 || out.attempted === 0) break;
+            if (out.extracted === 0 && ++stalled >= 2) break;
+          }
+          while (names.length && timeLeft()) {
+            const out = (await (await refile(names, 50)).json()) as {
+              moved: unknown[]; remaining: number;
+            };
+            outcome.refiled += (out.moved || []).length;
+            if (!out.remaining) break;
+          }
+          if (outcome.read || outcome.refiled) {
+            console.log("hourly read: " + outcome.read + " certificates read, " + outcome.refiled + " refiled");
+          }
+        }
+      } catch (e) {
+        outcome.readError = said(e);
+        console.error("scheduled certificate read failed:", e);
+      }
+    }
     try {
-      const row = await env.DB.prepare("SELECT data FROM portal_state LIMIT 1").first<{ data: string }>();
-      const quals = row ? JSON.parse(row.data)?.quals : null;
-      const codes: [string, string][] = (quals?.cols || []).map((c: string[]) => [c[0], c[1]]);
-      const names: string[] = (quals?.rows || []).map((r: string[]) => r[0]).filter(Boolean);
-      if (!codes.length) return;
-
-      let readCount = 0;
-      let stalled = 0;
-      while (timeLeft()) {
-        const out = (await (await extract(codes, 4)).json()) as {
-          remaining: number; attempted: number; extracted: number;
-        };
-        readCount += out.extracted;
-        if (out.remaining <= 0 || out.attempted === 0) break;
-        if (out.extracted === 0 && ++stalled >= 2) break;
-      }
-
-      let movedCount = 0;
-      while (names.length && timeLeft()) {
-        const out = (await (await refile(names, 50)).json()) as {
-          moved: unknown[]; remaining: number;
-        };
-        movedCount += (out.moved || []).length;
-        if (!out.remaining) break;
-      }
-      if (readCount || movedCount) {
-        console.log(`hourly read: ${readCount} certificates read, ${movedCount} refiled`);
-      }
+      await recordHourly({ at: t0, durationMs: Date.now() - t0, ...outcome });
     } catch (e) {
-      console.error("scheduled certificate read failed:", e);
+      console.error("hourly outcome not written:", e);
     }
   },
 };

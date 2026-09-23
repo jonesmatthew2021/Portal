@@ -13458,6 +13458,24 @@ function SyncPeople({ found, onClose }) {
  * it never adds or removes a crew member on its own, because that is a question
  * for a person and it asks the next one who opens the portal.
  */
+/* This tab's own name, made once and kept for as long as the tab is open,
+   so the hourly-round lease can tell one tab from another. With storage
+   blocked the name lives only in memory, which is enough. */
+let TAB_NAME = "";
+function thisTab() {
+  if (TAB_NAME) return TAB_NAME;
+  try {
+    TAB_NAME = sessionStorage.getItem("coolibah-tab") || "";
+    if (!TAB_NAME) {
+      TAB_NAME = "tab-" + Math.random().toString(36).slice(2, 10);
+      sessionStorage.setItem("coolibah-tab", TAB_NAME);
+    }
+  } catch (e) {
+    TAB_NAME = TAB_NAME || "tab-" + Math.random().toString(36).slice(2, 10);
+  }
+  return TAB_NAME;
+}
+
 function UpdateDocumentation() {
   const { admin, lastDocUpdate, setLastDocUpdate, log,
     quals: QUALS, setQuals, trainingMatrix,
@@ -13590,15 +13608,41 @@ function UpdateDocumentation() {
 
   /* Every hour, where nobody has done it by hand. The check is the clock
      rather than a timer left running, so a portal opened after a week away
-     does its round at once instead of an hour later. */
+     does its round at once instead of an hour later.
+
+     One tab does it. With three admin tabs open, three rounds used to run at
+     once, each reading the same certificates and writing the same workbook
+     and each saving its own copy of the matrix over the others'. Whichever
+     tab gets to it first takes a ten-minute lease in the browser's shared
+     storage and renews it while its round runs; the others see the lease
+     and leave the round to it. Once the round has saved, lastDocUpdate is
+     newer than an hour in every tab and nobody is due. A browser with
+     storage blocked runs the round regardless — twice is better than never. */
   React.useEffect(() => {
     if (!admin) return undefined;
     const HOUR = 3600000;
+    const LEASE = "coolibah-hourly-lease";
+    const LEASE_MS = 10 * 60000;
+    const me = thisTab();
+    const heldElsewhere = () => {
+      try {
+        const l = JSON.parse(localStorage.getItem(LEASE) || "null");
+        return !!(l && l.tab !== me && l.until > Date.now());
+      } catch (e) { return false; }
+    };
+    const take = () => {
+      try { localStorage.setItem(LEASE, JSON.stringify({ tab: me, until: Date.now() + LEASE_MS })); } catch (e) { /* storage blocked: run anyway */ }
+    };
     const due = () => {
       const at = lastDocUpdate ? Date.parse(lastDocUpdate) : 0;
       return !at || Date.now() - at > HOUR;
     };
-    const tick = () => { if (due() && !going.current) go(false); };
+    const tick = async () => {
+      if (!due() || going.current || heldElsewhere()) return;
+      take();
+      const renew = setInterval(take, 60000);
+      try { await go(false); } finally { clearInterval(renew); }
+    };
     const t = setInterval(tick, 5 * 60000);
     const first = setTimeout(tick, 45000);
     return () => { clearInterval(t); clearTimeout(first); };

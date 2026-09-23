@@ -61,6 +61,17 @@ function SharePointPage() {
       (ls.strays ? `, ${ls.strays} loose in the certificates root` : "") + ". Runs every hour.";
   };
 
+  // The worker's own word on its last hourly round — in red when it fell over.
+  const hourlyLine = () => {
+    const h = listing && listing.lastHourly;
+    if (!h) return null;
+    const when = new Date(h.at).toLocaleString("en-AU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+    const bad = h.syncError || h.readError;
+    if (bad) return { bad: true, text: "Hourly round " + when + " failed: " + bad };
+    return { bad: false, text: "Hourly round " + when + ": " + h.read + " certificate" + (h.read === 1 ? "" : "s") +
+      " read, " + h.refiled + " refiled, " + Math.max(1, Math.round(h.durationMs / 1000)) + "s." };
+  };
+
   const fmtBytes = (n) => n == null ? "" :
     n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`;
   const fmtWhen = (s) => !s ? "" :
@@ -76,7 +87,10 @@ function SharePointPage() {
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontFamily: T.body,
         fontSize: 12.5, color: T.muted, padding: "9px 12px", border: `1px solid ${T.rule}`, borderRadius: 2,
         marginBottom: 12 }}>
-        <span style={{ flex: 1, minWidth: 0, lineHeight: 1.6 }}>{syncLine()}</span>
+        <span style={{ flex: 1, minWidth: 0, lineHeight: 1.6 }}>
+          <div>{syncLine()}</div>
+          {hourlyLine() && <div style={{ color: hourlyLine().bad ? T.bRed : T.muted }}>{hourlyLine().text}</div>}
+        </span>
         <Button variant="quiet" disabled={syncing} onClick={syncNow}>{syncing ? "Syncing..." : "Sync now"}</Button>
       </div>
       {/* The sync window: the worker's own percentage while it runs, and a

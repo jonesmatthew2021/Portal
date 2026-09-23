@@ -1,6 +1,6 @@
 import type { PortalUser } from "../auth.js";
 import { sharepointBrowse } from "../files/store.js";
-import { lastSync } from "./sync.js";
+import { lastSync, lastHourly } from "./sync.js";
 
 /**
  * The SharePoint page's window into the company library —
@@ -23,6 +23,7 @@ export default async (req: Request, actor: PortalUser): Promise<Response> => {
         path: path.replace(/^\/+|\/+$/g, ""),
         entries: await sharepointBrowse(path),
         lastSync: await lastSync().catch(() => null),
+        lastHourly: await lastHourly().catch(() => null),
       },
       { headers: { "Cache-Control": "no-store" } },
     );
