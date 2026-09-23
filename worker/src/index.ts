@@ -174,10 +174,20 @@ export default {
     // round writes it; a page's Update portal or an upload doing either at
     // the same time is two writers of the one file, so they take the same
     // lease for their turn and stand aside while this holds it.
+    //
+    // A page's turn is short - a sync, an upload - so an hour that finds the
+    // lease held waits for it rather than losing the whole hour: up to
+    // eight more tries fifteen seconds apart, two minutes in all, well
+    // inside the nine the hour has. The clock (t0) started before the
+    // first try, so every second spent waiting comes off the hour's budget.
     let lease: Lease | null;
     try {
       await ensureDocumentColumns();
       lease = await takeLease("the round on the hour");
+      for (let tries = 0; !lease && tries < LEASE_RETRIES; tries++) {
+        await hourWaits.sleep(LEASE_RETRY_MS);
+        lease = await takeLease("the round on the hour");
+      }
     } catch (e) {
       await written({ roundError: "the hour could not start: " + said(e) });
       console.error("the hour could not start:", e);
@@ -197,6 +207,14 @@ export default {
       }
     }
   },
+};
+
+const LEASE_RETRIES = 8;
+const LEASE_RETRY_MS = 15 * 1000;
+/** The wait between tries for the lease. The tests swap it for one that
+ *  does not wait. */
+export const hourWaits = {
+  sleep: (ms: number) => new Promise<void>((done) => setTimeout(done, ms)),
 };
 
 /**

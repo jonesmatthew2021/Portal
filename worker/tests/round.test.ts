@@ -24,7 +24,7 @@ import sync, { apply, outranks, sheetOrder, survey } from "../src/routes/sync.js
 import files from "../src/routes/files.js";
 import renameFile from "../src/routes/rename-file.js";
 import importSingle from "../src/routes/import-single.js";
-import worker from "../src/index.js";
+import worker, { hourWaits } from "../src/index.js";
 import { writeZip, readZip, partOf, partText, datedWorkbookName } from "../../source/shared/workbook.js";
 import { asKnownPerson, crewRegister } from "../../source/shared/names.js";
 import { settleRound, applySettled } from "../../source/shared/matrix-rules.js";
@@ -1084,12 +1084,47 @@ test("the hour runs the sync and the round under one lease, taken once and run o
   assert.equal(records[0].at, records[1].at, "the same hour both times");
   assert.equal(records[1].applied, 1);
 
-  // An hour that finds the lease held stands down whole - no sync either.
-  portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "Update portal", token: "y" }));
+  // An hour that finds the lease held for the next five minutes waits its
+  // two minutes - eight tries, fifteen seconds apart, none of them slept
+  // here - and then stands down whole: no sync either.
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 5 * 60000, by: "Update portal", token: "y" }));
   const before = portal.db.asked.length;
-  await worker.scheduled({} as never, env as never);
+  const waited: number[] = [];
+  const realSleep = hourWaits.sleep;
+  hourWaits.sleep = async (ms) => { waited.push(ms); };
+  try {
+    await worker.scheduled({} as never, env as never);
+  } finally {
+    hourWaits.sleep = realSleep;
+  }
+  assert.deepEqual(waited, Array(8).fill(15000), "eight waits of fifteen seconds before giving up");
   assert.equal(JSON.parse(portal.blobs.get("sync|last-hourly")!).roundSkipped, "another round is still running");
   assert.ok(!portal.db.asked.slice(before).some((a) => /portal_state|FROM documents/.test(a.sql)), "nothing was read or written past the lease");
+  assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).by, "Update portal", "the page's lease is untouched");
+});
+
+test("a lease that runs out while the hour is waiting is taken on a later try", async () => {
+  const { portal, bucket } = await oneManPortal();
+  const env = { DB: portal.db, FILES: bucket, FILE_STORE: "r2" };
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 5 * 60000, by: "Update portal", token: "y" }));
+  // The page's turn ends during the third wait.
+  let waits = 0;
+  const realSleep = hourWaits.sleep;
+  hourWaits.sleep = async () => {
+    if (++waits === 3) portal.blobs.set("sync|round-lease", JSON.stringify({ until: 0, by: "Update portal", token: "y" }));
+  };
+  try {
+    await worker.scheduled({} as never, env as never);
+  } finally {
+    hourWaits.sleep = realSleep;
+  }
+  assert.equal(waits, 3, "taken on the try after the third wait, and no more waiting");
+  const hourly = JSON.parse(portal.blobs.get("sync|last-hourly")!);
+  assert.equal(hourly.roundSkipped, null, "the hour ran");
+  assert.equal(hourly.applied, 1, "…and the round with it");
+  const lease = JSON.parse(portal.blobs.get("sync|round-lease")!);
+  assert.equal(lease.by, "the round on the hour", "under the hour's own lease");
+  assert.equal(lease.until, 0, "run out at the end");
 });
 
 /* ------------------------------------------------------------------------ *
