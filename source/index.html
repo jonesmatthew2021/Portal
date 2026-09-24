@@ -17235,6 +17235,14 @@ function App() {
   );
 }
 
+/* The big crew-facing pages - the Crew Matrix, the Roster, the certificate
+   Upload and the certificate cells they share - one file each under
+   source/parts, spliced in here by the build, just before the Admin tabs.
+   The same rules as the areas: the marker sits at the bottom so every
+   shared const above it already exists, and the components are function
+   declarations, which hoist. See tools/source.mjs. */
+/* @parts */
+
 /* The Admin tabs, one file each under source/areas, spliced in here by the
    build. The marker sits at the bottom so every shared const above it
    already exists; the components are function declarations, which hoist, so

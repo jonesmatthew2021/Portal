@@ -4,7 +4,10 @@
  * source/index.html is the shell: the page, the theme, the shared helpers and
  * the state everything hangs off. The Admin tabs live one to a file under
  * source/areas/, and this splices them into the shell at the @areas marker.
- * The code the worker runs too lives under source/shared/ and goes in at the
+ * The big crew-facing pages - the Crew Matrix, the Roster, the certificate
+ * Upload and the certificate cells they share - live one to a file under
+ * source/parts/ and go in at the @parts marker, just before the areas, by
+ * the same rules. The code the worker runs too lives under source/shared/ and goes in at the
  * @shared marker, where it sat before it was shared. What is this vessel's
  * alone - its name, brand, time zone, ranks and the rest - is source/vessel.json,
  * declared as VESSEL at the @vessel marker and written into the page's head.
@@ -17,10 +20,10 @@
  * one answer to "what is the portal's source" and the builds and the checks
  * cannot disagree about it.
  *
- * The areas go in in filename order, which is why the marker sits at the
- * bottom of the script: by then every shared const exists. The components
- * themselves are function declarations, which JavaScript hoists, so nothing
- * cares where in the file they end up.
+ * The parts and the areas go in in filename order, which is why the markers
+ * sit at the bottom of the script: by then every shared const exists. The
+ * components themselves are function declarations, which JavaScript hoists,
+ * so nothing cares where in the file they end up.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -29,8 +32,10 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SOURCE = join(ROOT, "source");
 const AREAS = join(ROOT, "source", "areas");
+const PARTS = join(ROOT, "source", "parts");
 const SHARED = join(ROOT, "source", "shared");
 const MARKER = "/* @areas */";
+const PARTS_MARKER = "/* @parts */";
 const SHARED_MARKER = "/* @shared */";
 const VESSEL_MARKER = "/* @vessel */";
 const VESSEL_FILE = join(SOURCE, "vessel.json");
@@ -240,6 +245,17 @@ export function areaFiles() {
   return names;
 }
 
+/** The part files - the big crew-facing pages - in the order they are spliced in. */
+export function partFiles() {
+  let names = [];
+  try {
+    names = readdirSync(PARTS).filter((n) => n.endsWith(".jsx")).sort();
+  } catch (e) {
+    return [];          // no parts yet: everything is still in the shell
+  }
+  return names;
+}
+
 /* The code the page and the worker both run: the workbook writer, the matrix
  * rules and the names register. The worker imports these files as modules;
  * the page has no bundler, so they are spliced into it at the @shared marker
@@ -267,26 +283,34 @@ const asLf = (t) => t.split(String.fromCharCode(13) + "\n").join("\n");
  *  `vessel` is the checked vessel file; left out, source/vessel.json is read. */
 export function portalSource({ vessel = readVessel() } = {}) {
   const shell = withShared(withVessel(asLf(readFileSync(join(ROOT, "source", "index.html"), "utf8")), vessel));
-  const names = areaFiles();
-  const at = shell.indexOf(MARKER);
+  // The parts go in first, then the areas: both markers sit under every const
+  // the shell declares, and a part's own consts are above the areas that read them.
+  return withFolder(withFolder(shell, PARTS, "parts", PARTS_MARKER, partFiles()), AREAS, "areas", MARKER, areaFiles());
+}
+
+/* The shell with one folder's files spliced in where its marker sits. The
+ * parts and the areas are folded by this one function so the two cannot
+ * drift apart: a file per page, a header per file, filename order. */
+function withFolder(shell, dir, rel, marker, names) {
+  const at = shell.indexOf(marker);
 
   if (at < 0) {
     if (names.length) {
       throw new Error(
-        "source/index.html has no " + MARKER + " marker, so the " + names.length +
-        " file(s) in source/areas would not be in the portal at all.",
+        "source/index.html has no " + marker + " marker, so the " + names.length +
+        " file(s) in source/" + rel + " would not be in the portal at all.",
       );
     }
     return shell;        // nothing to splice, nothing to mark
   }
 
-  const areas = names.map((n) => {
-    const body = readFileSync(join(AREAS, n), "utf8").replace(/\r\n/g, "\n");
-    // A header per area, so a stack trace or a search says which file to open.
-    return "/* ---- source/areas/" + n + " ---- */\n" + body.replace(/\n+$/, "") + "\n";
+  const files = names.map((n) => {
+    const text = readFileSync(join(dir, n), "utf8").replace(/\r\n/g, "\n");
+    // A header per file, so a stack trace or a search says which file to open.
+    return "/* ---- source/" + rel + "/" + n + " ---- */\n" + text.replace(/\n+$/, "") + "\n";
   }).join("\n");
 
-  return shell.slice(0, at) + areas + shell.slice(at + MARKER.length);
+  return shell.slice(0, at) + files + shell.slice(at + marker.length);
 }
 
 /** The shell with every shared file spliced in where the marker sits. */
