@@ -80,14 +80,43 @@ async function fetchAndKeep(cache, kind, key) {
   } catch (e) {}
 }
 
+/* Whether an earlier build of this portal has a cache on this device. Then
+   who is signed in is never asked at install: the person's kept /api/me
+   comes across from that cache on taking over (carry), or stays gone if a
+   sign-in forgot it. Asked at install, it was answered with whatever
+   cookie the device held at that instant - and a deploy is found by the
+   browser on a navigation the worker handles, the sign-in POST included,
+   so the new build could install while the old worker was forgetting the
+   last person's copies and sending the code on: the answer was the last
+   person, kept in the new cache, which nothing ever forgot, and the new
+   person's page on a slow link booted as them. Only a first-ever install,
+   with nobody's copy to carry, fetches it for the head start. If the
+   caches cannot even be listed, nothing is asked either. */
+async function earlierBuildKept() {
+  try {
+    return (await caches.keys()).some((name) => earlierPortalCache(name, NAME));
+  } catch (e) {
+    return true;
+  }
+}
+
+/* What is kept at install is a head start, not a condition of installing:
+   a cache the phone will not give (openCache null) means the worker
+   installs with nothing kept and the page reads from the network, plain.
+   Before this the install failed on the cache, the worker went redundant,
+   and the browser registered it again - and failed again - on every page
+   load, so that phone never read offline. */
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
-    const cache = await caches.open(NAME);
-    await Promise.all([
-      fetchAndKeep(cache, "page", "/"),
-      fetchAndKeep(cache, "api", "/api/me"),
-      ...VENDOR.map((key) => fetchAndKeep(cache, "vendor", key)),
-    ]);
+    const cache = await openCache();
+    if (cache) {
+      const earlier = await earlierBuildKept();
+      await Promise.all([
+        fetchAndKeep(cache, "page", "/"),
+        ...(earlier ? [] : [fetchAndKeep(cache, "api", "/api/me")]),
+        ...VENDOR.map((key) => fetchAndKeep(cache, "vendor", key)),
+      ]);
+    }
     await self.skipWaiting();
   })());
 });
@@ -112,14 +141,19 @@ async function carry(old, mine) {
   }
 }
 
+/* The open page is claimed whatever the caches do: with the phone's
+   storage gone the carry and the clearing fail, and the page would
+   otherwise be left uncontrolled until its next navigation. */
 self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
-    const mine = await caches.open(NAME);
-    for (const name of await caches.keys()) {
-      if (name === NAME) continue;
-      if (earlierPortalCache(name, NAME)) await carry(await caches.open(name), mine);
-      await caches.delete(name);
-    }
+    try {
+      const mine = await caches.open(NAME);
+      for (const name of await caches.keys()) {
+        if (name === NAME) continue;
+        if (earlierPortalCache(name, NAME)) await carry(await caches.open(name), mine);
+        await caches.delete(name);
+      }
+    } catch (e) {}
     await self.clients.claim();
   })());
 });

@@ -266,7 +266,17 @@ on any line that still names this one.
   (`forgetsBefore`), so a slow link can never boot the portal as the last
   person; a live `/api/me` for somebody else clears them too; a
   new build carries the kept answers across only from an earlier
-  `portal-*` cache and only for the same person (`earlierPortalCache`);
+  `portal-*` cache and only for the same person (`earlierPortalCache`),
+  and never re-fetches who is signed in at install when an earlier cache
+  exists (`earlierBuildKept`: the browser finds a deploy on the sign-in
+  POST itself, and an install asking then was told the last person and
+  kept them where nothing forgot them); a kept identity is trusted only
+  while the document is kept (`identityUnproven`: the first live
+  `/api/state` under a stamped `/api/me` has the page ask `/api/me?live=1`
+  once - `proveIdentity` - and reload as whoever the server says, or go to
+  the sign-in page on a 401); a cache the phone will not give at install
+  or on taking over fails neither (`openCache` null, the activate's work in
+  a try, `clients.claim()` regardless);
   and nothing else is ever cached - file bytes, the CDN scripts, the fauna
   app and every write go to the network untouched. The preview's name
   picker never shows on the live site (`showPicker`: only under the shim's

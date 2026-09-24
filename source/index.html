@@ -202,6 +202,13 @@ const MANAGEMENT_TEAM = ADMINS.filter((a) => !STANDALONE_ACCOUNTS.includes(a));
    labels, but the honour system they were is retired: the server enforces
    every level on every request regardless of what a page claims. */
 let SESSION_USER = { name: "", role: "crew", email: "", fitToSail: "" };
+/* The stamp on the /api/me the page booted on when that was a copy the
+   service worker kept (the link said nothing for NETWORK_WAIT_MS), null
+   when the server itself said who this is. A kept identity is trusted
+   only while the document is kept too: the first live document has the
+   page ask the server plainly (proveIdentity), and the stamp is cleared
+   once it agrees. */
+let SESSION_ME_FETCHED_AT = null;
 const isAdmin = (u) => SESSION_USER.role === "management" || SESSION_USER.role === "it";
 // The portal-plumbing half of the Admin tab — tab removal, the file store, the
 // save status and the redeploy notes — is kept to the IT SUPPORT account.
@@ -345,6 +352,40 @@ const signInOverAfterPull = (answered, fetchedAt, status) => !!answered && !fetc
  *  /api/me could not say who this is. On the live site the picker never
  *  shows, whatever /api/me did: a link that is down is not a sign-in. */
 const showPicker = (shimFlag, meFailed) => !!shimFlag && !!meFailed;
+/** Whether the person the page booted as is still only a kept copy's word
+ *  while the document is live: /api/me came stamped (the link said nothing
+ *  for NETWORK_WAIT_MS at boot, or the worker's copy stood in) and the poll
+ *  of /api/state that just landed did not. A kept identity is trusted only
+ *  while the document is kept: with the link up the server is asked
+ *  plainly who this is (proveIdentity), so a copy the worker should not
+ *  have had - the last person's, kept by a build installing while a
+ *  sign-in was mid-way - can never run the portal as them for long.
+ *  @param {string|null} meFetchedAt  the stamp on the boot's /api/me, null if live
+ *  @param {string|null} stateFetchedAt  the stamp on the poll's /api/state, null if live */
+const identityUnproven = (meFetchedAt, stateFetchedAt) => !!meFetchedAt && !stateFetchedAt;
+
+/* Asks the server, past every kept copy, who is signed in on this device.
+   The query keeps the request out of the service worker's rules
+   (cacheable wants a plain address) so the answer is always the live one.
+   Somebody else: the page is reloaded and boots as them. The sign-in over:
+   what was kept goes and the sign-in page follows, as the boot does on a
+   401. The same person: the kept identity is proven and the stamp cleared.
+   No answer, or a server in trouble: nothing is decided, and the next live
+   document asks again. */
+async function proveIdentity() {
+  let r;
+  try {
+    r = await fetch("/api/me?live=1", { cache: "no-store" });
+  } catch (e) {
+    return;
+  }
+  if (r.status === 401) { forgetOffline(); window.location.href = "/login"; return; }
+  if (!r.ok) return;
+  const who = await r.json().catch(() => null);
+  if (!who) return;
+  if (anotherPerson(SESSION_USER, who)) { window.location.reload(); return; }
+  SESSION_ME_FETCHED_AT = null;
+}
 
 // Safari on iOS will happily answer a repeated GET out of its own cache, which
 // leaves a phone polling all day and reading the same stale copy every time.
@@ -5326,6 +5367,13 @@ function Portal({ role, onSignOut }) {
       inFlight = pullOnce().finally(() => { inFlight = null; });
       return inFlight;
     };
+    // A live document under a kept identity has the server asked who this
+    // is, one ask at a time (identityUnproven, proveIdentity).
+    let proving = null;
+    const proveIdentityOnce = (fetchedAt) => {
+      if (proving || !identityUnproven(SESSION_ME_FETCHED_AT, fetchedAt)) return;
+      proving = proveIdentity().finally(() => { proving = null; });
+    };
     const pullOnce = async () => {
       try {
         const { rev: serverRev, data, fetchedAt } = await loadState();
@@ -5333,6 +5381,7 @@ function Portal({ role, onSignOut }) {
         // A kept copy puts the portal offline, as at the copy's stamp; a
         // live answer brings it back. Nothing else decides this.
         setOfflineAt((was) => offlineAfterPull(was, true, fetchedAt));
+        proveIdentityOnce(fetchedAt);
         // A slice changed before the first load lands was changed on the
         // page's own empty start: online it goes up and is merged over the
         // server's copy within seconds, and the copy comes down with it.
@@ -5377,6 +5426,8 @@ function Portal({ role, onSignOut }) {
         // with the reason; a kept one keeps the portal offline; no answer
         // at all changes nothing (offlineAfterPull).
         if (alive) setOfflineAt((was) => offlineAfterPull(was, !!(e && e.answered), e && e.fetchedAt ? e.fetchedAt : null));
+        // A live answer, whatever its status, is a link that is up.
+        if (alive && e && e.answered) proveIdentityOnce(e.fetchedAt ? e.fetchedAt : null);
       }
       // Anything changed before the first load finished was held back rather
       // than saved on top of nothing. Let it go up now.
@@ -6537,6 +6588,9 @@ function App() {
         if (!r.ok) { setMeFailed(`Couldn't reach the portal (${r.status})`); return; }
         const who = await r.json();
         SESSION_USER = { name: who.name, role: who.role, email: who.email || "", fitToSail: who.fitToSail || "" };
+        // A kept copy's word is trusted only until the document comes
+        // live (identityUnproven, proveIdentity).
+        SESSION_ME_FETCHED_AT = isCachedAnswer(r.headers);
         setMe(who);
       } catch (e) {
         setMeFailed(e && e.message ? e.message : "Couldn't reach the portal");
