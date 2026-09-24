@@ -393,7 +393,7 @@ const is = (got, want, what) => {
         is not; a slice changed again while its save was in the air stays
         unsaved ---- */
 {
-  const answering = (status) => async () => ({ ok: false, status, json: async () => ({}) });
+  const answering = (status) => async () => ({ ok: false, status, text: async () => "{}" });
   const pageWith = (fetchStub) => fn(
     ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
     windowStub.navigator, windowStub.location, sessionStub, sessionStub, () => {}, fetchStub,
@@ -418,6 +418,25 @@ const is = (got, want, what) => {
   is(e0 && e0.status, 0, "a save that never got there (offline) carries a status of 0");
   is(e0 && e0.message, "Failed to fetch", "…and the browser's own words");
   is(lib.saveTryAgainIn(e0), 15000, "…and is tried again in fifteen seconds");
+  /* A connection that drops while the answer is coming down fails the
+     body read, not the fetch: the save has landed, the tab does not know
+     its new rev, and the browser calls that a TypeError too. It is tried
+     again - the copy already landed comes back 409 and is merged. An
+     answer the tab cannot read at all (a page where the JSON should be)
+     would read the same way every time, and is not. */
+  const cutOff = pageWith(async () => ({ ok: true, status: 200, text: async () => { throw new TypeError("network error"); } }));
+  const eCut = await thrown(cutOff, {});
+  is(eCut && eCut.status, 0, "a save whose answer was cut off on the way down carries a status of 0");
+  is(eCut && eCut.message, "network error", "…and the browser's own words");
+  is(lib.saveTryAgainIn(eCut), 15000, "…and is tried again in fifteen seconds: the copy already landed comes back 409 and is merged");
+  const notJson = pageWith(async () => ({ ok: true, status: 200, text: async () => "<html>" }));
+  const eHtml = await thrown(notJson, {});
+  is(eHtml && eHtml.status, undefined, "a 200 with a page where the JSON should be carries no status");
+  is(lib.saveTryAgainIn(eHtml), 0, "…and is not tried again: it would read the same way every fifteen seconds");
+  const landed = pageWith(async () => ({ ok: true, status: 200, text: async () => '{"rev":7}' }));
+  is(await landed.saveState({}, 6), { rev: 7 }, "a save that landed hands back the new rev");
+  const collided = pageWith(async () => ({ ok: false, status: 409, text: async () => '{"rev":9,"data":{"notes":[]}}' }));
+  is(await collided.saveState({}, 6), { rev: 9, data: { notes: [] }, conflict: true }, "one that collided hands back what is stored, marked as a collision");
   const cyclic = {}; cyclic.self = cyclic;
   const eCyclic = await thrown(offline, cyclic);
   is(eCyclic && eCyclic.status, undefined, "a copy the tab could not write out fails before the save leaves, and carries no status");

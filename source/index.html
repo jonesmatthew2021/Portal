@@ -300,9 +300,17 @@ async function loadState() {
 // change is never quietly written over one made a moment earlier.
 async function saveState(data, rev) {
   const body = JSON.stringify({ rev, data });
-  let r;
+  let r, text;
   try {
     r = await fetch(STATE_API, { method: "PUT", headers: { "Content-Type": "application/json" }, body });
+    // The answer is read here too: a connection that drops while the
+    // answer is coming down fails the read the same way it fails the
+    // fetch, and the save it was answering has already landed with a new
+    // rev this tab does not know. Left as a plain error with no status,
+    // that save was never tried again, and the tab sat with the change
+    // marked unsaved until somebody typed. Trying again is safe: the copy
+    // already landed comes back 409 and is merged.
+    text = await r.text();
   } catch (cause) {
     // The save never got there - the connection dropped, the tab is
     // offline. The browser throws a TypeError for that, but so does a
@@ -313,7 +321,10 @@ async function saveState(data, rev) {
     e.status = 0;
     throw e;
   }
-  if (r.status === 409) return { ...(await r.json()), conflict: true };
+  // Parsed outside the try: an answer the tab cannot read (a 200 with a
+  // page where the JSON should be) would read the same way every time,
+  // so it carries no status and is not tried again.
+  if (r.status === 409) return { ...JSON.parse(text), conflict: true };
   if (!r.ok) {
     // The status rides on the error, so the save loop can tell a change the
     // server refused from one that never got there (see saveTryAgainIn).
@@ -321,7 +332,7 @@ async function saveState(data, rev) {
     e.status = r.status;
     throw e;
   }
-  return r.json();                              // { rev }
+  return JSON.parse(text);                      // { rev }
 }
 
 /* How long a save that failed waits before it is tried again, in
