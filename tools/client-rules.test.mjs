@@ -2617,6 +2617,10 @@ const is = (got, want, what) => {
   const shared = await import(pathToFileURL(join(ROOT, "source", "shared", "renewals.js")).href);
   const { renewalBlockers, renewalNeedsProblem, daysUntil, RED_DAYS, VESSEL } = lib;
   const codes = VESSEL.qualColumns.map((c) => c[0]);
+  // A table the page never got would pass the check below by being absent,
+  // so it is counted first.
+  is(Object.keys(VESSEL.renewalNeeds || {}).sort(), ["QL-01", "QL-02", "QL-03", "QL-04", "QL-05", "QL-06", "QL-07", "QL-10", "QL-11"],
+    "the page carries the vessel file's pairs, and not the two the law renews on a declaration (QL-08, QL-09)");
   is(renewalNeedsProblem(VESSEL.renewalNeeds, codes), null, "the vessel file's pairs all name its own columns");
   is(renewalNeedsProblem(VESSEL.renewalNeeds, codes), shared.renewalNeedsProblem(VESSEL.renewalNeeds, codes), "page and module agree");
   const today = "2026-09-25";
@@ -2642,6 +2646,8 @@ const is = (got, want, what) => {
   const { coveredBy, evidenceKindsProblem, EVIDENCE_KINDS, VESSEL, crewRegister } = lib;
   const codes = VESSEL.qualColumns.map((c) => c[0]);
   is(EVIDENCE_KINDS, ["extension", "lodged-renewal", "crewing-permit", "assessor-declaration", "issue-letter"], "the five kinds");
+  // Absent, the table would pass the check below by having nothing in it.
+  is(Object.keys(VESSEL.evidenceKinds || {}), EVIDENCE_KINDS, "the page carries all five of the vessel file's kinds");
   is(evidenceKindsProblem(VESSEL.evidenceKinds, codes), null, "the vessel file's kinds all name its own columns");
   is(shared.evidenceKindsProblem(VESSEL.evidenceKinds, codes), null, "the module says so too");
   const today = "2026-09-25";
