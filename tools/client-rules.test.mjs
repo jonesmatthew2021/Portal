@@ -2604,6 +2604,9 @@ const is = (got, want, what) => {
   is(codes({ endorsements: [{ text: "VI/2 (2) s. A-VI/2 (5-8)", until: null }] }, "QL-01"), ["QL-16"], "VI/2 (2) is fast rescue craft");
   is(coveredCells(read({ endorsements: [{ text: "VI/2 (2)", until: "2029-06-18" }] }), table, cols, "QL-01"), [{ code: "QL-16", until: "2029-06-18" }],
     "and takes the date AMSA printed against the endorsement");
+  is(coveredCells(read({ expiresOn: "2028-01-01", endorsements: [{ text: "VI/2 (2)", until: "2031-09-09" }] }), table, cols, "QL-01"),
+    [{ code: "QL-16", until: "2028-01-01" }],
+    "an endorsement printed to outlive the certificate carrying it takes the certificate's date");
   is(codes({ endorsements: [{ text: "IV/2", until: null }] }, "QL-01"), [], "GMDSS is never read off a certificate of competency");
   is(codes({ units: ["HLTAID011", "HLTAID015"] }, "QL-18"), ["QL-19"], "a unit code printed on a statement fills the column whose title carries it");
   is(codes({ units: ["HLTAID01"] }, null), [], "HLTAID01 is not HLTAID011");

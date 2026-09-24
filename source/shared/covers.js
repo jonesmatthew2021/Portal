@@ -202,7 +202,21 @@ export function coveredCells(reading, covers, columns, ownCode) {
       const text = e && typeof e === "object" ? String(e.text == null ? "" : e.text) : String(e == null ? "" : e);
       if (!text || !when.test(text)) return;
       const ownDate = e && typeof e === "object" ? day(e.until) : null;
-      keep(code, rule.perpetual === true ? certUntil : ownDate || certUntil);
+      /* The earlier of the two dates, never the endorsement's on its own.
+         An endorsement exists only as a line on a certificate that is in
+         force (MO70 s 36(2)(a)) - so a fast rescue boat endorsement printed
+         to 2031 on a ticket that expires in 2028 carries the column to 2028
+         and no further, and a ticket that outlives the endorsement carries
+         it only to the endorsement's own printed end. Where AMSA printed no
+         end against the endorsement the certificate's own date is all there
+         is. A perpetual endorsement (ECDIS) always takes the certificate's:
+         it does not expire of itself (s 37(3) item 8). */
+      const until = rule.perpetual === true
+        ? certUntil
+        : ownDate && certUntil
+          ? (ownDate < certUntil ? ownDate : certUntil)
+          : ownDate || certUntil;
+      keep(code, until);
     });
   });
 

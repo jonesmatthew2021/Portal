@@ -850,6 +850,14 @@ test("covers: the fast rescue craft column takes the endorsement's own printed d
   assert.deepEqual(cellsCovered({ endorsements: [
     { text: "VI/2 (2)", until: "2029-06-18" }, { text: "fast rescue boats", until: "2028-01-01" }] }, "QL-01"),
   [{ code: "QL-16", until: "2028-01-01" }]);
+  /* And an endorsement printed to run PAST the certificate carrying it gets
+     the certificate's date, not its own: an endorsement is a line on a
+     document that has to be in force to carry it (MO70 s 36(2)(a)), so the
+     column cannot be green years after the only paper behind it has gone. */
+  assert.deepEqual(coveredCells(
+    { readable: true, expiresOn: "2028-01-01", endorsements: [{ text: "VI/2 (2) s. A-VI/2 (5-8)", until: "2031-09-09" }], units: [] } as never,
+    vessel.covers, vessel.qualColumns, "QL-01"),
+  [{ code: "QL-16", until: "2028-01-01" }], "the earlier of the two, which is the certificate's own expiry");
 });
 
 test("covers: GMDSS is never read off a certificate of competency", () => {
