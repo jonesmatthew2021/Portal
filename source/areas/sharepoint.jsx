@@ -72,10 +72,12 @@ function SharePointPage() {
     const h = listing && listing.lastHourly;
     if (!h) return null;
     const when = new Date(h.at).toLocaleString("en-AU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+    // The hour's own line, or the name of whoever ran the round from the page.
+    const opening = (h.by && h.by !== "the round on the hour" ? h.by + " ran the round " : "Hourly round ") + when;
     const bad = [h.syncError, h.readError, h.roundError].filter(Boolean).join("; ");
-    if (bad) return { bad: true, text: "Hourly round " + when + " failed: " + bad };
-    const aside = [h.roundSkipped, h.held, h.validityProblem].filter(Boolean).join("; ");
-    return { bad: false, text: "Hourly round " + when + ": " + h.read + " certificate" + (h.read === 1 ? "" : "s") +
+    if (bad) return { bad: true, text: opening + " failed: " + bad };
+    const aside = [h.roundSkipped, h.workbookProblem, h.held, h.validityProblem].filter(Boolean).join("; ");
+    return { bad: false, text: opening + ": " + h.read + " certificate" + (h.read === 1 ? "" : "s") +
       " read, " + h.refiled + " refiled" +
       (h.applied ? ", " + h.applied + " date" + (h.applied === 1 ? "" : "s") + " applied" : "") +
       (h.cleared ? ", " + h.cleared + " cleared" : "") +
