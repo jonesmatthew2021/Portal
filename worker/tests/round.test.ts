@@ -21,6 +21,7 @@ import { saveDocument } from "../src/lib/shared-state.js";
 import { runMatrixRound, roundRunning, takeLease, dropLease, keepEquivalences } from "../src/lib/round.js";
 import { todayThere } from "../src/lib/analysis.js";
 import sync, { apply, outranks, sheetOrder, survey } from "../src/routes/sync.js";
+import roundRoute from "../src/routes/round.js";
 import files from "../src/routes/files.js";
 import renameFile from "../src/routes/rename-file.js";
 import importSingle from "../src/routes/import-single.js";
@@ -1226,10 +1227,10 @@ test("the hour runs the sync and the round under one lease, taken once and run o
   assert.equal(records[0].at, records[1].at, "the same hour both times");
   assert.equal(records[1].applied, 1);
 
-  // An hour that finds the lease held for the next five minutes waits its
-  // two minutes - eight tries, fifteen seconds apart, none of them slept
-  // here - and then stands down whole: no sync either.
-  portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 5 * 60000, by: "Update portal", token: "y" }));
+  // An hour that finds the lease held for the next ten minutes waits its
+  // five - twenty tries, fifteen seconds apart, none of them slept here -
+  // and then stands down whole: no sync either.
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 10 * 60000, by: "Update portal", token: "y" }));
   const before = portal.db.asked.length;
   const waited: number[] = [];
   const realSleep = hourWaits.sleep;
@@ -1239,7 +1240,7 @@ test("the hour runs the sync and the round under one lease, taken once and run o
   } finally {
     hourWaits.sleep = realSleep;
   }
-  assert.deepEqual(waited, Array(8).fill(15000), "eight waits of fifteen seconds before giving up");
+  assert.deepEqual(waited, Array(20).fill(15000), "twenty waits of fifteen seconds before giving up");
   assert.equal(JSON.parse(portal.blobs.get("sync|last-hourly")!).roundSkipped, "another round is still running");
   assert.ok(!portal.db.asked.slice(before).some((a) => /portal_state|FROM documents/.test(a.sql)), "nothing was read or written past the lease");
   assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).by, "Update portal", "the page's lease is untouched");
@@ -1267,6 +1268,30 @@ test("a lease that runs out while the hour is waiting is taken on a later try", 
   const lease = JSON.parse(portal.blobs.get("sync|round-lease")!);
   assert.equal(lease.by, "the round on the hour", "under the hour's own lease");
   assert.equal(lease.until, 0, "run out at the end");
+});
+
+test("the hour waits out a round somebody started from the page, three minutes long, and still runs", async () => {
+  const { portal, bucket } = await oneManPortal();
+  const env = { DB: portal.db, FILES: bucket, FILE_STORE: "r2" };
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 10 * 60000, by: "Matthew", token: "y" }));
+  // Matthew's round gives the lease back three minutes in: twelve waits of
+  // fifteen seconds, none of them slept here.
+  let waits = 0;
+  const realSleep = hourWaits.sleep;
+  hourWaits.sleep = async () => {
+    if (++waits === 12) portal.blobs.set("sync|round-lease", JSON.stringify({ until: 0, by: "Matthew", token: "y" }));
+  };
+  try {
+    await worker.scheduled({} as never, env as never);
+  } finally {
+    hourWaits.sleep = realSleep;
+  }
+  assert.equal(waits, 12, "taken on the try after the twelfth wait");
+  const hourly = JSON.parse(portal.blobs.get("sync|last-hourly")!);
+  assert.equal(hourly.syncError, null, "the sync ran");
+  assert.equal(hourly.applied, 1, "and the round");
+  assert.equal(hourly.roundSkipped, null);
+  assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).by, "the round on the hour");
 });
 
 /* ------------------------------------------------------------------------ *
@@ -1322,6 +1347,109 @@ test("equivalences the page stored, with no skills matrix named, are read again 
   const bare = await oneManPortal();
   assert.deepEqual(await keepEquivalences(), { rows: 0, written: false, problem: null });
   assert.equal(bare.portal.blobs.has("matrix-readings|equivalences.json"), false);
+});
+
+/* ------------------------------------------------------------------------ *
+ * The round started from the page: POST /api/round runs the same round the
+ * hour runs, under the same lease, and answers with the whole outcome.
+ * ------------------------------------------------------------------------ */
+const manager = { id: "u1", role: "management", name: "Matthew Jones", email: "m@portal" } as never;
+const postRound = (body: Record<string, unknown> = {}, path = "/api/round") => roundRoute(
+  new Request("http://portal" + path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+  manager, path,
+);
+const progressWrites = (db: { asked: Asked[] }) =>
+  db.asked.filter((a) => /^(INSERT INTO|UPDATE) blobs/.test(a.sql) && a.args[1] === "round-progress")
+    .map((a) => JSON.parse(String(a.args[2])) as { pct: number; word: string; done: boolean; by: string });
+
+test("POST /api/round runs the round in the caller's name and answers with everything it did", async () => {
+  const { portal, bucket } = await oneManPortal();
+  const res = await postRound({ by: "Matthew" });
+  const out = (await res.json()) as Record<string, unknown>;
+  assert.equal(res.status, 200, JSON.stringify(out));
+  assert.equal(out.applied, 1);
+  assert.equal(out.roundError, null);
+  assert.equal(out.roundSkipped, null);
+  assert.deepEqual(out.changes, [{ person: "EVANS, Brenton", code: "QL-01", title: "Master", from: "", to: "2031-05-26" }]);
+  const named = datedWorkbookName("20260901 - CREW QUALIFICATION EXPIRY.xlsx", todayThere());
+  assert.equal(out.workbook, named);
+  const newRow = portal.rows.find((r) => r.category === "training-matrix" && !r.removedAt)!;
+  assert.equal(out.workbookId, newRow.id, "the new workbook's row");
+  assert.equal((out.summary as { certificates: number }).certificates, 1);
+  assert.equal(portal.doc().quals.rows[0][3][0], "2031-05-26", "the cell moved");
+  assert.ok(bucket.text("opms/" + named), "the dated workbook is in the library");
+  assert.equal(portal.doc().history[1].by, "Matthew", "the log names who ran it");
+
+  const lease = JSON.parse(portal.blobs.get("sync|round-lease")!);
+  assert.equal(lease.by, "Matthew");
+  assert.equal(lease.until, 0, "given back");
+
+  const hourly = JSON.parse(portal.blobs.get("sync|last-hourly")!);
+  assert.equal(hourly.by, "Matthew");
+  assert.equal(hourly.applied, 1);
+  assert.equal(hourly.roundSkipped, null);
+  assert.equal(hourly.read, 0);
+  assert.equal(hourly.refiled, 0);
+  assert.ok(!("changes" in hourly) && !("summary" in hourly), "the record carries the counts, not the cells");
+  assert.equal(typeof hourly.at, "number");
+
+  const progress = JSON.parse(portal.blobs.get("sync|round-progress")!);
+  assert.equal(progress.pct, 100);
+  assert.equal(progress.word, "Done");
+  assert.equal(progress.done, true);
+  assert.equal(progress.by, "Matthew");
+  assert.deepEqual(progressWrites(portal.db).map((p) => p.pct), [1, 20, 30, 60, 75, 100], "said in order, under its own key");
+  assert.equal(portal.blobs.has("sync|progress"), false, "the sync's key is untouched");
+});
+
+test("POST /api/round while the hour holds the lease is refused, and says who holds it", async () => {
+  const { portal } = await oneManPortal();
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "the round on the hour", token: "x" }));
+  const res = await postRound({ by: "Matthew" });
+  assert.equal(res.status, 409);
+  const out = (await res.json()) as { error: string; by: string };
+  assert.match(out.error, /try again in a minute/);
+  assert.equal(out.by, "the round on the hour");
+  assert.equal(portal.blobs.has("sync|round-progress"), false, "no progress record written");
+  assert.equal(portal.state.rev, 1, "the document is untouched");
+  assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).by, "the round on the hour", "the hour's lease stands");
+});
+
+test("the round from the page and the round on the hour leave the same document", async () => {
+  const hour = await oneManPortal();
+  await worker.scheduled({} as never, { DB: hour.portal.db, FILES: hour.bucket, FILE_STORE: "r2" } as never);
+  const page = await oneManPortal();
+  const res = await postRound({});
+  assert.equal(res.status, 200);
+  const a = hour.portal.doc(), b = page.portal.doc();
+  assert.deepEqual(b.quals, a.quals);
+  assert.deepEqual(b.filledFromCert, a.filledFromCert);
+  assert.deepEqual(b.orphanSeen, a.orphanSeen);
+  assert.deepEqual(b.workbookPending, a.workbookPending);
+  assert.deepEqual(
+    b.history.map((h: { action: string; detail: string }) => [h.action, h.detail]),
+    a.history.map((h: { action: string; detail: string }) => [h.action, h.detail]),
+  );
+  assert.equal(b.history[0].by, "Matthew Jones", "with no name sent, the person signed in");
+  assert.equal(a.history[0].by, "the round on the hour");
+});
+
+test("POST /api/round/prepare keeps the rules without the lease, and is idempotent", async () => {
+  const { portal } = await oneManPortal({ skills: true });
+  const first = await postRound({}, "/api/round/prepare");
+  const out = (await first.json()) as { equivalences: number; validity: boolean; problem: string | null };
+  assert.equal(first.status, 200, JSON.stringify(out));
+  assert.equal(out.equivalences, 1);
+  assert.equal(out.validity, false, "the skills matrix here has no Guidance Information sheet");
+  assert.match(out.problem || "", /Guidance Information/);
+  assert.deepEqual(await (await postRound({}, "/api/round/prepare")).json(), out, "the same answer again");
+  assert.equal(equivalenceWrites(portal.db).length, 1, "the sheet was read once");
+  assert.equal(leaseWrites(portal.db).length, 0, "no lease taken");
+  assert.equal(portal.state.rev, 1, "nothing saved");
+
+  const bare = await oneManPortal();
+  assert.deepEqual(await (await postRound({}, "/api/round/prepare")).json(), { equivalences: 0, validity: false, problem: null });
+  assert.equal(bare.portal.state.rev, 1);
 });
 
 /* ------------------------------------------------------------------------ *

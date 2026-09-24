@@ -17,6 +17,7 @@ import aiChecker from "./routes/ai-checker.js";
 import archive from "./routes/archive.js";
 import run from "./routes/run.js";
 import sync, { runSync, syncProgress, lastSync, lastHourly, recordHourly } from "./routes/sync.js";
+import round, { roundProgress } from "./routes/round.js";
 import migrate from "./routes/migrate.js";
 import migrateCerts from "./routes/migrate-certs.js";
 import readOne from "./routes/read-one.js";
@@ -116,6 +117,21 @@ export default {
         );
       }
       if (path === "/api/sync") return await sync(req);
+      // The round, started from the page: where it has got to, the rules it
+      // reads by, and the round itself (routes/round.ts). The progress record
+      // is never called dead here; the page compares its `at` with its own
+      // start.
+      if (path === "/api/round/progress") {
+        return Response.json(
+          {
+            ...((await roundProgress().catch(() => null)) as Record<string, unknown> | null
+              ?? { pct: 0, word: "No round has run yet", done: true }),
+            running: await roundRunning().catch(() => false),
+          },
+          { headers: { "Cache-Control": "no-store" } },
+        );
+      }
+      if (path === "/api/round" || path === "/api/round/prepare") return await round(req, user, path);
       if (path === "/api/migrate-files") return await migrate(req);
       if (path === "/api/migrate-certs-opms") return await migrateCerts(req, user!);
       if (path === "/api/clear-r2") return await clearR2(req);
@@ -183,11 +199,13 @@ export default {
     // the same time is two writers of the one file, so they take the same
     // lease for their turn and stand aside while this holds it.
     //
-    // A page's turn is short - a sync, an upload - so an hour that finds the
-    // lease held waits for it rather than losing the whole hour: up to
-    // eight more tries fifteen seconds apart, two minutes in all, well
-    // inside the nine the hour has. The clock (t0) started before the
-    // first try, so every second spent waiting comes off the hour's budget.
+    // A page's turn is short - a sync, an upload, a round of up to four
+    // minutes - so an hour that finds the lease held waits for it rather
+    // than losing the whole hour: up to twenty more tries fifteen seconds
+    // apart, five minutes in all. The hour's own budget clock starts only
+    // once it holds the lease (theHour): a scheduled run has fifteen
+    // minutes of wall time, so five spent waiting still leaves the nine
+    // the work is given.
     let lease: Lease | null;
     try {
       await ensureDocumentColumns();
@@ -206,7 +224,7 @@ export default {
       return;
     }
     try {
-      await written(await theHour(env, lease, t0, outcome, written));
+      await written(await theHour(env, lease, Date.now(), outcome, written));
     } finally {
       try {
         await dropLease(lease.token);
@@ -217,7 +235,7 @@ export default {
   },
 };
 
-const LEASE_RETRIES = 8;
+const LEASE_RETRIES = 20;
 const LEASE_RETRY_MS = 15 * 1000;
 /** The wait between tries for the lease. The tests swap it for one that
  *  does not wait. */
@@ -227,7 +245,10 @@ export const hourWaits = {
 
 /**
  * The hour's work under its lease: the sync, the reading, the round. What
- * comes back is the round's own word on the hour, for the record.
+ * comes back is the round's own word on the hour, for the record. `t0` is
+ * when the lease was taken - the budget below runs from there, not from
+ * the tick, so time spent waiting for the lease is not time lost to the
+ * work.
  */
 async function theHour(
   env: PortalEnv, lease: Lease, t0: number,
