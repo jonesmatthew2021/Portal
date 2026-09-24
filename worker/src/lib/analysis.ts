@@ -21,6 +21,7 @@ import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
 import { fileStore } from "../db/documents.js";
 import { OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM } from "../../../source/shared/reading-lines.js";
+import { coveredCells } from "../../../source/shared/covers.js";
 
 // Certificates are read with a vision model — most of them are scans rather than
 // text PDFs, and a scan of a 1998 certificate of competency is not something a
@@ -844,13 +845,21 @@ export async function certificateStanding() {
 
   const claim = new Map<
     string,
-    { issued: string | null; expires: string | null; issuer: string | null; fileId: string | null }
+    { issued: string | null; expires: string | null; issuer: string | null; fileId: string | null; covered?: boolean }
   >();
+  /* Every certificate that reached a column of its own, kept for the covering
+     pass below: one document fills every column its printed endorsements and
+     unit codes cover as well (source/shared/covers.js, the table in the
+     vessel file). The page's cells read these dates, so they have to carry
+     the covered columns or the grid and the round would disagree about a
+     man's ECDIS. */
+  const standing: { row: Row; reading: Reading; person: string; code: string }[] = [];
 
   for (const { row, reading } of readings) {
     if (!reading || !reading.readable || !row.person || !row.person.trim()) continue;
     const code = codeFor(row, reading, eqTable);
     if (!code || !code.trim()) continue;
+    standing.push({ row, reading, person: row.person, code: code.trim().toUpperCase() });
 
     // A date typed against the certificate on the portal beats the model's
     // reading of the scan, same as in the comparison. An item recorded as
@@ -879,6 +888,26 @@ export async function certificateStanding() {
     claim.set(key, { issued, expires, issuer, fileId: row.id });
   }
 
+  /* The covered columns, joining the same contest: the one that runs the
+     longer holds the cell, and the cell's Open opens whichever document that
+     is. A covered column with no date to give claims nothing - there would be
+     nothing to put in the cell. */
+  for (const { row, reading, person, code } of standing) {
+    for (const cell of coveredCells(reading, vessel.covers, vessel.qualColumns, code)) {
+      if (!cell.until || neverLapses(cell.code)) continue;
+      const key = `${person.trim().toUpperCase()}::${cell.code.trim().toUpperCase()}`;
+      const sitting = claim.get(key);
+      if (sitting && (sitting.expires || "") >= cell.until) continue;
+      claim.set(key, {
+        issued: reading.issuedOn || null,
+        expires: cell.until,
+        issuer: (reading.issuer || "").trim() || null,
+        fileId: row.id,
+        covered: true,
+      });
+    }
+  }
+
   return {
     at: new Date().toISOString(),
     // `fileId` names the scan each line's dates were read from, so the
@@ -888,6 +917,9 @@ export async function certificateStanding() {
       return {
         person: key.slice(0, at), code: key.slice(at + 2),
         issued: v.issued, expires: v.expires, issuer: v.issuer, fileId: v.fileId,
+        // Whether the cell was filled by a column this certificate covers
+        // rather than by a certificate of its own.
+        covered: !!v.covered,
       };
     }),
   };

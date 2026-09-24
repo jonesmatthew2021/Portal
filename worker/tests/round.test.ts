@@ -18,7 +18,7 @@ import analyse, { compareMatrix, extract, refile, topUpParticulars } from "../sr
 import readOne from "../src/routes/read-one.js";
 import restoreFile from "../src/routes/restore-file.js";
 import { MAX_BYTES } from "../src/lib/shared-state.js";
-import { OUT_OF_CREDIT, READING_UNAVAILABLE, READING_VERSION } from "../src/lib/analysis.js";
+import { OUT_OF_CREDIT, READING_UNAVAILABLE, READING_VERSION, certificateStanding } from "../src/lib/analysis.js";
 import { KeptInPlace, ensureDocumentColumns, forgetDocumentColumns, purgeDocument, relocateToRemovedBlob, removeDocument, restoreDocument } from "../src/db/documents.js";
 import { replaceSingleFile } from "../src/db/single-file.js";
 import { saveDocument } from "../src/lib/shared-state.js";
@@ -4297,4 +4297,149 @@ test("an older card in his name is not read again once a newer card already carr
   }
   assert.deepEqual(cardsAsked(m2), ["new-named.pdf"], "the newer card is read for its number");
   assert.equal(person(wanted.portal).msic, "MSIC 3333", "and the box takes the card he holds now");
+});
+
+/* ------------------------------------------------------------------------ *
+ * One certificate fills every column it covers, in the round and on the
+ * page's cells. The rule is source/shared/covers.js and the table is the
+ * vessel file's; these are the wiring - that a covered column joins the same
+ * contest as any other certificate, links to the certificate that filled it,
+ * and is claimed, so a certificate taken off the books takes its covered
+ * dates with it like any other.
+ * ------------------------------------------------------------------------ */
+
+/** Brenton Evans's new-style AMSA Master certificate of competency, as the
+ *  reading lists what is printed on it. The ECDIS line is inside the II/2
+ *  endorsement; the VI/2 (1) line is survival craft, not fast rescue craft. */
+const evansCoC = {
+  version: "r1", at: "", model: "", readable: true,
+  holderName: "Brenton Evans", certificateTitle: "Certificate of Competency - Master", issuer: "AMSA",
+  issuedOn: "2026-05-26", expiresOn: "2031-05-26", neverExpires: false,
+  qualCode: "QL-01", codeConfidence: "high", notes: null,
+  endorsements: [
+    { text: "II/2 (incl. generic ECDIS)", until: null },
+    { text: "II/5", until: null },
+    { text: "VI/1 s. A-VI/1 (2)", until: null },
+    { text: "VI/2 (1) s. A-VI/2 (1-4)", until: null },
+    { text: "VI/4 (1) s. A-VI/4 (1-3)", until: null },
+    { text: "IV/2", until: null },
+  ],
+  units: [] as string[],
+};
+
+const coversCols = [
+  ["QL-01", "Master", "Qualification"],
+  ["QL-12", "Certificate of Safety Training (COST)", "Qualification"],
+  ["QL-13", "ECDIS", "Qualification"],
+  ["QL-14", "GMDSS", "Qualification"],
+  ["QL-16", "Fast Rescue Craft (FRC)", "Qualification"],
+] as [string, string, string][];
+
+const coversMatrix = {
+  cols: coversCols,
+  rows: [["EVANS, Brenton", "Master", "", ["", "", "", "", ""]]] as [string, string, string, string[]][],
+};
+
+/** A database holding the certificates given, each with its reading. */
+const coversDb = (certs: { row: Partial<Row>; reading: unknown }[]) => {
+  const rows = certs.map((c, i) => ({
+    ...billysTicket, id: "cov" + i, person: "EVANS, Brenton", folder: "evans",
+    bucket: "evans", checksum: "sum" + i, filename: "cert" + i + ".pdf",
+    blobKey: "opms/Evans - OPMS/cert" + i + ".pdf", qualCode: null, expiresOn: null,
+    ...c.row,
+  }));
+  const readings = certs.map((c, i) => ({ key: "r1/sum" + i + ".json", value: JSON.stringify(c.reading) }));
+  return fakeDb((sql, args) => {
+    if (/FROM documents WHERE category = 'certificate'/.test(sql)) return { results: rows };
+    if (/SELECT key, value FROM blobs/.test(sql)) return { results: readings };
+    // The page's own dates ask for one reading at a time, by its key.
+    if (/SELECT value FROM blobs/.test(sql)) return { results: readings.filter((r) => args.includes(r.key)) };
+    if (/UPDATE documents/.test(sql)) return { changes: 1 };
+    return undefined;
+  });
+};
+const evansOnly = asKnownPerson([{ name: "EVANS, Brenton", aliases: [] }]);
+
+test("covers: one Master ticket fills the ECDIS column too, and nothing else on it fills anything", async () => {
+  setEnv({ DB: coversDb([{ row: { qualCode: "QL-01" }, reading: evansCoC }]), FILE_STORE: "r2" } as never);
+  const out = await compareMatrix(coversMatrix, null, evansOnly);
+  const dates = Object.fromEntries(out.settled.map((s) => [s.code, s.value]));
+  assert.deepEqual(dates, { "QL-01": "2031-05-26", "QL-13": "2031-05-26" },
+    "his own column and the ECDIS the endorsement covers, both dated as the ticket is dated");
+  assert.deepEqual(out.claimed.sort(), ["EVANS, BRENTON::QL-01", "EVANS, BRENTON::QL-13"],
+    "the covered cell is claimed, so taking the certificate off the books takes its date off too");
+  for (const code of ["QL-12", "QL-14", "QL-16"]) {
+    assert.equal(out.settled.some((s) => s.code === code), false,
+      code + " is filled by its own certificate and never by a line on this one");
+  }
+});
+
+test("covers: a standalone ECDIS certificate joins the same contest, and the longer of the two wins", async () => {
+  const ecdis = (expiresOn: string) => ({
+    ...evansCoC, certificateTitle: "ECDIS", qualCode: "QL-13", expiresOn,
+    endorsements: [] as { text: string; until: string | null }[],
+  });
+  /* Its own certificate runs the longer: the cell takes its date and links to
+     it, exactly as two certificates for one column are decided today. */
+  setEnv({ DB: coversDb([
+    { row: { id: "coc", qualCode: "QL-01" }, reading: evansCoC },
+    { row: { id: "own", qualCode: "QL-13" }, reading: ecdis("2033-01-01") },
+  ]), FILE_STORE: "r2" } as never);
+  let out = await compareMatrix(coversMatrix, null, evansOnly);
+  assert.equal(out.settled.find((s) => s.code === "QL-13")!.value, "2033-01-01");
+  assert.equal(out.items.find((i) => i.code === "QL-13")!.certificate!.id, "own",
+    "and the cell links to the ECDIS certificate itself");
+
+  // The covered date runs the longer: it wins, and the cell links to the ticket.
+  setEnv({ DB: coversDb([
+    { row: { id: "coc", qualCode: "QL-01" }, reading: evansCoC },
+    { row: { id: "own", qualCode: "QL-13" }, reading: ecdis("2028-01-01") },
+  ]), FILE_STORE: "r2" } as never);
+  out = await compareMatrix(coversMatrix, null, evansOnly);
+  assert.equal(out.settled.find((s) => s.code === "QL-13")!.value, "2031-05-26");
+  assert.equal(out.items.find((i) => i.code === "QL-13")!.certificate!.id, "coc",
+    "the covered column links to the certificate that filled it");
+});
+
+test("covers: a ticket printed in another man's name fills nothing, its own column or any other", async () => {
+  setEnv({ DB: coversDb([
+    { row: { qualCode: "QL-01" }, reading: { ...evansCoC, holderName: "Kachin Sittiyos" } },
+  ]), FILE_STORE: "r2" } as never);
+  const out = await compareMatrix(coversMatrix, null, evansOnly);
+  assert.deepEqual(out.settled, [], "the holder check comes first, and it covers nothing");
+  assert.equal(out.notes.filter((n) => n.kind === "name-mismatch").length, 1);
+});
+
+test("covers: a training statement's unit codes fill their own columns, and the round writes no read code for them", async () => {
+  const cols = [
+    ["QL-18", "Provide First Aid - HLTAID011", "Qualification"],
+    ["QL-19", "Adv Resuscitation and Oxygen Therapy - HLTAID015", "Qualification"],
+  ] as [string, string, string][];
+  const statement = {
+    ...evansCoC, certificateTitle: "Statement of Attainment", qualCode: "QL-18",
+    expiresOn: "2029-06-30", endorsements: [], units: ["HLTAID011", "HLTAID015"],
+  };
+  const db = coversDb([{ row: { qualCode: "QL-18" }, reading: statement }]);
+  setEnv({ DB: db, FILE_STORE: "r2" } as never);
+  const out = await compareMatrix(
+    { cols, rows: [["EVANS, Brenton", "Master", "", ["", ""]]] as [string, string, string, string[]][] },
+    null, evansOnly,
+  );
+  assert.deepEqual(out.settled.map((s) => [s.code, s.value]).sort(),
+    [["QL-18", "2029-06-30"], ["QL-19", "2029-06-30"]],
+    "one statement, both columns, its own date");
+  const noted = db.asked.filter((a) => /UPDATE documents\s+SET read_code/.test(a.sql));
+  assert.deepEqual(noted.map((n) => n.args[1]), ["QL-18"],
+    "the row's own read code is written once and the covered column never writes over it");
+});
+
+test("covers: the page's own dates carry the covered column, linked to the certificate that filled it", async () => {
+  setEnv({ DB: coversDb([{ row: { id: "coc", qualCode: "QL-01" }, reading: evansCoC }]), FILE_STORE: "r2" } as never);
+  const out = await certificateStanding();
+  const by = Object.fromEntries(out.dates.map((d) => [d.code, d]));
+  assert.deepEqual(Object.keys(by).sort(), ["QL-01", "QL-13"],
+    "the cells the page draws carry the covered column too, or the grid and the round would disagree");
+  assert.equal(by["QL-13"].expires, "2031-05-26");
+  assert.equal(by["QL-13"].fileId, "coc", "Open on the ECDIS cell opens the ticket that covers it");
+  assert.equal(by["QL-13"].issued, "2026-05-26", "with the covering certificate's own issue date");
 });

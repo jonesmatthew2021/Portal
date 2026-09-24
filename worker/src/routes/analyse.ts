@@ -10,7 +10,7 @@ import { imageToPdf } from "../lib/pdf-wrap.js";
 import { readDocument } from "../lib/shared-state.js";
 import { asKnownPerson, crewRegister } from "../../../source/shared/names.js";
 import { isMsicCard, msicAsWritten, msicCodeIn, newestCard, openToCertificates, particularsFor, particularsKeyOf, ticketCodesIn } from "../../../source/shared/particulars.js";
-import { unitColumnsIn } from "../../../source/shared/covers.js";
+import { coveredCells, unitColumnsIn } from "../../../source/shared/covers.js";
 import { vessel } from "../vessel.js";
 import { getEnv } from "../env.js";
 import {
@@ -873,7 +873,12 @@ export async function compareMatrix(
   // One certificate per person and code. Two certificates for the same item is
   // a renewal sitting next to the certificate it renews, so the later date is
   // the one held against the spreadsheet and the other is only mentioned.
-  const claim = new Map<string, { row: Row; reading: Reading }>();
+  const claim = new Map<string, { row: Row; reading: Reading; coveredUntil?: string }>();
+  /* Every certificate that got past the holder check and onto a column of
+     its own, kept for the covering pass below: one certificate fills every
+     column its printed endorsements and unit codes cover as well as its own
+     (source/shared/covers.js, the table in the vessel file). */
+  const standing: { row: Row; reading: Reading; person: string; code: string }[] = [];
 
   for (const { row, reading } of readings) {
     const link = { id: row.id, filename: row.filename, url: `/api/files/${row.id}` };
@@ -944,6 +949,8 @@ export async function compareMatrix(
       }
     }
 
+    standing.push({ row, reading, person, code: code.trim().toUpperCase() });
+
     const key = `${person.trim().toUpperCase()}::${code.trim().toUpperCase()}`;
     const sitting = claim.get(key);
     if (sitting) {
@@ -969,6 +976,34 @@ export async function compareMatrix(
       continue;
     }
     claim.set(key, { row, reading });
+  }
+
+  /* The covering pass. A new-style AMSA certificate of competency prints its
+     endorsements on its face - "II/2 (incl. generic ECDIS)" - and a training
+     statement prints the unit codes it covers, so one document answers for
+     more than one column. Which endorsement fills which column is the vessel
+     file's `covers` table and never the model's guess; a unit code fills the
+     column whose title carries it (source/shared/covers.js, with the clauses).
+     The covered column joins exactly the contest its own column joins: the
+     one that runs the longer is the certificate in force, and the cell links
+     to whichever document that is. A covered column with no date to give -
+     no end printed against the endorsement and none on the certificate -
+     claims nothing, because there would be nothing to put in the cell. */
+  for (const { row, reading, person, code } of standing) {
+    for (const cell of coveredCells(reading, vessel.covers, vessel.qualColumns, code)) {
+      if (!cell.until) continue;
+      const at = cell.code.trim().toUpperCase();
+      if (!colAt.has(at)) continue;
+      const key = `${person.trim().toUpperCase()}::${at}`;
+      const sitting = claim.get(key);
+      if (sitting) {
+        const held = sitting.coveredUntil
+          || (neverLapses(at) ? null : (isDate(sitting.row.expiresOn) ? normDate(sitting.row.expiresOn!) : null) || sitting.reading.expiresOn)
+          || "";
+        if (held >= cell.until) continue;
+      }
+      claim.set(key, { row, reading, coveredUntil: cell.until });
+    }
   }
 
   const covered = new Set<string>();
@@ -998,7 +1033,7 @@ export async function compareMatrix(
   const noted: { id: string; code: string; expires: string | null; issued: string | null;
     issuer: string | null; title: string | null }[] = [];
 
-  for (const [key, { row, reading }] of claim) {
+  for (const [key, { row, reading, coveredUntil }] of claim) {
     const code = key.split("::")[1];
     // The key was built from the register's name for him, so it is what
     // finds his row.
@@ -1013,7 +1048,11 @@ export async function compareMatrix(
     // since — is the person's own answer, and beats the model's reading of the
     // scan the same way their choice of matrix code does.
     const typed = isDate(row.expiresOn) ? normDate(row.expiresOn!) : null;
-    const expiry = typed || reading.expiresOn || null;
+    /* A covered column takes the date the cover rule worked out - the
+       endorsement's own printed end where AMSA printed one, otherwise the
+       certificate's. The date typed against the certificate on the portal is
+       the person's answer about its OWN column, so it says nothing here. */
+    const expiry = coveredUntil || typed || reading.expiresOn || null;
 
     const link = {
       id: row.id,
@@ -1035,7 +1074,10 @@ export async function compareMatrix(
     const same = (row.readCode ?? null) === note.code && (row.readExpires ?? null) === note.expires
       && (row.readIssued ?? null) === note.issued && (row.readIssuer ?? null) === note.issuer
       && (row.readTitle ?? null) === note.title;
-    if (!same) noted.push(note);
+    /* Never for a covered column: the row's own read code is what the
+       certificate IS, and writing a column it merely covers over the top
+       would lose which certificate this document is. */
+    if (!same && !coveredUntil) noted.push(note);
 
     const base = {
       id: `cert:${row.id}:${code}`,
@@ -1056,7 +1098,9 @@ export async function compareMatrix(
     // than acted on — it can only be a course or issue date, not an expiry the
     // item doesn't have.
     if (neverLapses(code)) {
-      if (expiry) {
+      // A column that carries no expiry says nothing about a date a covering
+      // certificate would have given it: it is held or it isn't.
+      if (expiry && !coveredUntil) {
         notes.push({
           kind: "no-expiry-item",
           person: matrixRow[0],
