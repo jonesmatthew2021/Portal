@@ -9,6 +9,81 @@
  * The shell holds the theme, the shared components and the state; this
  * holds what is only this section's. See tools/source.mjs.
  */
+/* The lines the Marine Orders put on Needs attention for one crew row.
+   Four things the eight orders decide that nothing on the grid could say
+   for itself. Each is a pure rule in source/shared/, run here over the
+   matrix as it stands and the certificates the portal has read:
+
+     - a recognition whose foreign certificate nobody holds and which does
+       not print its expiry: the date in the cell is a date the portal
+       cannot check (MO70 s 33(2), s 37(4));
+     - a medical whose printed expiry is longer than MO76 s 16(1) allows
+       for the holder's age on the day of the examination;
+     - a certificate in the red band that cannot be renewed at all,
+       because something the order wants in hand went first (MO70 s 25,
+       MO71 Sch 4 4.2, MO72 Sch 4 4.2, MO73 Sch 4, MO505 s 9(3)(b));
+     - a certificate that has gone but which one of the five papers the
+       orders allow still carries (MO70 s 15(3), MO504 s 16(2),
+       MO505 s 7(3), ss 22-24, s 12(2)).
+
+   A blank answer from any of them is nothing on the screen. Pure, so the
+   rule tests can hold it to its answers: `row` is the matrix row, `cols`
+   the columns, `dates` the round's certDates, `needs` the columns this
+   position has to hold, `person` the register's entry for him (the date
+   of birth), and `rules` the renewal rules and the medical's codes. */
+function marineOrderLines(row, cols, dates, needs, person, todayISO, rules) {
+  const out = [];
+  const held = {};
+  cols.forEach((c, i) => { held[c[0]] = row[3][i]; });
+  /* Whether a line about a column is worth putting on the management
+     list. A cell that is red, not held or unconfirmed is pressing whatever
+     the seat; a column nobody in this seat must hold is nobody's work to
+     do. With no skills matrix read there is nothing to ask, so a blank cell
+     says nothing either way - the same as the grid, which marks no cell
+     Missing without it. */
+  const pressing = (code) => {
+    const b = bandFor(held[code]);
+    return !!b && (b.key === "red" || b.key === "not" || b.key === "unknown");
+  };
+
+  cols.forEach((c) => {
+    const d = certDateFor(dates, row[0], c[0]);
+    /* A recognition whose foreign certificate nobody holds is a date the
+       portal cannot check: said where the seat has to hold the column or
+       the cell is pressing, and not for a column this seat never needs. */
+    if (d && d.recognition && d.foreignUnknown && (needs.has(c[0]) || pressing(c[0]))) {
+      out.push({ code: c[0], text: `${row[0]} — ${c[0]}: the certificate the recognition is for is not on the portal` });
+    }
+    /* A paper, only where there is something for it to carry - the same
+       test the cell itself uses (bandWithCover): a pressing cell, or a
+       required cell with nothing in it. A man whose certificate is current
+       with a spent letter still on file is nobody's work to do. */
+    const cover = certCoverFor(dates, row[0], c[0]);
+    const carrying = bandFor(held[c[0]]) ? pressing(c[0]) : needs.has(c[0]);
+    if (cover && carrying) out.push({ code: c[0], text: `${row[0]} — ${c[0]}: ${coverLine(cover)}` });
+  });
+
+  rules.medicalCodes.forEach((code) => {
+    const d = certDateFor(dates, row[0], code);
+    if (!d) return;
+    const said = medicalTooLong(
+      { rowId: "", issuedOn: d.issued, assessedOn: d.assessedOn, expiresOn: d.expires, conditions: d.conditions },
+      person && person.dob, todayISO,
+    );
+    if (said) out.push({ code, text: `${row[0]} — medical expires ${fmtDate(d.expires)}, longer than the law allows for their age` });
+  });
+
+  renewalBlockers(row[0], held, todayISO, rules.renewal).forEach((b) => {
+    const parts = [
+      ...b.expired.map((n) => `${n} is expired`),
+      ...b.missing.map((n) => `${n} is not held`),
+    ];
+    out.push({ code: b.code, text: `${row[0]} — ${b.code} cannot be renewed: ${parts.join(", ")}` });
+  });
+
+  return out;
+}
+
 function CertChecker({ query }) {
   const { quals: QUALS, certDates, certificates, renewalMarks, people, skillsRequirements } = usePortal();
   const validityFor = useValidityLookup();
@@ -82,75 +157,17 @@ function CertChecker({ query }) {
   const printed = listWith(() => true);
 
   /* ---- what the Marine Orders say about these cells ---------------------
-     Four things the eight orders decide that nothing on the grid could say
-     for itself. Each is a pure rule in source/shared/, run here over the
-     matrix as it stands and the certificates the portal has read:
-
-       - a recognition whose foreign certificate nobody holds and which does
-         not print its expiry: the date in the cell is a date the portal
-         cannot check (MO70 s 33(2), s 37(4));
-       - a medical whose printed expiry is longer than MO76 s 16(1) allows
-         for the holder's age on the day of the examination;
-       - a certificate in the red band that cannot be renewed at all,
-         because something the order wants in hand went first (MO70 s 25,
-         MO71 Sch 4 4.2, MO72 Sch 4 4.2, MO73 Sch 4, MO505 s 9(3)(b));
-       - a certificate that has gone but which one of the five papers the
-         orders allow still carries (MO70 s 15(3), MO504 s 16(2),
-         MO505 s 7(3), ss 22-24, s 12(2)).
-
-     A blank answer from any of them is nothing on the screen. */
+     One line each, worked out by marineOrderLines above; the register's
+     entry for each man carries the date of birth the medical's age check
+     reads, and the skills matrix says which columns his seat has to hold. */
   const knownName = asKnownPerson(people);
   const personBy = new Map((people || []).map((p) => [String(p.name || "").trim().toUpperCase(), p]));
-  const medicalCodes = medicalCodesIn(VESSEL.certStated);
-  const renewalRules = { needs: VESSEL.renewalNeeds, daysUntil, redDays: RED_DAYS };
+  const orderRules = { renewal: { needs: VESSEL.renewalNeeds, daysUntil, redDays: RED_DAYS }, medicalCodes: medicalCodesIn(VESSEL.certStated) };
 
-  const ordersFor = (row) => {
-    const out = [];
-    const held = {};
-    QUALS.cols.forEach((c, i) => { held[c[0]] = row[3][i]; });
-
-    /* Which columns this position has to hold, for the cover lines below: a
-       paper carrying a column nobody in this seat must hold is nothing to put
-       on the management list. With no skills matrix read there is nothing to
-       ask, so a blank cell says nothing either way - the same as the grid,
-       which marks no cell Missing without it. */
-    const needs = requiredCodesFor(row[1], skillsRequirements);
-
-    QUALS.cols.forEach((c) => {
-      const d = certDateFor(certDates, row[0], c[0]);
-      if (d && d.recognition && d.foreignUnknown) {
-        out.push({ code: c[0], text: `${row[0]} — ${c[0]}: the certificate the recognition is for is not on the portal` });
-      }
-      const cover = certCoverFor(certDates, row[0], c[0]);
-      /* And only where there is something for it to carry: the same test the
-         cell itself uses (bandWithCover). A man whose certificate is current
-         with a spent letter still on file is nobody's work to do. */
-      const b = bandFor(held[c[0]]);
-      const carrying = b ? b.key === "red" || b.key === "not" || b.key === "unknown" : needs.has(c[0]);
-      if (cover && carrying) out.push({ code: c[0], text: `${row[0]} — ${c[0]}: ${coverLine(cover)}` });
-    });
-
-    medicalCodes.forEach((code) => {
-      const d = certDateFor(certDates, row[0], code);
-      if (!d) return;
-      const person = personBy.get(String(knownName(row[0]) || row[0]).trim().toUpperCase());
-      const said = medicalTooLong(
-        { rowId: "", issuedOn: d.issued, assessedOn: d.assessedOn, expiresOn: d.expires, conditions: d.conditions },
-        person && person.dob, TODAY,
-      );
-      if (said) out.push({ code, text: `${row[0]} — medical expires ${fmtDate(d.expires)}, longer than the law allows for their age` });
-    });
-
-    renewalBlockers(row[0], held, TODAY, renewalRules).forEach((b) => {
-      const parts = [
-        ...b.expired.map((n) => `${n} is expired`),
-        ...b.missing.map((n) => `${n} is not held`),
-      ];
-      out.push({ code: b.code, text: `${row[0]} — ${b.code} cannot be renewed: ${parts.join(", ")}` });
-    });
-
-    return out;
-  };
+  const ordersFor = (row) => marineOrderLines(
+    row, QUALS.cols, certDates, requiredCodesFor(row[1], skillsRequirements),
+    personBy.get(String(knownName(row[0]) || row[0]).trim().toUpperCase()), TODAY, orderRules,
+  );
 
   const orders = QUALS.rows
     .map((row) => ({ row, lines: ordersFor(row) }))

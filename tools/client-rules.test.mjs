@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, recognisedUntil, recognitionFills, foreignExpiryOn, isRecognitionReading, certCoverFor, coverLine, bandWithCover, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, EVIDENCE_KINDS };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, recognisedUntil, recognitionFills, foreignExpiryOn, isRecognitionReading, certCoverFor, coverLine, bandWithCover, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, EVIDENCE_KINDS, marineOrderLines };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -2781,6 +2781,42 @@ const is = (got, want, what) => {
   is(bandWithCover(null, cover, false), null, "not required for this position: left hatched");
   is(bandWithCover(null, cover, true).key, "covered", "required with nothing on file: the paper carries it");
   is(bandWithCover(null, cover, true).date, null, "and with no date to show, the sentence stays on the title");
+}
+
+/* ---- the lines the Marine Orders put on Needs attention for one man, and
+        when each is worth putting there ---- */
+{
+  const { marineOrderLines, VESSEL, daysUntil, RED_DAYS } = lib;
+  const today = "2026-09-25";
+  const on = (n) => new Date(Date.parse(today) + n * 86400000).toISOString().slice(0, 10);
+  const cols = [["QL-02", "Chief Mate", "Qualification"], ["QL-17", "AMSA Medical", "Qualification"]];
+  const rules = { renewal: { needs: VESSEL.renewalNeeds, daysUntil, redDays: RED_DAYS }, medicalCodes: ["QL-17"] };
+  const recognised = { map: { "EVANS, BRENTON::QL-02": { expires: on(900), issued: on(-200), recognition: true, foreignUnknown: true } } };
+  const row = (cell) => ["EVANS, Brenton", "Master", "", [cell, ""]];
+  // Only the recognition and cover lines: a red Chief Mate with no medical
+  // held is a renewal blocker too, which is right and not what is asked here.
+  const lines = (cell, needs, dates = recognised) =>
+    marineOrderLines(row(cell), cols, dates, new Set(needs), null, today, rules).map((l) => l.text)
+      .filter((t) => /recognition|covered by/.test(t));
+  /* The recognition line - "the certificate the recognition is for is not on
+     the portal" - is gated as the cover lines are: on the cell's band, or on
+     the seat requiring the column. A recognition on a column nobody in this
+     seat must hold is nothing to put on the management list. */
+  is(lines(on(900), []), [], "a green recognition on a column the seat does not require: no line");
+  is(lines(on(900), ["QL-02"]), ["EVANS, Brenton — QL-02: the certificate the recognition is for is not on the portal"],
+    "the seat requires it: the line");
+  is(lines(on(-10), []), ["EVANS, Brenton — QL-02: the certificate the recognition is for is not on the portal"],
+    "the cell is red: the line, required or not");
+  is(lines("", []), [], "a blank cell on a column not required: nothing");
+  is(lines("", ["QL-02"]), ["EVANS, Brenton — QL-02: the certificate the recognition is for is not on the portal"],
+    "a blank cell on a column the seat requires: the line");
+  const known = { map: { "EVANS, BRENTON::QL-02": { expires: on(900), recognition: true, foreignUnknown: false } } };
+  is(lines(on(900), ["QL-02"], known), [], "the foreign certificate is known: nothing to say");
+  // The cover lines were already gated this way, and still are.
+  const covered = { map: {}, covers: { "EVANS, BRENTON::QL-02": { kind: "extension", until: on(45) } } };
+  is(lines(on(-10), [], covered), ["EVANS, Brenton — QL-02: " + lib.coverLine({ kind: "extension", until: on(45) })],
+    "a red cell a paper carries: the cover line");
+  is(lines(on(900), [], covered), [], "a green cell with a spent letter on file: nothing");
 }
 
 if (failed) {
