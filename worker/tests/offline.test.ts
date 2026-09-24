@@ -265,3 +265,37 @@ test("a crew save cannot blank or change a man's MSIC number or date of birth, o
   assert.equal(mgmt.doc().people[0].msic, "MSIC 2222", "management's save changes the box");
   assert.deepEqual(mgmt.doc().particularsFromCert, { p1: { msic: "MSIC 2222" } });
 });
+
+test("a crew login is never handed a man's printed medical limitation", () => {
+  /* The round reads any limitation printed on a certificate ("fit for
+     particular duties only", MO76 s 7(1)(b)) and the date of the examination
+     (s 16(1)) and puts them in certDates, which is shared document state - so
+     without this they went to every crew login and were kept on every crew
+     phone offline. They are shown on the certificate viewer, to management,
+     and nowhere else. */
+  const doc = {
+    people: [{ id: "p1", name: "EVANS, Brenton" }],
+    certDates: {
+      at: "2026-09-25T00:00:00.000Z",
+      map: {
+        "EVANS, BRENTON::QL-17": {
+          issued: "2026-06-05", expires: "2028-06-02", url: "/api/files/med",
+          assessedOn: "2026-06-02", conditions: "Fit for particular duties only",
+        },
+        "EVANS, BRENTON::QL-01": { issued: null, expires: "2031-05-26", conditions: null },
+      },
+      covers: { "EVANS, BRENTON::QL-03": { kind: "extension", until: "2026-11-25" } },
+    },
+  };
+  const view = JSON.parse(crewStateView(21, JSON.stringify(doc))) as typeof doc;
+  const cells = view.certDates.map as Record<string, Record<string, unknown>>;
+  assert.deepEqual(cells["EVANS, BRENTON::QL-17"], { issued: "2026-06-05", expires: "2028-06-02", url: "/api/files/med" },
+    "the dates crew read are the matrix; the words off the face of the document are not");
+  assert.equal("conditions" in cells["EVANS, BRENTON::QL-01"], false, "not even where the document printed none");
+  assert.deepEqual(view.certDates.covers, doc.certDates.covers, "and the covers are left as they are");
+
+  const plain = JSON.stringify({ certDates: { map: { "A::QL-01": { expires: "2031-05-26" } } } });
+  assert.equal(crewStateView(22, plain), plain, "nothing to take off: the same bytes go out");
+  const odd = JSON.stringify({ certDates: { map: { "A::QL-01": null } }, people: [] });
+  assert.equal(crewStateView(23, odd), odd, "and a cell that is not a record is left as it is");
+});

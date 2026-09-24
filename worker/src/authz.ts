@@ -51,9 +51,19 @@ export const denied = () =>
 
 /** What crew are never handed of the document: the two boxes beside each
  *  man on Crew Details (an admin page) that the round fills from his
- *  certificates, and the round's note of what it put in them. Crew read
- *  everything the portal shows them, and it shows them neither. */
-const CREW_NEVER_SEES = { person: ["msic", "dob"], document: ["particularsFromCert"] } as const;
+ *  certificates, the round's note of what it put in them, and what the round
+ *  read off the face of each certificate that only the certificate viewer
+ *  shows - the date of a medical examination and any limitation printed on
+ *  the document ("fit for particular duties only", MO76 s 7(1)(b)). A man's
+ *  medical limitation is his own business: it is shown to management on the
+ *  viewer and it is not put on every crew phone with the rest of the
+ *  document. Crew read everything the portal shows them, and it shows them
+ *  none of these. */
+const CREW_NEVER_SEES = {
+  person: ["msic", "dob"],
+  document: ["particularsFromCert"],
+  certDate: ["conditions", "assessedOn"],
+} as const;
 
 /* The crew's copy, made once per revision per isolate. The route hands the
    stored JSON through byte for byte because every open portal polls it
@@ -91,6 +101,26 @@ export function crewStateView(rev: number, dataText: string): string {
       }
       return person;
     });
+  }
+  /* The dates the round worked out for each person and column, keyed
+     PERSON::CODE. The dates themselves are the matrix, which crew read; the
+     two things read off the face of the document are not. */
+  const dates = doc.certDates as { map?: unknown } | undefined;
+  if (dates && typeof dates === "object" && !Array.isArray(dates)
+    && dates.map && typeof dates.map === "object" && !Array.isArray(dates.map)) {
+    const map = dates.map as Record<string, unknown>;
+    const clean: Record<string, unknown> = {};
+    let any = false;
+    for (const at of Object.keys(map)) {
+      const cell = map[at];
+      if (!cell || typeof cell !== "object" || Array.isArray(cell)) { clean[at] = cell; continue; }
+      const kept = { ...(cell as Record<string, unknown>) };
+      for (const key of CREW_NEVER_SEES.certDate) {
+        if (key in kept) { delete kept[key]; any = true; }
+      }
+      clean[at] = kept;
+    }
+    if (any) { doc.certDates = { ...dates, map: clean }; touched = true; }
   }
   // Nothing to take off: the bytes go out as they are, the way every other
   // grant gets them, rather than restrung.
