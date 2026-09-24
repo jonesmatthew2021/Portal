@@ -1,0 +1,252 @@
+{
+  "slug": "example",
+  "operator": "Example Marine",
+  "name": "MV",
+  "nameAccent": "Example",
+  "shortName": "Example",
+  "title": "MV Example - Crew Portal",
+  "strapline": "Port of Example · Example Ore",
+  "brand": { "logo": "brand/logo.png", "icon": "app/icon-192.png", "roundelText": ["EXAMPLE", "MARINE", "SAIL WELL"] },
+  "theme": {
+    "themeColor": "#1C5C8C",
+    "bodyBackground": "#F4F8FA",
+    "signIn": { "ink": "#16324a", "button": "#2e6a8e" },
+    "light": {
+      "deep": "#F4F8FA",
+      "panel": "#FFFFFF",
+      "raised": "#E8F0F5",
+      "rule": "#CFDCE6",
+      "text": "#12293D",
+      "muted": "#5D7688",
+      "accent": "#1C5C8C",
+      "accentSoft": "#DCEAF3",
+      "teal": "#2FA5AC",
+      "blue": "#1C5C8C"
+    },
+    "dark": {
+      "deep": "#0E1A24",
+      "panel": "#16242F",
+      "raised": "#1E3140",
+      "rule": "#2C4356",
+      "text": "#E6EEF4",
+      "muted": "#9CB2C2",
+      "accent": "#5AA6DB",
+      "accentSoft": "#16344B",
+      "teal": "#3FBEC6",
+      "blue": "#5AA6DB"
+    },
+    "fonts": {
+      "display": "'Archivo Narrow', 'Arial Narrow', sans-serif",
+      "body": "'IBM Plex Sans', system-ui, sans-serif",
+      "mono": "'IBM Plex Mono', ui-monospace, monospace"
+    }
+  },
+  "timezone": "Australia/Brisbane",
+  "domain": "example-portal.test",
+  "mailFrom": "MV Example Crew Portal <portal@example-portal.test>",
+  "emailDomainGuess": "examplemarine.test",
+  "it": { "name": "Alex Example" },
+  "contacts": { "opms": "AE", "correspondencePoster": "Alex Example" },
+  "links": { "opms": "https://opms.example.test/" },
+  "portways": { "partnership": "EXM", "vessel": "Example" },
+  "previewAccounts": [
+    { "name": "Alex Example" },
+    { "name": "Sam Sample" },
+    { "name": "ADMIN" },
+    { "name": "IT SUPPORT" }
+  ],
+  "parties": ["Example Marine", "Example Ports", "Example Customer", "MV Example", "Other"],
+  "swings": {
+    "ids": ["ALPHA", "BRAVO"],
+    "labels": { "A": "Swing Alpha", "B": "Swing Bravo" },
+    "pattern": { "anchor": "2026-01-07", "cycle": 14 },
+    "legacyNotes": [
+      { "id": "sw-2025-12", "label": "10 Dec – 24 Dec 2025" }
+    ]
+  },
+  "ranks": [
+    { "id": "master", "label": "Master", "dept": "Deck" },
+    { "id": "chief-officer", "label": "Chief Officer", "dept": "Deck" },
+    { "id": "second-officer", "label": "Second Officer", "dept": "Deck" },
+    { "id": "gph", "label": "GPH", "dept": "Deck" },
+    { "id": "chief-engineer", "label": "Chief Engineer", "dept": "Engine" },
+    { "id": "first-engineer", "label": "First Engineer", "dept": "Engine" },
+    { "id": "junior-engineers", "label": "Junior Engineers", "dept": "Engine" },
+    { "id": "chef", "label": "Chef", "dept": "Catering" }
+  ],
+  "depts": ["Deck", "Engine", "Catering"],
+  "deptOrder": ["Masters", "DECK OFFICERS", "GPH", "Engineers", "Chefs"],
+  "deptRenames": { "C/O": "DECK OFFICERS" },
+  "rankGroups": [
+    ["Masters", "master"],
+    ["Chief Officers", "chief (officer|mate)"],
+    ["Second Officers", "second (officer|mate)"],
+    ["Chief Engineer", "chief engineer"],
+    ["First Engineer", "first engineer"],
+    ["Junior Engineers", "junior engineer|assistant engineer"],
+    ["GPH", "\\bgph\\b|general purpose"],
+    ["Chefs", "cook|chef|steward"]
+  ],
+  "rosterRanks": [
+    "MASTER",
+    "CHIEF OFFICER",
+    "SECOND OFFICER",
+    "CHIEF ENGINEER",
+    "FIRST ENGINEER",
+    "JUNIOR ENGINEER",
+    "GPH",
+    "COOK"
+  ],
+  "rankToPortways": {
+    "Master": "Master",
+    "Chief Mate": "Chief Officer",
+    "2nd Mate": "Second Mate",
+    "Second Mate": "Second Mate",
+    "Chief Engineer": "Chief Engineer",
+    "1st Engineer": "First Engineer",
+    "Junior Engineer": "Assistant Engineer",
+    "GPH": "General Purpose Hand",
+    "Cook": "Cook"
+  },
+  "shift": {
+    "vesselCode": "EXA-MPL-MV",
+    "pools": [
+      { "pool": "master", "is": "\\bmaster" },
+      { "pool": "chief-officer", "is": "chief (officer|mate)" },
+      { "pool": "second-mate", "is": "second (mate|officer)" },
+      { "pool": "primary-engineer", "is": "chief engineer|(first|1st) engineer" },
+      { "pool": "assistant-engineer", "is": "(assistant|junior|third|3rd) engineer" },
+      { "pool": "gph", "is": "\\bgph\\b|general purpose hand" },
+      { "pool": "cook", "is": "\\b(cook|chef)" }
+    ],
+    "establishment": [
+      { "key": "master", "label": "Master", "pool": "master", "shifts": ["day", "night"] },
+      { "key": "chief-officer-a", "label": "Chief Officer (A)", "pool": "chief-officer", "shifts": ["day"] },
+      { "key": "chief-officer-b", "label": "Chief Officer (B)", "pool": "chief-officer", "shifts": ["night"] },
+      { "key": "second-mate", "label": "Second Mate", "pool": "second-mate", "shifts": ["day", "night"] },
+      {
+        "key": "primary-engineer-a",
+        "label": "Shift Primary Engineer",
+        "pool": "primary-engineer",
+        "shifts": ["day"]
+      },
+      {
+        "key": "primary-engineer-b",
+        "label": "Shift Primary Engineer",
+        "pool": "primary-engineer",
+        "shifts": ["night"]
+      },
+      {
+        "key": "assistant-engineer",
+        "label": "Assistant Engineer",
+        "pool": "assistant-engineer",
+        "shifts": ["day", "night"]
+      },
+      { "key": "gph", "label": "GPH", "pool": "gph", "shifts": ["day", "night"] },
+      { "key": "cook", "label": "Cook", "pool": "cook", "shifts": [] }
+    ],
+    "groups": [
+      { "id": "day", "title": "Day Shift", "hours": "1200 – 2400" },
+      { "id": "night", "title": "Night Shift", "hours": "2400 – 1200" },
+      { "id": "swing", "title": "Whole Swing", "hours": null }
+    ],
+    "sheetWords": { "day": "Shift 1", "night": "Shift 2" }
+  },
+  "customerMarks": {
+    "elearning": "EXC|Example Customer",
+    "auIssuers": ["example customer", "example marine"],
+    "nameStopWords": ["example", "marine", "alpha", "bravo"]
+  },
+  "elearningCodes": ["VS-04"],
+  "noExpiryCodes": ["VS-04"],
+  "elearningGroups": ["Project Induction", "Vessel Induction", "Project Specific"],
+  "certStated": { "QL-17": "1 or 2 years — as printed on the certificate" },
+  "certPageNotes": ["VS-04 Example e-learning has no expiry date."],
+  "tickets": {
+    "QL-01": { "grade": 6, "stream": "deck", "short": "Master" },
+    "QL-02": { "grade": 5, "stream": "deck", "short": "Chief Mate" },
+    "QL-03": { "grade": 4, "stream": "deck", "short": "Master <100m NC" },
+    "QL-04": { "grade": 3, "stream": "deck", "short": "Master <45m NC" },
+    "QL-08": { "grade": 2, "stream": "deck", "short": "Master <24m NC" },
+    "QL-05": { "grade": 6, "stream": "engine", "short": "Engineer Class 1" },
+    "QL-06": { "grade": 5, "stream": "engine", "short": "Engineer Class 2" },
+    "QL-07": { "grade": 3, "stream": "engine", "short": "Engineer Class 3 NC" },
+    "QL-09": { "grade": 2, "stream": "engine", "short": "Marine Engine Driver 2" },
+    "QL-10": { "grade": 1, "stream": "both", "short": "Integrated Rating" },
+    "QL-11": { "grade": 1, "stream": "catering", "short": "Marine Cook" }
+  },
+  "docBuckets": ["vesselSafety", "partnershipSafety", "insurance", "travel", "templates", "agreements", "documentation"],
+  "labels": {
+    "correspondence": "Customer Correspondence",
+    "pwCorrespondence": "Ports Correspondence",
+    "vesselSafety": "Vessel Safety Minutes",
+    "vesselSafetyPage": "Vessel Safety Meeting Minutes",
+    "partnershipSafety": "Partnership Quarterly Safety",
+    "partnershipSafetyPage": "Partnership Quarterly Safety Minutes",
+    "agreements": "Customer Agreements",
+    "documentation": "Misc Documents",
+    "travel": "Hotel and Flight Bookings",
+    "portwaysDocs": "Ports Documentation"
+  },
+  "qualColumns": [
+    ["QL-01", "Master", "Qualification"],
+    ["QL-02", "Chief Mate", "Qualification"],
+    ["QL-03", "Master <100m NC", "Qualification"],
+    ["QL-04", "Master <45m NC", "Qualification"],
+    ["QL-05", "Engineer Class 1, Chief Engineer (Motor)", "Qualification"],
+    ["QL-06", "Engineer Class 2, Second Engineer, Chief Engineer <3000 kW (Motor)", "Qualification"],
+    ["QL-07", "Engineer Class 3 NC", "Qualification"],
+    ["QL-08", "Master <24m NC", "Qualification"],
+    ["QL-09", "Marine Engine Driver Grade 2 NC", "Qualification"],
+    [
+      "QL-10",
+      "Integrated Rating, Able Seafarer - Deck, Able Seafarer - Engineer (STCW Reg II/5 & III/5)",
+      "Qualification"
+    ],
+    ["QL-11", "Marine Cook", "Qualification"],
+    ["QL-12", "Certificate of Safety Training (COST)", "Qualification"],
+    ["QL-13", "ECDIS - STCW Reg II/1 & II/2", "Qualification"],
+    ["QL-14", "GMDSS - STCW Reg IV/2", "Qualification"],
+    ["QL-15", "Long Range Operator Certificate of Proficiency (LROCP)", "Qualification"],
+    ["QL-16", "Fast Rescue Craft (FRC)", "Qualification"],
+    ["QL-17", "AMSA Certificate of Medical Fitness - Form 303", "Qualification"],
+    ["QL-18", "Provide First Aid - HLTAID011", "Qualification"],
+    ["QL-19", "Adv Resuscitation and Oxygen Therapy - HLTIAD015", "Qualification"],
+    ["QL-20", "Use hygienic practices for food safety - SITXFSA005", "Qualification"],
+    ["VS-01", "Maritime Security Identification Card", "Vessel Specific"],
+    ["VS-02", "ECDIS Type Specific - Furuno ECDIS, FMD series", "Vessel Specific"],
+    ["VS-04", "Helm CONNECT - Crew Basic + Jobs", "Vessel Specific"],
+    ["VS-05", "MRN - Connecting Tug to Barge Articouple System", "Vessel Specific"],
+    ["PS-01", "MRN - Marine Fauna Observer", "Project Specific"],
+    ["PS-02", "Example Customer - Mooring Operations Awareness - Onslow", "Project Specific"],
+    ["MS-01", "Phase 1 - ASD and ATB Theory & Assessment", "Master Specific"],
+    ["MS-02", "Phase 2 - Simulator Training & Practical Assessment ASD", "Master Specific"],
+    ["MS-03", "Phase 3 - Simulator Training & Practical Assessment ATB", "Master Specific"],
+    ["MS-04", "Phase 4a - On-Water Training & Practical Assessment ASD", "Master Specific"],
+    ["MS-05", "Phase 4b - On-Water Training & Practical Assessment ATB", "Master Specific"],
+    ["MS-06", "Phase 5 - On-Water Passing in the LNG Swing Basin", "Master Specific"],
+    ["MS-07", "Pilbara Ports Port of Example Pilotage Exemption Certificate", "Master Specific"],
+    ["CS-01", "MRN - EMS Tech Material Handling Systems - Single Point Loading System", "Cargo System"],
+    ["CS-02", "MRN - EMS Tech Material Handling Systems - Self-Unloading System", "Cargo System"],
+    ["CS-03", "Cargo System - Operator - Practical", "Cargo System"],
+    ["CS-04", "Cargo System - Trainer - Practical", "Cargo System"],
+    ["HR-01", "HRWL - Dogging - Dogging (DG)", "High Risk Work Licence (HRWL)"],
+    ["HR-02", "HRWL - Vehicle loading crane (CV)", "High Risk Work Licence (HRWL)"],
+    ["PT-01", "Example Customer - Lock Holder, Isolation and Tagging", "Permit to Work"],
+    ["PT-02", "Enter and Work in Confined Spaces - RIIWHS202E", "Permit to Work"],
+    ["PT-03", "Work Safely at Heights - RIIWHS204E", "Permit to Work"],
+    ["VI-01", "Onboard induction, familiarisation and training - Tug and Barge", "Vessel Induction"],
+    ["VI-02", "MRN - Tug and Barge Induction", "Vessel Induction"],
+    ["PI-01", "Example Customer - Code of Conduct & Business Integrity", "Project Induction"],
+    ["PI-02", "Example Customer - Corporate Safety Induction", "Project Induction"],
+    ["PI-03", "Example Customer - Hazard Report Card, Take Time & JHA", "Project Induction"],
+    ["PI-04", "Example Customer - Manual Handling", "Project Induction"],
+    ["PI-05", "Example Customer - Operational Health and Safety Induction", "Project Induction"],
+    ["PI-06", "Example Customer - Safe and Respectful Behaviours", "Project Induction"],
+    ["PI-07", "Example Customer - Welcome to Example Customer", "Project Induction"],
+    ["PI-08", "Example Customer - Cybersecurity Awareness Training", "Project Induction"],
+    ["PI-09", "Example Customer - Critical Risk Management (CRM) Awareness", "Project Induction"],
+    ["PI-10", "Example Customer - Airborne Contaminant Awareness Training", "Project Induction"]
+  ],
+  "crewFolders": { "smith-alan": "Al", "jones-bob": "Bob" }
+}

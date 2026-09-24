@@ -412,7 +412,7 @@ export async function extract(codes: [string, string][], limit: number) {
  *
  * Only a name that fits one person on the matrix and nobody else counts: the
  * surname and at least one given name both have to appear on the document, so
- * "EVANS, Brenton" is never taken for "EVANS, Dylan". Anything less certain is
+ * "SMITH, Alan" is never taken for "SMITH, Dan". Anything less certain is
  * left exactly where it was filed and reported as a difference instead — moving
  * a certificate into the wrong person's folder is worse than leaving it be.
  */
@@ -716,7 +716,7 @@ async function compare(matrix: Matrix, sheet: Sheet) {
 /**
  * The comparison itself. `nameOf` is how a certificate's person is read
  * before it is looked for on the matrix: the crew register's, where the
- * round passes one, so a certificate filed under "bILLY" claims the row the
+ * round passes one, so a certificate filed under "sAM" claims the row the
  * matrix calls "SITTIYOS, Kachin". A spelling the register does not know
  * stays itself, the same fallback applySettled uses. The route passes
  * nothing and compares names as they are, as it always has.
@@ -808,7 +808,7 @@ export async function compareMatrix(
     // The name on the document against the person it was filed under. A scan
     // filed against the wrong crew member is worse than one not filed at all.
     // The register's name for him counts as his too: a certificate filed
-    // under "bILLY" and printed "Kachin Sittiyos" is the same man.
+    // under "sAM" and printed "Sam Sample" is the same man.
     if (reading.holderName) {
       const on = words(reading.holderName);
       const filed = [...words(row.person), ...words(person)];

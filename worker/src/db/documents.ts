@@ -205,8 +205,8 @@ export const removedKeyFor = (row: { id: string; filename: string }) =>
 export const legacyRemovedKeyFor = (row: { id: string; filename: string }) =>
   `${REMOVED_ROOT}/${row.id}/${row.filename}`;
 
-// One folder per person. The name is slugged so "EVANS, Brenton", "Evans,
-// Brenton" and "evans  brenton" all file into the same folder rather than
+// One folder per person. The name is slugged so "SMITH, Alan", "Smith,
+// Alan" and "smith  alan" all file into the same folder rather than
 // leaving one person's certificates scattered across three. The portal uses the
 // same rule in the browser, so the folder a file is about to land in can be
 // shown before it is sent.
@@ -234,7 +234,7 @@ export const OPMS_FOLDER_NAMES: Record<string, string> = vessel.crewFolders;
  * The person's OPMS folder name: LASTNAME, First.
  *
  * The office named these folders for the person rather than for the record -
- * "Kyle", "PK", "Con", "Zac" - and the portal kept the crew as the matrix
+ * "Kyle", "AJ", "Bob", "Tom" - and the portal kept the crew as the matrix
  * writes them. Holding the two together took a lookup table and a fair
  * amount of guessing, and it still put the same man on the screen twice the
  * day somebody new arrived, once to be added and once to be removed.
@@ -613,7 +613,7 @@ export async function canonicaliseCertificate(
  *
  * It used to move - into a folder worked out from the new person's name. Where
  * the library had never used that name the move made the folder, so a
- * certificate found in "Billy - OPMS" and read as Kachin Sittiyos's ended up
+ * certificate found in "Sam - OPMS" and read as Sam Sample's ended up
  * alone in a new "SITTIYOS, Kachin" folder, and the library filled with empty
  * halves of people. The office keeps its own folders; the portal keeps its own
  * books, and the books are what the matrix reads.

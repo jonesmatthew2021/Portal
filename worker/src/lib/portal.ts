@@ -3,7 +3,7 @@
  *
  * The checker used to be blind on purpose. It was a conversation and nothing
  * else: whatever was typed, pasted or attached into it was all it had, and asked
- * about "the matrix" or "Brenton's medical" it could only say that it couldn't
+ * about "the matrix" or "Alan's medical" it could only say that it couldn't
  * see them and point at the pages that could. Everything the portal actually
  * holds — the shared record, the file store, a hundred scanned certificates, the
  * analyses already worked out — sat on the other side of a wall from the one part

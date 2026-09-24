@@ -755,7 +755,7 @@ export function recalcOnOpen(xml) {
  * office's file by the round.
  *
  * `opts.nameOf` reads a name the workbook writes through the crew register,
- * so a row the office calls "bILLY" is the matrix's "SITTIYOS, Kachin" and
+ * so a row the office calls "sAM" is the matrix's "SAMPLE, Sam" and
  * not a second man to be added underneath. The page's callers pass nothing
  * and names are compared as written, as they always were.
  * @param {ArrayBuffer} buf

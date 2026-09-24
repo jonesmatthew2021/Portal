@@ -161,7 +161,7 @@ export async function survey(tick: (pct: number, word: string) => Promise<void> 
 
   /* --- the certificates' one home: a folder per person under OPMS ---------
    *
-   * The office's folders were "<First name> - OPMS" - Brenton - OPMS, Evan -
+   * The office's folders were "<First name> - OPMS" - Alan - OPMS, Bob -
    * OPMS. They are being renamed to the person's own name and nothing else,
    * because the folder already sits inside OPMS Documents and saying it twice
    * told nobody anything.

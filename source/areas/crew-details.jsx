@@ -134,7 +134,7 @@ function CrewDetails() {
    * location is the one folder in the library that the crew's folders sit in,
    * and it is set once for everybody. A man's own folder is only written down
    * where the folder underneath it cannot be worked out from his name - the
-   * office called it "Kyle", or "PK", or something that is not a name at all -
+   * office called it "Kyle", or "AJ", or something that is not a name at all -
    * and saying so here settles it for good.
    *
    * Both are folders the library already has. Neither makes one: the folders
@@ -594,7 +594,7 @@ function CrewDetails() {
              * before the office's " - OPMS" tail — under the register's own
              * rules: a spelling it has been taught, or a word exactly one man
              * answers to. "Evgeny - OPMS" reaches EVDOKIMOV, Evgeny; "Chris"
-             * and "PK" reach nobody and are left for by hand, because
+             * and "AJ" reach nobody and are left for by hand, because
              * guessing here files one man's certificates as another's.
              *
              * Nothing said by hand is touched: a man who already has a folder

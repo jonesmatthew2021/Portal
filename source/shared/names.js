@@ -50,9 +50,9 @@ export function isCrewRow(row) {
  * The crew register: one place a person is named, and everything reads it.
  *
  * The office writes the same man six ways. The matrix spreadsheet has
- * "bILLY", his SharePoint folder is "Billy - OPMS", his certificates are
- * signed "SITTIYOS, Kachin", the travel roster says "KACHIN SITTIYOS" and the
- * swing list says "Kachin Sittiyos". Every one of those is a different string,
+ * "sAM", his SharePoint folder is "Sam - OPMS", his certificates are
+ * signed "SAMPLE, Sam", the travel roster says "SAM SAMPLE" and the
+ * swing list says "Sam Sample". Every one of those is a different string,
  * so nothing joined up and the man read as holding no paperwork at all.
  *
  * Renaming things to agree was tried and it does not hold - the next export
@@ -61,7 +61,7 @@ export function isCrewRow(row) {
  * every other spelling they are known by, and the portal answers to any of
  * them and speaks only the register's.
  *
- * Which means a folder called "Billy - OPMS" can stay called that for ever.
+ * Which means a folder called "Sam - OPMS" can stay called that for ever.
  * ======================================================================== */
 
 /** A name with everything that is not a letter taken out, for comparing.
@@ -80,8 +80,8 @@ export const registerWords = (n) => String(n || "").toUpperCase().split(/[^A-Z]+
  * Two ways of asking. First the spelling itself, letter for letter, which
  * covers the register's own names and every alias listed against them.
  *
- * Then the words, in any order. The travel roster writes "BRENTON EVANS" and
- * "MICHAEL CHRISTIE ROGERS" where the matrix writes "EVANS, Brenton" and
+ * Then the words, in any order. The travel roster writes "ALAN SMITH" and
+ * "MICHAEL CHRISTIE ROGERS" where the matrix writes "SMITH, Alan" and
  * "ROGERS, Michael" — the same man, the same words, put in the other order and
  * sometimes with a middle name along. Left to aliases that would have been
  * forty rows of the office's two habits, answered one at a time, and answered

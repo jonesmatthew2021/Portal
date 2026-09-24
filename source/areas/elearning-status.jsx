@@ -25,7 +25,7 @@ function ELearningStatus() {
       .map((c, i) => ({ code: c[0], title: c[1], group: c[2], i }))
       // The named exceptions too — modules filed under another group but sat
       // at a computer all the same: VS-04 Helm CONNECT, and anything MRN, MRM
-      // or MinRes issue.
+      // of the customer's issue.
       .filter((c) => ELEARNING_GROUPS.includes(c.group) || isELearningItem(c.code, c.title)),
     [QUALS],
   );

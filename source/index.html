@@ -2436,7 +2436,7 @@ function skillsRequirementsFrom(XLSX, wb) {
    * holding them is ninety thousand characters on its own and the text was cut
    * off at sixty, so the model never saw most of the table and the portal ran
    * with no periods at all. A certificate that prints an issue date but no
-   * expiry - which is every MinRes induction, every cargo system module, eight
+   * expiry - which is every customer induction, every cargo system module, eight
    * hundred and twenty-four of them - could not be dated, so those columns
    * could only ever be filled from the crew qualification spreadsheet.
    *
@@ -2461,7 +2461,7 @@ function skillsRequirementsFrom(XLSX, wb) {
 
 /* Which of those positions a crew member's own position answers to, and what
    it must hold. The sheet's site prefix and berth letters are set aside, so
-   "ONS-MRN-TSV Chief Officer (A)" answers to "Chief Officer - Unlimited" —
+   "<site code> Chief Officer (A)" answers to "Chief Officer - Unlimited" —
    and where a rank has two berths, only what every berth demands is asked,
    so nobody is marked missing the other berth's ticket. */
 const REQ_SYNONYM = { chef: "cook", chefs: "cook", cooks: "cook" };
@@ -4784,7 +4784,7 @@ function CrewRosters({ people, setPeople, board, setBoard, log, currentUser, vie
     const names = MATRIX.rows.map((r) => r[0]);
     const m = {};
     // A name already in SURNAME, First form is shown exactly as stored. The
-    // matrix match only fills out old shorthand entries ("Brenton") — it must
+    // matrix match only fills out old shorthand entries ("Alan") — it must
     // never swallow a new person who shares a given name with somebody.
     people.forEach((p) => {
       m[p.id] = p.name.includes(",") ? p.name : (matchRoster(p.name, names) || p.name);
@@ -5732,7 +5732,7 @@ async function fileChecksum(file) {
 
 // Who a file belongs to, guessed from its name, so a folder of fifty scans mostly
 // sorts itself. A surname on its own is only taken when one person has it —
-// "EVANS, Brenton" and "EVANS, Dylan" are left for the uploader to choose between.
+// "SMITH, Alan" and "SMITH, Dan" are left for the uploader to choose between.
 function guessPerson(filename, names) {
   const hay = " " + filename.toLowerCase().replace(/[^a-z0-9]+/g, " ") + " ";
   const has = (w) => w.length > 2 && hay.includes(" " + w + " ");
@@ -5763,7 +5763,7 @@ const nameWords = (s) =>
   (s || "").normalize("NFKD").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 
 // Crew folders are named for the person with the system they came out of on the
-// end — "Anand - OPMS", "Brenton - OPMS". Everything from the first spaced dash
+// end — "Alan - OPMS", "Bob - OPMS". Everything from the first spaced dash
 // on is dropped so the folder reads as a name; a hyphenated name keeps its
 // hyphen, because that one has no spaces around it.
 const folderPerson = (label) =>
@@ -5773,7 +5773,7 @@ const folderPerson = (label) =>
  * Which crew member a folder belongs to.
  *
  * Whoever made the folders typed the name however they think of the person — a
- * given name ("Brenton"), a surname ("Rogers"), a short form ("Chris", "Con") —
+ * given name ("Alan"), a surname ("Smith"), a short form ("Chris", "Bob") —
  * so the roster is tried in order of how certain the match is. Anything that
  * could be two people is left blank rather than guessed: "Matthew" is three
  * people on this roster, and filing a certificate against the wrong one is worse
@@ -5789,7 +5789,7 @@ function matchRoster(label, names) {
   });
   const one = (list) => (list.length === 1 ? list[0].name : "");
 
-  // Surname and given name both there — "Evans Brenton" either way round.
+  // Surname and given name both there — "Smith Alan" either way round.
   const both = rows.filter((r) => want.includes(r.surname) && r.given.some((g) => want.includes(g)));
   if (both.length) return one(both);
 
@@ -5801,7 +5801,7 @@ function matchRoster(label, names) {
   // Matched more than one person by name — stop rather than fall to a weaker test.
   if (byGiven.length || bySurname.length) return "";
 
-  // Short forms: "Chris" for Christopher, "Con" for Cornelius. Only from three
+  // Short forms: "Chris" for Christopher, "Bob" for Robert. Only from three
   // letters up, and only when it fits one person.
   return one(
     rows.filter((r) =>
@@ -9395,8 +9395,8 @@ const normTitle = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " 
 /* The roster and the matrix are each fine on their own and the question nobody
    could answer was the one across both of them: of the people rostered onto the
    next swing, who turns up with something expired, missing, or running out while
-   they are onboard. The roster carries the name the crew use ("Brenton") and the
-   matrix carries the name on the certificate ("EVANS, Brenton"), so the two are
+   they are onboard. The roster carries the name the crew use ("Alan") and the
+   matrix carries the name on the certificate ("SMITH, Alan"), so the two are
    matched the same way a dropped certificate folder is - and anyone the match
    isn't sure about is reported as unchecked rather than guessed at and passed. */
 /* A section of the swing page, always open: the title, the verdict beside it,
@@ -11469,7 +11469,7 @@ function SyncPeople({ found, onClose }) {
    *
    * A folder is named however the office names it. Most are a first name -
    * "Kyle", "Travis" - some are a nickname no rule would ever get to from the
-   * crew list ("PK" for Preetham Kumar), and some are a surname. So the pairing
+   * crew list ("AJ" for Alan James), and some are a surname. So the pairing
    * is taken in three passes, each surer than the one under it:
    *
    *   1. what somebody has already said outright, and been remembered;
@@ -15777,8 +15777,8 @@ function Portal({ role, onSignOut }) {
      empty most of the matrix. */
   const filledFromCert = store.filledFromCert || {}, setFilledFromCert = put("filledFromCert");
   /* Which OPMS folder belongs to whom, where the name alone doesn't say.
-     The office names its folders for the person, not for the record - "PK",
-     "Con", "Zac", "Chris" - and the portal keeps the crew as the matrix writes
+     The office names its folders for the person, not for the record - "AJ",
+     "Bob", "Tom", "Chris" - and the portal keeps the crew as the matrix writes
      them. Rather than make the office rename forty folders, the pairing is
      written down here the once, the first time anybody is asked. */
   const folderNames = store.folderNames || {}, setFolderNames = put("folderNames");
@@ -15861,7 +15861,7 @@ function Portal({ role, onSignOut }) {
       const map = {};
       /* The server reads these off the documents, which carry their folder's
          wording. Keyed under the register's name instead, so a date found in
-         "Billy - OPMS" reaches Kachin Sittiyos's row. */
+         "Sam - OPMS" reaches Sam Sample's row. */
       const known = asKnownPerson(people);
       (r.dates || []).forEach((d) => {
         map[`${known(d.person).toUpperCase()}::${String(d.code || "").toUpperCase()}`] = {

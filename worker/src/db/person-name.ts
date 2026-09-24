@@ -2,7 +2,7 @@
  * One way of writing a crew member's name down: LASTNAME, First.
  *
  * The office's OPMS folders were named for the person rather than for the
- * record - "Kyle", "PK", "Con", "Zac" - and the portal kept the crew as the
+ * record - "Kyle", "AJ", "Bob", "Tom" - and the portal kept the crew as the
  * crew matrix writes them, "EVDOKIMOV, Evgeny". Holding the two together took
  * a lookup table, a pairing question and a fair amount of guessing, and it
  * still put the same man on the screen twice the day somebody new arrived.

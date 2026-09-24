@@ -12,13 +12,13 @@
  * no longer exists, the page failing to compile, preview.html drifting from the
  * portal it is meant to mirror, and the worker's types going astray.
  */
-import { readFileSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { buildPreview } from "./build-preview.mjs";
-import { portalJsx, areaFiles, sharedFiles } from "./source.mjs";
+import { portalJsx, portalSource, areaFiles, sharedFiles, readVessel } from "./source.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(join(ROOT, "tools", "package.json"));
@@ -257,6 +257,37 @@ if (!existsSync(rulesTest)) {
     }
   });
 }
+
+/* --------------------------------------------------------------- 10 */
+run("The vessel's name lives only in the vessel file", () => {
+  /* The portal is stood up for another vessel by copying the code and writing
+     a new source/vessel.json - so nothing but that file may name this one.
+     The page is assembled here, in memory, for a made-up vessel
+     (tools/fixtures/example-vessel.json) and read for this vessel's names,
+     and the worker's own sources are read the same way; the fauna log's files
+     are another job's and are left out. A hit is a name that would follow the
+     code onto the next vessel's portal. The real build is not touched. */
+  const WORDS = ["Coolibah", "United Marine", "MinRes", "Perth", "Ashburton",
+    "coolibah-portal", "unitedmarine", "Preetham", "Matthew Jones", "ONS-MRN"];
+  const hits = [];
+  const look = (where, text) => text.split("\n").forEach((line, i) => {
+    for (const w of WORDS) if (line.includes(w)) hits.push(where + ":" + (i + 1) + "  \"" + w + "\"  " + line.trim().slice(0, 90));
+  });
+  const example = readVessel(join(ROOT, "tools", "fixtures", "example-vessel.json"));
+  look("the page assembled for " + example.name + " " + example.nameAccent, portalSource({ vessel: example }));
+  const sources = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((d) =>
+    d.isDirectory() ? sources(join(dir, d.name))
+      : d.name.endsWith(".ts") && !d.name.includes("fauna") ? [join(dir, d.name)] : []);
+  const files = sources(join(ROOT, "worker", "src"));
+  for (const f of files) look(relative(ROOT, f).replace(/\\/g, "/"), readFileSync(f, "utf8"));
+  if (hits.length) {
+    throw new Error(
+      hits.length + " place(s) still name this vessel outside source/vessel.json:\n      " +
+      hits.slice(0, 12).join("\n      ") + (hits.length > 12 ? "\n      ..." : ""),
+    );
+  }
+  return "the page for a made-up vessel and " + files.length + " worker files name nothing of this one";
+});
 
 /* ---------------------------------------------------------------------- */
 console.log("");

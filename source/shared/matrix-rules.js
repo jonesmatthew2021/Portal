@@ -154,7 +154,7 @@ export function readExpiryRules(rows) {
  *
  * `nameOf` is how a name is read before it is compared: the crew register's
  * nameOf, where there is one, so a settled date for "SITTIYOS, Kachin" lands
- * on the row the spreadsheet still calls "bILLY". The row keeps its name as
+ * on the row the spreadsheet still calls "sAM". The row keeps its name as
  * written. A spelling the register does not know (its nameOf answers null)
  * is compared as it is, so a stranger's row stays his own and never falls
  * in with another stranger's. Left out, names are compared as they are.

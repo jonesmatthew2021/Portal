@@ -15,7 +15,7 @@ import { PORTAL_ROW_ID } from "./schema.js";
  * that has never been near the button carries on exactly as it did.
  *
  * A man's own folder is set against him on his row, for the folder whose name
- * does not say whose it is. "Kyle", "PK", "Chris - OPMS" - the sync reads a
+ * does not say whose it is. "Kyle", "AJ", "Chris - OPMS" - the sync reads a
  * folder name and works out the man, and where it cannot, this is where the
  * answer was written down. What is written down here beats what is worked out,
  * always: that is the whole point of having been asked.
