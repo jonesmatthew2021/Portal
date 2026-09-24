@@ -202,8 +202,10 @@ test("no folder is invented for a man the portal cannot place", () => {
 /* Crew Details picks folders out of the library, so it saves a real library
    path. The rest of the portal speaks its own keys. Getting this translation
    wrong sends the sync looking in a folder that does not exist, and it finds
-   nothing at all — which reads on the screen as the library being empty. */
-setEnv({
+   nothing at all — which reads on the screen as the library being empty.
+   Set inside each test, not once for the file: the sync's tests run in
+   this process too and leave the env as they last set it. */
+const libraryMap = () => setEnv({
   SHAREPOINT_ROOT: "United Operations Team/Crew Portal",
   SHAREPOINT_MAP: JSON.stringify({
     "certification/spreadsheet/": "United Operations Team/Crew Portal/Crew Certificates Spreadsheet/",
@@ -216,14 +218,17 @@ setEnv({
 } as never);
 
 test("the OPMS folder picked in the library is the portal's own opms", () => {
+  libraryMap();
   assert.equal(asKey("United Operations Team/OPMS Documents"), "opms");
 });
 
 test("a man's folder inside it keeps its place", () => {
+  libraryMap();
   assert.equal(asKey("United Operations Team/OPMS Documents/Kyle"), "opms/Kyle");
 });
 
 test("a folder the map says nothing about still has a key of its own", () => {
+  libraryMap();
   // Not left as it was: a bare real path would be read as a key and re-rooted
   // inside the portal's own folder, where there is nothing — so the sync would
   // walk an empty folder and report that the library held no certificates.
@@ -231,10 +236,12 @@ test("a folder the map says nothing about still has a key of its own", () => {
 });
 
 test("a folder inside the portal's own is a plain key, as it always was", () => {
+  libraryMap();
   assert.equal(asKey("United Operations Team/Crew Portal/Matrix"), "matrices");
 });
 
 test("nothing picked is nothing set, and the portal keeps its own default", () => {
+  libraryMap();
   assert.equal(asKey(""), "");
 });
 
