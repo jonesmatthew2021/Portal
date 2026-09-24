@@ -4,5 +4,12 @@
   "description": "Local tooling for the portal build folder - the fast-preview compiler and the localhost server.",
   "dependencies": {
     "@babel/standalone": "^7.24.0"
+  },
+  "devDependencies": {
+    "@fontsource/archivo-narrow": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
   }
 }

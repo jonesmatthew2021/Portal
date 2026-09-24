@@ -409,7 +409,17 @@ const PUBLIC_FILES = new Set([
   "/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/apple-touch-icon.png",
   // The fauna log's own home-screen icon and manifest.
   "/fauna/manifest.webmanifest", "/fauna/icon-192.png", "/fauna/icon-512.png",
+  // The service worker that keeps the last-loaded portal readable offline.
+  "/sw.js",
 ]);
+
+/** Whether a path is fetched outside any sign-in: the home-screen files, the
+ *  service worker, and React, React DOM and the fonts under /vendor/ - the
+ *  page's own building blocks, which carry nothing of the crew's. A script
+ *  answered with the sign-in page instead would break the page that asked. */
+export function publicPath(path: string): boolean {
+  return PUBLIC_FILES.has(path) || path.startsWith("/vendor/");
+}
 
 export async function gate(
   req: Request,
@@ -434,8 +444,9 @@ export async function gate(
   if (path === "/login/verify" && req.method === "POST") return { barred: await handleVerify(req), user: null };
   if (path === "/logout") return { barred: await handleLogout(req), user: null };
   // The home-screen app's icon and manifest are fetched by the phone itself,
-  // outside any sign-in — they carry nothing but the roundel.
-  if (PUBLIC_FILES.has(path)) return { barred: null, user: null };
+  // outside any sign-in — they carry nothing but the roundel; the service
+  // worker and the vendor files are the page's own parts (publicPath).
+  if (publicPath(path)) return { barred: null, user: null };
 
   const user = await currentUser(req);
   if (user) {

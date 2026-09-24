@@ -40,6 +40,13 @@ export const into = (text, values) =>
   text.replace(SLOTS, (mark) => (mark in values ? JSON.stringify(values[mark]).replace(/</g, "\\u003c") : mark));
 export const vesselIntoShim = (shim, vessel) => into(shim, { __VESSEL__: vessel });
 
+/** The page with every /vendor/ address pointed at source/vendor/ instead:
+ *  the two script tags and the font files. Only the two spellings the page
+ *  uses are touched (src="/vendor/ and url('/vendor/), so a word in a note
+ *  that happens to say /vendor/ is left alone. */
+export const withPreviewVendor = (page) =>
+  page.split('src="/vendor/').join('src="source/vendor/').split("url('/vendor/").join("url('source/vendor/");
+
 /** Returns the built preview. Writes it to preview.html unless write is false. */
 export function buildPreview({ write = true, quiet = false } = {}) {
   const vessel = readVessel();
@@ -71,6 +78,12 @@ export function buildPreview({ write = true, quiet = false } = {}) {
   const at = out.indexOf(ANCHOR);
   if (at < 0) throw new Error("source/index.html has no babel script tag to sit in front of.");
   out = BANNER + out.slice(0, at) + shim + "\n" + out.slice(at);
+
+  // React, React DOM and the fonts sit at /vendor/ on the live site. The
+  // preview is a file in the build folder - opened by double-click, or
+  // served by tools/serve.ps1 - so the same files are asked for by the
+  // path that works from both: source/vendor/, beside preview.html.
+  out = withPreviewVendor(out);
 
   if (write) {
     writeFileSync(join(ROOT, "preview.html"), out);

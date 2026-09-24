@@ -61,6 +61,7 @@ $mime = @{
   '.webp'='image/webp'; '.svg'='image/svg+xml'; '.ico'='image/x-icon'
   '.pdf'='application/pdf'; '.txt'='text/plain; charset=utf-8'
   '.ts'='text/plain; charset=utf-8'; '.mjs'='text/javascript'
+  '.woff2'='font/woff2'; '.webmanifest'='application/manifest+json'
   '.xlsx'='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
   '.docx'='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 }
@@ -88,6 +89,10 @@ while ($listener.IsListening) {
       $res.OutputStream.Write($tok, 0, $tok.Length)
       $res.Close(); continue
     }
+
+    # The live site serves React, React DOM and the fonts at /vendor/; the
+    # copies are source/vendor/, so the live path answers from there too.
+    if ($rel -like 'vendor/*') { $rel = 'source/' + $rel }
 
     $isFront = ($rel -eq '')
     if ($isFront) {

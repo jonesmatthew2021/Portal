@@ -23,11 +23,13 @@
 <script>
 /* An error thrown inside a script served from another domain reaches this
    handler stripped down to the words "Script error." — no file, no line, no
-   stack. React, React DOM and Babel are all served from a CDN, and React
+   stack. React, React DOM and Babel were all served from a CDN, and React
    rethrows anything an event handler throws, so almost every fault in the
-   portal used to arrive here anonymous and unfixable. The three tags below
-   now carry crossorigin="anonymous", which is what lets the browser hand the
-   real message over, and this handler reports everything it is given. */
+   portal used to arrive here anonymous and unfixable. React and React DOM
+   are served from the portal itself now (same origin, so the message comes
+   through whole); the Babel tag, which only the preview loads, carries
+   crossorigin="anonymous" for the same reason, and this handler reports
+   everything it is given. */
 (function () {
   var pending = null;
 
@@ -102,8 +104,12 @@
   });
 })();
 </script>
-<script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-<script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<!-- React and React DOM are the portal's own copies (source/vendor, the
+     18.2.0 builds the page always ran on), served from the same place as the
+     page so a device at sea with no link still has them. Only Babel, which the
+     preview alone loads, still comes from the CDN. -->
+<script src="/vendor/react.production.min.js"></script>
+<script src="/vendor/react-dom.production.min.js"></script>
 <script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 </head><body>
 <div id="fatal"></div>
@@ -774,8 +780,25 @@ function useScheme() {
   return dark;
 }
 
+/* The three families the page is set in, served from the portal itself
+   (source/vendor/fonts, the latin files from the @fontsource packages) rather
+   than from Google: a phone at sea with no link still has them, and nothing
+   about the page waits on another company's server. The same weights the
+   Google import used to ask for, the same letters it used to serve (the
+   unicode-range is Google's latin range), swap so text is never invisible
+   while a file loads. */
+const FONT_FILES = [
+  ["Archivo Narrow", "archivo-narrow", [500, 600, 700]],
+  ["IBM Plex Sans", "ibm-plex-sans", [400, 500, 600]],
+  ["IBM Plex Mono", "ibm-plex-mono", [400, 500, 600]],
+];
+const fontFaces = () => FONT_FILES.map(([family, file, weights]) => weights.map((w) => `
+@font-face { font-family: '${family}'; font-style: normal; font-weight: ${w}; font-display: swap;
+  src: url('/vendor/fonts/${file}-latin-${w}-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }`).join("")).join("\n");
+
 const stylesNow = () => `
-@import url('https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+${fontFaces()}
 
 .um * { box-sizing: border-box; }
 .um-btn { cursor: pointer; border: none; font-family: ${T.display}; text-transform: uppercase;

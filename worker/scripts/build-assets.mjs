@@ -53,6 +53,31 @@ writeFileSync(join(ASSETS, "manifest.webmanifest"), manifestFor(vessel));
 for (const [key, served] of BRAND_FILES) {
   if (served) copyFileSync(join(REPO, "source", vessel.brand[key]), join(ASSETS, served));
 }
+// React, React DOM and the fonts are the portal's own copies under
+// source/vendor, served at /vendor/ so a device with no link still has them.
+// They are committed once and copied here as they are. The two React files
+// must be the very builds the tools' package.json names (18.2.0, from
+// tools/node_modules), so a copy that drifted from the package would stop
+// the build here rather than ship a React nobody chose.
+const VENDOR = join(REPO, "source", "vendor");
+for (const [name, pkg] of [["react.production.min.js", "react"], ["react-dom.production.min.js", "react-dom"]]) {
+  // The packages' "exports" hide the umd folder from require.resolve, so
+  // the file is found beside the package.json, which they do export.
+  const installed = join(dirname(require.resolve(pkg + "/package.json")), "umd", name);
+  if (!readFileSync(join(VENDOR, name)).equals(readFileSync(installed))) {
+    throw new Error("source/vendor/" + name + " is not the " + pkg + " build in tools/node_modules - copy it over again.");
+  }
+}
+const copyTree = (from, to) => {
+  mkdirSync(to, { recursive: true });
+  let n = 0;
+  for (const entry of readdirSync(from, { withFileTypes: true })) {
+    if (entry.isDirectory()) n += copyTree(join(from, entry.name), join(to, entry.name));
+    else { copyFileSync(join(from, entry.name), join(to, entry.name)); n++; }
+  }
+  return n;
+};
+const vendorFiles = copyTree(VENDOR, join(ASSETS, "vendor"));
 // The fauna log — the phone app at /fauna/ — is its own folder, carried over
 // as it is: the page, its rules module, its manifest and icons, and the
 // workbook template the month export is written into. Plain files, nothing
@@ -63,5 +88,5 @@ const faunaFiles = readdirSync(join(REPO, "source", "fauna")).filter((f) => !f.e
 for (const f of faunaFiles) copyFileSync(join(REPO, "source", "fauna", f), join(FAUNA, f));
 
 console.log(
-  `assets built — index.html ${(out.length / 1024 / 1024).toFixed(1)} MB (compiled in ${((Date.now() - t0) / 1000).toFixed(1)}s), crew-list-form.html, app icons and the fauna log (${faunaFiles.length} files) copied`,
+  `assets built — index.html ${(out.length / 1024 / 1024).toFixed(1)} MB (compiled in ${((Date.now() - t0) / 1000).toFixed(1)}s), crew-list-form.html, app icons, the vendor files (${vendorFiles}) and the fauna log (${faunaFiles.length} files) copied`,
 );
