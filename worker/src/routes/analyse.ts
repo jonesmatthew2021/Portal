@@ -994,9 +994,19 @@ export async function compareMatrix(
          open it. Its date is cut back to the foreign certificate's below. */
       const mineIsRec = isRecognitionReading(reading);
       const sittingIsRec = isRecognitionReading(sitting.reading);
+      /* The medical is the one exception to "the longer runs": it expires the
+         moment a further one is issued (MO76 s 16(3)), so of two on file the
+         one ISSUED last is the one in force even where the older prints the
+         later date. A shorter certificate signed after an injury wins. Two
+         issued the same day have nothing in the order to separate them and
+         fall back to the longer, as everything else does. */
+      const byIssue = certStatesOwnExpiry(code)
+        && (reading.issuedOn || "") !== (sitting.reading.issuedOn || "");
       const inForce = mineIsRec !== sittingIsRec
         ? (mineIsRec ? { row, reading } : sitting)
-        : (expiryOf(row, reading) || "") > (expiryOf(sitting.row, sitting.reading) || "") ? { row, reading } : sitting;
+        : byIssue
+          ? ((reading.issuedOn || "") > (sitting.reading.issuedOn || "") ? { row, reading } : sitting)
+          : (expiryOf(row, reading) || "") > (expiryOf(sitting.row, sitting.reading) || "") ? { row, reading } : sitting;
       const replaced = inForce === sitting ? { row, reading } : sitting;
       claim.set(key, inForce);
       notes.push({
@@ -1004,7 +1014,9 @@ export async function compareMatrix(
         person: replaced.row.person,
         detail: mineIsRec !== sittingIsRec
           ? `Two certificates on file for ${code}. ${inForce.row.filename} is AMSA's certificate of recognition, which is the document that counts here, so ${replaced.row.filename} is the foreign certificate behind it.`
-          : `Two certificates on file for ${code}. ${inForce.row.filename} runs the longer, so ${replaced.row.filename} is treated as the one it replaced.`,
+          : byIssue
+            ? `Two certificates on file for ${code}. ${inForce.row.filename} was issued last, so ${replaced.row.filename} expired the day it was signed.`
+            : `Two certificates on file for ${code}. ${inForce.row.filename} runs the longer, so ${replaced.row.filename} is treated as the one it replaced.`,
         certificate: { id: replaced.row.id, filename: replaced.row.filename, url: `/api/files/${replaced.row.id}` },
       });
       continue;

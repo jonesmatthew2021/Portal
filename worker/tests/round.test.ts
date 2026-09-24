@@ -4340,8 +4340,9 @@ const coversMatrix = {
   rows: [["EVANS, Brenton", "Master", "", ["", "", "", "", ""]]] as [string, string, string, string[]][],
 };
 
-/** A database holding the certificates given, each with its reading. */
-const coversDb = (certs: { row: Partial<Row>; reading: unknown }[]) => {
+/** A database holding the certificates given, each with its reading, and the
+ *  crew register the evidence rule reads names through. */
+const coversDb = (certs: { row: Partial<Row>; reading: unknown }[], people: unknown[] = [{ name: "EVANS, Brenton", aliases: [] }]) => {
   const rows = certs.map((c, i) => ({
     ...billysTicket, id: "cov" + i, person: "EVANS, Brenton", folder: "evans",
     bucket: "evans", checksum: "sum" + i, filename: "cert" + i + ".pdf",
@@ -4355,6 +4356,7 @@ const coversDb = (certs: { row: Partial<Row>; reading: unknown }[]) => {
     // The page's own dates ask for one reading at a time, by its key.
     if (/SELECT value FROM blobs/.test(sql)) return { results: readings.filter((r) => args.includes(r.key)) };
     if (/UPDATE documents/.test(sql)) return { changes: 1 };
+    if (/FROM portal_state/.test(sql)) return { results: [{ data: JSON.stringify({ people }), rev: 1 }] };
     return undefined;
   });
 };
@@ -4519,4 +4521,111 @@ test("recognition: where nothing is known about the certificate behind it, the c
   const two = told.dates.find((d) => d.code === "QL-01")!;
   assert.equal(two.expires, "2029-03-01", "where it prints the foreign expiry, the earlier of the two governs on the page too");
   assert.equal(two.foreignUnknown, false);
+});
+
+/* ------------------------------------------------------------------------ *
+ * The medical. A medical expires the moment a further one is issued
+ * (MO76 s 16(3)), so of two on file the one ISSUED last governs - even where
+ * the older one prints the later expiry. Taking the later date would put a
+ * man to sea on a certificate a doctor has already replaced.
+ * ------------------------------------------------------------------------ */
+const medCols = [["QL-17", "AMSA Certificate of Medical Fitness - Form 303", "Qualification"]] as [string, string, string][];
+const medMatrix = {
+  cols: medCols,
+  rows: [["EVANS, Brenton", "Master", "", [""]]] as [string, string, string, string[]][],
+};
+const medical = (over: Record<string, unknown>) => ({
+  ...evansCoC, certificateTitle: "Certificate of Medical Fitness", qualCode: "QL-17",
+  endorsements: [], units: [], assessedOn: null, conditions: null, ...over,
+});
+
+test("the medical: the one issued last governs, even where the older prints the later expiry", async () => {
+  const certs = [
+    // Issued first, runs to 2028. A full two-year certificate.
+    { row: { id: "old", qualCode: "QL-17" }, reading: medical({ issuedOn: "2026-01-10", expiresOn: "2028-01-10" }) },
+    // Issued after an injury: shorter, but it is the one in force.
+    { row: { id: "new", qualCode: "QL-17" }, reading: medical({ issuedOn: "2026-06-02", expiresOn: "2027-06-02", conditions: "Fit for particular duties only" }) },
+  ];
+  setEnv({ DB: coversDb(certs), FILE_STORE: "r2" } as never);
+  const out = await compareMatrix(medMatrix, null, evansOnly);
+  assert.deepEqual(out.settled, [{ person: "EVANS, Brenton", code: "QL-17", value: "2027-06-02" }],
+    "the medical issued last is the one in force, whatever the older one prints");
+  assert.equal(out.items.find((i) => i.code === "QL-17")!.certificate!.id, "new");
+
+  setEnv({ DB: coversDb(certs), FILE_STORE: "r2" } as never);
+  const dates = await certificateStanding();
+  const one = dates.dates.find((d) => d.code === "QL-17")!;
+  assert.equal(one.expires, "2027-06-02", "and the page's cell agrees with the round");
+  assert.equal(one.fileId, "new");
+  assert.equal(one.conditions, "Fit for particular duties only",
+    "the limitation printed on it rides along, for the certificate viewer");
+});
+
+test("the medical: the assessment date rides along, and a condition on any certificate does", async () => {
+  setEnv({ DB: coversDb([
+    { row: { id: "med", qualCode: "QL-17" }, reading: medical({ issuedOn: "2026-06-05", assessedOn: "2026-06-02", expiresOn: "2028-06-02" }) },
+  ]), FILE_STORE: "r2" } as never);
+  const out = await certificateStanding();
+  const one = out.dates.find((d) => d.code === "QL-17")!;
+  assert.equal(one.assessedOn, "2026-06-02", "MO76 s 16(1) runs its term from the examination, not the issue");
+  assert.equal(one.conditions, null, "and a document that prints no limitation says none");
+});
+
+test("the medical: two issued the same day fall back to the later expiry, and every other column still does", async () => {
+  setEnv({ DB: coversDb([
+    { row: { id: "a", qualCode: "QL-17" }, reading: medical({ issuedOn: "2026-06-02", expiresOn: "2027-06-02" }) },
+    { row: { id: "b", qualCode: "QL-17" }, reading: medical({ issuedOn: "2026-06-02", expiresOn: "2028-06-02" }) },
+  ]), FILE_STORE: "r2" } as never);
+  let out = await compareMatrix(medMatrix, null, evansOnly);
+  assert.deepEqual(out.settled, [{ person: "EVANS, Brenton", code: "QL-17", value: "2028-06-02" }],
+    "nothing in s 16(3) to separate them, so the longer stands as it always did");
+
+  // A ticket is not a medical: two of them are still decided by the longer.
+  setEnv({ DB: coversDb([
+    { row: { id: "a", qualCode: "QL-01" }, reading: { ...evansCoC, issuedOn: "2026-06-02", expiresOn: "2031-05-26", endorsements: [] } },
+    { row: { id: "b", qualCode: "QL-01" }, reading: { ...evansCoC, issuedOn: "2026-08-02", expiresOn: "2029-01-01", endorsements: [] } },
+  ]), FILE_STORE: "r2" } as never);
+  out = await compareMatrix(coversMatrix, null, evansOnly);
+  assert.deepEqual(out.settled, [{ person: "EVANS, Brenton", code: "QL-01", value: "2031-05-26" }],
+    "a certificate of competency is not replaced by a later issue the way a medical is");
+});
+
+/* ------------------------------------------------------------------------ *
+ * The papers that carry a man while his certificate is out. The rule and its
+ * clauses are source/shared/evidence.js; this is the wiring that puts what it
+ * answers where the cells can show it.
+ * ------------------------------------------------------------------------ */
+test("evidence: an extension letter on file reaches the page's cells, with what carries him and until when", async () => {
+  const today = todayThere();
+  const inAMonth = new Date(new Date(today + "T00:00:00Z").getTime() + 30 * 86400000).toISOString().slice(0, 10);
+  const lastMonth = new Date(new Date(today + "T00:00:00Z").getTime() - 30 * 86400000).toISOString().slice(0, 10);
+  setEnv({ DB: coversDb([
+    // His Master ticket, run out last month.
+    { row: { id: "coc", qualCode: "QL-01" }, reading: { ...evansCoC, endorsements: [], expiresOn: lastMonth, evidenceKind: null, isRecognition: false } },
+    // AMSA's letter extending it, filed against the same column.
+    { row: { id: "letter", qualCode: "QL-01" }, reading: {
+      ...evansCoC, certificateTitle: "Extension of certificate", endorsements: [],
+      issuedOn: today, expiresOn: inAMonth, evidenceKind: "extension", isRecognition: false,
+    } },
+  ]), FILE_STORE: "r2" } as never);
+  const out = await certificateStanding();
+  assert.deepEqual(out.covers, [{ person: "EVANS, Brenton", code: "QL-01", kind: "extension", until: inAMonth, fileId: "letter" }],
+    "the cell can show amber and say what carries him, instead of a plain red");
+
+  // Never a certificate of safety training: MO70 s 15(3) does not list it.
+  setEnv({ DB: coversDb([
+    { row: { id: "cost", qualCode: "QL-12" }, reading: { ...evansCoC, qualCode: "QL-12", endorsements: [], expiresOn: lastMonth, evidenceKind: null, isRecognition: false } },
+    { row: { id: "letter", qualCode: "QL-12" }, reading: {
+      ...evansCoC, qualCode: "QL-12", endorsements: [], issuedOn: today, expiresOn: inAMonth,
+      evidenceKind: "extension", isRecognition: false,
+    } },
+  ]), FILE_STORE: "r2" } as never);
+  assert.deepEqual((await certificateStanding()).covers, [],
+    "AMSA cannot extend a certificate of safety training, so no letter ever covers that column");
+});
+
+test("evidence: a portal with no such paper on file walks the readings once and answers nothing", async () => {
+  setEnv({ DB: coversDb([{ row: { id: "coc", qualCode: "QL-01" }, reading: evansCoC }]), FILE_STORE: "r2" } as never);
+  const out = await certificateStanding();
+  assert.deepEqual(out.covers, [], "which is every hour until somebody files one");
 });

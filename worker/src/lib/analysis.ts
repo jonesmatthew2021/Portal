@@ -23,6 +23,9 @@ import { fileStore } from "../db/documents.js";
 import { OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM } from "../../../source/shared/reading-lines.js";
 import { coveredCells } from "../../../source/shared/covers.js";
 import { isRecognitionReading, recognisedUntil, recognitionFills } from "../../../source/shared/recognition.js";
+import { coveredBy } from "../../../source/shared/evidence.js";
+import { crewRegister } from "../../../source/shared/names.js";
+import { readDocument } from "./shared-state.js";
 
 // Certificates are read with a vision model — most of them are scans rather than
 // text PDFs, and a scan of a 1998 certificate of competency is not something a
@@ -849,6 +852,7 @@ export async function certificateStanding() {
     {
       issued: string | null; expires: string | null; issuer: string | null; fileId: string | null;
       covered?: boolean; recognition?: boolean; foreignUnknown?: boolean;
+      assessedOn?: string | null; conditions?: string | null;
     }
   >();
   /* Every certificate that reached a column of its own, kept for the covering
@@ -895,7 +899,7 @@ export async function certificateStanding() {
   const dateFor = (reading: Reading, key: string, own: string | null) =>
     isRecognitionReading(reading) ? recognisedUntil(reading, own, foreignAt.get(key)) : { until: own, foreignUnknown: false };
 
-  for (const { row, reading, key, expires: ownExpiry, issued, issuer } of standing) {
+  for (const { row, reading, code, key, expires: ownExpiry, issued, issuer } of standing) {
     const { until: expires, foreignUnknown } = dateFor(reading, key, ownExpiry);
     const mineIsRec = isRecognitionReading(reading);
     const sitting = claim.get(key);
@@ -904,7 +908,14 @@ export async function certificateStanding() {
          (MO505 s 4, s 7(2)), so it holds the cell against the foreign
          certificate whichever runs the longer; two of a kind are decided the
          way they always were, by which runs the longer. */
-      const beats = mineIsRec !== !!sitting.recognition ? mineIsRec : (expires || "") > (sitting.expires || "");
+      /* The medical is the one exception to "the longer runs": it expires the
+         moment a further one is issued (MO76 s 16(3)), so of two on file the
+         one ISSUED last holds the cell. Two issued the same day fall back to
+         the longer, as everything else does. */
+      const byIssue = certStatesOwnExpiry(code) && (issued || "") !== (sitting.issued || "");
+      const beats = mineIsRec !== !!sitting.recognition ? mineIsRec
+        : byIssue ? (issued || "") > (sitting.issued || "")
+          : (expires || "") > (sitting.expires || "");
       if (!beats) {
         // An issue date or issuer is still worth carrying over where the one
         // in force didn't print one. The file the line links to stays the
@@ -916,10 +927,14 @@ export async function certificateStanding() {
       claim.set(key, {
         issued: issued || sitting.issued, expires, issuer: issuer || sitting.issuer,
         fileId: row.id, recognition: mineIsRec, foreignUnknown,
+        assessedOn: reading.assessedOn || null, conditions: (reading.conditions || "").trim() || null,
       });
       continue;
     }
-    claim.set(key, { issued, expires, issuer, fileId: row.id, recognition: mineIsRec, foreignUnknown });
+    claim.set(key, {
+      issued, expires, issuer, fileId: row.id, recognition: mineIsRec, foreignUnknown,
+      assessedOn: reading.assessedOn || null, conditions: (reading.conditions || "").trim() || null,
+    });
   }
 
   /* The covered columns, joining the same contest: the one that runs the
@@ -952,6 +967,14 @@ export async function certificateStanding() {
 
   return {
     at: new Date().toISOString(),
+    /* The papers that lawfully carry a man while a certificate is out - an
+       AMSA extension letter, a near-coastal renewal lodged before expiry, a
+       temporary crewing permit, a final assessor's declaration, an issue
+       letter. The rule and the clauses are source/shared/evidence.js and the
+       ceilings are the vessel file's. The cell shows amber and says what
+       carries him; nothing is ever green on a cover, because the certificate
+       itself has gone. */
+    covers: await evidenceCovers(certs, readings, eqTable),
     // `fileId` names the scan each line's dates were read from, so the
     // certification screens can put a link to the certificate itself on the line.
     dates: [...claim.entries()].map(([key, v]) => {
@@ -969,10 +992,72 @@ export async function certificateStanding() {
            nobody holds is a date the portal cannot check. */
         recognition: !!v.recognition,
         foreignUnknown: !!v.recognition && !!v.foreignUnknown,
+        /* The date of the examination, where the document prints one apart
+           from the issue (MO76 s 16(1) runs the medical's term from it), and
+           any limitation printed on the certificate - "fit for particular
+           duties only" (s 7(1)(b)), "daylight only" on a colour-vision
+           deck holder's near-coastal card (MO505 s 13(d)-(e)). The viewer
+           shows the words as printed; nothing summarises them. */
+        assessedOn: v.assessedOn ?? null,
+        conditions: v.conditions ?? null,
       };
     }),
   };
 }
+
+/**
+ * The papers that stand in for a certificate that has run out, for every man
+ * on the register who has one on file.
+ *
+ * A red cell is not always a man who cannot work: the orders let five papers
+ * carry him for a while, each for its own time and only over the columns its
+ * kind may cover (source/shared/evidence.js, the table in the vessel file,
+ * with the clause beside each). The rule is pure and proved on its own; this
+ * is what feeds it - the certificates on the books, their readings, and the
+ * crew register, so a paper filed under one spelling reaches the man.
+ *
+ * Only the men who actually have one of those papers on file are asked
+ * about, and only the columns some kind may cover: on a portal with no
+ * evidence documents at all - which is most hours - this walks the readings
+ * once and answers nothing.
+ */
+async function evidenceCovers(certs: Row[], readings: { row: Row; reading: Reading | null }[], eqTable: Awaited<ReturnType<typeof equivalences>>) {
+  const kinds = vessel.evidenceKinds as Record<string, { covers?: string[] }>;
+  const columns = [...new Set(Object.values(kinds).flatMap((k) => (k.covers || []).map((c) => String(c).trim().toUpperCase())))];
+  if (!columns.length) return [] as { person: string; code: string; kind: string; until: string | null; fileId: string }[];
+
+  const held = new Map<string, Reading>();
+  const rows = readings.map(({ row, reading }) => {
+    const key = readingKey(row);
+    if (reading) held.set(key, reading);
+    return { id: row.id, key, person: row.person, code: codeFor(row, reading, eqTable), filedOn: row.filedOn ? String(row.filedOn) : null };
+  });
+  // Nothing on the books is one of the five papers: no cover to work out.
+  if (!rows.some((r) => !!held.get(r.key)?.evidenceKind)) return [];
+
+  const cur = await readDocument();
+  const people = (Array.isArray(cur?.doc.people) ? cur!.doc.people : []) as { name?: string }[];
+  const register = crewRegister(people);
+  const today = todayThere();
+  const rules = { kinds: vessel.evidenceKinds, register };
+
+  // Whose papers they are, as the register names them.
+  const mine = new Set<string>();
+  for (const r of rows) {
+    if (!held.get(r.key)?.evidenceKind || !r.person) continue;
+    mine.add(register.nameOf(r.person) || r.person);
+  }
+
+  const out: { person: string; code: string; kind: string; until: string | null; fileId: string }[] = [];
+  for (const person of mine) {
+    for (const code of columns) {
+      const cover = coveredBy(code, person, rows, held, today, rules);
+      if (cover) out.push({ person, code, kind: cover.kind, until: cover.until, fileId: cover.rowId });
+    }
+  }
+  return out;
+}
+
 
 /**
  * What the model is given for one document: the sheets as text where the portal
