@@ -670,6 +670,36 @@ function matrixLastMoved(matrixUpdated, trainingMatrix) {
   return String((trainingMatrix && trainingMatrix.uploaded) || "").slice(0, 10);
 }
 
+/* ---- filing the matrix spreadsheet (MatrixSpreadsheet) -------------------
+   The report built from the matrix as it stands, filed in place of the one
+   on the portal. No certificate is read and no date moves; what comes out
+   of it is the line in the log and the stamp the swing report reads. */
+
+/* What to do with a refused upload. The replace takes the server's lease,
+   so a 409 is somebody writing the workbook: waited for once, and the
+   server's own sentence shown the second time. Anything else is the error
+   it is. */
+function fileSpreadsheetStep(err, waited) {
+  return err && err.status === 409 && !waited ? "wait" : "fail";
+}
+
+/* What to say once it is filed: the line in the log, and the patch on
+   certAnalysis that keeps `generated` - the stamp the swing report reads
+   "matrix fresh" from - a filing, as it always was. A workbook built from
+   nothing has no count of cells changed worth giving. */
+function fileSpreadsheetOutcome(report, record, by, at) {
+  const written = (report && report.written) || 0;
+  const filename = (record && record.filename) || "";
+  const detail = report && report.rebuilt
+    ? `${filename} · built from the matrix`
+    : `${filename} · ${written} ${written === 1 ? "cell" : "cells"} changed`;
+  const patch = (prev) => ({
+    ...(prev || {}),
+    generated: { ...((prev && prev.generated) || {}), at, by, filename, fileId: (record && record.id) || null, failed: null },
+  });
+  return { detail, patch };
+}
+
 /* The done panel, off the round's outcome: the eyebrow, and the lines
    under it - the counts, the workbook and any one-line problem, nothing
    else. Each line carries a tone for the window (plain, muted, problem,
@@ -4422,20 +4452,21 @@ function TrainingMatrix() {
       </div>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18, marginBottom: 30, alignItems: "center" }}>
-        {/* The one button here that changes anything: it brings the matrix up
+        {/* The one button here that changes a date: it brings the matrix up
             to date with the certificates that have gone up since it was last
-            read. Everything under Report writes the matrix out as it stands —
-            the crew report, one person's report, or the spreadsheet itself,
-            downloaded and opened — nothing read, nothing changed. */}
+            read. Everything else writes the matrix out as it stands — the
+            crew report, one person's report, or the spreadsheet itself,
+            downloaded and opened, or filed on the portal in place of the one
+            there — nothing read, no date moved. */}
         {admin && <UpdateMatrixButton variant="quiet" />}
         <Button onClick={() => setReportMenu(!reportMenu)}>{reportMenu ? "Report ▴" : "Report ▾"}</Button>
         {reportMenu && (
           <>
             <Button variant="quiet" onClick={() => { setReportMenu(false); setReport("crew"); }}>Crew report</Button>
             <Button variant="quiet" onClick={() => { setReportMenu(false); setReport("individual"); }}>Individual report</Button>
-            <DownloadLatestMatrix variant="quiet" />
           </>
         )}
+        <MatrixSpreadsheet variant="quiet" />
       </div>
 
       {/* floats above everything, pinned to the bottom of the screen */}
@@ -8388,31 +8419,35 @@ function filedUnderSuffix(wanted, actual) {
 }
 
 /**
- * Download the matrix as it stands, and open it.
+ * The matrix as a spreadsheet: a report built from the matrix as it stands.
  *
- * The sibling of Update matrix: where that one reads the certificates and has
- * the round move the matrix, this one writes out exactly what is on the
- * screen now — no reading, no filing, nothing changed on the portal. The same
- * file is handed to a new tab as well as to the downloads, so the browser
- * opens it with whatever reads spreadsheets on the machine.
+ * The same file either way (latestMatrixFile): the workbook on the portal
+ * with today's figures written into it, or a grid built from nothing where
+ * there is no workbook to update. Matrix spreadsheet downloads it and opens
+ * it, for anybody - the file is handed to a new tab as well as to the
+ * downloads, so the browser opens it with whatever reads spreadsheets on
+ * the machine. File the matrix spreadsheet, admin only, files it on the
+ * portal in place of the one there, and the swing report's "matrix fresh"
+ * is stamped by the filing as it always was. Neither reads a certificate
+ * or moves a date: that is Update matrix's, and the round's. The replace
+ * takes the server's lease, so the filing stands down while a round has it
+ * (roundBusyTitle) and waits once for a 409 (fileSpreadsheetStep).
  */
-function DownloadLatestMatrix({ variant = "quiet", label = "Matrix spreadsheet" }) {
-  const { quals: QUALS, certSheet, log } = usePortal();
-  const [busy, setBusy] = useState(false);
+function MatrixSpreadsheet({ variant = "quiet" }) {
+  const { admin, role, quals: QUALS, certSheet, setCertSheet, setCertAnalysis, log,
+    roundRunning, roundHolder, setRoundRunning } = usePortal();
+  const [busy, setBusy] = useState("");     // "" | "download" | "file"
   const [err, setErr] = useState("");
-  const [note, setNote] = useState("");
+  const [notes, setNotes] = useState([]);   // workbookNotes, or the one line a rebuilt download gets
+  const [filed, setFiled] = useState(null); // the record filed, for the link under the row
 
-  const go = async () => {
-    setErr(""); setNote("");
-    setBusy(true);
+  const download = async () => {
+    setErr(""); setNotes([]); setFiled(null);
+    setBusy("download");
     // Opened inside the click itself, so the popup blocker sees a window the
-    // user asked for — by the time the workbook is built the click is history.
+    // user asked for - by the time the workbook is built the click is history.
     const opened = window.open("", "_blank");
     try {
-      // The same file the Update button would file: the workbook on the portal
-      // with today's figures in it, rather than a fresh grid of dates. A
-      // download that doesn't look like the spreadsheet on file is the thing
-      // somebody prints and hands over.
       const { file, filename, report } = await latestMatrixFile(QUALS, todayISO(), certSheet);
       const url = URL.createObjectURL(file);
 
@@ -8424,31 +8459,85 @@ function DownloadLatestMatrix({ variant = "quiet", label = "Matrix spreadsheet" 
       a.remove();
 
       if (opened) opened.location = url;
-      setNote(report && report.rebuilt ? report.rebuilt : "");
+      setNotes(report && report.rebuilt ? [{ text: report.rebuilt, warn: true }] : []);
       log("Crew Matrix", "Downloaded the latest matrix", filename);
     } catch (e) {
       if (opened) opened.close();
-      setErr(e.message || String(e));
+      setErr(`The matrix couldn't be downloaded. ${e.message || String(e)}`);
     }
-    setBusy(false);
+    setBusy("");
   };
 
+  const file = async () => {
+    setErr(""); setNotes([]); setFiled(null);
+    setBusy("file");
+    try {
+      const on = todayISO();
+      const { file: built, report } = await latestMatrixFile(QUALS, on, certSheet);
+      const send = () => uploadCertificateSheet(built, { uploadedBy: role, filedOn: on, session: SESSION }, "replace");
+      let res;
+      try {
+        res = await send();
+      } catch (e) {
+        if (fileSpreadsheetStep(e, false) !== "wait") throw e;
+        // Somebody is writing the workbook: the buttons go down under
+        // their name while this waits, and the send goes once more.
+        setRoundRunning(true);
+        await waitForRound(undefined, setRoundRunning);
+        res = await send();
+      }
+      if (!res.record) {
+        // Byte-for-byte the same file is already there.
+        setNotes([{ text: "It is the same file as the one already on the portal, so nothing was filed again.", warn: true }]);
+      } else {
+        const said = fileSpreadsheetOutcome(report, res.record, role, new Date().toISOString());
+        setCertSheet(res.record);
+        setCertAnalysis(said.patch);
+        log("Admin", "Filed the matrix spreadsheet", said.detail);
+        setNotes(workbookNotes(report).map((text) => ({ text, warn: !!report.rebuilt })));
+        setFiled(res.record);
+      }
+    } catch (e) {
+      setErr(`The matrix spreadsheet couldn't be filed. ${e.message || String(e)}`);
+    }
+    setBusy("");
+  };
+
+  const under = err || notes.length || filed;
   return (
-    <div>
-      <Button variant={variant} onClick={go} disabled={busy}>
-        {busy ? "Preparing…" : label}
+    <>
+      <Button variant={variant} onClick={download} disabled={!!busy}>
+        {busy === "download" ? "Preparing…" : "Matrix spreadsheet"}
       </Button>
-      {err && (
-        <div style={{ fontFamily: T.body, fontSize: 13, color: T.bRed, lineHeight: 1.6, marginTop: 8 }}>
-          The matrix couldn't be downloaded. {err}
+      {admin && (
+        <Button variant={variant} onClick={file} disabled={!!busy || roundRunning}
+          title={!busy && roundRunning ? roundBusyTitle(roundHolder) : undefined}>
+          {busy === "file" ? "Filing…" : "File the matrix spreadsheet"}
+        </Button>
+      )}
+      {/* The lines under the row take the whole of the next line of it. */}
+      {under && (
+        <div style={{ flexBasis: "100%" }}>
+          {err && (
+            <div style={{ fontFamily: T.body, fontSize: 13, color: T.bRed, lineHeight: 1.6 }}>{err}</div>
+          )}
+          {filed && (
+            <a href={filed.url} download={filed.filename}
+              style={{ fontFamily: T.mono, fontSize: 12, color: T.accent, textDecoration: "none" }}>
+              {filed.filename}
+            </a>
+          )}
+          {/* What happened to the workbook itself - updated in place, or
+              rebuilt, and anything on the matrix it had no room for. */}
+          {notes.map((note, i) => (
+            <div key={i} style={{ fontFamily: T.body, fontSize: 13, lineHeight: 1.6, marginTop: filed || i ? 6 : 0,
+              color: note.warn ? T.bOrange : T.muted }}>
+              {note.text}
+            </div>
+          ))}
         </div>
       )}
-      {note && (
-        <div style={{ fontFamily: T.body, fontSize: 13, color: T.bOrange, lineHeight: 1.6, marginTop: 8 }}>
-          {note}
-        </div>
-      )}
-    </div>
+    </>
   );
 }
 

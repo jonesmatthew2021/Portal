@@ -56,7 +56,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetStep, fileSpreadsheetOutcome };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -724,6 +724,35 @@ const is = (got, want, what) => {
   is(lib.matrixLastMoved("2026-09-22", null), "2026-09-22", "no workbook on file: the round's stamp");
   is(lib.matrixLastMoved("", { uploaded: "2026-09-20T03:00:00.000Z" }), "2026-09-20", "no stamp yet: the workbook's day stands in");
   is(lib.matrixLastMoved("", null), "", "neither: nothing, and no nudge");
+
+  /* Filing the matrix spreadsheet: a refusal for the lease is waited for once. */
+  is(lib.fileSpreadsheetStep({ status: 409 }, false), "wait", "409 the first time: somebody is writing the workbook, wait for them");
+  is(lib.fileSpreadsheetStep({ status: 409 }, true), "fail", "409 again after the wait: the server's sentence is shown");
+  is(lib.fileSpreadsheetStep({ status: 502 }, false), "fail", "any other refusal is the error it is");
+  is(lib.fileSpreadsheetStep(new Error("no network"), false), "fail", "…and so is a request that never got there");
+  is(lib.fileSpreadsheetStep(null, false), "fail", "nothing thrown is nothing to wait for");
+
+  /* What to say once it is filed, and the stamp the swing report reads. */
+  {
+    const record = { id: "cs9", filename: "20260924 - CREW QUALIFICATION EXPIRY (portal).xlsx", url: "/api/files/cs9" };
+    const at = "2026-09-24T10:00:00.000Z";
+    const said = lib.fileSpreadsheetOutcome({ written: 3, rebuilt: "" }, record, "Matthew", at);
+    is(said.detail, "20260924 - CREW QUALIFICATION EXPIRY (portal).xlsx · 3 cells changed", "the log line: the file and the cells changed");
+    is(lib.fileSpreadsheetOutcome({ written: 1, rebuilt: "" }, record, "Matthew", at).detail,
+      "20260924 - CREW QUALIFICATION EXPIRY (portal).xlsx · 1 cell changed", "one cell, singular");
+    is(lib.fileSpreadsheetOutcome({ written: 0, rebuilt: "No spreadsheet is filed on the portal yet, so this one was built from the matrix." }, record, "Matthew", at).detail,
+      "20260924 - CREW QUALIFICATION EXPIRY (portal).xlsx · built from the matrix", "built from nothing: no count of cells");
+    const prev = {
+      at: "2026-09-20T00:00:00.000Z", by: "Kachin", model: "round", items: [], notes: [], summary: { read: 4 }, verdicts: {},
+      generated: { at: "2026-09-20T00:00:00.000Z", by: "Kachin", filename: "old.xlsx", applied: 2, dismissed: 0, fileId: "tm1", failed: "it broke" },
+    };
+    is(said.patch(prev), {
+      ...prev,
+      generated: { at, by: "Matthew", filename: record.filename, applied: 2, dismissed: 0, fileId: "cs9", failed: null },
+    }, "the stamp the swing report reads is the filing's; the reading's own fields, and the round's count, stand");
+    is(said.patch(null), { generated: { at, by: "Matthew", filename: record.filename, fileId: "cs9", failed: null } },
+      "no reading held yet: the stamp alone");
+  }
 
   const full = {
     at: "2026-09-24T10:00:00.000Z", applied: 2, cleared: 1, settled: 3, written: 3,
