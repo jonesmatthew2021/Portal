@@ -93,6 +93,24 @@
       failed: flag("reminders") === "failed" ? ["someone@example.com"] : [],
       unanswered: flag("reminders") === "unanswered" ? ["someone@example.com"] : [], skipped: null, error: null };
   };
+  /* ?particulars=1: the document as the round leaves it once it has
+     filled the first two men's MSIC number and date of birth from their
+     certificates - the boxes on Crew Details carrying the values and the
+     note of what the certificates put there. The preview has no worker and
+     no readings, so there is no round to run here: this is what one leaves
+     behind, so the boxes can be looked at and typed over. */
+  if (flag("particulars") === "1" && mem.data && Array.isArray(mem.data.people)) {
+    const filled = [["MSIC 0123456", "1980-03-10"], ["MSIC 0654321", "1975-05-05"]];
+    const fromCert = { ...(mem.data.particularsFromCert || {}) };
+    let n = 0;
+    const people = mem.data.people.map((p) => {
+      if (n >= filled.length || !p || !p.name || p.id == null) return p;
+      const [msic, dob] = filled[n++];
+      fromCert[String(p.id)] = { msic, dob };
+      return { ...p, msic, dob };
+    });
+    mem.data = { ...mem.data, people, particularsFromCert: fromCert };
+  }
   const OUT_OF_CREDIT = "Out of credit — top it up at console.anthropic.com";
   /* ?offline=1: the four answers the service worker keeps come back the
      way it hands them back when the link is down - stamped with the time

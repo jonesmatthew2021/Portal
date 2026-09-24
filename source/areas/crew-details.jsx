@@ -318,11 +318,12 @@ function CrewDetails() {
 
   /* The man's own particulars, which are his and not a document's.
    *
-   * His MSIC expiry already comes off the card itself, read as VS-01 — but the
-   * number printed on it is nowhere, and it is what gets asked for at the gate
-   * and on every port form. Date of birth the same: every crew list Portways
-   * and the ports ask for wants it, and it was being typed from memory each
-   * time. Held against the person, so it is written once. */
+   * His MSIC number is what gets asked for at the gate and on every port form,
+   * and every crew list Portways and the ports ask for wants his date of
+   * birth. Held against the person, so it is written once. The round fills
+   * both from his own certificates (source/shared/particulars.js) wherever
+   * the box is empty or still holds what the certificates put there; a box
+   * typed here is left as typed. */
   const setDetail = (id, field, value) => setPeople((list) => (list || []).map((p) => (p.id === id
     ? { ...p, [field]: value } : p)));
 
