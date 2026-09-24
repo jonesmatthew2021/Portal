@@ -2464,6 +2464,66 @@ test("a reading asks for the document's number and the holder's date of birth, a
   assert.equal(READING_VERSION, "r1", "no reading made before is thrown away");
 });
 
+test("a reading asks what else the certificate covers, whether it is a recognition, the medical's own dates and any cover standing in for a certificate", async () => {
+  /* One question, every key, always present: a reading without a key is one
+     made before it was asked for, and that is the only thing the hour's
+     top-up has to go on. The lists are held to what a certificate can
+     honestly print, and a printed limitation to twenty words. */
+  const { portal } = await unreadPortal(2);
+  const model = modelAnswers((n) => ({ status: 200, body: readingStream(n === 1
+    ? { ...reading,
+      endorsements: [
+        { text: "  II/2 (incl. generic ECDIS)  ", until: null },
+        "VI/2 (2) s. A-VI/2 (5-8)",
+        { text: "VI/6 (1) s. A-VI/6 (4)", until: "26.05.2031" },
+        { text: "", until: "2031-05-26" },
+      ],
+      units: ["HLTAID011", " hltaid011 ", "SITXFSA005"],
+      isRecognition: false, recognises: { authority: "AMSA", country: "India" },
+      assessedOn: "2026-02-10", conditions: null, evidenceKind: "nonsense" }
+    : { ...reading, certificateTitle: "Certificate of Recognition of GMDSS",
+      endorsements: "not a list", units: null,
+      isRecognition: true, recognises: { authority: "Directorate General of Shipping", country: "India", number: "IND-12345", expiresOn: "2029-10-07" },
+      assessedOn: "not a date",
+      conditions: "fit for particular duties only and must wear corrective lenses at all times while on watch and keep a spare pair aboard the vessel at sea",
+      evidenceKind: "Issue-Letter" }) }));
+  try {
+    await extract([["QL-01", "Master"]], 4);
+  } finally {
+    model.restore();
+  }
+  const asked = model.calls[0];
+  for (const key of ["endorsements", "units", "isRecognition", "recognises", "assessedOn", "conditions", "evidenceKind"]) {
+    assert.ok(asked.includes(key), "the question asks for " + key);
+  }
+  const first = JSON.parse(portal.blobs.get("certificate-readings|r1/unread-1.json")!);
+  assert.deepEqual(first.endorsements, [
+    { text: "II/2 (incl. generic ECDIS)", until: null },
+    { text: "VI/2 (2) s. A-VI/2 (5-8)", until: null },
+    { text: "VI/6 (1) s. A-VI/6 (4)", until: null },
+  ], "trimmed as printed, a plain string still an endorsement, a date only as YYYY-MM-DD, and nothing for an empty line");
+  assert.deepEqual(first.units, ["HLTAID011", "SITXFSA005"], "the same unit code twice is one code");
+  assert.equal(first.recognises, null, "nothing said about a foreign certificate on a document that is not a recognition");
+  assert.equal(first.assessedOn, "2026-02-10");
+  assert.equal(first.evidenceKind, null, "a kind that is not one of the five is none");
+
+  const second = JSON.parse(portal.blobs.get("certificate-readings|r1/unread-2.json")!);
+  assert.deepEqual(second.endorsements, [], "an answer that is not a list is no endorsements");
+  assert.deepEqual(second.units, []);
+  assert.equal(second.isRecognition, true);
+  assert.deepEqual(second.recognises, { authority: "Directorate General of Shipping", country: "India", number: "IND-12345", expiresOn: "2029-10-07" },
+    "what the recognition prints about the certificate behind it");
+  assert.equal(second.assessedOn, null);
+  assert.equal(second.conditions!.split(" ").length, 20, "a printed limitation is kept to twenty words");
+  assert.equal(second.evidenceKind, "issue-letter", "however the model cased it");
+  for (const r of [first, second]) {
+    for (const key of ["endorsements", "units", "isRecognition", "recognises", "assessedOn", "conditions", "evidenceKind"]) {
+      assert.ok(key in r, key + " is on every reading made now");
+    }
+  }
+  assert.equal(READING_VERSION, "r1", "and no reading made before is thrown away for them");
+});
+
 test("a PDF the model turns away is stored as unreadable, with the plain reason, and stops nothing", async () => {
   const { portal } = await unreadPortal(1);
   const model = modelAnswers(() => ({ status: 400, body: BAD_PDF_BODY }));

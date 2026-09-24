@@ -23,6 +23,8 @@ import {
   codeFor,
   contentFor,
   date,
+  EVIDENCE_KINDS,
+  type EvidenceKind,
   isDate,
   isHeld,
   isNotHeld,
@@ -153,7 +155,18 @@ Return exactly this JSON object and nothing else — no prose, no markdown fence
   "codeConfidence": "high"|"medium"|"low",
   "notes": string|null,             // at most 15 words, only if something matters
   "documentNumber": string|null,    // the card, licence or certificate number as printed; on an MSIC card, the card number
-  "holderBirthDate": "YYYY-MM-DD"|null  // the holder's date of birth, only if printed
+  "holderBirthDate": "YYYY-MM-DD"|null, // the holder's date of birth, only if printed
+  "endorsements": [                 // every endorsement printed as part of what this certificate certifies
+    { "text": string, "until": "YYYY-MM-DD"|null }
+  ],
+  "units": [string],                // the training unit codes printed on the document
+  "isRecognition": true|false,      // the title says this is a certificate of recognition
+  "recognises": {                   // what a recognition prints about the foreign certificate behind it
+    "authority": string|null, "country": string|null, "number": string|null, "expiresOn": "YYYY-MM-DD"|null
+  },
+  "assessedOn": "YYYY-MM-DD"|null,  // the date of the examination or assessment, if printed apart from the issue date
+  "conditions": string|null,        // any limitation printed on the document, at most 20 words
+  "evidenceKind": string|null       // for a document that is not a certificate itself, which of the five it is
 }
 
 Rules:
@@ -165,6 +178,25 @@ Rules:
 - Only give qualCode when the document is plainly that item. Use "high" only when
   the printed title and the item title are the same qualification. If two codes
   could fit, pick neither and return null.
+- endorsements: the STCW regulation numbers and the named endorsements printed
+  as part of what the certificate certifies, each as printed — "II/2 (incl.
+  generic ECDIS)", "VI/2 (1) s. A-VI/2 (1-4)", "Proficiency in fast rescue
+  boats". Give "until" only where a date of expiry is printed against that
+  endorsement; otherwise null. [] where the document prints none.
+- units: the national training unit codes printed on the document, as printed —
+  "HLTAID011", "HLTAID015", "SITXFSA005", "RIIWHS202E". [] where there are none.
+- recognises: only for a certificate of recognition, and only what it prints
+  about the certificate it recognises. null for anything else.
+- conditions: a limitation on what the holder may do, as printed — "fit for
+  particular duties only", "must wear corrective lenses", "daylight only".
+  null where the document prints none.
+- evidenceKind: one of "extension" (a letter extending a certificate),
+  "lodged-renewal" (a receipt or acknowledgement that a renewal was lodged),
+  "crewing-permit" (a temporary crewing permit), "assessor-declaration" (a
+  final assessor's declaration) or "issue-letter" (a letter saying a
+  certificate has been issued). null where the document is a certificate
+  itself. Where such a document prints the date the cover runs out, that date
+  is expiresOn.
 - Never invent a name, a date, a number or a code. null is the right answer when
   it is not on the page.`;
 
@@ -187,6 +219,82 @@ ${list}
 
 What it was filed against is what a person typed when they uploaded it, and may
 be wrong. Report what the document itself says.`;
+}
+
+/* How much of a list, and of a line, one document may give.
+ *
+ * A certificate of competency prints a dozen endorsements and a training
+ * statement half a dozen unit codes. A scan the model has misread could come
+ * back with hundreds of them, and every one of those would be held against
+ * the covers table for the life of the reading. */
+const MAX_LISTED = 20;
+const MAX_ENDORSEMENT_CHARS = 90;
+const MAX_UNIT_CHARS = 24;
+/** The words a printed condition is kept to (the question asks for 20). */
+const MAX_CONDITION_WORDS = 20;
+
+/** The endorsements printed on a certificate, each as printed, with its own
+ *  end date where the document prints one against it. A model answering with
+ *  plain strings rather than the objects asked for is still read: the words
+ *  are the endorsement, and the date is the certificate's own. */
+function endorsementsFrom(v: unknown): { text: string; until: string | null }[] {
+  if (!Array.isArray(v)) return [];
+  const out: { text: string; until: string | null }[] = [];
+  for (const item of v) {
+    const asObject = item && typeof item === "object" && !Array.isArray(item) ? (item as Record<string, unknown>) : null;
+    const text = str(asObject ? asObject.text : item);
+    if (!text) continue;
+    out.push({ text: text.slice(0, MAX_ENDORSEMENT_CHARS), until: asObject ? date(asObject.until) : null });
+    if (out.length >= MAX_LISTED) break;
+  }
+  return out;
+}
+
+/** The unit codes printed on a training statement, as printed. The same code
+ *  twice is one code: the rule matches a column's title, and a list with
+ *  "HLTAID011" three times fills nothing more than one with it once. */
+function unitsFrom(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const out: string[] = [];
+  for (const item of v) {
+    const unit = str(item);
+    if (!unit) continue;
+    const short = unit.slice(0, MAX_UNIT_CHARS);
+    if (!out.some((u) => u.toUpperCase() === short.toUpperCase())) out.push(short);
+    if (out.length >= MAX_LISTED) break;
+  }
+  return out;
+}
+
+/** What a certificate of recognition prints about the foreign certificate
+ *  behind it — only what is printed, and nothing at all where the document
+ *  is not a recognition. */
+function recognisesFrom(v: unknown, isRecognition: boolean) {
+  if (!isRecognition || !v || typeof v !== "object" || Array.isArray(v)) return null;
+  const said = v as Record<string, unknown>;
+  const out = {
+    authority: str(said.authority), country: str(said.country),
+    number: str(said.number), expiresOn: date(said.expiresOn),
+  };
+  // A recognition that printed none of the four tells us nothing about the
+  // certificate behind it, which is not the same as there being none.
+  return out.authority || out.country || out.number || out.expiresOn ? out : null;
+}
+
+/** A printed limitation, held to its first `MAX_CONDITION_WORDS` words: it
+ *  is shown on the certificate viewer as printed, and a model that answered
+ *  with the whole page must not fill the screen with it. */
+function conditionsFrom(v: unknown) {
+  const said = str(v);
+  if (!said) return null;
+  const words = said.split(/\s+/).filter(Boolean);
+  return words.length > MAX_CONDITION_WORDS ? words.slice(0, MAX_CONDITION_WORDS).join(" ") : said;
+}
+
+/** One of the five documents that stand in for a certificate, or null. */
+function evidenceKindFrom(v: unknown): EvidenceKind | null {
+  const said = (str(v) || "").toLowerCase();
+  return (EVIDENCE_KINDS as readonly string[]).includes(said) ? (said as EvidenceKind) : null;
 }
 
 async function askModel(row: Row, bytes: ArrayBuffer, codes: [string, string][]) {
@@ -238,9 +346,17 @@ async function askModel(row: Row, bytes: ArrayBuffer, codes: [string, string][])
       : str(parsed.notes),
     // Always written, null where the page has none: a reading carrying the
     // keys is one that was asked for them, so the hour never pays to ask
-    // this certificate again (topUpParticulars).
+    // this certificate again (topUpParticulars). Every key below is the
+    // same bargain - READING_ASKS is the list.
     documentNumber: str(parsed.documentNumber),
     holderBirthDate: date(parsed.holderBirthDate),
+    endorsements: endorsementsFrom(parsed.endorsements),
+    units: unitsFrom(parsed.units),
+    isRecognition: parsed.isRecognition === true,
+    recognises: recognisesFrom(parsed.recognises, parsed.isRecognition === true),
+    assessedOn: date(parsed.assessedOn),
+    conditions: conditionsFrom(parsed.conditions),
+    evidenceKind: evidenceKindFrom(parsed.evidenceKind),
   };
 
   if (!reading.readable && !reading.reason) {
@@ -250,12 +366,14 @@ async function askModel(row: Row, bytes: ArrayBuffer, codes: [string, string][])
 }
 
 /** A reading that says the certificate could not be read, and why. It
- *  carries the two particulars' keys, null, like every reading made now:
- *  asked again it would say no more. */
+ *  carries every key a reading made now carries, empty, so that asked again
+ *  it would say no more. */
 function unreadableReading(reason: string): Reading {
   return {
     version: READING_VERSION, at: new Date().toISOString(), model: null, readable: false, reason,
     documentNumber: null, holderBirthDate: null,
+    endorsements: [], units: [], isRecognition: false, recognises: null,
+    assessedOn: null, conditions: null, evidenceKind: null,
   };
 }
 
