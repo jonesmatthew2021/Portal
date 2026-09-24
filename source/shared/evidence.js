@@ -34,7 +34,8 @@
  * is the page's (the amber band and the words on its title).
  *
  * A shared file cannot import another, so the register (crewRegister in
- * names.js) is handed in by the caller as part of `rules`. The page splices
+ * names.js) and the name question (nameIsSomebodyElse, the round's and the
+ * cells') are handed in by the caller as part of `rules`. The page splices
  * this file in at its @shared marker, so the rule is proved on the code that
  * ships. Edit it here and only here.
  */
@@ -61,7 +62,11 @@
  *   expired to carry anything at all, and the clause it all comes from.
  * @typedef {Record<string, EvidenceKind> | null | undefined} EvidenceKinds
  * @typedef {{ nameOf: (spelling: unknown) => string | null }} Register
- * @typedef {{ kinds?: EvidenceKinds, register: Register }} EvidenceRules
+ * @typedef {(printed: unknown, filedUnder: unknown, known: unknown) => boolean} NameIsSomebodyElse
+ *   Whether the name printed on a document says it is somebody else's - the
+ *   one question the round and the page's cells ask (nameIsSomebodyElse in
+ *   names.js), handed in so this rule can never answer it differently.
+ * @typedef {{ kinds?: EvidenceKinds, register: Register, nameIsSomebodyElse: NameIsSomebodyElse }} EvidenceRules
  * @typedef {{ kind: string, until: string | null, rowId: string }} Cover
  *   The cover that stands: which paper it is, the day it stops counting
  *   (null for an issue letter, which the law gives no end), and the row to
@@ -168,6 +173,12 @@ export function evidenceKindsProblem(table, columnCodes) {
 export function coveredBy(code, person, rows, readings, todayISO, rules) {
   const kinds = rules && rules.kinds;
   const register = rules && rules.register;
+  const isSomebodyElse = rules && rules.nameIsSomebodyElse;
+  /* The name rule is the round's and the cells' (names.js) and every caller
+     has it. Without it this rule would answer whose paper a letter is its
+     own way, so a caller that forgets it is stopped here rather than found
+     on the grid. */
+  if (typeof isSomebodyElse !== "function") throw new Error("coveredBy needs the shared name rule (nameIsSomebodyElse in source/shared/names.js) in rules.");
   if (!kinds || typeof kinds !== "object" || !register) return null;
   const want = evidenceCode(code);
   const today = evidenceDay(todayISO);
@@ -187,8 +198,14 @@ export function coveredBy(code, person, rows, readings, todayISO, rules) {
     if (!row.person || register.nameOf(row.person) !== me) return;
     const reading = readingOf(key);
     if (!reading || reading.readable === false) return;
-    // Printed in somebody else's name: his folder, not his paper.
-    if (reading.holderName && register.nameOf(reading.holderName) !== me) return;
+    /* Printed in somebody else's name: his folder, not his paper. The same
+       question the round and the cells ask - the printed name has to share a
+       word with the folder or with the register's name for him, and a
+       document naming nobody says nothing either way. Held by strict
+       equality of nameOf instead, a spelling the register could not resolve
+       ("Brent Evans" against an alias of "bRENTON") was his to the round and
+       nobody's here. */
+    if (isSomebodyElse(reading.holderName, row.person, me)) return;
     seen.add(key);
     /* What the document is: one of the five papers where the reading says
        so - unless somebody tagged the row, which makes it the certificate

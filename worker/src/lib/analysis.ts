@@ -1116,7 +1116,8 @@ async function evidenceCovers(
   if (!rows.some((r) => !r.tagged && !!held.get(r.key)?.evidenceKind)) return [];
 
   const today = todayThere();
-  const rules = { kinds: vessel.evidenceKinds, register };
+  // The name question is the one the cells above and the round ask.
+  const rules = { kinds: vessel.evidenceKinds, register, nameIsSomebodyElse };
 
   // Whose papers they are, as the register names them.
   const mine = new Set<string>();

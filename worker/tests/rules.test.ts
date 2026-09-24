@@ -18,7 +18,7 @@ import { asKey } from "../src/db/cert-home.js";
 import { canonicalPersonName } from "../src/db/person-name.js";
 import { setEnv } from "../src/env.js";
 import { vessel, checkVessel, vesselNow } from "../src/vessel.js";
-import { crewRowsOnly, crewRegister, nameLetters, registerWords } from "../../source/shared/names.js";
+import { crewRowsOnly, crewRegister, nameLetters, registerWords, nameIsSomebodyElse } from "../../source/shared/names.js";
 import { RED_DAYS, daysUntil, hasExpired } from "../../source/shared/bands.js";
 import * as reminders from "../../source/shared/reminders.js";
 import { particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, ticketCodesIn, isMsicCard, openToCertificates } from "../../source/shared/particulars.js";
@@ -1275,7 +1275,7 @@ const EV_TABLE = (vessel as unknown as {
 }).evidenceKinds;
 const EV_TODAY = "2026-09-25";
 const EV_PEOPLE = [{ name: "EVANS, Brenton", aliases: ["bRENTON"] }, { name: "SITTIYOS, Kachin", aliases: [] }];
-const EV_RULES = { kinds: EV_TABLE, register: crewRegister(EV_PEOPLE) };
+const EV_RULES = { kinds: EV_TABLE, register: crewRegister(EV_PEOPLE), nameIsSomebodyElse };
 const EV_ROWS = [
   { id: "ext", key: "ext", person: "EVANS, Brenton", code: null, filedOn: "2026-08-02" },
   { id: "dec", key: "dec", person: "EVANS, Brenton", code: null, filedOn: "2026-09-01" },
@@ -1493,6 +1493,30 @@ test("the expiry day itself is the day a certificate stops counting (MO70 s 5(a)
     reminders.reminderItemLine({ person: "SITTIYOS, Kachin", code: "QL-17", title: "AMSA Medical", date: "2026-09-24", daysLeft: 0, from: [] }),
     "QL-17 AMSA Medical — expired today (24 Sep 2026)",
   );
+});
+
+test("evidence: whose paper it is, asked the way the round and the cells ask it", () => {
+  /* The round (compareMatrix) and the page's cells (certificateStanding)
+     hold a printed name against the folder and the register's name with
+     nameIsSomebodyElse in source/shared/names.js, which accepts a single
+     shared word. This rule held it by strict equality of nameOf, so a
+     spelling the register cannot resolve - "Brent Evans", printed on a
+     letter, with only "bRENTON" as his alias - was his paper to the round
+     and nobody's to this rule. One question, asked through `rules`. */
+  const letter = (holderName: string) => ({
+    ext: { readable: true, holderName, evidenceKind: "extension", issuedOn: "2026-07-20", expiresOn: "2026-11-25" },
+    coc: EV_READINGS.coc,
+  });
+  const rows = [EV_ROWS[0], EV_ROWS[3]];
+  const cover = { kind: "extension", until: "2026-11-25", rowId: "ext" };
+  assert.deepEqual(coverOf("QL-01", rows, letter("Brent Evans")), cover, "one shared word with the man: his, as the round says");
+  assert.deepEqual(coverOf("QL-01", rows, letter("Brenton")), cover, "a one-word printed name that is his still covers");
+  assert.equal(coverOf("QL-01", rows, letter("Kachin")), null, "a one-word printed name that is another man's does not");
+  assert.equal(coverOf("QL-01", rows, letter("Kachin Sittiyos")), null, "nor a whole name that is another man's");
+  assert.deepEqual(coverOf("QL-01", rows, letter("")), cover, "a paper naming nobody says nothing either way, as the round takes it");
+  assert.equal(nameIsSomebodyElse("Brent Evans", "EVANS, Brenton", "EVANS, Brenton"), false, "the shared rule's own answer");
+  assert.throws(() => coveredBy("QL-01", "EVANS, Brenton", rows, letter("Brenton"), EV_TODAY, { kinds: EV_TABLE, register: EV_RULES.register } as never),
+    /nameIsSomebodyElse/, "a caller that forgets the name rule is stopped here, not found on the grid");
 });
 
 test("evidence: a hand-tagged row is the certificate, whatever kind of paper the reading calls it", () => {

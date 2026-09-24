@@ -2702,9 +2702,10 @@ const is = (got, want, what) => {
   is(evidenceKindsProblem(VESSEL.evidenceKinds, codes), null, "the vessel file's kinds all name its own columns");
   is(shared.evidenceKindsProblem(VESSEL.evidenceKinds, codes), null, "the module says so too");
   const today = "2026-09-25";
-  const rules = { kinds: VESSEL.evidenceKinds, register: crewRegister([{ name: "EVANS, Brenton", aliases: [] }, { name: "SITTIYOS, Kachin", aliases: [] }]) };
+  const rules = { kinds: VESSEL.evidenceKinds, nameIsSomebodyElse: names.nameIsSomebodyElse,
+    register: crewRegister([{ name: "EVANS, Brenton", aliases: [] }, { name: "SITTIYOS, Kachin", aliases: [] }]) };
   const rows = [
-    { id: "ext", key: "ext", person: "EVANS, Brenton", code: "QL-01", filedOn: "2026-08-02" },
+    { id: "ext", key: "ext", person: "EVANS, Brenton", code: null, filedOn: "2026-08-02" },
     { id: "coc", key: "coc", person: "EVANS, Brenton", code: "QL-01", filedOn: "2021-02-01" },
   ];
   const readings = {
@@ -2719,6 +2720,11 @@ const is = (got, want, what) => {
   is(coveredBy("QL-01", "EVANS, Brenton", rows, recognised, today, rules), null, "and none of a certificate of recognition");
   const spent = { ...readings, ext: { ...readings.ext, expiresOn: "2026-09-01" } };
   is(coveredBy("QL-01", "EVANS, Brenton", rows, spent, today, rules), null, "a cover that has run out is no cover");
+  // Whose paper it is, asked the way the round asks it (nameIsSomebodyElse).
+  const oneWord = { ...readings, ext: { ...readings.ext, holderName: "Brenton" } };
+  is(coveredBy("QL-01", "EVANS, Brenton", rows, oneWord, today, rules), cover, "a one-word printed name that is his still covers");
+  const hers = { ...readings, ext: { ...readings.ext, holderName: "Kachin" } };
+  is(coveredBy("QL-01", "EVANS, Brenton", rows, hers, today, rules), null, "one that is another man's does not");
 }
 
 /* ---- the certificate of recognition: never longer than the certificate it
