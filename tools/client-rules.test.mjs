@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, showPicker };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -435,6 +435,11 @@ const is = (got, want, what) => {
   is(live503 && live503.fetchedAt, null, "…a live one, with no stamp");
   is(live503 && live503.message, "Couldn't load the portal (503)", "…with the status in its words for the badge");
   is(lib.offlineAfterPull(STAMP, live503.answered, live503.fetchedAt), null, "…and a live 503 ends offline mode");
+  is(live503 && live503.status, 503, "…and carries the status");
+  is(lib.signInOverAfterPull(live503.answered, live503.fetchedAt, live503.status), false, "…which is not the sign-in over");
+  const live401 = await loadFailed(pageWith(async () => ({ ok: false, status: 401, headers: headers({}) })));
+  is(live401 && live401.status, 401, "a load refused carries the 401");
+  is(lib.signInOverAfterPull(live401.answered, live401.fetchedAt, live401.status), true, "…and the poll takes it as the sign-in over");
   const kept500 = await loadFailed(pageWith(async () => ({ ok: false, status: 500, headers: headers({ [lib.FETCHED_AT_HEADER]: STAMP }) })));
   is(kept500 && kept500.fetchedAt, STAMP, "a failed answer that carries the stamp is a kept one");
   is(lib.offlineAfterPull(STAMP, kept500.answered, kept500.fetchedAt), STAMP, "…and does not end offline mode");
@@ -1103,7 +1108,7 @@ const is = (got, want, what) => {
   const ORIGIN = "https://portal.example";
   for (const [name, rules] of [["the module", offline], ["the page", lib]]) {
     const { cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER,
-      networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache } = rules;
+      networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, forgetsBefore } = rules;
     is(cacheable("GET", "/", ORIGIN), "page", name + ": the page is kept");
     is(cacheable("GET", ORIGIN + "/?tab=roster", ORIGIN), "page", name + ": …whatever the query on it");
     is(cacheable("GET", "/api/me", ORIGIN), "api", name + ": /api/me is kept");
@@ -1167,6 +1172,23 @@ const is = (got, want, what) => {
     is(forgetsOn("page", 200, headers({ "X-Portal-Page": "portal" })), false, name + ": the page itself clears nothing");
     is(forgetsOn("page", 502, headers({})), false, name + ": nor a page that could not be served");
     is(forgetsOn("vendor", 401, headers({})), false, name + ": a vendor file never decides this");
+    /* What is forgotten before a request is even sent: the sign-out, and
+       the request a sign-in completes through. The code posted to
+       /login/verify is the one that sets the new cookie and sends the
+       browser to the page; nothing on that path used to touch the kept
+       copies, and the next person's page booted as the last person off
+       the kept /api/me when the link was merely slow. */
+    is(forgetsBefore("GET", "/logout", ORIGIN), "signOut", name + ": the sign-out address forgets everything before it is sent");
+    is(forgetsBefore("GET", ORIGIN + "/logout", ORIGIN), "signOut", name + ": …in full too");
+    is(forgetsBefore("POST", "/login/verify", ORIGIN), "signIn", name + ": the code posted to /login/verify is a sign-in completing");
+    is(forgetsBefore("post", ORIGIN + "/login/verify", ORIGIN), "signIn", name + ": …whatever the case of the method");
+    is(forgetsBefore("GET", "/login/verify", ORIGIN), null, name + ": a GET of that address completes nothing");
+    is(forgetsBefore("POST", "/login", ORIGIN), null, name + ": asking for the code completes nothing either");
+    is(forgetsBefore("GET", "/login", ORIGIN), null, name + ": nor does opening the sign-in form");
+    is(forgetsBefore("GET", "/", ORIGIN), null, name + ": the page forgets nothing");
+    is(forgetsBefore("POST", "/api/state", ORIGIN), null, name + ": nor a save");
+    is(forgetsBefore("POST", "https://elsewhere.example/login/verify", ORIGIN), null, name + ": another origin's sign-in is none of this worker's");
+    is(forgetsBefore("POST", "http://[bad", ORIGIN), null, name + ": an address that cannot be read forgets nothing");
     /* Whose kept answers come across on a new build. */
     is(earlierPortalCache("portal-aaa", "portal-bbb"), true, name + ": an earlier build's cache is carried across");
     is(earlierPortalCache("portal-bbb", "portal-bbb"), false, name + ": …not this build's own");
@@ -1449,6 +1471,112 @@ const is = (got, want, what) => {
     await w.advance(1);
     is(state && !!stampOf(state), true, "…and the kept document at API_WAIT_MS");
   }
+  {
+    /* The fetch listener itself: which requests it answers and which it
+       leaves to the browser. A FetchEvent-like object: respondWith
+       records the promise the worker answers with, waitUntil the work it
+       runs alongside. A navigation cannot be built as a Request here
+       (Node refuses the mode), so those are plain request-like objects. */
+    const fetchEvent = (request) => ({
+      request, answer: null, done: Promise.resolve(),
+      respondWith(p) { this.answer = p; },
+      waitUntil(p) { this.done = this.done.then(() => p); },
+    });
+    const w = world();
+    const cache = w.cacheOf(w.NAME);
+    cache.store.set("/vendor/react.production.min.js", new Response("react"));
+    let calls = [];
+    w.setFetch((r) => { calls.push((r.method || "GET") + " " + new URL(r.url).pathname); return Promise.resolve(json({ rev: 9 })); });
+    // A poll of the document: answered by the worker, network first.
+    const poll = fetchEvent(new Request(ORIGIN + "/api/state"));
+    w.listeners.fetch(poll);
+    is(!!poll.answer, true, "a GET of /api/state is answered by the worker");
+    is((await (await poll.answer).json()).rev, 9, "…with the live document, network first");
+    await poll.done;
+    is(!!cache.store.get("/api/state"), true, "…and the answer is kept");
+    // A vendor file: the kept copy, the network never asked.
+    calls = [];
+    const vendor = fetchEvent(new Request(ORIGIN + "/vendor/react.production.min.js"));
+    w.listeners.fetch(vendor);
+    is(!!vendor.answer, true, "a GET of a vendor file is answered by the worker");
+    is(await (await vendor.answer).text(), "react", "…from the kept copy first");
+    is(calls, [], "…without asking the network");
+    // A save: the worker leaves it to the browser.
+    const save = fetchEvent(new Request(ORIGIN + "/api/state", { method: "POST", body: "{}" }));
+    w.listeners.fetch(save);
+    is(save.answer, null, "a POST of /api/state is left to the browser: the worker neither answers nor keeps it");
+    is(calls, [], "…and does not send it itself");
+    // The sign-out: everything kept goes before the request is sent.
+    cache.store.set("/api/me", await w.stamped(json({ email: "a@example.com" })));
+    let keptWhenSent = null;
+    w.setFetch(async (r) => { keptWhenSent = await w.caches.keys(); return new Response(null, { status: 303, headers: { Location: "/login" } }); });
+    const out = fetchEvent({ url: ORIGIN + "/logout", method: "GET", mode: "navigate" });
+    w.listeners.fetch(out);
+    is(!!out.answer, true, "a navigation to /logout is answered by the worker");
+    is((await out.answer).status, 303, "…with the server's own answer, the 303 the browser follows");
+    is(keptWhenSent, [], "…sent only once the whole cache is gone");
+    is(await w.caches.keys(), [], "…and it stays gone");
+  }
+  {
+    /* The must-fix: a sign-in submitted on this device clears the last
+       person's copies before the new person's page can boot. Person A's
+       stamped /api/me and document are kept; B posts the code; the
+       worker answers only once the crew's answers are gone, so the 303
+       and the page after it find nothing of A's - and a slow /api/me for
+       B is then NOT answered from a kept copy at NETWORK_WAIT_MS, where
+       before it was A's, and the portal booted as A, live and editable. */
+    const fetchEvent = (request) => ({
+      request, answer: null, done: Promise.resolve(),
+      respondWith(p) { this.answer = p; },
+      waitUntil(p) { this.done = this.done.then(() => p); },
+    });
+    const w = world();
+    const cache = w.cacheOf(w.NAME);
+    cache.store.set("/api/me", await w.stamped(json({ email: "a@example.com" })));
+    cache.store.set("/api/state", await w.stamped(json({ rev: 8 })));
+    cache.store.set("/", await w.stamped(new Response("<html>", { status: 200, headers: { "X-Portal-Page": "portal" } })));
+    cache.store.set("/vendor/react.production.min.js", new Response("react"));
+    let keptWhenSent = null, sent = null;
+    w.setFetch(async (r) => {
+      sent = (r.method || "GET") + " " + new URL(r.url).pathname;
+      keptWhenSent = [...cache.store.keys()];
+      return new Response(null, { status: 303, headers: { Location: "/" } });
+    });
+    const signIn = fetchEvent({ url: ORIGIN + "/login/verify", method: "POST", mode: "navigate" });
+    w.listeners.fetch(signIn);
+    is(!!signIn.answer, true, "the code posted to /login/verify is answered by the worker");
+    const answered = await signIn.answer;
+    is(answered.status, 303, "…with the server's own answer, the 303 to the page");
+    is(sent, "POST /login/verify", "…the request itself sent on as it was");
+    is(keptWhenSent, ["/vendor/react.production.min.js"], "…and sent only once the crew's answers and the page were gone, the vendor file left");
+    is([...cache.store.keys()], ["/vendor/react.production.min.js"], "afterwards only the vendor entry remains");
+    // B's page boots and asks /api/me on a link that says nothing.
+    w.setFetch(() => new Promise(() => {}));
+    const me = fetchEvent(new Request(ORIGIN + "/api/me"));
+    w.listeners.fetch(me);
+    let booted = null;
+    me.answer.then((a) => { booted = a; });
+    await settle();   // the worker sets its timer once the cache is open
+    await w.advance(offline.NETWORK_WAIT_MS + 1);
+    is(booted, null, "the new person's slow /api/me is not answered from a kept copy at NETWORK_WAIT_MS: there is none");
+    await w.advance(offline.API_WAIT_MS);
+    is(booted, null, "…nor later: the page waits on the network, and never boots as the last person");
+  }
+  {
+    // The cache failing never fails the sign-in: with the phone's storage
+    // gone, the code still goes to the server and the 303 comes back.
+    const fetchEvent = (request) => ({ request, answer: null, respondWith(p) { this.answer = p; }, waitUntil() {} });
+    const w = world();
+    w.caches.open = async () => { throw new DOMException("storage is full", "QuotaExceededError"); };
+    w.caches.delete = async () => { throw new DOMException("storage is full", "QuotaExceededError"); };
+    w.setFetch(async () => new Response(null, { status: 303, headers: { Location: "/" } }));
+    const signIn = fetchEvent({ url: ORIGIN + "/login/verify", method: "POST", mode: "navigate" });
+    w.listeners.fetch(signIn);
+    is((await signIn.answer).status, 303, "with the cache refusing, a sign-in still reaches the server and its 303 comes back");
+    const out = fetchEvent({ url: ORIGIN + "/logout", method: "GET", mode: "navigate" });
+    w.listeners.fetch(out);
+    is((await out.answer).status, 303, "…and so does a sign-out");
+  }
 }
 
 /* ---- the page offline: the badge's line, the lock, the picker ---- */
@@ -1458,7 +1586,7 @@ const is = (got, want, what) => {
      name picker may stand in for the sign-in. The last one is the bug
      that started this: a link that was down used to fall through to the
      honour-system picker on the live site. */
-  const { offlineLine, controlsLocked, offlineAfterPull, showPicker, VESSEL } = lib;
+  const { offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, VESSEL } = lib;
   /* What a poll of /api/state decides. A live answer of any status ends
      offline mode: a 500 is a server in trouble on a link that is up, and
      the badge says Not saving with the reason, as it always did. Before
@@ -1471,6 +1599,15 @@ const is = (got, want, what) => {
   is(offlineAfterPull(STAMP, true, STAMP), STAMP, "a kept copy, good or failed, does not: nothing live has been heard");
   is(offlineAfterPull(STAMP, false, null), STAMP, "no answer at all (the link down, nothing kept) changes nothing");
   is(offlineAfterPull(null, false, null), null, "…online or offline");
+  /* A live 401 on the poll is the sign-in over - expired while the tab
+     was open, or taken away - and the tab goes to the sign-in page the
+     way the boot does. Before this it sat on "Couldn't load the portal
+     (401)" until somebody pressed Try again. */
+  is(signInOverAfterPull(true, null, 401), true, "a live 401 on the poll is the sign-in over: the tab goes to the sign-in page");
+  is(signInOverAfterPull(true, STAMP, 401), false, "a kept 401 is not: it is a copy of one already acted on");
+  is(signInOverAfterPull(true, null, 503), false, "a live 503 is a server in trouble, not a sign-in over");
+  is(signInOverAfterPull(false, null, undefined), false, "no answer at all decides nothing");
+  is(signInOverAfterPull(undefined, undefined, 401), false, "…even with a 401 left on the error from somewhere else");
   is(VESSEL.timezone, "Australia/Perth", "the line is read in the vessel's own time (the test's cases are in it)");
   // 06:32 UTC is 14:32 in the vessel's time.
   is(offlineLine("2026-09-24T06:32:00.000Z", Date.parse("2026-09-24T09:00:00.000Z")),

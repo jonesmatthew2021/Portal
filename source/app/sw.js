@@ -128,6 +128,25 @@ self.addEventListener("activate", (event) => {
    address itself in case the word never arrived. */
 const forget = () => caches.delete(NAME);
 
+/* The sign-out and the sign-in's completing request (forgetsBefore) are
+   answered by this worker itself: what is kept goes first, then the
+   request is sent on and the server's answer - the 303 the browser
+   follows - handed back as it is. Answered here rather than left to the
+   browser with the deletes running alongside, because the deletes must be
+   done before the browser follows the 303 and the page opens: on a
+   sign-in it opens for the new person and asks /api/me at once, and a
+   copy still kept then was the last person's. The sign-out takes the
+   whole cache, as its word from the page does; a sign-in takes the crew's
+   answers and leaves the build's own files, which the new person's page
+   needs too. The cache failing never fails the request (openCache). */
+async function forgetThen(what, request) {
+  try {
+    if (what === "signOut") await forget();
+    else { const cache = await openCache(); if (cache) await forgetKept(cache); }
+  } catch (e) {}
+  return fetch(request);
+}
+
 self.addEventListener("message", (event) => {
   if (event.data && event.data.type === FORGET_MESSAGE) event.waitUntil(forget());
 });
@@ -187,8 +206,9 @@ async function cacheFirst(event) {
 
 self.addEventListener("fetch", (event) => {
   const request = event.request;
-  if (request.mode === "navigate" && cacheKey(request.url) === "/logout") {
-    event.waitUntil(forget());
+  const goes = forgetsBefore(request.method, request.url, ORIGIN);
+  if (goes) {
+    event.respondWith(forgetThen(goes, request));
     return;
   }
   const kind = cacheable(request.method, request.url, ORIGIN);

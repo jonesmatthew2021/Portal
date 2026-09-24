@@ -258,8 +258,13 @@ on any line that still names this one.
   `DropSpot`, `controlsLocked`). Sign-out tells the worker to forget
   everything (`forgetOffline`); a sign-in that is over - a 401, or the
   sign-in form served where the page should be - clears the kept copies
-  (`forgetsOn`), so a revoked device reads nothing offline; a different
-  person signing in on the same device clears the last person's copies; a
+  (`forgetsOn`), so a revoked device reads nothing offline, and a live 401
+  on the poll sends the tab to the sign-in page the way the boot does
+  (`signInOverAfterPull`); a sign-in submitted on this device clears the
+  kept copies before the new person's page loads - the worker answers
+  `POST /login/verify` and `/logout` itself, after the deletes
+  (`forgetsBefore`), so a slow link can never boot the portal as the last
+  person; a live `/api/me` for somebody else clears them too; a
   new build carries the kept answers across only from an earlier
   `portal-*` cache and only for the same person (`earlierPortalCache`);
   and nothing else is ever cached - file bytes, the CDN scripts, the fauna

@@ -328,6 +328,18 @@ const controlsLocked = (offlineAt, roundRunning) => !!offlineAt || !!roundRunnin
  *  @param {boolean} answered  whether an answer came, good or not
  *  @param {string|null} fetchedAt  the stamp on that answer, null if live */
 const offlineAfterPull = (was, answered, fetchedAt) => (answered ? fetchedAt || null : was);
+/** Whether a poll of /api/state found the sign-in over: a live 401 - the
+ *  session expired while the tab was open, or the grant was taken away.
+ *  The tab then goes to the sign-in page the way the boot does on its
+ *  401, forgetting what the worker kept first. Before this the tab sat on
+ *  "Couldn't load the portal (401)", or Not saving once loaded, and got
+ *  to the sign-in only through a reload. Only a live answer: a kept 401
+ *  is a copy of one already acted on, and a 503 is a server in trouble on
+ *  a link that is up (offlineAfterPull), never a sign-in over.
+ *  @param {boolean} answered  whether an answer came, good or not
+ *  @param {string|null} fetchedAt  the stamp on that answer, null if live
+ *  @param {number} status  the answer's status */
+const signInOverAfterPull = (answered, fetchedAt, status) => !!answered && !fetchedAt && status === 401;
 /** Whether the honour-system name picker may stand in for the sign-in:
  *  only under the preview's shim (which sets the flag), and only when
  *  /api/me could not say who this is. On the live site the picker never
@@ -348,6 +360,9 @@ async function loadState() {
     const e = new Error(`Couldn't load the portal (${r.status})`);
     e.answered = true;
     e.fetchedAt = fetchedAt;
+    // The status too, so the pull can tell a sign-in that is over (a
+    // live 401) from a server in trouble (signInOverAfterPull).
+    e.status = r.status;
     throw e;
   }
   return { ...(await r.json()), fetchedAt };  // { rev, data, fetchedAt }
@@ -5349,6 +5364,13 @@ function Portal({ role, onSignOut }) {
         if (alive) setLoaded(true);
         if (alive) setSync({ state: "ok", at: new Date().toISOString().slice(11, 16) });
       } catch (e) {
+        // The sign-in over, found by the poll: the sign-in page, the way
+        // the boot goes there on its own 401.
+        if (alive && signInOverAfterPull(e && e.answered, e && e.fetchedAt, e && e.status)) {
+          forgetOffline();
+          window.location.href = "/login";
+          return;
+        }
         if (alive) setSync({ state: "error", msg: e.message });
         // A failed answer still decides offline mode: a live one, whatever
         // its status, means the link is up and the badge says Not saving

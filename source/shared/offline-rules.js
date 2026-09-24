@@ -49,9 +49,10 @@ export const API_WAIT_MS = 30000;
  *
  *  /api/me is short for the same reason the page is. The page boots on it
  *  - nothing shows until it answers - and its kept copy is always the
- *  person signed in on this device: the worker forgets it on a 401 and
- *  when somebody else signs in, so handing it back early can never boot
- *  the portal as the wrong person. The long wait buys /api/me nothing,
+ *  person signed in on this device: the worker forgets it on a 401, and
+ *  before a sign-in submitted on this device goes to the server
+ *  (forgetsBefore), so handing it back early can never boot the portal
+ *  as the last person. The long wait buys /api/me nothing,
  *  and on a link that is connected but answers nothing (a satellite dish
  *  at sea) it cost thirty seconds of "Signing you in..." before the
  *  document's own wait even started. It is /api/state that decides
@@ -68,6 +69,40 @@ export function networkWait(kind, key) {
 /** The word the page sends the service worker to clear everything it
  *  kept - on sign-out, so a signed-out device holds nothing. */
 export const FORGET_MESSAGE = "forget";
+
+/**
+ * Whether a request ends this device's reading of one person's portal
+ * before it is sent, so everything kept goes first: the sign-out address,
+ * and the request a sign-in completes through - the code posted to
+ * /login/verify, which is the one that sets the new cookie and sends the
+ * browser to the page. Nothing on that path used to touch the kept
+ * copies: the page opening for the new person then asked /api/me, and a
+ * link merely slow gave it the last person's kept copy after
+ * NETWORK_WAIT_MS, so the portal booted as them, live and editable, and
+ * the new person's edits were written under the last person's name. The
+ * step that asks for the code (POST /login) completes nothing and is
+ * left alone. The service worker answers these two itself, after the
+ * deletes are done, so the 303 the server sends back never reaches the
+ * browser while a copy is still kept.
+ *
+ * @param {string} method
+ * @param {string} url  the request's address, absolute or a path
+ * @param {string} [origin]  the portal's own origin; another origin's
+ *   sign-in is none of this worker's
+ * @returns {"signOut"|"signIn"|null}
+ */
+export function forgetsBefore(method, url, origin) {
+  let u;
+  try {
+    u = new URL(url, origin || "https://portal.invalid");
+  } catch (e) {
+    return null;
+  }
+  if (origin && u.origin !== origin) return null;
+  if (u.pathname === "/logout") return "signOut";
+  if (u.pathname === "/login/verify" && String(method).toUpperCase() === "POST") return "signIn";
+  return null;
+}
 
 /** The four answers the service worker keeps the last good copy of. Nothing
  *  else under /api/ is ever kept. */
