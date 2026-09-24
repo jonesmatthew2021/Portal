@@ -601,6 +601,66 @@ function pullNowStep({ dirty, saving, waitedMs }) {
   return waitedMs >= PULL_NOW_CEILING_MS ? "pull-late" : "wait";
 }
 
+/* A pull for a caller who needs what the server holds now - the runner,
+   after the round has saved. The tick's own pulls run one at a time, and a
+   second ask while one is running is handed the one running; but that one
+   may have asked the server before the round's save landed, and would
+   bring back nothing new. So a caller is given a fresh pull after any in
+   flight, never the one in flight itself. */
+function freshPull(inFlight, pull) {
+  return inFlight ? inFlight.then(pull, pull) : pull();
+}
+
+/* The switch the poll throws when the record says the round was cut off.
+   The request is raced against it, never cancelled: a lease that lapsed
+   under a workbook write still in flight is not a dead round, and a
+   cancelled request would have the platform stop the write with it. The
+   runner stops waiting; the request keeps its socket to the end. */
+const CUT_OFF = "The round was cut off; press again";
+function cutOffSwitch() {
+  let throwIt = () => {};
+  const tripped = new Promise((_, no) => { throwIt = () => no(new Error(CUT_OFF)); });
+  tripped.catch(() => {});
+  return { tripped, cutOffNow: throwIt };
+}
+
+/* Clearing the run's window leaves a live run alone. The round runs on
+   the server once started, and a window taken down mid-run is not a run
+   stopped: its progress would go on landing on nothing, the button would
+   come back, and a start queued behind it would wait unseen. Only a run
+   that has finished, either way, is cleared. */
+function runCleared(m) {
+  return m && m.phase !== "done" && m.phase !== "failed" ? m : null;
+}
+
+/* A start landing mid-run, kept for after it: one queued start, with every
+   ask made while it waits folded in. The first ask's keys stand, and the
+   certificate upload's origin stands whichever came first, because that
+   screen is the one that reads the origin to report its own batch. Every
+   caller is answered with the round that runs for them (its waiters), not
+   told at once that nothing happened. */
+function queueRound(queued, input, waiter) {
+  const q = queued || { input: {}, waiters: [] };
+  const merged = { ...(input || {}), ...q.input };
+  if (input && input.origin === "certificates") merged.origin = "certificates";
+  return { input: merged, waiters: waiter ? [...q.waiters, waiter] : q.waiters };
+}
+
+/* What a button that writes the workbook says, held down, while somebody
+   else has it: the hour by its own sentence, a person by name. */
+function roundBusyTitle(holder) {
+  const h = String(holder || "").trim();
+  return !h || h === "the round on the hour" ? ROUND_BUSY : `${h} is writing the workbook`;
+}
+
+/* When the matrix last moved: the round writes matrixUpdated when a date
+   moves and files the workbook when a cell does, so the later of the two
+   is the day the matrix last followed a certificate. */
+function matrixLastMoved(matrixUpdated, trainingMatrix) {
+  const stamps = [matrixUpdated, trainingMatrix && trainingMatrix.uploaded].filter(Boolean).map((s) => String(s).slice(0, 10));
+  return stamps.sort().pop() || "";
+}
+
 /* The done panel, off the round's outcome: the eyebrow, and the lines
    under it - the counts, the workbook and any one-line problem, nothing
    else. Each line carries a tone for the window (plain, muted, problem,
@@ -3106,14 +3166,15 @@ function DateColsHead({ trail = 150, validity = false }) {
    file, wherever it sits: it starts the round from the page (runMatrixRound),
    which reads the new certificates, refiles them and has the server put
    what they settle on the matrix and into the office's workbook. Admin
-   only; held down while a round runs here or the hour holds the lease. */
+   only; held down while a round runs here or somebody else holds the
+   lease, under their name (roundBusyTitle). */
 function UpdateMatrixButton({ variant = "quiet", label = "Update matrix" }) {
-  const { admin, matrixRun, runMatrixRound, roundRunning } = usePortal();
+  const { admin, matrixRun, runMatrixRound, roundRunning, roundHolder } = usePortal();
   if (!admin) return null;
   const running = !!matrixRun && matrixRun.phase !== "done" && matrixRun.phase !== "failed";
   return (
     <Button variant={variant} disabled={running || roundRunning}
-      title={!running && roundRunning ? ROUND_BUSY : undefined}
+      title={!running && roundRunning ? roundBusyTitle(roundHolder) : undefined}
       onClick={() => { if (!running) runMatrixRound({ origin: "button" }); }}>
       {running ? "Updating…" : label}
     </Button>
@@ -14363,7 +14424,7 @@ function readOPMSExport(XLSX, buf) {
    gathers them, worst first, each with the button that goes to the fix. */
 
 function TodayScreen({ go }) {
-  const { quals: QUALS, certificates, certSheet, opmsSheet, matrixUpdated,
+  const { quals: QUALS, certificates, opmsSheet, matrixUpdated, trainingMatrix,
     opmsAnalysis, opmsMarks, renewalMarks } = usePortal();
 
   // Everything urgent, as a single worklist: expired, inside 30 days, or
@@ -14417,8 +14478,10 @@ function TodayScreen({ go }) {
       return ps && fs && fs.length > 3 && fs !== ps && !(c.filename || "").toUpperCase().includes(ps);
     }).length;
     const age = (iso) => (iso ? Math.max(0, -daysTo(String(iso).slice(0, 10))) : null);
-    return { in60, unknown, misfiled, opmsAge: age(opmsSheet && opmsSheet.uploaded), sheetAge: age(certSheet && certSheet.uploaded) };
-  }, [QUALS, certificates, opmsSheet, certSheet]);
+    // The matrix's age is the round's own stamp, not the certificate sheet's,
+    // which only an upload by hand moves (matrixLastMoved).
+    return { in60, unknown, misfiled, opmsAge: age(opmsSheet && opmsSheet.uploaded), sheetAge: age(matrixLastMoved(matrixUpdated, trainingMatrix)) };
+  }, [QUALS, certificates, opmsSheet, matrixUpdated, trainingMatrix]);
 
   // OPMS disagreements still open — the comparison's two columns minus what
   // has been marked sent or fixed. Zero means two independent systems agree.
@@ -14439,7 +14502,7 @@ function TodayScreen({ go }) {
   if (quiet.unknown) attention.push({ n: quiet.unknown, text: "marked with a question mark nobody has answered", target: "checker", act: "Settle them" });
   if (quiet.misfiled) attention.push({ n: quiet.misfiled, text: "scans that look filed under the wrong person", target: "documents", act: "Check them" });
   if (quiet.opmsAge != null && quiet.opmsAge > 9) attention.push({ n: `${quiet.opmsAge}d`, text: "since Portways refreshed the OPMS spreadsheet — chase the weekly export", target: "opms", act: "OPMS" });
-  if (quiet.sheetAge != null && quiet.sheetAge > 30) attention.push({ n: `${quiet.sheetAge}d`, text: "since the training matrix spreadsheet was updated — press Update matrix after your next batch", target: "documents", act: "Go" });
+  if (quiet.sheetAge != null && quiet.sheetAge > 30) attention.push({ n: `${quiet.sheetAge}d`, text: "since a certificate last moved a date on the training matrix — press Update matrix after your next batch", target: "documents", act: "Go" });
 
   const stKind = { expired: { fg: T.bRed, bg: T.bRedBg }, soon: { fg: T.bRed, bg: T.bRedBg }, not: { fg: T.accent, bg: T.accentSoft } };
 
@@ -15469,11 +15532,21 @@ function CoolibahPortal({ role, onSignOut }) {
    * ref, and a ref changing does not redraw anything, so the fact has to be
    * held somewhere the screen watches. */
   const [pending, setPending] = useState(false);
-  /* Whether the worker's hour holds the workbook, as the portal last said
-     when this tab asked (/api/sync/last): asked by the hourly tick and by
-     every wait before a round, never on a clock of its own. The buttons
-     that write the workbook are held down while it is true. */
-  const [roundRunning, setRoundRunning] = useState(false);
+  /* Whether somebody holds the workbook, as the portal last said when this
+     tab asked (/api/sync/last): asked by the hourly tick and by every wait
+     before a round, never on a clock of its own. The buttons that write
+     the workbook are held down while it is true - under the holder's name
+     where a 409 gave one, which stands while the lease is held and goes
+     with it. A look that only says "running" keeps the name it has. */
+  const [roundHeld, setRoundHeld] = useState({ running: false, holder: null });
+  const roundRunning = roundHeld.running;
+  const roundHolder = roundHeld.holder;
+  const setRoundRunning = (running, holder) => setRoundHeld((h) => {
+    const next = running
+      ? { running: true, holder: String(holder || "").trim() || (h.running ? h.holder : null) }
+      : { running: false, holder: null };
+    return h.running === next.running && h.holder === next.holder ? h : next;
+  });
   const [loaded, setLoaded] = useState(false);
   const [files, setFiles] = useState({ state: "loading" });
   const [retry, setRetry] = useState(0);
@@ -15674,9 +15747,9 @@ function CoolibahPortal({ role, onSignOut }) {
   // as everything else, and again the moment the phone comes back to it.
   /* The two polls, reachable from the round runner below: a round that has
      just landed on the server wants the files and the document pulled now,
-     not on the next tick. Each hands back the pull in flight when one is,
-     so a caller waits for the very pull that is running rather than being
-     told nothing happened. */
+     not on the next tick. Each hands a caller a fresh pull after any in
+     flight (freshPull), so what comes back was asked for after the round
+     saved. The tick and the wake-up keep sharing the one in flight. */
   const pullFilesRef = useRef(null);
   const pullStateRef = useRef(null);
   React.useEffect(() => {
@@ -15714,7 +15787,7 @@ function CoolibahPortal({ role, onSignOut }) {
       }
     };
 
-    pullFilesRef.current = pullFiles;
+    pullFilesRef.current = () => freshPull(inFlight, pullFiles);
     pullFiles();
     const id = setInterval(pullFiles, FILES_POLL_MS);
     const stopWatching = onWake(pullFiles);
@@ -15792,7 +15865,7 @@ function CoolibahPortal({ role, onSignOut }) {
       }
     };
 
-    pullStateRef.current = pull;
+    pullStateRef.current = () => freshPull(inFlight, pull);
     pull();
     const id = setInterval(pull, POLL_MS);
     const stopWatching = onWake(pull);
@@ -16015,7 +16088,7 @@ function CoolibahPortal({ role, onSignOut }) {
   //   (the server's round, with its pct and word), "waiting" (for the hour
   //   to let go of the lease), "done" (with the outcome) or "failed".
   const [matrixRun, setMatrixRun] = useState(null);
-  const clearMatrixRun = () => setMatrixRun(null);
+  const clearMatrixRun = () => setMatrixRun(runCleared);
 
   // What the run reads is what is on the page at the moment it reads it, not
   // at the moment it was set going several renders earlier.
@@ -16046,8 +16119,8 @@ function CoolibahPortal({ role, onSignOut }) {
 
   const runMatrixRound = async (input = {}) => {
     if (matrixRunState.current.running) {
-      matrixRunState.current.queued = { ...(matrixRunState.current.queued || {}), ...input };
-      return null;
+      // Answered when the round that runs for this ask has finished (queueRound).
+      return new Promise((ok) => { matrixRunState.current.queued = queueRound(matrixRunState.current.queued, input, ok); });
     }
     matrixRunState.current.running = true;
 
@@ -16058,12 +16131,13 @@ function CoolibahPortal({ role, onSignOut }) {
     const moved = [];
     let prepareProblem = null;
     // The round's own progress, read every second and a half; the request
-    // is let go of when the record says the round was cut off.
+    // is raced against the record saying the round was cut off, and kept
+    // alive either way (cutOffSwitch).
     let poll = null;
     let cutOff = false;
     let cutOffSeen = 0;
     const stopPoll = () => { if (poll) clearInterval(poll); poll = null; };
-    const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const { tripped: cutOffP, cutOffNow } = cutOffSwitch();
     let last = null;
     const show = (next) => { last = next; setMatrixRun(next); };
 
@@ -16162,7 +16236,7 @@ function CoolibahPortal({ role, onSignOut }) {
           if (++cutOffSeen < 2) return;
           cutOff = true;
           stopPoll();
-          if (ctrl) ctrl.abort();
+          cutOffNow();
           return;
         }
         cutOffSeen = 0;
@@ -16171,9 +16245,9 @@ function CoolibahPortal({ role, onSignOut }) {
 
       const post = () => fetch("/api/round", {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ by, runId }), ...(ctrl ? { signal: ctrl.signal } : {}),
+        body: JSON.stringify({ by, runId }),
       });
-      let r = await post();
+      let r = await Promise.race([post(), cutOffP]);
       let body = await r.json().catch(() => ({}));
       let answer = roundAnswerPhase(r.status, body, by);
       if (answer === "waiting") {
@@ -16181,15 +16255,19 @@ function CoolibahPortal({ role, onSignOut }) {
         show({ ...base, ...progress, phase: "waiting" });
         await waitForRound(undefined, setRoundRunning);
         show({ ...base, ...progress, phase: "starting", pct: 0, word: "Starting" });
-        r = await post();
+        r = await Promise.race([post(), cutOffP]);
         body = await r.json().catch(() => ({}));
         answer = roundAnswerPhase(r.status, body, by);
         if (answer === "waiting") answer = "failed:" + (body.error || ROUND_BUSY);
       }
       if (answer !== "done") {
-        // A person's round: the buttons that write the workbook stay down
-        // until the hourly tick finds the lease free again.
-        if (r.status === 409) setRoundRunning(true);
+        // A person's round: the buttons that write the workbook stay down,
+        // under that person's name, until the lease drops - watched for
+        // from here rather than left to the next tick.
+        if (r.status === 409) {
+          setRoundRunning(true, typeof body.by === "string" ? body.by : "");
+          waitForRound(undefined, setRoundRunning).catch(() => {});
+        }
         throw new Error(answer.slice("failed:".length));
       }
       stopPoll();
@@ -16221,7 +16299,7 @@ function CoolibahPortal({ role, onSignOut }) {
       return last;
     } catch (e) {
       // Whatever was filed is filed either way, and every reading is kept.
-      const message = cutOff ? "The round was cut off; press again" : (e && e.message) || String(e);
+      const message = cutOff ? CUT_OFF : (e && e.message) || String(e);
       show({ ...base, ...progress, phase: "failed", message });
       return last;
     } finally {
@@ -16229,7 +16307,13 @@ function CoolibahPortal({ role, onSignOut }) {
       matrixRunState.current.running = false;
       const queued = matrixRunState.current.queued;
       matrixRunState.current.queued = null;
-      if (queued) runMatrixRound(queued);
+      // Whoever asked while this one ran is answered by the round that runs for them.
+      if (queued) {
+        runMatrixRound(queued.input).then(
+          (r) => queued.waiters.forEach((ok) => ok(r)),
+          () => queued.waiters.forEach((ok) => ok(null)),
+        );
+      }
     }
   };
 
@@ -16729,7 +16813,7 @@ function CoolibahPortal({ role, onSignOut }) {
     return { ok: true, gone };
   };
 
-  const ctx = { role, admin, session: SESSION, pending, roundRunning, setRoundRunning, removeCrew, renameCrew, setCrewRank, people, setPeople,
+  const ctx = { role, admin, session: SESSION, pending, roundRunning, roundHolder, setRoundRunning, removeCrew, renameCrew, setCrewRank, people, setPeople,
     notPeople, setNotPeople, certRoot, setCertRoot, writeCrewToWorkbooks, lastDocUpdate, setLastDocUpdate, folderNames, setFolderNames, filledFromCert, setFilledFromCert, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixRun, runMatrixRound, clearMatrixRun };
 
   return (

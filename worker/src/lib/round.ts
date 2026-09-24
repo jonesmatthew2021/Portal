@@ -220,10 +220,10 @@ export async function validityRulesHeld(): Promise<boolean> {
 
 /**
  * The skills matrix's Equivalence sheet, read off the live skills matrix
- * and kept under the same key and in the same shape the page's
- * "equivalences" action writes (storeEquivalences in source/index.html
- * is the parse this follows, and like the page this never writes an
- * empty table: a sheet that gives nothing leaves whatever is held alone).
+ * and kept under the same key and in the same shape the page once wrote
+ * (the sheet's parse lives here now, and like the page this never writes
+ * an empty table: a sheet that gives nothing leaves whatever is held
+ * alone).
  * The parse depends on the crew matrix's columns as much as on the sheet,
  * so what is kept is stamped with both - the skills matrix it was read
  * from and the columns it was read against - and read again when either

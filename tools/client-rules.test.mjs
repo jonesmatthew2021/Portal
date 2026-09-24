@@ -56,7 +56,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -654,6 +654,73 @@ const is = (got, want, what) => {
   is(lib.pullNowStep({ dirty: 0, saving: true, waitedMs: 1000 }), "wait", "a save in the air: wait");
   is(lib.pullNowStep({ dirty: 1, saving: true, waitedMs: 20000 }), "pull-late", "twenty seconds of that: pull anyway, and say the matrix follows");
   is(lib.pullNowStep({ dirty: 0, saving: false, waitedMs: 30000 }), "pull", "clear at last, however long it took: a plain pull");
+
+  /* The pull the runner is handed is a fresh one, after any in flight: a
+     tick's pull that asked the server before the round saved brings back
+     nothing new, so it is waited out and a new one made. */
+  {
+    let pulls = 0;
+    const pull = () => { pulls++; return Promise.resolve("pulled " + pulls); };
+    is(await lib.freshPull(null, pull), "pulled 1", "nothing in flight: one pull, now");
+    let letGo;
+    const inFlight = new Promise((ok) => { letGo = ok; });
+    const asked = lib.freshPull(inFlight, pull);
+    is(pulls, 1, "one in flight: no pull yet - the one running was asked before the save");
+    letGo();
+    is(await asked, "pulled 2", "…and a fresh one follows it");
+    is(await lib.freshPull(Promise.reject(new Error("failed")), pull), "pulled 3", "a pull that failed is followed all the same");
+  }
+
+  /* The request is raced against the cut-off, never cancelled. */
+  {
+    const never = new Promise(() => {});
+    const sw = lib.cutOffSwitch();
+    let said = null;
+    const race = Promise.race([never, sw.tripped]).catch((e) => { said = e.message; });
+    sw.cutOffNow();
+    await race;
+    is(said, lib.CUT_OFF, "the switch thrown: the runner stops waiting and says the round was cut off");
+    const quiet = lib.cutOffSwitch();
+    is(await Promise.race([Promise.resolve({ status: 200 }), quiet.tripped]), { status: 200 }, "not thrown: the request's own answer comes through");
+    // Thrown once nobody is racing it: nothing is thrown at the page. Node
+    // would end this run on an unhandled rejection, so reaching the end is the proof.
+    quiet.cutOffNow();
+    await new Promise((ok) => setTimeout(ok, 0));
+  }
+
+  /* Closing the window leaves a live run alone. */
+  is(lib.runCleared({ phase: "done", origin: "button" }), null, "a run that finished is cleared");
+  is(lib.runCleared({ phase: "failed", origin: "button" }), null, "…and one that failed");
+  is(lib.runCleared(null), null, "nothing to clear is nothing");
+  const live = { phase: "starting", origin: "button", pct: 40 };
+  is(lib.runCleared(live), live, "a run in its server phase stays: the round is running whatever the window does");
+  is(lib.runCleared({ phase: "reading" }), { phase: "reading" }, "…and one still reading");
+
+  /* A start landing mid-run is queued, and every caller waits for the round that runs for them. */
+  {
+    const q1 = lib.queueRound(null, { origin: "certificates" }, "upload");
+    is(q1, { input: { origin: "certificates" }, waiters: ["upload"] }, "the first ask starts the queue, with its caller waiting");
+    const q2 = lib.queueRound(q1, { origin: "portal", by: "Update portal" }, "portal");
+    is(q2, { input: { origin: "certificates", by: "Update portal" }, waiters: ["upload", "portal"] },
+      "a later ask folds in: the first origin stands, a key only the later ask carried comes along, both wait");
+    const q3 = lib.queueRound(lib.queueRound(null, { origin: "button" }, "b"), { origin: "certificates" }, "upload");
+    is(q3.input.origin, "certificates", "the upload's origin stands whichever came first: its screen reads it to report the batch");
+    is(lib.queueRound(q1, { origin: "button" }).waiters, ["upload"], "an ask with nobody waiting adds no waiter");
+    is(lib.queueRound(null, undefined, "x"), { input: {}, waiters: ["x"] }, "an ask with nothing to say still queues");
+  }
+
+  /* The button's title while somebody else has the workbook. */
+  is(lib.roundBusyTitle(null), lib.ROUND_BUSY, "no name: the hour's own sentence");
+  is(lib.roundBusyTitle("the round on the hour"), lib.ROUND_BUSY, "the hour by name: the same");
+  is(lib.roundBusyTitle(" Kachin "), "Kachin is writing the workbook", "a person: named");
+  is(lib.roundBusyTitle("Update portal"), "Update portal is writing the workbook", "…or the press that holds it");
+
+  /* When the matrix last moved: the later of the round's stamp and the workbook's. */
+  is(lib.matrixLastMoved("2026-08-01", { uploaded: "2026-09-20T03:00:00.000Z" }), "2026-09-20", "the workbook filed later: its day");
+  is(lib.matrixLastMoved("2026-09-22", { uploaded: "2026-09-20T03:00:00.000Z" }), "2026-09-22", "the round's stamp later: its day");
+  is(lib.matrixLastMoved("2026-09-22", null), "2026-09-22", "no workbook on file: the round's stamp");
+  is(lib.matrixLastMoved("", { uploaded: "2026-09-20T03:00:00.000Z" }), "2026-09-20", "no stamp: the workbook's day");
+  is(lib.matrixLastMoved("", null), "", "neither: nothing, and no nudge");
 
   const full = {
     at: "2026-09-24T10:00:00.000Z", applied: 2, cleared: 1, settled: 3, written: 3,
