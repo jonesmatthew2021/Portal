@@ -471,6 +471,30 @@ on any line that still names this one.
     (s 12(2)). Where the paper prints its own end that date governs; the
     ceiling only catches a longer one. The cell goes **amber**, never green:
     green would say the certificate is in date, and it has gone.
+    **A paper is never the certificate**: it fills no cell, joins no contest
+    for one and never stands as the foreign certificate behind a recognition -
+    the certificate still expired on the day printed on it, and that is the day
+    the matrix and the office's workbook say. The extension's six months run
+    from the certificate's own printed expiry, because s 15(3)-(4) extends "the
+    term of a certificate" - so a letter with no certificate on the portal
+    behind it covers nothing. A renewal lodged **after** the card expired
+    carries nothing (s 7(3): "before it expires"). And a paper is spent once
+    the certificate it was written about is in hand: a card issued on or after
+    the paper takes it off the books, which is what stops an issue letter, the
+    one paper with no end, carrying a column for ever.
+  - **A covered column runs no longer than the certificate carrying it.** An
+    endorsement exists only as a line on a certificate that has to be in force
+    to carry it (MO70 s 36(2)(a)), so QL-16 takes the **earlier** of the
+    endorsement's own printed end and the certificate's expiry, and only the
+    certificate in force for its own column covers another - a ticket the round
+    decided was superseded is the one it replaced. A column that carries no
+    expiry is never covered: it is held or it isn't. The round and the page's
+    cells (`compareMatrix` in `worker/src/routes/analyse.ts`,
+    `certificateStanding` in `worker/src/lib/analysis.ts`) decide every cell the
+    same way, on the same dates, keyed on the register's name and refusing a
+    document printed in another man's name (`nameIsSomebodyElse` in
+    `source/shared/names.js`) - two answers for one cell is a bug, not a
+    difference of opinion.
   - **The expiry day itself is the day a certificate stops counting**
     (`hasExpired` in `source/shared/bands.js`, MO70 s 5(a)(iii)). `daysUntil` is a
     plain day count and answers 0 on that day; everything that decides whether
@@ -479,6 +503,17 @@ on any line that still names this one.
   A green cell means "not expired" and nothing more: suspension and
   cancellation are invisible on a document and only AMSA can confirm them
   (MO70 s 5(a), s 45; MO505 s 17). Never word anything as "valid".
+
+  **The figures the orders turn on are data** (`vesselFacts` in the vessel file,
+  checked by both `checkVessel`s): 160 m, 10,000 GT, 3730 kW - Matthew's own
+  figures, 25 Sep 2026. MO504 Sch 1 cl 8(2) counts the minimum crew by length
+  and its note * makes the master and the engineer two people at 750 kW,
+  MO504 s 16(3) holds the master's role at 24 m, MO71 Sch 1 reads a master's
+  ticket against gross tonnage and MO505 s 5 an engineer's against propulsion
+  power. The portal works no crewing number out from them - MO504's table stops
+  at 80 m and MO505 Sch 1 at 100 m and 3000 GT, and which hull the figures
+  describe is Matthew's to say; a table in the vessel file cites them so its
+  premise can be checked against the order.
 
   **The office's own spreadsheet is wrong by law in five places** (Part 7 of
   the report): QL-13 ECDIS is not "5 years" but perpetual; a plain Chief Mate
