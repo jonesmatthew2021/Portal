@@ -14,6 +14,8 @@
  * one list, change the other.
  */
 import raw from "../../source/vessel.json";
+import { renewalNeedsProblem } from "../../source/shared/renewals.js";
+import { evidenceKindsProblem } from "../../source/shared/evidence.js";
 
 export type VesselColours = {
   deep: string; panel: string; raised: string; rule: string; text: string;
@@ -77,6 +79,21 @@ export type Vessel = {
    *  the certificate prints). `perpetual` is an endorsement that never
    *  expires, whose column takes the certificate's own date. */
   covers: { code: string; when: string; perpetual?: boolean; why?: string }[];
+  /** What the law wants in hand before a certificate can be renewed, and the
+   *  clause it comes from (source/shared/renewals.js reads this table). */
+  renewalNeeds: Record<string, { needs: string[]; why: string }>;
+  /** The five papers that stand in for a certificate that has run out: each
+   *  one's ceiling in days, what the days are counted from, the columns it
+   *  may cover and the clause (source/shared/evidence.js reads this table). */
+  evidenceKinds: Record<string, {
+    days: number | null; from: "issued" | "expiry"; covers: string[];
+    notWhenRecognition?: boolean; why: string;
+  }>;
+  /** The columns a certificate of recognition can never fill, whatever the
+   *  foreign certificate behind it says - a foreign basic safety training or
+   *  marine cook certificate is not one of the classes AMSA may recognise
+   *  (MO70 s 7(2)(b)). */
+  neverRecognised: { codes: string[]; why: string };
   certPageNotes: string[];
   tickets: Record<string, { grade: number; stream: string; short: string }>;
   docBuckets: string[];
@@ -110,7 +127,10 @@ const SHAPE: [string, Kind][] = [
   ["customerMarks.elearning", "string"], ["customerMarks.auIssuers", "string[]"],
   ["customerMarks.nameStopWords", "string[]"],
   ["elearningCodes", "string[]"], ["noExpiryCodes", "string[]"], ["elearningGroups", "string[]"],
-  ["certStated", "object"], ["covers", "array"], ["certPageNotes", "string[]"], ["tickets", "object"],
+  ["certStated", "object"], ["covers", "array"],
+  ["renewalNeeds", "object"], ["evidenceKinds", "object"], ["neverRecognised.codes", "string[]"],
+  ["neverRecognised.why", "string"],
+  ["certPageNotes", "string[]"], ["tickets", "object"],
   ["docBuckets", "string[]"], ["labels", "object"], ["qualColumns", "array"], ["crewFolders", "object"],
 ];
 const THEME_COLOURS = ["deep", "panel", "raised", "rule", "text", "muted", "accent", "accentSoft", "teal", "blue"];
@@ -198,6 +218,22 @@ export function checkVessel(value: unknown, from = "source/vessel.json"): Vessel
     if (!columnCodes.has(String(c.code).trim().toUpperCase())) throw wrong(`covers[${i}].code`, "one of the codes in qualColumns");
     if (c.perpetual !== undefined && typeof c.perpetual !== "boolean") throw wrong(`covers[${i}].perpetual`, "true or false");
     if (c.why !== undefined && !word(c.why)) throw wrong(`covers[${i}].why`, "the clause it comes from, as a string");
+  });
+  /* The two tables the rules read straight off this file: what the law wants
+   * in hand before a certificate can be renewed (MO70 s 25, MO71 Sch 4 4.2
+   * and the rest), and the papers that lawfully stand in for one that has run
+   * out. Each rule says in one sentence what is wrong with the first bad
+   * entry, and a table naming a column this matrix has not got would be a
+   * blocker nobody could see or a cover nobody could find. */
+  const codes = [...columnCodes];
+  const needsWrong = renewalNeedsProblem(v.renewalNeeds, codes);
+  if (needsWrong) throw new Error(`${from}: ${needsWrong}`);
+  const kindsWrong = evidenceKindsProblem(v.evidenceKinds, codes);
+  if (kindsWrong) throw new Error(`${from}: ${kindsWrong}`);
+  /* The columns a recognition can never fill (MO70 s 7(2)(b)). A code that is
+   * not a column would bar nothing and say nothing about it. */
+  v.neverRecognised.codes.forEach((c, i) => {
+    if (!columnCodes.has(String(c).trim().toUpperCase())) throw wrong(`neverRecognised.codes[${i}]`, "one of the codes in qualColumns");
   });
   return v;
 }

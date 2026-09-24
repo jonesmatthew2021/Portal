@@ -28,6 +28,8 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { renewalNeedsProblem } from "../source/shared/renewals.js";
+import { evidenceKindsProblem } from "../source/shared/evidence.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SOURCE = join(ROOT, "source");
@@ -75,7 +77,10 @@ const VESSEL_SHAPE = [
   ["customerMarks.elearning", "string"], ["customerMarks.auIssuers", "string[]"],
   ["customerMarks.nameStopWords", "string[]"],
   ["elearningCodes", "string[]"], ["noExpiryCodes", "string[]"], ["elearningGroups", "string[]"],
-  ["certStated", "object"], ["covers", "array"], ["certPageNotes", "string[]"], ["tickets", "object"],
+  ["certStated", "object"], ["covers", "array"],
+  ["renewalNeeds", "object"], ["evidenceKinds", "object"], ["neverRecognised.codes", "string[]"],
+  ["neverRecognised.why", "string"],
+  ["certPageNotes", "string[]"], ["tickets", "object"],
   ["docBuckets", "string[]"], ["labels", "object"], ["qualColumns", "array"], ["crewFolders", "object"],
 ];
 // The colours a theme must name: the ones the roundel gives the page.
@@ -164,6 +169,21 @@ export function checkVessel(vessel, from = "source/vessel.json") {
     if (!columnCodes.has(String(c.code).trim().toUpperCase())) throw wrong("covers[" + i + "].code", "one of the codes in qualColumns");
     if (c.perpetual !== undefined && typeof c.perpetual !== "boolean") throw wrong("covers[" + i + "].perpetual", "true or false");
     if (c.why !== undefined && !word(c.why)) throw wrong("covers[" + i + "].why", "the clause it comes from, as a string");
+  });
+  /* The two tables the rules read straight off this file: what the law wants
+   * in hand before a certificate can be renewed (MO70 s 25, MO71 Sch 4 4.2
+   * and the rest), and the papers that lawfully stand in for one that has run
+   * out. Each rule says in one sentence what is wrong with the first bad
+   * entry - the same two rules the worker asks, so the build and the worker
+   * refuse the same file. */
+  const codes = [...columnCodes];
+  const needsWrong = renewalNeedsProblem(vessel.renewalNeeds, codes);
+  if (needsWrong) throw new Error(from + ": " + needsWrong);
+  const kindsWrong = evidenceKindsProblem(vessel.evidenceKinds, codes);
+  if (kindsWrong) throw new Error(from + ": " + kindsWrong);
+  /* The columns a recognition can never fill (MO70 s 7(2)(b)). */
+  vessel.neverRecognised.codes.forEach((c, i) => {
+    if (!columnCodes.has(String(c).trim().toUpperCase())) throw wrong("neverRecognised.codes[" + i + "]", "one of the codes in qualColumns");
   });
   return vessel;
 }

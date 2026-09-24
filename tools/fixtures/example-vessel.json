@@ -232,6 +232,10 @@
       "why": "MO505 s 12(2) - AMSA's letter saying the certificate has been issued is the certificate until the card arrives, so the law gives it no end; where the letter prints one, that date governs"
     }
   },
+  "neverRecognised": {
+    "codes": ["QL-11", "QL-12"],
+    "why": "MO70 s 7(2)(b) - AMSA may recognise a foreign certificate only of the classes in s 7(1)(a), (aa), (b), (c) and (ca). The certificate of safety training (s 7(1)(e)) and the marine cook certificate (s 7(1)(d)) are not among them, so a recognition claiming either fills nothing"
+  },
   "docBuckets": ["vesselSafety", "partnershipSafety", "insurance", "travel", "templates", "agreements", "documentation"],
   "labels": {
     "correspondence": "Customer Correspondence",

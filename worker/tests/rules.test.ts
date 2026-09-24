@@ -907,6 +907,43 @@ test("the vessel file's covers table is checked: a pattern that will not compile
   for (const rule of vessel.covers) assert.ok(rule.why && /MO\d\d/.test(rule.why), rule.code + " carries the clause it comes from");
 });
 
+test("checkVessel asks the renewal, evidence and recognition tables the same questions the rules do", () => {
+  /* The two rules that hold a table (renewalNeedsProblem, evidenceKindsProblem)
+     are pure and tested on their own; this is the wiring - the worker and the
+     build both refuse a file whose tables would leave a blocker nobody can see
+     or a cover nobody can find. */
+  assert.throws(
+    () => checkVessel({ ...vessel, renewalNeeds: { "QL-01": { needs: ["QL-99"], why: "MO71 Sch 4 4.2" } } }, "a vessel file"),
+    /a vessel file: renewalNeeds\["QL-01"\] wants QL-99, which is not one of the vessel's columns\./,
+  );
+  assert.throws(
+    () => checkVessel({ ...vessel, renewalNeeds: { "QL-01": { needs: ["QL-17"] } } }, "a vessel file"),
+    /must say which clause the pair comes from/,
+  );
+  assert.throws(
+    () => checkVessel({ ...vessel, evidenceKinds: { hearsay: { days: 30, from: "issued", covers: ["QL-01"], why: "nobody's" } } }, "a vessel file"),
+    /a vessel file: evidenceKinds\["hearsay"\] is not one of the kinds a reading gives/,
+  );
+  assert.throws(
+    () => checkVessel({ ...vessel, evidenceKinds: { extension: { days: 184, from: "sometime", covers: ["QL-01"], why: "MO70 s 15(3)" } } }, "a vessel file"),
+    /must count its days in "from" from one of issued, expiry/,
+  );
+  assert.throws(
+    () => checkVessel({ ...vessel, neverRecognised: { codes: ["QL-99"], why: "MO70 s 7\\(2\\)\\(b\\)" } }, "a vessel file"),
+    /"neverRecognised.codes\[0\]" - it must be one of the codes in qualColumns/,
+  );
+  assert.equal(checkVessel(vessel), vessel, "the file as it is passes all three");
+  // Every entry carries the clause it comes from: the law's mapping is data
+  // somebody can read against the order, not a number in the code.
+  for (const [code, need] of Object.entries(vessel.renewalNeeds)) {
+    assert.ok(/MO\d\d/.test(need.why), code + " carries the clause it comes from");
+  }
+  for (const [kind, entry] of Object.entries(vessel.evidenceKinds)) {
+    assert.ok(/MO\d\d/.test(entry.why), kind + " carries the clause it comes from");
+  }
+  assert.ok(/MO70 s 7\(2\)\(b\)/.test(vessel.neverRecognised.why), "and so does the recognition bar");
+});
+
 /* ------------------------------------------------------------------------ *
  * The medical (source/shared/medical.js): which one governs, and whether
  * the expiry printed on it is longer than the law allows for the holder's
