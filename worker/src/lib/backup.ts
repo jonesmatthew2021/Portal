@@ -84,8 +84,11 @@ const trimSlashes = (s: string) => String(s || "").replace(/^\/+|\/+$/g, "");
  * portal's own folder, and whatever the caller adds (the certificate home
  * and the crew folders Crew Details assigned): the sync reads those
  * folders and would take a backup on as a document, and the round writes
- * into them. Under or equal is refused; a folder beside them is fine.
- * `folder` and `alsoFiledInto` are real library paths.
+ * into them. Under or equal is refused, and so is a folder that holds
+ * any of them - the channel's own root, most likely, where the file
+ * would sit loose beside everyone's folders with the crew's emails and
+ * phones in it. A folder beside them is fine. `folder` and
+ * `alsoFiledInto` are real library paths.
  */
 export function folderAllowed(
   folder: string,
@@ -111,6 +114,10 @@ export function folderAllowed(
   if (inside) {
     return { ok: false, reason: `the folder ${want} is one the portal files into (${inside}); pick another` };
   }
+  const holds = filedInto.find((f) => (f.toLowerCase() + "/").startsWith(lower));
+  if (holds) {
+    return { ok: false, reason: `the folder ${want} holds the portal's own folders (${holds}); pick one beside them` };
+  }
   return { ok: true };
 }
 
@@ -133,8 +140,9 @@ const RECORD = "last-backup";
 export const lastBackup = () => getStore("sync").get(RECORD, { type: "json" }) as Promise<BackupRecord | null>;
 
 /** The named stores that go in the file: the AI's readings and checks. The
- *  sync store (the hour's records, the lease) and the job stores do not. */
-const READING_STORES = ["certificate-readings", "matrix-readings", "shift-allocation-readings", "opms-checks"];
+ *  sync store (the hour's records, the lease) and the job stores do not -
+ *  and a restore writes these four and no store a file names for itself. */
+export const READING_STORES = ["certificate-readings", "matrix-readings", "shift-allocation-readings", "opms-checks"];
 
 /** The real paths of the folders Crew Details points at: the certificate
  *  home and every man's own folder. The backup may not go under any. */
@@ -234,12 +242,15 @@ export async function nightlyBackup(now: number): Promise<BackupRecord | null> {
     const allowed = folderAllowed(folder, env, await foldersFiledInto());
     if (!allowed.ok) return await failed(allowed.reason);
     const files = fileStore();
-    if (!(await files.hasFolder("library/" + folder))) return await failed(`the folder ${folder} is not in the library; make it in Teams`);
+    const where = await files.hasFolder("library/" + folder);
+    if (!where) return await failed(`the folder ${folder} is not in the library`);
 
     const { text, rev, counts } = await backupBody(now, perth.day);
     const bytes = new TextEncoder().encode(text);
     const name = backupName(perth.day);
-    await files.set(`library/${folder}/${name}`, bytes.buffer as ArrayBuffer, { intoExistingFolder: true });
+    // Into the folder by the id the look just gave: the one write that
+    // cannot make a folder, whatever the library does with a path.
+    await files.set(`library/${folder}/${name}`, bytes.buffer as ArrayBuffer, { intoFolderId: where.id });
     for (const old of namesToDrop(perth.day)) {
       // Each on its own: a drop that fails costs one old file, not the backup.
       try {

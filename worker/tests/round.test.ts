@@ -616,6 +616,8 @@ const smallWorkbook = () => writeZip([
  *  Store rows are keyed "store|key". */
 function portalDb(doc: Record<string, unknown>, rows: Record<string, unknown>[], readings: Record<string, unknown>, users: Record<string, unknown>[] = []) {
   const state = { data: JSON.stringify(doc), rev: 1 };
+  // Whether the portal_state row is there at all: a wiped database has none.
+  const stateRow = { present: true };
   const blobs = new Map<string, string>();
   // The version mark the store stamps on every write, for the lease's take.
   const etags = new Map<string, string>();
@@ -623,7 +625,13 @@ function portalDb(doc: Record<string, unknown>, rows: Record<string, unknown>[],
   const drizzle = drizzleOn(rows);
   const db = fakeDb((sql, args) => {
     if (/PRAGMA table_info/.test(sql)) return { results: [{ name: "adopted_from_folder" }, { name: "kept_in_place" }] };
-    if (/SELECT data, rev FROM portal_state/.test(sql)) return { results: [{ ...state }] };
+    if (/SELECT data, rev FROM portal_state/.test(sql)) return { results: stateRow.present ? [{ ...state }] : [] };
+    // The restore's seed of an empty row where there is none.
+    if (sql === "INSERT INTO portal_state (id, data, rev, updated_at) VALUES (?1, '{}', 0, ?2) ON CONFLICT (id) DO NOTHING") {
+      if (stateRow.present) return { changes: 0 };
+      stateRow.present = true; state.data = "{}"; state.rev = 0;
+      return { changes: 1 };
+    }
     if (/SELECT data FROM portal_state/.test(sql)) return { results: [{ data: state.data }] };
     if (/SELECT folder, blob_key AS blobKey FROM documents/.test(sql)) {
       return { results: rows.filter((r) => r.category === "certificate" && !r.removedAt && r.folder).map((r) => ({ folder: r.folder, blobKey: r.blobKey })) };
@@ -642,7 +650,7 @@ function portalDb(doc: Record<string, unknown>, rows: Record<string, unknown>[],
       return { changes: 1 };
     }
     if (/UPDATE portal_state SET data/.test(sql)) {
-      if (args[3] !== state.rev) return { changes: 0 };
+      if (!stateRow.present || args[3] !== state.rev) return { changes: 0 };
       state.data = String(args[1]); state.rev++;
       return { changes: 1 };
     }
@@ -705,7 +713,7 @@ function portalDb(doc: Record<string, unknown>, rows: Record<string, unknown>[],
     }
     return drizzle(sql, args);
   });
-  return { db, state, blobs, etags, doc: () => JSON.parse(state.data), rows };
+  return { db, state, stateRow, blobs, etags, doc: () => JSON.parse(state.data), rows };
 }
 
 /* A skills matrix whose Equivalence sheet says a "Master <500GT" ticket
@@ -2479,10 +2487,19 @@ test("the library driver refuses to make a folder outside the portal's own, and 
 });
 
 /** Graph, answered by hand for the backup's write: the folders in `exists`
- *  are folders, a PUT lands only where its parent is one, and every call
- *  is written down. */
+ *  are folders, each with an id of its own, and every call is written
+ *  down. A PUT by path makes whatever folders the path is missing - as
+ *  Graph's upload by path is known to - and says so in `made`; a PUT by
+ *  a folder's id lands only while that folder is still there. */
 function graphLibrary(exists: Set<string>) {
   const calls: { method: string; path: string }[] = [];
+  const made: string[] = [];
+  const ids = new Map<string, string>();
+  const idOf = (folder: string) => {
+    if (!ids.has(folder)) ids.set(folder, "item" + (ids.size + 1));
+    return ids.get(folder)!;
+  };
+  const folderOf = (id: string) => [...ids.entries()].find(([, v]) => v === id)?.[0];
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -2495,23 +2512,30 @@ function graphLibrary(exists: Set<string>) {
     if (path === "/v1.0/sites/site1/drives") return json({ value: [{ id: "d1", name: "Documents" }] });
     if (method === "GET") {
       const m = /^\/v1\.0\/drives\/d1\/root:\/(.+)$/.exec(path);
-      return m && exists.has(m[1]) ? json({ id: "f", folder: {} }) : json({ error: "not found" }, 404);
+      return m && exists.has(m[1]) ? json({ id: idOf(m[1]), folder: {} }) : json({ error: "not found" }, 404);
     }
     if (method === "POST" && path.endsWith(":/children")) {
       const parent = /root:\/(.+):\/children$/.exec(path)![1];
-      exists.add(`${parent}/${JSON.parse(String(init!.body)).name}`);
-      return json({ id: "new" }, 201);
+      const folder = `${parent}/${JSON.parse(String(init!.body)).name}`;
+      exists.add(folder); made.push(folder);
+      return json({ id: idOf(folder) }, 201);
     }
     if (method === "PUT") {
+      const byId = /^\/v1\.0\/drives\/d1\/items\/([^:]+):\/[^/]+:\/content$/.exec(path);
+      if (byId) {
+        const folder = folderOf(byId[1]);
+        return folder && exists.has(folder) ? json({ id: "put" }, 201) : json({ error: { code: "itemNotFound", message: "The resource could not be found." } }, 404);
+      }
       const parent = /root:\/(.+)\/[^/]+:\/content$/.exec(path)![1];
-      return exists.has(parent) ? json({ id: "put" }, 201) : json({ error: { code: "itemNotFound", message: "The resource could not be found." } }, 404);
+      if (!exists.has(parent)) { exists.add(parent); made.push(parent); }
+      return json({ id: "put" }, 201);
     }
     if (method === "DELETE") return new Response(null, { status: 204 });
     return json({ error: "unexpected " + method + " " + path }, 500);
   }) as typeof fetch;
   const posts = () => calls.filter((c) => c.method === "POST" && c.path.endsWith(":/children")).map((c) => c.path);
   const puts = () => calls.filter((c) => c.method === "PUT").map((c) => c.path);
-  return { calls, posts, puts, restore: () => { globalThis.fetch = realFetch; } };
+  return { calls, made, posts, puts, idOf, restore: () => { globalThis.fetch = realFetch; } };
 }
 const sharepointEnv = (over: Record<string, unknown> = {}) => ({
   FILE_STORE: "sharepoint", MS_TENANT_ID: "tenant", MS_CLIENT_ID: "app", MS_CLIENT_SECRET: "secret",
@@ -2521,29 +2545,32 @@ const sharepointEnv = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-test("a write into an existing folder goes straight to the address and makes nothing on the way", async () => {
+test("a write into an existing folder goes to the folder by its id and makes nothing on the way", async () => {
   const graph = graphLibrary(new Set(["United Operations Team", "United Operations Team/Backups"]));
   try {
     setEnv(sharepointEnv() as never);
     const { fileStore } = await import("../src/files/store.js");
     const store = fileStore();
-    assert.equal(await store.hasFolder("library/United Operations Team/Backups"), true, "the folder is there");
-    assert.equal(await store.hasFolder("library/United Operations Team/Nowhere"), false, "…and this one is not");
+    const id = graph.idOf("United Operations Team/Backups");
+    assert.deepEqual(await store.hasFolder("library/United Operations Team/Backups"), { id }, "the folder is there, by its id");
+    assert.equal(await store.hasFolder("library/United Operations Team/Nowhere"), null, "…and this one is not");
     graph.calls.length = 0;
 
-    // The folder is there: one PUT, and no folder asked about or made.
-    await store.set("library/United Operations Team/Backups/Crew Portal backup 2026-09-24.json", bytesOf("{}"), { intoExistingFolder: true });
-    assert.deepEqual(graph.puts(), ["/v1.0/drives/d1/root:/United Operations Team/Backups/Crew Portal backup 2026-09-24.json:/content"]);
+    // The folder is there: one PUT to its id, and no folder asked about or made.
+    await store.set("library/United Operations Team/Backups/Crew Portal backup 2026-09-24.json", bytesOf("{}"), { intoFolderId: id });
+    assert.deepEqual(graph.puts(), [`/v1.0/drives/d1/items/${id}:/Crew Portal backup 2026-09-24.json:/content`], "by the folder's id, never by a path the library could grow to fit");
     assert.deepEqual(graph.posts(), [], "no folder made");
+    assert.deepEqual(graph.made, [], "not by the write either");
     assert.deepEqual(graph.calls.filter((c) => c.method === "GET"), [], "and none looked for");
 
-    // The folder is not there: the write is Graph's own 404, and still no folder.
+    // An id the library never gave: the write is Graph's own 404, and still no folder.
     graph.calls.length = 0;
     await assert.rejects(
-      store.set("library/United Operations Team/Nowhere/Crew Portal backup 2026-09-24.json", bytesOf("{}"), { intoExistingFolder: true }),
+      store.set("library/United Operations Team/Nowhere/Crew Portal backup 2026-09-24.json", bytesOf("{}"), { intoFolderId: "nothing" }),
       /SharePoint write failed \(404\)/,
     );
     assert.deepEqual(graph.posts(), [], "no folder made");
+    assert.deepEqual(graph.made, []);
     assert.equal(graph.puts().length, 1, "the one write, refused");
   } finally {
     graph.restore();
@@ -2557,15 +2584,45 @@ test("a folder that goes between the look and the write: the write fails, and st
     setEnv(sharepointEnv() as never);
     const { fileStore } = await import("../src/files/store.js");
     const store = fileStore();
-    assert.equal(await store.hasFolder("library/United Operations Team/Backups"), true);
+    const where = await store.hasFolder("library/United Operations Team/Backups");
+    assert.ok(where);
     // Somebody in Teams deletes the folder in the instant between.
     exists.delete("United Operations Team/Backups");
     await assert.rejects(
-      store.set("library/United Operations Team/Backups/Crew Portal backup 2026-09-24.json", bytesOf("{}"), { intoExistingFolder: true }),
+      store.set("library/United Operations Team/Backups/Crew Portal backup 2026-09-24.json", bytesOf("{}"), { intoFolderId: where.id }),
       /SharePoint write failed \(404\)/,
     );
     assert.deepEqual(graph.posts(), [], "no folder made");
-    assert.equal(exists.has("United Operations Team/Backups"), false, "and the library is as the person left it");
+    assert.deepEqual(graph.made, [], "and the write, by id, could not grow one back");
+    assert.equal(exists.has("United Operations Team/Backups"), false, "the library is as the person left it");
+  } finally {
+    graph.restore();
+  }
+});
+
+test("the backup itself writes by the folder's id, so the library's own upload by path never gets the chance to make a folder", async () => {
+  const exists = new Set(["United Operations Team", "United Operations Team/Backups"]);
+  const graph = graphLibrary(exists);
+  try {
+    setEnv({ ...sharepointEnv(), DB: (await backupPortal()).portal.db, BACKUP_FOLDER, BACKUP_HOUR: "2", SHAREPOINT_FAUNA_FOLDER: "United Operations Team/Fauna" } as never);
+    const rec = await nightlyBackup(TEN_PAST_TWO);
+    assert.equal(rec?.error, null, rec?.error || "");
+    assert.equal(rec?.day, "2026-09-24");
+    assert.deepEqual(graph.puts(), [`/v1.0/drives/d1/items/${graph.idOf("United Operations Team/Backups")}:/Crew Portal backup 2026-09-24.json:/content`]);
+    assert.deepEqual(graph.made, [], "no folder made by any road");
+    assert.deepEqual(graph.posts(), []);
+
+    // The folder gone before the next night: refused on the record, nothing made.
+    exists.delete("United Operations Team/Backups");
+    graph.calls.length = 0;
+    const realError = console.error;
+    console.error = () => {};
+    let gone;
+    try { gone = await nightlyBackup(TEN_PAST_TWO + 86_400_000); } finally { console.error = realError; }
+    assert.equal(gone?.error, "the folder United Operations Team/Backups is not in the library");
+    assert.equal(gone?.day, "2026-09-24", "the day stays the last that landed");
+    assert.deepEqual(graph.puts(), [], "nothing written");
+    assert.deepEqual(graph.made, []);
   } finally {
     graph.restore();
   }
@@ -2699,6 +2756,94 @@ test("over the rate: the batch stores nothing and says the reading is unavailabl
   assert.deepEqual(readingWrites(portal.db), [], "nothing stored");
 });
 
+test("a 400 about the portal's own request, or one the portal cannot read, stores nothing and stops nothing", async () => {
+  // The API refusing a parameter the portal sends is a fact about the
+  // request, not the scan: the certificate stays unread and is tried
+  // again once the request is right, rather than written down as turned
+  // away and needing a paid re-read to undo.
+  const rejected = await unreadPortal(1);
+  const parameter = modelAnswers(() => ({ status: 400, body: apiError("invalid_request_error", "thinking.type: adaptive is not supported on this model") }));
+  try {
+    const out = (await (await extract([["QL-01", "Master"]], 4)).json()) as { extracted: number; stopped: unknown; failures: { kind: string }[] };
+    assert.equal(out.extracted, 0);
+    assert.equal(out.stopped, null);
+    assert.deepEqual(out.failures.map((f) => f.kind), ["other"]);
+  } finally {
+    parameter.restore();
+  }
+  assert.deepEqual(readingWrites(rejected.portal.db), [], "nothing stored: the certificate queues again");
+
+  const unreadable = await unreadPortal(1);
+  const html = modelAnswers(() => ({ status: 400, body: "<html><body>Bad Request</body></html>" }));
+  try {
+    const out = (await (await extract([["QL-01", "Master"]], 4)).json()) as { extracted: number; stopped: unknown; failures: { kind: string }[] };
+    assert.equal(out.extracted, 0);
+    assert.equal(out.stopped, null);
+    assert.deepEqual(out.failures.map((f) => f.kind), ["other"]);
+  } finally {
+    html.restore();
+  }
+  assert.deepEqual(readingWrites(unreadable.portal.db), [], "nothing stored for an answer the portal cannot read");
+});
+
+/** A stream the model cut with an error event, after `before` of an answer. */
+const cutStream = (type: string, before = "") =>
+  (before ? `data: ${JSON.stringify({ type: "content_block_delta", delta: { type: "text_delta", text: before } })}\n\n` : "") +
+  `data: ${JSON.stringify({ type: "error", error: { type, message: type } })}\n\n`;
+
+test("an error on the stream itself is sorted like a status, and a reading it cut is no reading", async () => {
+  // Nothing had come: overloaded on the stream is the model busy.
+  const empty = await unreadPortal(1);
+  const busy = modelAnswers(() => ({ status: 200, body: cutStream("overloaded_error") }));
+  try {
+    const out = (await (await extract([["QL-01", "Master"]], 4)).json()) as { extracted: number; stopped: unknown; failures: { kind: string }[] };
+    assert.equal(out.extracted, 0);
+    assert.deepEqual(out.stopped, { kind: "busy", line: READING_UNAVAILABLE });
+  } finally {
+    busy.restore();
+  }
+  assert.deepEqual(readingWrites(empty.portal.db), [], "nothing stored");
+
+  // Half a reading had come, then the rate: what came is not a reading of
+  // the certificate, and is not stored as one.
+  const cut = await unreadPortal(1);
+  const rate = modelAnswers(() => ({ status: 200, body: cutStream("rate_limit_error", '{"holderName":"Brenton Evans","certificateTitle":"Master') }));
+  try {
+    const out = (await (await extract([["QL-01", "Master"]], 4)).json()) as { extracted: number; stopped: unknown; failures: { kind: string }[] };
+    assert.equal(out.extracted, 0);
+    assert.deepEqual(out.stopped, { kind: "rate", line: READING_UNAVAILABLE });
+    assert.deepEqual(out.failures.map((f) => f.kind), ["rate"]);
+  } finally {
+    rate.restore();
+  }
+  assert.deepEqual(readingWrites(cut.portal.db), [], "the half reading was not stored");
+
+  // The account, on the stream: the hour can see it and stop.
+  const account = await unreadPortal(1);
+  const key = modelAnswers(() => ({ status: 200, body: cutStream("authentication_error") }));
+  try {
+    const out = (await (await extract([["QL-01", "Master"]], 4)).json()) as { stopped: { kind: string } | null };
+    assert.equal(out.stopped?.kind, "key");
+  } finally {
+    key.restore();
+  }
+  assert.deepEqual(readingWrites(account.portal.db), []);
+});
+
+test("a spend limit that wears a 429 is not asked again: the hour makes one call a certificate and stops", async () => {
+  const { portal, env } = await unreadPortal(2);
+  const model = modelAnswers(() => ({ status: 429, body: apiError("rate_limit_error", "You have reached your monthly spend limit.") }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    model.restore();
+  }
+  assert.equal(model.calls.length, 2, "one call for each of the two, and no retry after the account said no");
+  const hourly = JSON.parse(portal.blobs.get("sync|last-hourly")!);
+  assert.equal(hourly.readError, OUT_OF_CREDIT);
+  assert.deepEqual(readingWrites(portal.db), [], "nothing stored");
+});
+
 test("the hour stops reading on the first credit answer, says so in red, and still runs the round", async () => {
   const { portal, env } = await unreadPortal(2);
   const model = modelAnswers(() => ({ status: 400, body: CREDIT_BODY }));
@@ -2716,6 +2861,20 @@ test("the hour stops reading on the first credit answer, says so in red, and sti
   assert.equal(hourly.roundError, null);
   assert.deepEqual(readingWrites(portal.db), [], "nothing stored against the certificates");
   assert.equal(portal.blobs.has("sync|credit"), false, "nothing kept about the credit between hours");
+
+  // Topped up: the next hour reads both with nothing reset, and the line is gone.
+  const answers = modelAnswers(() => ({ status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans", certificateTitle: "Master <500GT", expiresOn: "2032-01-01" }) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    answers.restore();
+  }
+  assert.equal(answers.calls.length, 2, "the two unread certificates were put to the model");
+  const next = JSON.parse(portal.blobs.get("sync|last-hourly")!);
+  assert.equal(next.readError, null);
+  assert.equal(next.readTried, true, "the hour says it read");
+  assert.equal(next.read, 2);
+  assert.equal(readingWrites(portal.db).length, 2, "their readings are stored now");
 });
 
 test("a busy model stops the hour's reading as an aside, not an error, and the next hour reads as normal", async () => {
@@ -2866,8 +3025,20 @@ test("a folder the portal files into is refused, against the real map in wrangle
   const alsoFiled = ["United Operations Team/Somewhere Else", "United Operations Team/Certs/Kyle"];
   assert.equal(folderAllowed("United Operations Team/Somewhere Else/Backups", env, alsoFiled).ok, false);
   assert.equal(folderAllowed("United Operations Team/Certs/Kyle", env, alsoFiled).ok, false);
-  assert.equal(folderAllowed("United Operations Team/Certs", env, alsoFiled).ok, true, "beside a man's folder is fine");
+  assert.equal(folderAllowed("United Operations Team/Certs/Backups", env, alsoFiled).ok, true, "beside a man's folder is fine");
   assert.equal(folderAllowed("", env).ok, false, "no folder named");
+  // A folder that holds the portal's own folders is refused too: the
+  // channel's root, where the file would sit loose beside everyone's.
+  const holds = (folder: string, because: RegExp) => {
+    const said = folderAllowed(folder, env, alsoFiled);
+    assert.equal(said.ok, false, folder + " should be refused");
+    assert.match((said as { reason: string }).reason, /holds the portal's own folders/);
+    assert.match((said as { reason: string }).reason, because);
+    assert.match((said as { reason: string }).reason, /pick one beside them/);
+  };
+  holds("United Operations Team", /United Operations Team\//);
+  holds("united operations team/", /United Operations Team\//);
+  holds("United Operations Team/Certs", /Certs\/Kyle/);
 });
 
 /* ------------------------------------------------------------------------ *
@@ -3137,6 +3308,34 @@ test("asked for the readings, they go in bound and eighty at a time", async () =
   assert.equal(JSON.parse(portal.blobs.get("certificate-readings|r1/sum-7.json")!).holderName, "Person 7");
   assert.equal(portal.blobs.get("matrix-readings|equivalences.json"), "{broken", "a value the backup kept as text goes back as that text");
   assert.equal(portal.state.rev, 2, "and the document went in first");
+});
+
+test("a store the file names for itself is refused whole: the readings are the four the portal keeps", async () => {
+  const { portal } = await oneManPortal();
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: 1, by: "nobody", token: "t" }));
+  const res = await putBack(aBackup({ readings: { "certificate-readings": {}, sync: { "round-lease": { until: 9e15, by: "a file", token: "x" } } } }), manager, "?what=readings");
+  assert.equal(res.status, 400);
+  assert.match(((await res.json()) as { error: string }).error, /can't put back the store "sync"/);
+  assert.equal(portal.state.rev, 1, "the document was not written either: refused before anything");
+  assert.ok(!portal.db.asked.some((a) => /INSERT OR REPLACE/.test(a.sql)), "nothing written");
+  assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).by, "nobody", "the lease is as it was");
+  // A store the file names but was not asked for is not looked at.
+  const notAsked = await putBack(aBackup({ readings: { sync: { "round-lease": {} } } }));
+  assert.equal(notAsked.status, 200, "the document alone was asked for");
+});
+
+test("a wiped database takes the document back as its first revision", async () => {
+  const { portal } = await oneManPortal();
+  portal.stateRow.present = false;
+  const res = await putBack(aBackup());
+  const out = (await res.json()) as { rev: number; error?: string };
+  assert.equal(res.status, 200, out.error || "");
+  assert.equal(out.rev, 1, "the first revision on an empty portal");
+  assert.deepEqual(portal.doc().quals.rows, [["EVANS, Brenton", "Master", "", ["2029-01-01"]]]);
+  assert.equal(historyRows(portal.db).length, 1);
+  // And on a portal that has a document, the seed changes nothing.
+  const again = await putBack(aBackup());
+  assert.equal(((await again.json()) as { rev: number }).rev, 2);
 });
 
 test("asked for the file index and the users, only the portal's own columns are written, by name from the portal's list", async () => {

@@ -1,6 +1,8 @@
 import type { PortalUser } from "../auth.js";
 import { getEnv } from "../env.js";
 import { MAX_BYTES, saveDocument, type SharedDocument } from "../lib/shared-state.js";
+import { READING_STORES } from "../lib/backup.js";
+import { PORTAL_ROW_ID } from "../db/schema.js";
 import { ensureTable as ensureFaunaTable } from "./fauna.js";
 
 /**
@@ -104,6 +106,26 @@ export default async (req: Request, actor: PortalUser): Promise<Response> => {
   const what = [...new Set(named)] as string[];
   const unknown = what.filter((w) => !(PARTS as readonly string[]).includes(w));
   if (unknown.length) return bad(`This portal can't put back "${unknown.join('", "')}"; it knows ${PARTS.join(", ")}.`);
+  // The readings are the four stores the backup writes and no other: a
+  // store the file names for itself - the sync store, with the lease and
+  // the hour's records in it, or a job store - is refused before anything
+  // is written, the same rule as the columns: names from the portal, never
+  // from the file.
+  const stores = what.includes("readings") && file.readings && typeof file.readings === "object"
+    ? (file.readings as Record<string, Record<string, unknown>>)
+    : {};
+  const strange = Object.keys(stores).filter((s) => !READING_STORES.includes(s));
+  if (strange.length) return bad(`This portal can't put back the store "${strange.join('", "')}"; a backup's readings are ${READING_STORES.join(", ")}.`);
+
+  const db = getEnv().DB;
+  // A wiped or brand-new database has no state row yet, and a save is a
+  // save over one. An empty row is put there first, only where there is
+  // none, so the restore lands on it as the first revision - the very
+  // case a backup is kept for.
+  await db
+    .prepare("INSERT INTO portal_state (id, data, rev, updated_at) VALUES (?1, '{}', 0, ?2) ON CONFLICT (id) DO NOTHING")
+    .bind(PORTAL_ROW_ID, Math.floor(Date.now() / 1000))
+    .run();
 
   // The document first, as a save like any other, under a name of its own -
   // a burst of saves by one name is kept as one version, and this must not
@@ -115,14 +137,12 @@ export default async (req: Request, actor: PortalUser): Promise<Response> => {
     return bad("The document was not put back: " + (e instanceof Error ? e.message : String(e)), 409);
   }
 
-  const db = getEnv().DB;
   const rows: Record<string, number> = {};
   const run = async (stmts: D1PreparedStatement[]) => {
     for (let i = 0; i < stmts.length; i += BATCH) await db.batch(stmts.slice(i, i + BATCH));
   };
   for (const part of what as Part[]) {
     if (part === "readings") {
-      const stores = file.readings && typeof file.readings === "object" ? (file.readings as Record<string, Record<string, unknown>>) : {};
       const stmts: D1PreparedStatement[] = [];
       for (const [store, entries] of Object.entries(stores)) {
         if (!entries || typeof entries !== "object") continue;

@@ -116,11 +116,15 @@ modules. Edit that code there and only there.
   document byte for byte, the file index, the users, the readings, the fauna
   log; never sessions, sign-in codes or history — into `BACKUP_FOLDER`
   (wrangler.toml; empty means off and nothing shown), never making the folder
-  (`set(..., { intoExistingFolder: true })`) and refusing one the portal files
-  into (`folderAllowed`). A month of dailies and a year of monthlies are kept by
-  name, never by listing. `POST /api/state/restore-file` puts one back
-  (`routes/restore-file.ts`, from a terminal: the document as a save under a
-  name of its own; the file index, users, readings and fauna only when named).
+  (the write is addressed to the folder by the id `hasFolder` gave,
+  `set(..., { intoFolderId })`, so no path is ever resolved for Graph to grow
+  a folder to fit) and refusing one the portal files into or one that holds
+  the portal's folders (`folderAllowed`). A month of dailies and a year of
+  monthlies are kept by name, never by listing. `POST /api/state/restore-file`
+  puts one back (`routes/restore-file.ts`, from a terminal: the document as a
+  save under a name of its own, on a wiped database too; the file index,
+  users, readings and fauna only when named, and the readings only into the
+  four stores the backup writes).
 - **One round.** Every Update matrix button starts the server's round
   (`POST /api/round`, `runMatrixRound` in `source/index.html`); the page
   reads new certificates and refiles first, and never applies dates itself

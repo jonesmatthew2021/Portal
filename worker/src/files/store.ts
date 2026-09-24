@@ -24,14 +24,19 @@ import { getEnv } from "../env.js";
 export type FileStore = {
   get(key: string, opts?: { type?: "arrayBuffer" }): Promise<ArrayBuffer | null>;
   get(key: string, opts: { type: "stream" }): Promise<ReadableStream | null>;
-  /** `intoExistingFolder`: the write goes straight to the address and
-   *  makes no folder on the way - a parent that is not there is the
-   *  library's own refusal, never a folder the portal made. For a file
-   *  that goes into a folder of the owner's, such as the backup. */
-  set(key: string, value: ArrayBuffer, opts?: { intoExistingFolder?: boolean }): Promise<void>;
+  /** `intoFolderId`: the write is addressed to that folder by the id the
+   *  library gave it (hasFolder), under the key's file name, and no
+   *  folder is looked for or made on the way. An id can only ever be the
+   *  folder it was given for, so a folder that has gone is the library's
+   *  own 404 - the path is never resolved, and the library cannot grow a
+   *  folder to fit it. For a file that goes into a folder of the owner's,
+   *  such as the backup. */
+  set(key: string, value: ArrayBuffer, opts?: { intoFolderId?: string }): Promise<void>;
   delete(key: string): Promise<void>;
-  /** Whether the key names a folder that is there. One look, no listing. */
-  hasFolder(key: string): Promise<boolean>;
+  /** The folder the key names, by the id the library knows it by, or
+   *  null where there is none (a file of that name is not a folder). One
+   *  look, no listing. */
+  hasFolder(key: string): Promise<{ id: string } | null>;
   getMetadata(key: string): Promise<{ key: string; size?: number } | null>;
   /** `modified` is when the library last touched the file, as an ISO
    *  string, where the driver knows; the sync weighs two qualification
@@ -55,9 +60,9 @@ function r2Store(): FileStore {
     async delete(key) {
       await bucket().delete(key);
     },
-    async hasFolder() {
+    async hasFolder(key) {
       // R2 has no folders: a key is its whole address, so every folder is there.
-      return true;
+      return { id: key };
     },
     async getMetadata(key) {
       const head = await bucket().head(key);
@@ -238,11 +243,19 @@ function sharepointStore(): FileStore {
     },
     async set(key, value, opts) {
       const drive = await driveId();
-      // Straight to the address when asked: no folder is looked for and
-      // none made, so a parent that is not there comes back as Graph's
-      // own 404 on the write itself.
-      if (!opts?.intoExistingFolder) await ensureFolders(drive, toReal(key));
-      const res = await graph(`/drives/${drive}/root:/${encodePath(toReal(key))}:/content`, {
+      let address: string;
+      if (opts?.intoFolderId) {
+        // By the folder's own id, under the file's name: no path is
+        // resolved, so nothing on the way can be made to fit it. Graph's
+        // upload by path is known to make the folders a path is missing;
+        // by id it can only answer 404 for a folder that has gone.
+        const name = key.split("/").pop() || "";
+        address = `/drives/${drive}/items/${opts.intoFolderId}:/${encodeURIComponent(name)}:/content`;
+      } else {
+        await ensureFolders(drive, toReal(key));
+        address = `/drives/${drive}/root:/${encodePath(toReal(key))}:/content`;
+      }
+      const res = await graph(address, {
         method: "PUT",
         headers: { "Content-Type": "application/octet-stream" },
         body: value,
@@ -257,10 +270,10 @@ function sharepointStore(): FileStore {
       // One look at the item itself. Only an item that is a folder counts:
       // a file of that name is not somewhere to write into.
       const res = await graph(`/drives/${await driveId()}/root:/${encodePath(toReal(key))}`);
-      if (res.status === 404) return false;
+      if (res.status === 404) return null;
       if (!res.ok) throw new Error(`SharePoint check failed (${res.status}) for ${key}`);
-      const item = (await res.json()) as { folder?: unknown };
-      return !!item.folder;
+      const item = (await res.json()) as { id?: unknown; folder?: unknown };
+      return item.folder && typeof item.id === "string" && item.id ? { id: item.id } : null;
     },
     async getMetadata(key) {
       const res = await graph(`/drives/${await driveId()}/root:/${encodePath(toReal(key))}`);
