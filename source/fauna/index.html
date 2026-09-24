@@ -83,6 +83,11 @@
   .pdfout { display:flex; gap:10px; margin:10px 0 0; }
   .pdfout a, .pdfout button { flex:1; text-align:center; font:inherit; font-size:15px; font-weight:600; padding:12px; border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--sea); text-decoration:none; }
   .pdfout button { background:var(--good); color:#fff; border-color:var(--good); }
+  .sendrow { display:flex; align-items:center; gap:8px; margin:10px 0 0; }
+  .sendrow label { font-size:13px; color:var(--mute); }
+  .sendrow input { flex:1; font:inherit; font-size:16px; padding:9px 10px; border:1px solid var(--line); border-radius:8px; min-height:42px; min-width:0; }
+  .sendrow button { font:inherit; font-size:15px; font-weight:600; padding:0 14px; min-height:42px; border:0; border-radius:8px; background:var(--good); color:#fff; white-space:nowrap; }
+  .sendrow button[disabled] { background:#9CC3AD; }
   .toast { position:fixed; left:50%; bottom:calc(84px + env(safe-area-inset-bottom)); transform:translateX(-50%); background:var(--ink); color:#fff; padding:10px 16px; border-radius:10px; font-size:14px; opacity:0; transition:opacity .2s; pointer-events:none; max-width:90vw; text-align:center; z-index:9; }
   .toast.show { opacity:1; }
   #fatal { display:none; color:#fff; background:var(--bad); font-family:ui-monospace,monospace; font-size:13px; line-height:1.6; padding:14px 16px; white-space:pre-wrap; word-break:break-word; }
@@ -106,7 +111,6 @@
   <div class="month">
     <h2>Saved entries</h2>
     <select id="monthPick"></select>
-    <a class="dl" id="download" href="#">Download month</a>
   </div>
   <div class="logline" id="logline" style="display:none"></div>
   <ul class="list" id="list"></ul>
@@ -115,13 +119,19 @@
     <h2 id="sheetTitle">Spreadsheet</h2>
     <div class="sheetwrap"><table id="sheet"></table></div>
     <div class="pdf">
-      <button type="button" id="pdfGo">Generate PDF</button>
-      <span class="pdfstate" id="pdfState"></span>
+      <button type="button" id="xlsGo">Generate spreadsheet</button>
+      <span class="pdfstate" id="xlsState"></span>
     </div>
-    <div class="pdfout" id="pdfOut" style="display:none">
-      <a id="pdfOpen" target="_blank" rel="noopener">Open</a>
-      <button type="button" id="pdfSend">Send</button>
-      <a id="pdfSave" download>Save</a>
+    <div class="pdfout" id="xlsOut" style="display:none">
+      <a id="xlsOpen" target="_blank" rel="noopener">Open</a>
+      <button type="button" id="xlsShare" style="display:none">Share</button>
+      <button type="button" id="xlsSend">Send</button>
+      <a id="xlsSave" download>Save</a>
+    </div>
+    <div class="sendrow" id="sendRow" style="display:none">
+      <label for="sendTo">To</label>
+      <input id="sendTo" type="email" multiple inputmode="email" autocomplete="email" placeholder="name@company.com">
+      <button type="button" id="sendGo">Send it</button>
     </div>
   </section>
 </main>
@@ -514,7 +524,7 @@ async function loadLogInfo() {
   else line.style.display = "none";
 }
 async function loadMonth() {
-  $("download").href = `/api/fauna/export?month=${month}`;
+  $("xlsOut").style.display = "none"; $("sendRow").style.display = "none"; $("xlsState").textContent = "";
   try {
     const res = await fetch(`/api/fauna/sightings?month=${month}`, { cache: "no-store" });
     if (res.status === 401) { location.href = "/login?next=" + encodeURIComponent("/fauna/"); return; }
@@ -551,36 +561,65 @@ function renderSheet() {
   }
 }
 
-/* --------------------------------------------------------------- the PDF -- */
-let pdfUrl = null, pdfFile = null;
-$("pdfGo").onclick = async () => {
-  const btn = $("pdfGo"), state = $("pdfState");
-  btn.disabled = true; state.textContent = "Filling the sheet..."; $("pdfOut").style.display = "none";
+/* ---------------------------------------------------- the spreadsheet file -- */
+// Generate fills the office's workbook with the month and hands it back as a
+// file on the phone: open it, share it where the phone allows, save it, or
+// have the portal email it - each the person's own choice.
+const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+let xlsUrl = null, xlsFile = null;
+$("xlsGo").onclick = async () => {
+  const btn = $("xlsGo"), state = $("xlsState");
+  btn.disabled = true; state.textContent = "Filling the spreadsheet..."; $("xlsOut").style.display = "none"; $("sendRow").style.display = "none";
   try {
-    const res = await fetch(`/api/fauna/pdf?month=${month}`, { cache: "no-store" });
+    const res = await fetch(`/api/fauna/export?month=${month}`, { cache: "no-store" });
     if (res.status === 401) { location.href = "/login?next=" + encodeURIComponent("/fauna/"); return; }
     if (!res.ok) { const out = await res.json().catch(() => ({})); throw new Error(out.error || res.status); }
     const blob = await res.blob();
-    const name = `${month.slice(5, 7)}.${month.slice(0, 4)} - Marine Fauna Observation Log.pdf`;
-    if (pdfUrl) URL.revokeObjectURL(pdfUrl);
-    pdfFile = new File([blob], name, { type: "application/pdf" });
-    pdfUrl = URL.createObjectURL(pdfFile);
-    $("pdfOpen").href = pdfUrl;
-    $("pdfSave").href = pdfUrl; $("pdfSave").download = name;
-    $("pdfSend").style.display = navigator.canShare && navigator.canShare({ files: [pdfFile] }) ? "" : "none";
+    const name = `${month.slice(5, 7)}.${month.slice(0, 4)} - Marine Fauna Observation Log.xlsx`;
+    if (xlsUrl) URL.revokeObjectURL(xlsUrl);
+    xlsFile = new File([blob], name, { type: XLSX_TYPE });
+    xlsUrl = URL.createObjectURL(xlsFile);
+    $("xlsOpen").href = xlsUrl;
+    $("xlsSave").href = xlsUrl; $("xlsSave").download = name;
+    $("xlsShare").style.display = navigator.canShare && navigator.canShare({ files: [xlsFile] }) ? "" : "none";
     state.textContent = `${name} (${Math.max(1, Math.round(blob.size / 1024))} KB)`;
-    $("pdfOut").style.display = "";
+    $("xlsOut").style.display = "";
   } catch (e) {
-    state.textContent = "The PDF could not be made: " + (e.message || e);
+    state.textContent = "The spreadsheet could not be made: " + (e.message || e);
   } finally {
     btn.disabled = false;
   }
 };
-$("pdfSend").onclick = async () => {
-  if (!pdfFile) return;
-  try { await navigator.share({ files: [pdfFile], title: pdfFile.name }); }
+$("xlsShare").onclick = async () => {
+  if (!xlsFile) return;
+  try { await navigator.share({ files: [xlsFile], title: xlsFile.name }); }
   catch (e) { if (e && e.name !== "AbortError") toast("Could not open the share sheet: " + (e.message || e)); }
 };
+$("xlsSend").onclick = () => {
+  const row = $("sendRow");
+  row.style.display = row.style.display === "none" ? "" : "none";
+  if (row.style.display !== "none") { $("sendTo").value = store.get("fauna.sendTo", ""); $("sendTo").focus(); }
+};
+$("sendGo").onclick = async () => {
+  const to = $("sendTo").value.trim();
+  if (!to) { $("sendTo").focus(); return; }
+  const btn = $("sendGo");
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/fauna/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ month, to }) });
+    if (res.status === 401) { location.href = "/login?next=" + encodeURIComponent("/fauna/"); return; }
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(out.error || res.status);
+    store.set("fauna.sendTo", to);
+    toast(`Sent ${out.filename} to ${out.to.join(", ")}.`);
+    $("sendRow").style.display = "none";
+  } catch (e) {
+    toast("Not sent: " + (e.message || e));
+  } finally {
+    btn.disabled = false;
+  }
+};
+$("sendTo").addEventListener("keydown", (e) => { if (e.key === "Enter") $("sendGo").click(); });
 
 function renderList() {
   renderSheet();

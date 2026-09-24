@@ -5,8 +5,8 @@ import { getStore } from "../compat/blobs.js";
 import {
   openLog, ensureMonthTab, writeRows, saveLog, newMonthWorkbook, monthFileName, isMonthFile, type LogRow, type LogWorkbook,
 } from "../lib/fauna-log.js";
-import { monthPdf } from "../lib/fauna-pdf.js";
-import { settle } from "../../../source/fauna/fields.js";
+import { settle, monthName } from "../../../source/fauna/fields.js";
+import { XLSX_MIME } from "../../../source/shared/workbook.js";
 
 /**
  * The Marine Fauna Observation Log, filled in on a phone.
@@ -15,7 +15,7 @@ import { settle } from "../../../source/fauna/fields.js";
  *   PUT  /api/fauna/sightings        save one (new or changed)
  *   DELETE /api/fauna/sightings/:id  take one off
  *   GET  /api/fauna/export?month=    the month as the office's own workbook
- *   GET  /api/fauna/pdf?month=       the month as a PDF of that sheet, to send on
+ *   POST /api/fauna/send             that workbook emailed to whoever is named
  *   GET  /api/fauna/log?month=       the month's workbook in SharePoint, and what is owed
  *   POST /api/fauna/log              write everything owed now
  *
@@ -387,24 +387,67 @@ export default async (req: Request, user: PortalUser, path: string): Promise<Res
     }
   }
 
-  // The month's sheet as a PDF: the same entries, laid out as the log is,
-  // for sending on.
-  if (path === "/api/fauna/pdf" && req.method === "GET") {
-    const month = url.searchParams.get("month") || thisMonth;
-    if (!isMonth(month)) return json({ error: "The month is YYYY-MM." }, 400);
-    try {
-      const bytes = await monthPdf(await templateBytes(url.origin), month, await listMonth(month));
-      return new Response(bytes, {
-        headers: {
-          ...NO_STORE,
-          "Content-Type": "application/pdf",
-          "Content-Disposition": `inline; filename="${monthFileName(month).replace(/\.xlsx$/i, ".pdf")}"`,
-        },
-      });
-    } catch (e) {
-      return json({ error: `The PDF could not be made: ${e instanceof Error ? e.message : String(e)}` }, 500);
-    }
-  }
+  // The month's workbook emailed on, from the portal's own address, to
+  // whoever the person names - their decision, made on the phone.
+  if (path === "/api/fauna/send" && req.method === "POST") return await sendMonth(req, user);
 
   return json({ error: `No such endpoint: ${path}` }, 404);
 };
+
+/* ---------------------------------------------------------------- send --- */
+
+/** The addresses typed into the To box: separated by commas, semicolons or
+ *  spaces; anything that is not an address is left out and named. */
+export function recipients(raw: unknown): { to: string[]; bad: string[] } {
+  const parts = String(raw ?? "").split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean);
+  const to: string[] = [];
+  const bad: string[] = [];
+  for (const p of parts) {
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p)) { if (!to.includes(p.toLowerCase())) to.push(p.toLowerCase()); }
+    else bad.push(p);
+  }
+  return { to, bad };
+}
+
+async function sendMonth(req: Request, user: PortalUser) {
+  const env = getEnv();
+  const body = (await req.json().catch(() => null)) as { month?: unknown; to?: unknown; note?: unknown } | null;
+  const month = typeof body?.month === "string" ? body.month : "";
+  if (!isMonth(month)) return json({ error: "The month is YYYY-MM." }, 400);
+  const { to, bad } = recipients(body?.to);
+  if (bad.length) return json({ error: `Not an email address: ${bad.join(", ")}` }, 400);
+  if (!to.length) return json({ error: "Who is it going to? Type an email address." }, 400);
+  if (to.length > 10) return json({ error: "Ten addresses at most." }, 400);
+  if (!env.EMAIL) return json({ error: "Email sending isn't switched on for this deploy." }, 503);
+
+  const url = new URL(req.url);
+  const entries = await listMonth(month);
+  let bytes: ArrayBuffer;
+  try {
+    bytes = await exportMonth(await templateBytes(url.origin), month, entries);
+  } catch (e) {
+    return json({ error: `The spreadsheet could not be made: ${e instanceof Error ? e.message : String(e)}` }, 500);
+  }
+  const filename = monthFileName(month);
+  const title = `${monthName(month)} ${month.slice(0, 4)}`;
+  const note = typeof body?.note === "string" && body.note.trim() ? body.note.trim().slice(0, 1000) : "";
+  const count = entries.length;
+  try {
+    await env.EMAIL.send({
+      to,
+      from: { name: "TSV Coolibah Crew Portal", email: "portal@coolibah-portal.com" },
+      replyTo: user.email,
+      subject: `Marine Fauna Observation Log - ${title} - MinRes Coolibah`,
+      text:
+        `Attached is the Marine Fauna Observation Log for ${title} from the MinRes Coolibah` +
+        ` (${count} ${count === 1 ? "entry" : "entries"}), sent by ${user.name} from the vessel's crew portal.` +
+        (note ? `\n\n${note}` : "") +
+        `\n\nReplies go to ${user.email}.`,
+      attachments: [{ disposition: "attachment", filename, type: XLSX_MIME, content: bytes }],
+    });
+  } catch (e) {
+    return json({ error: `The email was not sent: ${e instanceof Error ? e.message : String(e)}` }, 502);
+  }
+  console.log(`fauna log ${filename} emailed to ${to.join(", ")} by ${user.email}`);
+  return json({ sent: true, to, filename });
+}

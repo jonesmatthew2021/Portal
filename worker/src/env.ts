@@ -12,15 +12,9 @@ export type PortalEnv = {
   DB: D1Database;
   FILES: R2Bucket;
   ASSETS: Fetcher;
-  EMAIL?: {
-    send(message: {
-      to: string;
-      from: string;
-      subject: string;
-      text?: string;
-      html?: string;
-    }): Promise<{ messageId: string }>;
-  };
+  // Cloudflare's own email sending: the sign-in codes, the security alarm,
+  // and the fauna log emailed on with the workbook attached.
+  EMAIL?: SendEmail;
   BOOTSTRAP_IT_EMAIL?: string;
   FIT_TO_SAIL_URL?: string;
   ANTHROPIC_API_KEY?: string;

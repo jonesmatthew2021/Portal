@@ -14,10 +14,8 @@ import {
   settle, missingFields, blankRecord, latLongText, observerName, positionText, windKmh, compassOf, activityOf,
   sunUp, sheetValue, monthName, inZoneByTable,
 } from "../../source/fauna/fields.js";
-import { exportMonth, monthFileIn } from "../src/routes/fauna.js";
+import { exportMonth, monthFileIn, recipients } from "../src/routes/fauna.js";
 import { openLog, ensureMonthTab, writeRows, saveLog, monthTabs, newMonthWorkbook, monthFileName, isMonthFile } from "../src/lib/fauna-log.js";
-import { monthPdf } from "../src/lib/fauna-pdf.js";
-import { PdfDoc, textWidth, wrapText } from "../src/lib/pdf.js";
 import { readZip, partOf, partText, listSheets, readSheetRows } from "../../source/shared/workbook.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -195,50 +193,15 @@ test("the month goes into the office's own log, tab renamed and rows filled", { 
   assert.ok(/<c r="A17" s="54"><v>0\.3194/.test(sheetXml), "the time keeps the column's time style and is a fraction of the day");
 });
 
-/* ---------------------------------------------------------- the PDF ---- */
+/* --------------------------------------------------------- sending ---- */
 
-test("text is measured and wrapped in Helvetica, and a file comes out whole", () => {
-  assert.ok(Math.abs(textWidth("Whale", 10) - 28.34) < 0.05, "W h a l e at 10pt: 944+556+556+222+556");
-  assert.ok(textWidth("Whale", 10, true) > textWidth("Whale", 10), "bold is wider");
-  assert.deepEqual(wrapText("Altered course to stbd", 7, 40), ["Altered", "course to", "stbd"]);
-  assert.deepEqual(wrapText("Vessel Heading \r\n(°)", 6.5, 60, true), ["Vessel Heading", "(°)"], "the sheet's own line break is kept");
-  assert.deepEqual(wrapText("Supercalifragilistic", 7, 30), ["Supercali", "fragilistic"], "a word too wide for the column is cut");
-  const doc = new PdfDoc(200, 100);
-  const p = doc.addPage();
-  doc.text(p, 10, 10, "21°23.4'S (×2)", 9);
-  doc.rect(p, 5, 5, 50, 20, { stroke: [0, 0, 0] });
-  const bytes = doc.build();
-  const text = new TextDecoder("latin1").decode(bytes);
-  assert.ok(text.startsWith("%PDF-1.4"));
-  assert.ok(text.includes("(21\\26023.4'S \\(\\3272\\)) Tj"), "the degree and multiplication signs as WinAnsi octal, brackets escaped");
-  assert.ok(/\/Count 1 >>/.test(text) && text.trimEnd().endsWith("%%EOF"));
-  const xref = Number(/startxref\n(\d+)/.exec(text)![1]);
-  assert.equal(text.slice(xref, xref + 4), "xref", "the cross-reference table is where the trailer says");
-});
-
-test("the month's PDF carries the title, the zone table, every column and every entry, over pages", { skip: !existsSync(TEMPLATE) && "no template built yet (node tools/fauna-template.mjs)" }, async () => {
-  const template = readFileSync(TEMPLATE);
-  const buf = () => template.buffer.slice(template.byteOffset, template.byteOffset + template.byteLength);
-  const one = settle({ ...blankRecord(), ...BASE, time: "07:40", date: "2026-09-24", faunaType: "Whale", species: "Humpback", total: 3, adults: 2, calves: 1,
-    bearing: 45, distance: 500, behaviour: "Travelling", action: "Altered course to stbd", comments: "Cow and calf, seen from the bridge wing" });
-  const bytes = await monthPdf(buf(), "2026-09", [one]);
-  const text = new TextDecoder("latin1").decode(bytes);
-  assert.ok(text.startsWith("%PDF-1.4"));
-  assert.ok(/\/Count 1 >>/.test(text), "one page for one entry");
-  for (const word of ["MARINE FAUNA OBSERVATION LOG", "MINRES COOLIBAH", "September 2026", "Monitoring Zones related to Fauna", "Whale and calf",
-    "bow riding exception", "Vessel Position", "Group Composition", "Comments", "Humpback", "24/09/2026", "07:40", "Altered course to", "PAGE 1 OF 1"]) {
-    assert.ok(text.includes(word), "the PDF says " + word);
-  }
-  assert.ok(text.includes("(21\\26023.4'S) Tj"), "the position with its degree sign");
-
-  const many = Array.from({ length: 70 }, (_, i) => ({ ...one, time: `${String(6 + (i % 12)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}`, date: `2026-09-${String(1 + (i % 28)).padStart(2, "0")}` }));
-  const long = new TextDecoder("latin1").decode(await monthPdf(buf(), "2026-09", many));
-  const pages = Number(/\/Count (\d+) >>/.exec(long)![1]);
-  assert.ok(pages >= 2, "seventy entries run over the page: " + pages);
-  assert.equal((long.match(/\(Comments\) Tj/g) || []).length, pages, "the header row is on every page");
-  assert.ok(long.includes(`PAGE ${pages} OF ${pages}`));
-  const empty = new TextDecoder("latin1").decode(await monthPdf(buf(), "2026-10", []));
-  assert.ok(empty.includes("(Nil sightings) Tj") && empty.includes("October 2026"));
+test("the To box takes addresses however they are separated, and names what is not one", () => {
+  assert.deepEqual(recipients("marine@minres.com.au; Ops@UnitedMarine.au, fauna@example.com"), {
+    to: ["marine@minres.com.au", "ops@unitedmarine.au", "fauna@example.com"], bad: [],
+  });
+  assert.deepEqual(recipients("marine@minres.com.au marine@minres.com.au"), { to: ["marine@minres.com.au"], bad: [] }, "once each");
+  assert.deepEqual(recipients("john, marine@minres.com.au"), { to: ["marine@minres.com.au"], bad: ["john"] });
+  assert.deepEqual(recipients(""), { to: [], bad: [] });
 });
 
 test("a month with no tab gets one copied from the latest month, and rows keep their places", { skip: !existsSync(TEMPLATE) && "no template built yet (node tools/fauna-template.mjs)" }, async () => {

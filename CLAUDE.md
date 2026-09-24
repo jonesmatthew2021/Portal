@@ -63,14 +63,15 @@ assets as they are (no JSX, no build step beyond the copy):
 
 The worker side is `worker/src/routes/fauna.ts`: the entries live in
 `fauna_sightings`, `GET /api/fauna/export?month=` hands back the month as
-the office's workbook, and `GET /api/fauna/pdf?month=` as a PDF of that
-sheet (`worker/src/lib/fauna-pdf.ts` lays it out on A3 landscape from the
-template's own title, zone table and column widths; `worker/src/lib/pdf.ts`
-is the small PDF writer, Helvetica only, no library). The page shows the
-month's spreadsheet at the bottom with a Generate PDF button under it, then
-Open, Send (the phone's share sheet) and Save — sending is the person's
-choice. Voice and AI reading were built first and taken out on 24 Sep 2026
-at Matthew's word: it is a form, nothing more.
+the office's workbook, and `POST /api/fauna/send` emails that workbook,
+attached, from portal@coolibah-portal.com to the addresses typed on the
+phone (Cloudflare's email binding, reply-to the sender). The page shows the
+month's spreadsheet at the bottom with a Generate spreadsheet button under
+it, then Open, Share (where the phone's share sheet takes a spreadsheet),
+Send (by email) and Save — sending is the person's choice. Voice and AI
+reading were built first and taken out on 24 Sep 2026 at Matthew's word,
+and so was a PDF of the sheet (he wants the spreadsheet itself): it is a
+form, nothing more.
 
 **The logs in SharePoint.** `SHAREPOINT_FAUNA_FOLDER` (wrangler.toml) names
 the library folder — Matthew's choice, 24 Sep 2026: a subfolder called
