@@ -495,7 +495,15 @@ on any line that still names this one.
     carries nothing (s 7(3): "before it expires"). And a paper is spent once
     the certificate it was written about is in hand: a card issued on or after
     the paper takes it off the books, which is what stops an issue letter, the
-    one paper with no end, carrying a column for ever.
+    one paper with no end, carrying a column for ever. **A hand tag beats the
+    model's `evidenceKind`**: the model sometimes reads an ordinary
+    certificate as one of the five papers, and left to the reading that
+    certificate stopped filling its cell and had its date cleared as an
+    orphan; so a row somebody tagged (`documents.qual_code`) is the
+    certificate for its column whatever the reading calls it - on the round,
+    on the page's dates and in the evidence rule (`tagged` on its rows), a
+    document being the certificate or a paper and never both - and a paper
+    is filed untagged, its column read off the document.
   - **A covered column runs no longer than the certificate carrying it.** An
     endorsement exists only as a line on a certificate that has to be in force
     to carry it (MO70 s 36(2)(a)), so QL-16 takes the **earlier** of the

@@ -1000,8 +1000,17 @@ export async function compareMatrix(
        the contest for one and never stands as the foreign certificate
        behind a recognition. What it does carry is worked out separately
        (source/shared/evidence.js) and shown as a cover, in amber, saying
-       what carries him. */
-    if (reading.evidenceKind) {
+       what carries him.
+
+       Unless somebody tagged the row. The model sometimes reads an ordinary
+       certificate as one of the five papers, and left to the reading that
+       certificate stopped filling its cell and had the date cleared as an
+       orphan. The person who tagged it chose the item off the list, which
+       beats the model's guess about what kind of paper it is the same way
+       it beats the model's code: a tagged row is the certificate for its
+       column, and a paper is filed untagged. The page's cells and the
+       evidence rule read the tag the same way. */
+    if (reading.evidenceKind && !row.qualCode) {
       notes.push({
         kind: "no-code",
         person: row.person,

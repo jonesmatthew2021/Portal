@@ -1495,6 +1495,34 @@ test("the expiry day itself is the day a certificate stops counting (MO70 s 5(a)
   );
 });
 
+test("evidence: a hand-tagged row is the certificate, whatever kind of paper the reading calls it", () => {
+  /* The round and the page's cells let a hand tag beat the model's
+     evidenceKind (a tagged row fills its cell). This rule has to agree, or
+     one document would be both the certificate in the cell and a paper
+     covering it. `tagged` on the row is the hand tag. */
+  const letter = { id: "ext", key: "ext", person: "EVANS, Brenton", code: "QL-01", tagged: true, filedOn: "2026-08-02" };
+  const ticket = { id: "coc", key: "coc", person: "EVANS, Brenton", code: "QL-01", filedOn: "2021-02-01" };
+  const readings: Record<string, Record<string, unknown>> = {
+    ext: { readable: true, holderName: "Brenton Evans", evidenceKind: "extension", issuedOn: "2026-07-20", expiresOn: "2026-11-25" },
+    coc: { readable: true, holderName: "Brenton Evans", evidenceKind: null, isRecognition: false, expiresOn: "2026-08-01" },
+  };
+  assert.equal(coveredBy("QL-01", "EVANS, Brenton", [letter, ticket], readings, EV_TODAY, EV_RULES), null,
+    "tagged, the letter is the certificate for QL-01 and no paper: nothing covers");
+  assert.deepEqual(coveredBy("QL-01", "EVANS, Brenton", [{ ...letter, tagged: false }, ticket], readings, EV_TODAY, EV_RULES),
+    { kind: "extension", until: "2026-11-25", rowId: "ext" }, "untagged, it is the paper it reads as");
+  /* And as the certificate it anchors the count: a lodged renewal's 90 days
+     run from the expiry of the certificate on file, which a tagged paper now
+     is. */
+  const card = { id: "card", key: "card", person: "EVANS, Brenton", code: "QL-03", tagged: true, filedOn: "2026-01-01" };
+  const receipt = { id: "lodged", key: "lodged", person: "EVANS, Brenton", code: null, filedOn: "2026-07-01" };
+  const nc: Record<string, Record<string, unknown>> = {
+    card: { readable: true, holderName: "Brenton Evans", evidenceKind: "issue-letter", issuedOn: "2021-07-07", expiresOn: "2026-07-07" },
+    lodged: { readable: true, holderName: "brenton EVANS", evidenceKind: "lodged-renewal", issuedOn: "2026-07-01", expiresOn: null },
+  };
+  assert.deepEqual(coveredBy("QL-03", "EVANS, Brenton", [card, receipt], nc, EV_TODAY, EV_RULES),
+    { kind: "lodged-renewal", until: "2026-10-05", rowId: "lodged" }, "90 days from the tagged document's expiry");
+});
+
 test("evidence: a recognition the round could place nowhere still bars an extension", () => {
   /* MO70 s 30 note: a certificate of recognition's term can never be
      extended. That is a fact about the certificate that ran out, so it is

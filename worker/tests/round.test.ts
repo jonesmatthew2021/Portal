@@ -4728,8 +4728,9 @@ test("evidence: an extension letter on file reaches the page's cells, with what 
   setEnv({ DB: coversDb([
     // His Master ticket, run out last month.
     { row: { id: "coc", qualCode: "QL-01" }, reading: { ...evansCoC, endorsements: [], expiresOn: lastMonth, evidenceKind: null, isRecognition: false } },
-    // AMSA's letter extending it, filed against the same column.
-    { row: { id: "letter", qualCode: "QL-01" }, reading: {
+    // AMSA's letter extending it, read as being about the same column and
+    // filed untagged: a hand tag would say it is the certificate itself.
+    { row: { id: "letter", qualCode: null }, reading: {
       ...evansCoC, certificateTitle: "Extension of certificate", endorsements: [],
       issuedOn: today, expiresOn: inAMonth, evidenceKind: "extension", isRecognition: false,
     } },
@@ -4741,7 +4742,7 @@ test("evidence: an extension letter on file reaches the page's cells, with what 
   // Never a certificate of safety training: MO70 s 15(3) does not list it.
   setEnv({ DB: coversDb([
     { row: { id: "cost", qualCode: "QL-12" }, reading: { ...evansCoC, qualCode: "QL-12", endorsements: [], expiresOn: lastMonth, evidenceKind: null, isRecognition: false } },
-    { row: { id: "letter", qualCode: "QL-12" }, reading: {
+    { row: { id: "letter", qualCode: null }, reading: {
       ...evansCoC, qualCode: "QL-12", endorsements: [], issuedOn: today, expiresOn: inAMonth,
       evidenceKind: "extension", isRecognition: false,
     } },
@@ -4767,7 +4768,7 @@ test("evidence: the letter's own date never lands in the cell, on the round or o
       ...evansCoC, endorsements: [], units: [], expiresOn: "2026-06-01",
       evidenceKind: null, isRecognition: false,
     } },
-    { row: { id: "letter", qualCode: "QL-01" }, reading: {
+    { row: { id: "letter", qualCode: null }, reading: {
       ...evansCoC, certificateTitle: "Extension of certificate", endorsements: [], units: [],
       issuedOn: "2026-06-01", expiresOn: "2026-12-01", evidenceKind: "extension", isRecognition: false,
     } },
@@ -4787,6 +4788,33 @@ test("evidence: the letter's own date never lands in the cell, on the round or o
     "the page's cell agrees with the round: one date, off the certificate itself");
   assert.deepEqual(page.covers.map((c) => [c.code, c.kind, c.fileId]), [["QL-01", "extension", "letter"]],
     "and the letter reaches the page only as a cover");
+});
+
+test("evidence: a hand tag beats the model's evidenceKind - a row tagged QL-01 is the Master certificate whatever the reading calls it", async () => {
+  /* The model sometimes reads an ordinary certificate as one of the five
+     papers. Left to the reading, that certificate stopped filling its cell
+     and the date the portal had put there was cleared as an orphan on its
+     second sighting. The person who tagged the row chose the item off the
+     list; that beats a model's guess about what kind of paper it is, the
+     same way it beats the model's code. So a tagged row is a certificate
+     for its column, on the round, on the page's dates and in the evidence
+     rule - and a paper is filed untagged. */
+  const certs = [
+    { row: { id: "tagged", qualCode: "QL-01" }, reading: {
+      ...evansCoC, endorsements: [], units: [], issuedOn: "2026-05-26", expiresOn: "2031-05-26",
+      evidenceKind: "extension", isRecognition: false,
+    } },
+  ];
+  setEnv({ DB: coversDb(certs), FILE_STORE: "r2" } as never);
+  const out = await compareMatrix(coversMatrix, null, evansOnly);
+  assert.deepEqual(out.settled, [{ person: "EVANS, Brenton", code: "QL-01", value: "2031-05-26" }], "the tagged row fills QL-01");
+  assert.deepEqual(out.claimed, ["EVANS, BRENTON::QL-01"]);
+  assert.equal(out.notes.some((n) => /stands in for a certificate/.test(n.detail)), false, "and nothing calls it a paper");
+
+  setEnv({ DB: coversDb(certs), FILE_STORE: "r2" } as never);
+  const page = await certificateStanding();
+  assert.deepEqual(page.dates.map((d) => [d.code, d.expires, d.fileId]), [["QL-01", "2031-05-26", "tagged"]], "the page's cell agrees");
+  assert.deepEqual(page.covers, [], "and it is no cover: a document is the certificate or a paper, never both");
 });
 
 test("covers: the page's cells refuse a ticket printed in another man's name too", async () => {

@@ -901,8 +901,10 @@ export async function certificateStanding() {
        never stands as the foreign certificate behind a recognition. The
        cover is worked out separately and shown as a cover
        (source/shared/evidence.js, and `covers` below); the round refuses it
-       the same way, or the grid and the round would disagree. */
-    if (reading.evidenceKind) continue;
+       the same way, or the grid and the round would disagree. A hand tag
+       beats the reading's kind: a tagged row is the certificate for its
+       column (compareMatrix says why). */
+    if (reading.evidenceKind && !row.qualCode) continue;
     const named = codeFor(row, reading, eqTable);
     /* A document that is no one column can still fill the columns it
        covers - a high risk work licence printing five classes is rightly
@@ -1106,10 +1108,12 @@ async function evidenceCovers(
   const rows = readings.map(({ row, reading }) => {
     const key = readingKey(row);
     if (reading) held.set(key, reading);
-    return { id: row.id, key, person: row.person, code: codeFor(row, reading, eqTable), filedOn: row.filedOn ? String(row.filedOn) : null };
+    // `tagged` is the hand tag, which makes the row a certificate whatever
+    // kind of paper the reading calls it - as the cells above read it.
+    return { id: row.id, key, person: row.person, code: codeFor(row, reading, eqTable), tagged: !!row.qualCode, filedOn: row.filedOn ? String(row.filedOn) : null };
   });
   // Nothing on the books is one of the five papers: no cover to work out.
-  if (!rows.some((r) => !!held.get(r.key)?.evidenceKind)) return [];
+  if (!rows.some((r) => !r.tagged && !!held.get(r.key)?.evidenceKind)) return [];
 
   const today = todayThere();
   const rules = { kinds: vessel.evidenceKinds, register };
@@ -1117,7 +1121,7 @@ async function evidenceCovers(
   // Whose papers they are, as the register names them.
   const mine = new Set<string>();
   for (const r of rows) {
-    if (!held.get(r.key)?.evidenceKind || !r.person) continue;
+    if (r.tagged || !held.get(r.key)?.evidenceKind || !r.person) continue;
     mine.add(register.nameOf(r.person) || r.person);
   }
 

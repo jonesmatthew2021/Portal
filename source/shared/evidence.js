@@ -41,10 +41,13 @@
 
 /**
  * @typedef {{ id?: unknown, key?: unknown, person?: string | null, code?: string | null,
- *   filedOn?: string | null }} EvidenceRow
+ *   tagged?: boolean, filedOn?: string | null }} EvidenceRow
  *   One certificate on the books: the row's own id, the key of its reading,
- *   the name it is filed under, the matrix code it answers to and when it was
- *   filed. Newest upload first, as the library's listing hands them over.
+ *   the name it is filed under, the matrix code it answers to, whether that
+ *   code is a hand tag (which makes the row a certificate whatever kind of
+ *   paper the reading calls it - the round and the page's cells read the tag
+ *   the same way), and when it was filed. Newest upload first, as the
+ *   library's listing hands them over.
  * @typedef {{ readable?: boolean, holderName?: string | null, issuedOn?: string | null,
  *   expiresOn?: string | null, evidenceKind?: string | null,
  *   isRecognition?: boolean | null }} EvidenceReading
@@ -176,7 +179,7 @@ export function coveredBy(code, person, rows, readings, todayISO, rules) {
 
   // His own papers, each once, in the order the listing gave them.
   const seen = new Set();
-  /** @type {{ row: EvidenceRow, reading: EvidenceReading }[]} */
+  /** @type {{ row: EvidenceRow, reading: EvidenceReading, kind: string }[]} */
   const mine = [];
   (Array.isArray(rows) ? rows : []).forEach((row) => {
     const key = row && row.key != null ? String(row.key) : "";
@@ -187,7 +190,12 @@ export function coveredBy(code, person, rows, readings, todayISO, rules) {
     // Printed in somebody else's name: his folder, not his paper.
     if (reading.holderName && register.nameOf(reading.holderName) !== me) return;
     seen.add(key);
-    mine.push({ row, reading });
+    /* What the document is: one of the five papers where the reading says
+       so - unless somebody tagged the row, which makes it the certificate
+       for that column whatever the reading calls it. A document is the
+       certificate or a paper, never both. */
+    const kind = row.tagged ? "" : String(reading.evidenceKind || "").trim();
+    mine.push({ row, reading, kind });
   });
 
   /* The certificate itself, for the two questions that turn on it: the day
@@ -195,7 +203,7 @@ export function coveredBy(code, person, rows, readings, todayISO, rules) {
      recognition, whose term can never be extended. The latest expiry of the
      certificates in this column - never one of the papers standing in for
      them. */
-  const own = mine.filter((x) => evidenceCode(x.row.code) === want && !x.reading.evidenceKind);
+  const own = mine.filter((x) => evidenceCode(x.row.code) === want && !x.kind);
   const ownExpiry = own
     .map((x) => evidenceDay(x.reading.expiresOn))
     .filter((d) => !!d)
@@ -214,13 +222,13 @@ export function coveredBy(code, person, rows, readings, todayISO, rules) {
      put a code to: a recognition it could place nowhere would otherwise
      leave an extension letter covering the column anyway. */
   const ownIsRecognition = mine.some((x) =>
-    x.reading.isRecognition === true && !x.reading.evidenceKind
+    x.reading.isRecognition === true && !x.kind
     && (!evidenceCode(x.row.code) || evidenceCode(x.row.code) === want));
 
   /** @type {Cover[]} */
   const standing = [];
   mine.forEach((x) => {
-    const kind = String(x.reading.evidenceKind || "").trim();
+    const kind = x.kind;
     if (!kind) return;
     const entry = /** @type {Record<string, EvidenceKind>} */ (kinds)[kind];
     if (!entry) return;                                       // not a kind this vessel allows
