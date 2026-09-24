@@ -22,7 +22,7 @@ import { crewRowsOnly, crewRegister, nameLetters, registerWords } from "../../so
 import { RED_DAYS, daysUntil, hasExpired } from "../../source/shared/bands.js";
 import * as reminders from "../../source/shared/reminders.js";
 import { particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, ticketCodesIn, isMsicCard, openToCertificates } from "../../source/shared/particulars.js";
-import { coveredCells, coveredCodes, unitCodesIn, unitColumnsIn } from "../../source/shared/covers.js";
+import { coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, COVER_SOURCES } from "../../source/shared/covers.js";
 import { foreignExpiryOn, isRecognitionReading, recognisedUntil, recognitionFills } from "../../source/shared/recognition.js";
 import { medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote } from "../../source/shared/medical.js";
 import { renewalBlockers, renewalNeedsProblem } from "../../source/shared/renewals.js";
@@ -935,7 +935,31 @@ test("covers: GMDSS is never read off a certificate of competency", () => {
      or by an AMSA certificate of recognition of one. */
   assert.deepEqual(codesCovered({ endorsements: [{ text: "IV/2", until: null }] }, "QL-01"), []);
   assert.deepEqual(codesCovered({ endorsements: [{ text: "GMDSS - STCW Reg IV/2", until: null }] }, "QL-01"), []);
-  assert.equal(vessel.covers.some((c) => c.code.toUpperCase() === "QL-14"), false, "and the vessel file's table has no GMDSS row to do it with");
+  assert.equal(vessel.covers.some((c) => c.code.toUpperCase() === "QL-14" && (c.from === undefined || c.from === "endorsements")), false,
+    "and the vessel file's table has no GMDSS row reading the endorsements to do it with");
+});
+
+test("covers: a certificate that itself certifies the GMDSS radio operator capacity is that certificate", () => {
+  /* Evgeny Evdokimov's AMSA certificate of competency prints two capacities
+     on the one document - Master and GMDSS Radio Operator - and the model,
+     rightly, gave it no single code, so his QL-14 stood empty with the paper
+     on file. GMDSS is its own certificate class (MO70 s 7(1)(ca)), which is
+     why a bare "IV/2" in a regulation list fills nothing; a document that
+     itself certifies the holder may serve in the GMDSS radio operator
+     CAPACITY is that certificate. The reading lists the printed capacities
+     and a row of the vessel file reads them (`from: "capacities"`). */
+  assert.deepEqual(cellsCovered({ capacities: ["Master", "GMDSS Radio Operator"] }, "QL-01"), [{ code: "QL-14", until: "2031-05-26" }],
+    "the GMDSS column, dated as the certificate is dated");
+  assert.deepEqual(codesCovered({ capacities: ["Master"], endorsements: [{ text: "IV/2", until: null }] }, "QL-01"), [],
+    "a regulation number is not a capacity");
+  assert.deepEqual(codesCovered({ capacities: ["GMDSS Radio Operator"] }, "QL-14"), [], "a document whose own code is QL-14 is not covered again");
+  assert.deepEqual(codesCovered({ capacities: ["Chief Mate", "Master"] }, "QL-02"), [], "no other capacity fills anything: the ticket's own column is its code");
+  assert.deepEqual(codesCovered({ capacities: "GMDSS Radio Operator" }, "QL-01"), [], "an answer that is not a list is no capacities");
+  const row = vessel.covers.find((c) => c.code === "QL-14")!;
+  assert.equal(row.from, "capacities", "the vessel file reads the capacity, never an endorsement");
+  assert.match(String(row.why), /MO70 s 7\(1\)\(ca\)/);
+  assert.equal(checkVessel({ ...vessel, covers: [row] }, "a vessel file").covers[0], row, "checkVessel takes the row");
+  assert.deepEqual(COVER_SOURCES, ["endorsements", "units", "capacities"]);
 });
 
 test("covers: a unit code printed on a training statement fills every column whose title carries it", () => {

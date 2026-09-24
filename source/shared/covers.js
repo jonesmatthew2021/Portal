@@ -39,12 +39,17 @@
  *    proficiency was issued (MO70 s 37(3) item 2, s 37(5)), which is not the
  *    day it was written onto the certificate: so where AMSA printed the
  *    endorsement its own end date, that date governs.
- *  - GMDSS is never read off a certificate of competency. It is a
- *    certificate class of its own with its own term and its own revalidation
- *    (MO70 s 7(1)(ca), s 15(1)(b), s 21B, s 25A); no rule makes it an
- *    endorsement, so "IV/2" printed on a ticket fills nothing. QL-14 is
- *    filled by a GMDSS document, or by an AMSA certificate of recognition of
- *    one.
+ *  - GMDSS is never read off a certificate of competency as an endorsement.
+ *    It is a certificate class of its own with its own term and its own
+ *    revalidation (MO70 s 7(1)(ca), s 15(1)(b), s 21B, s 25A); no rule makes
+ *    it an endorsement, so "IV/2" printed in a ticket's regulation list
+ *    fills nothing. QL-14 is filled by a GMDSS document, or by an AMSA
+ *    certificate of recognition of one. The one exception: AMSA prints some
+ *    certificates of competency with two capacities on the one document -
+ *    "Master" and "GMDSS Radio Operator" - and a document that itself
+ *    certifies the holder may serve in the GMDSS radio operator CAPACITY is
+ *    that certificate, whatever else it is. The reading lists the printed
+ *    capacities and a row of the table reads them (`from: "capacities"`).
  *  - The Certificate of Safety Training is never filled by an endorsement.
  *    It is a certificate class of its own (MO70 s 7(1)(e), s 22) that cannot
  *    be endorsed onto another document (s 34(1)) and cannot be recognised
@@ -68,7 +73,7 @@
 /**
  * @typedef {{ readable?: boolean, expiresOn?: string | null, qualCode?: string | null,
  *   endorsements?: { text?: string | null, until?: string | null }[] | unknown,
- *   units?: string[] | unknown }} CoversReading
+ *   units?: string[] | unknown, capacities?: string[] | unknown }} CoversReading
  * @typedef {{ code: string, when: string, unless?: string, from?: string, perpetual?: boolean, why?: string }} CoverRule
  *   One row of the vessel file's `covers` table: the column a printed
  *   endorsement fills, the pattern that recognises it (read without regard
@@ -84,9 +89,11 @@
 /** The lists of a reading a covers row may read. A row that names none
  *  reads the endorsements. A row reading the units matches its pattern as a
  *  whole token - a high risk work licence prints its classes as codes
- *  ("C6, DG, LF, RB, WP"), and DG is the class, not a word inside one. Both
- *  `checkVessel`s refuse a row naming any other list. */
-export const COVER_SOURCES = ["endorsements", "units"];
+ *  ("C6, DG, LF, RB, WP"), and DG is the class, not a word inside one. A
+ *  row reading the capacities matches its pattern in each capacity the
+ *  document certifies the holder may serve in ("GMDSS Radio Operator").
+ *  Both `checkVessel`s refuse a row naming any other list. */
+export const COVER_SOURCES = ["endorsements", "units", "capacities"];
 
 /** A training unit code as this rule recognises one: letters and digits
  *  together, six characters or more - "HLTAID011", "SITXFSA005",
@@ -242,6 +249,15 @@ export function coveredCells(reading, covers, columns, ownCode) {
         return;
       }
       if (unitTokens.some((t) => whole.test(t) && !(notWhen && notWhen.test(t)))) keep(code, certUntil);
+      return;
+    }
+    if (from === "capacities") {
+      /* A capacity the document certifies the holder may serve in. A
+         certificate prints no separate end against a capacity: the column
+         runs as long as the certificate does. */
+      const said = (Array.isArray(reading.capacities) ? reading.capacities : [])
+        .map((c) => String(c == null ? "" : c));
+      if (said.some((c) => !!c && when.test(c) && !(notWhen && notWhen.test(c)))) keep(code, certUntil);
       return;
     }
     printed.forEach((e) => {

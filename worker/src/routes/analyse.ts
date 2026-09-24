@@ -162,6 +162,7 @@ Return exactly this JSON object and nothing else — no prose, no markdown fence
     { "text": string, "until": "YYYY-MM-DD"|null }
   ],
   "units": [string],                // the training unit codes printed on the document
+  "capacities": [string],           // the capacities the document certifies the holder may serve in, as printed
   "isRecognition": true|false,      // the title says this is a certificate of recognition
   "recognises": {                   // what a recognition prints about the foreign certificate behind it
     "authority": string|null, "country": string|null, "number": string|null, "expiresOn": "YYYY-MM-DD"|null
@@ -189,6 +190,9 @@ Rules:
   "HLTAID011", "HLTAID015", "SITXFSA005", "RIIWHS202E" — and the class codes
   printed on a high risk work licence, such as DG or CV, one each. [] where
   there are none.
+- capacities: the capacities a certificate of competency says the holder may
+  serve in, each as printed — "Master", "GMDSS Radio Operator", "Chief Mate".
+  [] where the document prints none.
 - recognises: only for a certificate of recognition, and only what it prints
   about the certificate it recognises. null for anything else.
 - conditions: a limitation on what the holder may do, as printed — "fit for
@@ -234,6 +238,7 @@ be wrong. Report what the document itself says.`;
 const MAX_LISTED = 20;
 const MAX_ENDORSEMENT_CHARS = 90;
 const MAX_UNIT_CHARS = 24;
+const MAX_CAPACITY_CHARS = 60;
 /** The words a printed condition is kept to (the question asks for 20), and
  *  the characters, for an answer that came back as one unspaced block: the
  *  words are the whole page and the word count would not catch it, and this
@@ -269,6 +274,23 @@ function unitsFrom(v: unknown): string[] {
     if (!unit) continue;
     const short = unit.slice(0, MAX_UNIT_CHARS);
     if (!out.some((u) => u.toUpperCase() === short.toUpperCase())) out.push(short);
+    if (out.length >= MAX_LISTED) break;
+  }
+  return out;
+}
+
+/** The capacities a certificate of competency says the holder may serve in,
+ *  each as printed. AMSA prints some tickets with two on the one document
+ *  ("Master" and "GMDSS Radio Operator"); which column a capacity fills is
+ *  the vessel file's covers table (a row reading the capacities). */
+function capacitiesFrom(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const out: string[] = [];
+  for (const item of v) {
+    const said = str(item);
+    if (!said) continue;
+    const short = said.slice(0, MAX_CAPACITY_CHARS);
+    if (!out.some((c) => c.toUpperCase() === short.toUpperCase())) out.push(short);
     if (out.length >= MAX_LISTED) break;
   }
   return out;
@@ -361,6 +383,7 @@ async function askModel(row: Row, bytes: ArrayBuffer, codes: [string, string][])
     holderBirthDate: date(parsed.holderBirthDate),
     endorsements: endorsementsFrom(parsed.endorsements),
     units: unitsFrom(parsed.units),
+    capacities: capacitiesFrom(parsed.capacities),
     isRecognition: parsed.isRecognition === true,
     recognises: recognisesFrom(parsed.recognises, parsed.isRecognition === true),
     assessedOn: date(parsed.assessedOn),
@@ -381,7 +404,7 @@ function unreadableReading(reason: string): Reading {
   return {
     version: READING_VERSION, at: new Date().toISOString(), model: null, readable: false, reason,
     documentNumber: null, holderBirthDate: null,
-    endorsements: [], units: [], isRecognition: false, recognises: null,
+    endorsements: [], units: [], capacities: [], isRecognition: false, recognises: null,
     assessedOn: null, conditions: null, evidenceKind: null,
   };
 }
@@ -1657,6 +1680,7 @@ function keysAdded(again: Reading, held: Reading, gives: boolean, particulars: b
   put("holderBirthDate", again.holderBirthDate ?? null, null, particulars);
   put("endorsements", again.endorsements ?? [], []);
   put("units", again.units ?? [], []);
+  put("capacities", again.capacities ?? [], []);
   put("isRecognition", again.isRecognition === true, false);
   put("recognises", again.recognises ?? null, null);
   put("assessedOn", again.assessedOn ?? null, null);
@@ -1780,9 +1804,13 @@ export async function topUpParticulars(
   const wantsMore = (c: Cert) => {
     const r = c.reading;
     const covers = (endorsedKinds.has(c.code) || unitKinds.has(c.code) || isLicence(r)) && !("endorsements" in r);
+    /* The capacities came after the endorsements: a ticket read for its
+       endorsements before they were asked for is looked at once more. Only
+       a ticket - a certificate of competency is what prints a capacity. */
+    const capacities = endorsedKinds.has(c.code) && !("capacities" in r);
     const recognition = !("isRecognition" in r) && /\brecognition\b/i.test(String(r.certificateTitle || ""));
     const conditions = (medical.has(c.code) || ncCards.has(c.code)) && !("assessedOn" in r);
-    return covers || recognition || conditions;
+    return covers || capacities || recognition || conditions;
   };
 
   // What the rule finds for him off the readings as they stand: `held` is

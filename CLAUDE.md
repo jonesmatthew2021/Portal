@@ -422,9 +422,23 @@ on any line that still names this one.
     item 8 - the office's "5 years" is wrong by law); fast rescue boats to
     QL-16, taking the endorsement's own printed end where AMSA printed one
     (s 37(3) item 2, s 37(5)). A unit code in a column's title fills that
-    column with the document's own date. **GMDSS is never read off a
-    certificate of competency** - it is a class of its own with its own term
-    (s 7(1)(ca), s 21B), so "IV/2" printed on a ticket fills nothing. **QL-12
+    column with the document's own date; a high risk work licence's printed
+    classes ("C6, DG, LF, RB, WP") are listed as units too and read as whole
+    tokens by a row saying `from: "units"` (DG to HR-01, CV to HR-02, the
+    licence's own date), and a document that is no one column still covers
+    the columns its reading names. **GMDSS is never read off a certificate
+    of competency as an endorsement** - it is a class of its own with its own
+    term (s 7(1)(ca), s 21B), so "IV/2" printed in a ticket's regulation list
+    fills nothing. The one exception: AMSA prints some tickets with two
+    capacities on the one document (Evgeny Evdokimov's: Master and GMDSS
+    Radio Operator), and a document that itself certifies the holder may
+    serve in the GMDSS radio operator *capacity* is that certificate - the
+    reading lists the printed `capacities` and a row saying
+    `from: "capacities"` reads them into QL-14, never an endorsement. A row's
+    `unless` is an exclusion that wins over its pattern: the survival craft
+    endorsement is printed "other than fast rescue boats" (s 37(3) item 1)
+    and fills no QL-16, and a type-specific Furuno course is VS-02, not the
+    STCW ECDIS endorsement. **QL-12
     is only ever filled by its own certificate**: the certificate of safety
     training cannot be endorsed onto another document (s 34(1)) and cannot be
     recognised from a foreign one (s 7(2)(b)). Matthew, 25 Sep 2026: "COST is

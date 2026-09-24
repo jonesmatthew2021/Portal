@@ -196,6 +196,12 @@
       "why": "MO70 s 37(3) item 2, s 37(5): the fast rescue boat endorsement runs 5 years from the day the proficiency was issued, so its own printed end date governs where AMSA printed one. STCW VI/2 (1) and A-VI/2 (1-4) are survival craft and fill nothing - and AMSA prints that endorsement as 'survival craft and rescue boats other than fast rescue boats' (A-VI/2-1; s 37(3) item 1), so a line saying 'other than fast rescue' fills nothing whatever else it says."
     },
     {
+      "code": "QL-14",
+      "from": "capacities",
+      "when": "gmdss\\s+radio\\s+operator",
+      "why": "MO70 s 7(1)(ca): the GMDSS radio operator certificate is a class of its own, so IV/2 in a ticket's regulation list fills nothing. But AMSA prints some certificates of competency with two capacities on the one document - Master and GMDSS Radio Operator (Evgeny Evdokimov's) - and a document that itself certifies the holder may serve in the GMDSS radio operator capacity IS that certificate. Read off the printed capacities only, never an endorsement; the certificate's own date."
+    },
+    {
       "code": "HR-01",
       "from": "units",
       "when": "DG",

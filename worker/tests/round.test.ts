@@ -2479,10 +2479,11 @@ test("a reading asks what else the certificate covers, whether it is a recogniti
         { text: "", until: "2031-05-26" },
       ],
       units: ["HLTAID011", " hltaid011 ", "SITXFSA005"],
+      capacities: ["  Master ", "GMDSS Radio Operator", "", 7],
       isRecognition: false, recognises: { authority: "AMSA", country: "India" },
       assessedOn: "2026-02-10", conditions: null, evidenceKind: "nonsense" }
     : { ...reading, certificateTitle: "Certificate of Recognition of GMDSS",
-      endorsements: "not a list", units: null,
+      endorsements: "not a list", units: null, capacities: "Master",
       isRecognition: true, recognises: { authority: "Directorate General of Shipping", country: "India", number: "IND-12345", expiresOn: "2029-10-07" },
       assessedOn: "not a date",
       conditions: "fit for particular duties only and must wear corrective lenses at all times while on watch and keep a spare pair aboard the vessel at sea",
@@ -2493,7 +2494,7 @@ test("a reading asks what else the certificate covers, whether it is a recogniti
     model.restore();
   }
   const asked = model.calls[0];
-  for (const key of ["endorsements", "units", "isRecognition", "recognises", "assessedOn", "conditions", "evidenceKind"]) {
+  for (const key of ["endorsements", "units", "capacities", "isRecognition", "recognises", "assessedOn", "conditions", "evidenceKind"]) {
     assert.ok(asked.includes(key), "the question asks for " + key);
   }
   const first = JSON.parse(portal.blobs.get("certificate-readings|r1/unread-1.json")!);
@@ -2503,6 +2504,7 @@ test("a reading asks what else the certificate covers, whether it is a recogniti
     { text: "VI/6 (1) s. A-VI/6 (4)", until: null },
   ], "trimmed as printed, a plain string still an endorsement, a date only as YYYY-MM-DD, and nothing for an empty line");
   assert.deepEqual(first.units, ["HLTAID011", "SITXFSA005"], "the same unit code twice is one code");
+  assert.deepEqual(first.capacities, ["Master", "GMDSS Radio Operator"], "the capacities as printed, trimmed, and nothing for an empty line");
   assert.equal(first.recognises, null, "nothing said about a foreign certificate on a document that is not a recognition");
   assert.equal(first.assessedOn, "2026-02-10");
   assert.equal(first.evidenceKind, null, "a kind that is not one of the five is none");
@@ -2510,6 +2512,7 @@ test("a reading asks what else the certificate covers, whether it is a recogniti
   const second = JSON.parse(portal.blobs.get("certificate-readings|r1/unread-2.json")!);
   assert.deepEqual(second.endorsements, [], "an answer that is not a list is no endorsements");
   assert.deepEqual(second.units, []);
+  assert.deepEqual(second.capacities, [], "and no capacities");
   assert.equal(second.isRecognition, true);
   assert.deepEqual(second.recognises, { authority: "Directorate General of Shipping", country: "India", number: "IND-12345", expiresOn: "2029-10-07" },
     "what the recognition prints about the certificate behind it");
@@ -2521,7 +2524,7 @@ test("a reading asks what else the certificate covers, whether it is a recogniti
   assert.equal(conditionsFrom(third.conditions)!.length, 200, "and to two hundred characters, however few words it is");
   assert.equal(second.evidenceKind, "issue-letter", "however the model cased it");
   for (const r of [first, second]) {
-    for (const key of ["endorsements", "units", "isRecognition", "recognises", "assessedOn", "conditions", "evidenceKind"]) {
+    for (const key of ["endorsements", "units", "capacities", "isRecognition", "recognises", "assessedOn", "conditions", "evidenceKind"]) {
       assert.ok(key in r, key + " is on every reading made now");
     }
   }
@@ -3674,13 +3677,13 @@ type PCert = { id: string; checksum: string; code: string | null; person?: strin
  *  where the document printed nothing, so nothing about it is read again. */
 const newReading = (over: Record<string, unknown>) => ({
   ...reading, holderName: "Brenton Evans", documentNumber: null, holderBirthDate: null,
-  endorsements: [], units: [], isRecognition: false, recognises: null,
+  endorsements: [], units: [], capacities: [], isRecognition: false, recognises: null,
   assessedOn: null, conditions: null, evidenceKind: null, ...over,
 });
 /** A reading made before any of those keys was asked for: not one of them. */
 const oldReading = (over: Record<string, unknown>) => {
   const r: Record<string, unknown> = { ...reading, holderName: "Brenton Evans", ...over };
-  for (const key of ["documentNumber", "holderBirthDate", "endorsements", "units",
+  for (const key of ["documentNumber", "holderBirthDate", "endorsements", "units", "capacities",
     "isRecognition", "recognises", "assessedOn", "conditions", "evidenceKind"]) delete r[key];
   return r;
 };
@@ -3935,6 +3938,39 @@ test("the back-fill looks once at a high risk work licence, named for a column o
   assert.deepEqual(stored("hrwl-tagged").units, ["C6", "DG", "LF", "RB", "WP"], "and so is the one tagged for dogging");
   assert.deepEqual(stored("hrwl-read").units, ["LF"], "one read since the question asked for units is left as it was");
   assert.equal(hourly(portal).particularsRead, 3, "his Master ticket and the two licences, once each");
+});
+
+test("the back-fill looks once at a certificate of competency read before the capacities were asked for, and not at a statement", async () => {
+  /* Evgeny's ticket prints Master and GMDSS Radio Operator as its
+     capacities. A ticket read for its endorsements before the question
+     asked for the capacities is looked at once more; a training statement,
+     which prints no capacity, is not paid for. */
+  const withoutCapacities = (over: Record<string, unknown>) => {
+    const r = newReading(over);
+    delete (r as Record<string, unknown>).capacities;
+    return r;
+  };
+  const { portal, env } = await particularsPortal({ model: true,
+    people: [{ ...EVANS_P, msic: "TYPED 1", dob: "1980-01-01" }],
+    certs: [
+      { id: "t2", checksum: "chief-mate", code: "QL-02",
+        reading: withoutCapacities({ qualCode: "QL-02", endorsements: [{ text: "II/2", until: null }] }) },
+      { id: "s1", checksum: "first-aid", code: "QL-18", reading: withoutCapacities({ qualCode: "QL-18", units: ["HLTAID011"] }) },
+      { id: "t3", checksum: "master-read", code: "QL-01", reading: newReading({ qualCode: "QL-01", capacities: ["Master"] }) },
+    ] });
+  const model = modelByFile(() => ({ status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans",
+    endorsements: [{ text: "II/2", until: null }], capacities: ["Chief Mate", "GMDSS Radio Operator"] }) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    model.restore();
+  }
+  const stored = (checksum: string) => JSON.parse(portal.blobs.get(`certificate-readings|r1/${checksum}.json`)!);
+  assert.deepEqual(stored("chief-mate").capacities, ["Chief Mate", "GMDSS Radio Operator"], "the ticket is read once for its capacities");
+  assert.deepEqual(stored("chief-mate").endorsements, [{ text: "II/2", until: null }], "and the endorsements it already had are left as they were");
+  assert.equal("capacities" in stored("first-aid"), false, "the statement was never asked: it prints no capacity");
+  assert.deepEqual(stored("master-read").capacities, ["Master"], "one read since is left as it was");
+  assert.equal(hourly(portal).particularsRead, 2, "his old Master ticket and the Chief Mate, once each");
 });
 
 test("a box somebody typed is never paid for: its certificates are not read again", async () => {

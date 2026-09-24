@@ -2613,6 +2613,9 @@ const is = (got, want, what) => {
     "the survival craft endorsement names fast rescue boats to exclude them, and fills nothing (the row's unless)");
   is(codes({ endorsements: [{ text: "Proficiency in fast rescue boats", until: null }] }, "QL-01"), ["QL-16"], "the fast rescue boat endorsement still fills QL-16");
   is(codes({ endorsements: [{ text: "IV/2", until: null }] }, "QL-01"), [], "GMDSS is never read off a certificate of competency");
+  is(codes({ capacities: ["Master", "GMDSS Radio Operator"] }, "QL-01"), ["QL-14"],
+    "unless the certificate itself certifies the GMDSS radio operator capacity: then it is that certificate");
+  is(shared.coveredCodes(read({ capacities: ["Master", "GMDSS Radio Operator"] }), table, cols, "QL-01"), ["QL-14"], "the worker's module reads the capacity the same");
   is(codes({ units: ["HLTAID011", "HLTAID015"] }, "QL-18"), ["QL-19"], "a unit code printed on a statement fills the column whose title carries it");
   is(codes({ units: ["HLTAID01"] }, null), [], "HLTAID01 is not HLTAID011");
   is(codes({ expiresOn: "2030-04-01", units: ["C6", "DG", "LF", "RB", "WP"] }, null), ["HR-01"],

@@ -153,8 +153,10 @@ export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
 export const READING_ASKS = {
   /** The MSIC number and the holder's date of birth. */
   particulars: ["documentNumber", "holderBirthDate"],
-  /** What the certificate covers besides its own column. */
-  covers: ["endorsements", "units"],
+  /** What the certificate covers besides its own column. The capacities
+   *  came after the other two, so a ticket carrying the endorsements but
+   *  not the capacities is looked at once more. */
+  covers: ["endorsements", "units", "capacities"],
   /** An AMSA certificate of recognition and the foreign certificate behind it. */
   recognition: ["isRecognition", "recognises"],
   /** The examination's own date and any limitation printed on the document. */
@@ -196,9 +198,16 @@ export type Reading = {
    *  the vessel file's `covers` table, never the model's guess
    *  (source/shared/covers.js). */
   endorsements?: { text: string; until: string | null }[];
-  /** The training unit codes printed on the document ("HLTAID011"). A unit
-   *  code in a column's title fills that column. */
+  /** The training unit codes printed on the document ("HLTAID011"), and
+   *  the classes printed on a high risk work licence ("DG"). A unit code in
+   *  a column's title fills that column; a class fills the column the vessel
+   *  file's covers table reads it into. */
   units?: string[];
+  /** The capacities a certificate of competency says the holder may serve
+   *  in, as printed ("Master", "GMDSS Radio Operator"). A document that
+   *  itself certifies the GMDSS radio operator capacity is that certificate
+   *  (the vessel file's covers table, reading the capacities). */
+  capacities?: string[];
   /** The document is an AMSA certificate of recognition: its title says so.
    *  A foreign certificate counts on this vessel only through one
    *  (MO505 s 4, s 7(2)). */

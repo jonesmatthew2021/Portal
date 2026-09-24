@@ -182,6 +182,12 @@
       "why": "MO70 s 37(3) item 2, s 37(5): the fast rescue boat endorsement runs 5 years from the proficiency's issue, so its own printed end date governs. The survival craft endorsement is printed 'other than fast rescue boats' (item 1) and fills nothing."
     },
     {
+      "code": "QL-14",
+      "from": "capacities",
+      "when": "gmdss\\s+radio\\s+operator",
+      "why": "MO70 s 7(1)(ca): GMDSS is its own certificate class, never an endorsement; a document that itself certifies the GMDSS radio operator capacity is that certificate."
+    },
+    {
       "code": "HR-01",
       "from": "units",
       "when": "DG",
