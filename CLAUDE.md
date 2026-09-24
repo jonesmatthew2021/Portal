@@ -14,11 +14,11 @@ the portal's). Nothing else in the frontend is a source file:
   them and the next build throws the work away.
 - `tools/source.mjs` assembles the portal: the shell plus every part, spliced in
   at the `/* @parts */` marker, plus every area, spliced in at the `/* @areas */`
-  marker just after. Both builds and all six checks come through it.
+  marker just after. Both builds and every check come through it.
 
 ```
 node tools/build.mjs      # rebuild everything
-node tools/check.mjs      # the six checks — run before deploying
+node tools/check.mjs      # the checks — run before deploying
 ```
 
 `npm run deploy` in `worker/` runs the checks first and refuses to ship if any
@@ -48,7 +48,7 @@ One file per Admin tab, so two jobs on two tabs are two files:
 | File under `source/areas/` | Tab |
 |---|---|
 | `crew-details.jsx` | Crew Details — the crew register |
-| `swing-allocation.jsx` | Swings (thin — the board and the compliance check are in the shell) |
+| `swing-allocation.jsx` | Swings (thin — the board is in `source/parts/roster.jsx`, the compliance report in `source/parts/crew-matrix.jsx`) |
 | `required-documents.jsx` | Documents — what the portal has to be given, with the library under it |
 | `certification-checker.jsx` | the gaps list — not a page; shown on the Crew Matrix under Needs attention |
 | `elearning-status.jsx` | E-Learning Status |
