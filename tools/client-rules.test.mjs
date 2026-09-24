@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -2575,6 +2575,40 @@ const is = (got, want, what) => {
   is(group && group.items.length, 1, "the item 120 days out is listed under Needs attention");
   is(group && Number(group.meta.split(" ")[0]), group && group.items.length, "…and the heading counts what is listed");
   is(group && group.meta.includes("within " + AMBER_DAYS + " days"), true, "…by the days it was listed by");
+}
+
+/* ---- the medical: which one governs, and an expiry longer than the law
+        allows for the holder's age (MO76 s 16(3), s 16(1)) ---- */
+{
+  /* The page's own copy of the rules (spliced in at @shared), and the
+     module the worker imports, answer the same. */
+  const shared = await import(pathToFileURL(join(ROOT, "source", "shared", "medical.js")).href);
+  const { medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, VESSEL, crewRegister } = lib;
+  const people = [{ id: "p1", name: "EVANS, Brenton", aliases: ["bRENTON"] }, { id: "p2", name: "SITTIYOS, Kachin", aliases: [] }];
+  const register = crewRegister(people);
+  const codes = medicalCodesIn(VESSEL.certStated);
+  is(codes, ["QL-17"], "the medical's column is the vessel file's certStated");
+  const rows = [
+    { id: "f2", key: "new", person: "bRENTON", code: "QL-17", filedOn: "2026-06-02" },
+    { id: "f1", key: "old", person: "EVANS, Brenton", code: "QL-17", filedOn: "2025-01-02" },
+    { id: "f4", key: "hers", person: "EVANS, Brenton", code: "QL-17", filedOn: "2026-07-01" },
+  ];
+  const readings = {
+    new: { readable: true, holderName: "Brenton Evans", issuedOn: "2026-06-01", assessedOn: "2026-05-28", expiresOn: "2027-06-01", conditions: " Daylight only " },
+    old: { readable: true, holderName: "brenton EVANS", issuedOn: "2025-01-01", assessedOn: "2025-01-01", expiresOn: "2029-01-01", conditions: null },
+    hers: { readable: true, holderName: "Kachin Sittiyos", issuedOn: "2026-06-30", expiresOn: "2028-06-30" },
+  };
+  const mine = medicalOnFile("EVANS, Brenton", rows, readings, register, codes);
+  is(mine.map((m) => m.rowId), ["f2", "f1"], "the medical issued last governs, though the older one prints 2029");
+  is(medicalNote(mine[0]), "Daylight only", "the condition as printed, tidied of its spaces");
+  is(shared.medicalOnFile("EVANS, Brenton", rows, readings, register, codes), mine, "the worker's module answers the same");
+  is(medicalTooLong(mine[0], "1990-04-01", "2026-09-25"), null, "a year out from a 36-year-old's assessment is well inside two years");
+  const twoAndADay = { ...mine[0], expiresOn: "2028-05-29" };
+  is(medicalTooLong(twoAndADay, "1990-04-01", "2026-09-25"), "the expiry is more than two years after the assessment", "two years and a day is flagged");
+  is(medicalTooLong(twoAndADay, null, "2026-09-25"), null, "with no date of birth on Crew Details, nothing is flagged");
+  is(shared.medicalTooLong(twoAndADay, "1971-05-28", "2026-09-25"),
+    "the expiry is more than a year after the assessment, and the holder was 55 or older that day", "55 on the assessment day: one year, module and page alike");
+  is(medicalTooLong(twoAndADay, "1971-05-28", "2026-09-25"), shared.medicalTooLong(twoAndADay, "1971-05-28", "2026-09-25"), "the page says it too");
 }
 
 if (failed) {

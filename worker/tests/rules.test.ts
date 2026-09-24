@@ -22,6 +22,7 @@ import { crewRowsOnly, crewRegister, nameLetters, registerWords } from "../../so
 import { RED_DAYS, daysUntil } from "../../source/shared/bands.js";
 import * as reminders from "../../source/shared/reminders.js";
 import { particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, ticketCodesIn, isMsicCard, openToCertificates } from "../../source/shared/particulars.js";
+import { medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote } from "../../source/shared/medical.js";
 import { expiringIn, EXPIRING_MEANS, PORTAL_TOOLS } from "../src/lib/portal.js";
 import { dueMeans } from "../src/lib/matrix.js";
 import { readFileSync } from "node:fs";
@@ -785,4 +786,93 @@ test("particulars: a tab's save over the round's keeps the round's fill where th
     { id: "p1", name: "EVANS, Brenton", msic: "MSIC 0002", rank: "Master" },
     { id: "p2", name: "SITTIYOS, Kachin", dob: "1975-05-06" },
   ], "Evans's rank is the tab's and his number the round's; the date the tab typed for Kachin is the tab's");
+});
+
+/* ------------------------------------------------------------------------ *
+ * The medical (source/shared/medical.js): which one governs, and whether
+ * the expiry printed on it is longer than the law allows for the holder's
+ * age. Both rules are MO76's - s 16(3) for the first, s 16(1) and its Note
+ * for the second - and a wrong answer to either puts a wrong date against a
+ * man's name.
+ * ------------------------------------------------------------------------ */
+const MED_PEOPLE = [
+  { id: "p1", name: "EVANS, Brenton", aliases: ["bRENTON"] },
+  { id: "p2", name: "SITTIYOS, Kachin", aliases: [] },
+];
+const MED_REGISTER = crewRegister(MED_PEOPLE);
+const MED_TODAY = "2026-09-25";
+const MED_CODES = medicalCodesIn(vessel.certStated);
+/** His medicals, newest filed first, as the library hands them over. */
+const MED_ROWS = [
+  { id: "f2", key: "new", person: "bRENTON", code: "QL-17", filedOn: "2026-06-02" },
+  { id: "f1", key: "old", person: "EVANS, Brenton", code: "QL-17", filedOn: "2025-01-02" },
+  // His Master ticket - not a medical, whatever it prints.
+  { id: "f3", key: "ticket", person: "EVANS, Brenton", code: "QL-01", filedOn: "2026-01-01" },
+  // Filed in his folder, printed in Kachin's name.
+  { id: "f4", key: "hers", person: "EVANS, Brenton", code: "QL-17", filedOn: "2026-07-01" },
+];
+const MED_READINGS: Record<string, Record<string, unknown>> = {
+  // Issued last, and runs the shorter time - a condition wanted re-checking.
+  new: { readable: true, holderName: "Brenton Evans", issuedOn: "2026-06-01", assessedOn: "2026-05-28",
+    expiresOn: "2027-06-01", conditions: "Fit for particular duties only" },
+  old: { readable: true, holderName: "brenton EVANS", issuedOn: "2025-01-01", assessedOn: "2025-01-01",
+    expiresOn: "2029-01-01", conditions: null },
+  ticket: { readable: true, holderName: "Brenton Evans", issuedOn: "2026-01-01", expiresOn: "2031-05-26" },
+  hers: { readable: true, holderName: "Kachin Sittiyos", issuedOn: "2026-06-30", expiresOn: "2028-06-30" },
+};
+const medicalsOf = (name: string, rows = MED_ROWS, readings = MED_READINGS) =>
+  medicalOnFile(name, rows, readings, MED_REGISTER, MED_CODES);
+
+test("the medical: the one issued last governs, even where an older one prints a later expiry", () => {
+  // MO76 s 16(3): a medical expires the moment a further one is issued. The
+  // old card's 2029 date died the day the new one was signed, so taking the
+  // later expiry would put a man to sea on a certificate that has gone.
+  assert.deepEqual(medicalCodesIn(vessel.certStated), ["QL-17"], "the medical's column is the vessel file's certStated");
+  const mine = medicalsOf("EVANS, Brenton");
+  assert.deepEqual(mine.map((m) => m.rowId), ["f2", "f1"], "newest issued first, whatever they print");
+  assert.deepEqual(mine[0], { rowId: "f2", issuedOn: "2026-06-01", assessedOn: "2026-05-28",
+    expiresOn: "2027-06-01", conditions: "Fit for particular duties only" });
+  assert.deepEqual(medicalsOf("brenton evans").map((m) => m.rowId), ["f2", "f1"], "his name any way round is the same man");
+  assert.equal(medicalNote(mine[0]), "Fit for particular duties only", "the condition as printed");
+  assert.equal(medicalNote(mine[1]), null, "and nothing where none is printed");
+  assert.deepEqual(medicalsOf("SITTIYOS, Kachin"), [], "a medical printed in his name but filed in another man's folder is not his");
+  assert.deepEqual(medicalsOf("EVANS, Brenton", MED_ROWS.slice(2)), [], "no medical, nothing - his ticket is not one");
+});
+
+test("the medical: a printed expiry longer than the law allows for the holder's age, and never a guess", () => {
+  /* MO76 s 16(1) and Note: two years at most, one year where the person was
+     18 or younger or 55 or older on the day of the examination. The Note's
+     edges are "not more than 18" and "at least 55", so exactly 18 and
+     exactly 55 are in the one-year band - the office's guide reads
+     "under 18/over 55" and is wrong by a year each way (report Part 7.4). */
+  const med = (expiresOn: string | null, assessedOn: string | null = "2026-05-28", issuedOn: string | null = "2026-06-01") =>
+    ({ rowId: "f2", issuedOn, assessedOn, expiresOn, conditions: null });
+  const grown = "1990-04-01";      // 36 on the assessment day
+  assert.equal(medicalTooLong(med("2028-05-28"), grown, MED_TODAY), null, "two years to the day is two years");
+  assert.equal(medicalTooLong(med("2028-05-29"), grown, MED_TODAY),
+    "the expiry is more than two years after the assessment", "two years and a day is not");
+  // The day before his birthday he is 54, and the two-year band is his.
+  assert.equal(medicalTooLong(med("2027-11-28"), "1971-05-29", MED_TODAY), null, "he turns 55 the day after the assessment: two years");
+  assert.equal(medicalTooLong(med("2027-11-28"), "1971-05-28", MED_TODAY),
+    "the expiry is more than a year after the assessment, and the holder was 55 or older that day", "55 on the day: one year");
+  assert.equal(medicalTooLong(med("2027-05-28"), "1971-05-28", MED_TODAY), null, "a year to the day is a year");
+  assert.equal(medicalTooLong(med("2027-06-28"), "2009-01-01", MED_TODAY),
+    "the expiry is more than a year after the assessment, and the holder was 18 or younger that day", "17 at 13 months");
+  assert.equal(medicalTooLong(med("2027-06-28"), "2008-05-28", MED_TODAY),
+    "the expiry is more than a year after the assessment, and the holder was 18 or younger that day", "18 on the day is the one-year band too");
+  assert.equal(medicalTooLong(med("2027-06-28"), "2007-05-28", MED_TODAY), null, "19 on the assessment day: two years");
+  assert.equal(medicalTooLong(med("2028-05-29"), null, MED_TODAY), null, "no date of birth, no age, no flag");
+  assert.equal(medicalTooLong(med("2028-05-29"), "", MED_TODAY), null, "nor an empty box");
+  assert.equal(medicalTooLong(med("2028-05-29"), "not a date", MED_TODAY), null, "nor a box somebody typed words into");
+  assert.equal(medicalTooLong(null, grown, MED_TODAY), null, "no medical, nothing");
+  // Issued 1 June: two years and a day from the issue, and two years and
+  // five days from the examination - so which date it is measured from shows.
+  assert.equal(medicalTooLong(med("2028-06-02", null), grown, MED_TODAY),
+    "the expiry is more than two years after it was issued", "no assessment date printed: measured from the issue");
+  assert.equal(medicalTooLong(med("2028-06-01", null), grown, MED_TODAY), null, "two years from the issue to the day");
+  assert.equal(medicalTooLong(med("2028-06-02", null, null), grown, MED_TODAY), null,
+    "neither date printed: nothing to measure from");
+  assert.equal(medicalTooLong(med(null), grown, MED_TODAY), null, "no printed expiry, nothing to check");
+  assert.equal(medicalTooLong(med("2026-09-24"), "2009-01-01", MED_TODAY), null,
+    "a medical that has already run out is on the gaps list, not here");
 });
