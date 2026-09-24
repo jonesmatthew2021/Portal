@@ -231,8 +231,14 @@ export async function survey(tick: (pct: number, word: string) => Promise<void> 
   /* The OPMS sheet's own folder sits one level under the home, exactly
      where a crew folder does, and it is nobody's: a file in it is a single
      document, taken below, not a certificate of somebody called
-     SPREADSHEET. */
-  const inSingleFolder = (key: string) => singleFolders.some((p) => key.startsWith(p));
+     SPREADSHEET. Case-folded like crewFolderIn: the walk's keys carry
+     the folder name as the office spelt it, and "Spreadsheet" is the same
+     folder as "spreadsheet". */
+  const lowerSingles = singleFolders.map((p) => p.toLowerCase());
+  const inSingleFolder = (key: string) => {
+    const k = key.toLowerCase();
+    return lowerSingles.some((p) => k.startsWith(p));
+  };
   const folks = new Map<string, string>();
   for (const f of opmsListing.blobs) {
     if (inSingleFolder(f.key)) continue;

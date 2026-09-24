@@ -319,6 +319,8 @@ export function graphLibrary(exists: Set<string>, library: { files?: FakeFile[];
    *  in it the page began. A retry is a call of its own. */
   const listings: { folder: string; skip: number }[] = [];
   const faults: { fault: ListingFault; when: (folder: string, skip: number, nth: number) => boolean; left: number }[] = [];
+  /** Calls of any kind, listings or not, that answer with a status instead. */
+  const refusals: { status: number; when: (method: string, path: string) => boolean; left: number }[] = [];
   const ids = new Map<string, string>();
   const idOf = (folder: string) => {
     if (!ids.has(folder)) ids.set(folder, "item" + (ids.size + 1));
@@ -340,10 +342,19 @@ export function graphLibrary(exists: Set<string>, library: { files?: FakeFile[];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = (init?.method || "GET").toUpperCase();
-    const path = decodeURIComponent(url.replace(/^https:\/\/[^/]+/, ""));
+    // Read as the driver sent it where it cannot be decoded: a stray "%"
+    // is a call Graph would still answer, and the fake must too.
+    const raw = url.replace(/^https:\/\/[^/]+/, "");
+    let path: string;
+    try { path = decodeURIComponent(raw); } catch { path = raw; }
     calls.push({ method, path });
     const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
       new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
+    const refusal = refusals.find((r) => r.left > 0 && r.when(method, path));
+    if (refusal) {
+      refusal.left--;
+      return json({ error: { code: "serviceNotAvailable" } }, refusal.status);
+    }
     if (path.includes("/oauth2/")) return json({ access_token: "t", expires_in: 3600 });
     if (/^\/v1\.0\/sites\/[^/]+:\/sites\/\w+$/.test(path)) return json({ id: "site1" });
     if (path === "/v1.0/sites/site1/drives") return json({ value: [{ id: "d1", name: "Documents" }] });
@@ -419,7 +430,13 @@ export function graphLibrary(exists: Set<string>, library: { files?: FakeFile[];
   const fault = (what: ListingFault, when: (folder: string, skip: number, nth: number) => boolean, times = 1) => {
     faults.push({ fault: what, when, left: times });
   };
-  return { calls, made, posts, puts, idOf, listings, fault, files, restore: () => { globalThis.fetch = realFetch; } };
+  /** The next `times` calls of any kind that `when` picks out, by method
+   *  and path, answer `status` instead - the way to turn away a write or
+   *  a look, which `fault` cannot reach. */
+  const refuse = (status: number, when: (method: string, path: string) => boolean, times = 1) => {
+    refusals.push({ status, when, left: times });
+  };
+  return { calls, made, posts, puts, idOf, listings, fault, refuse, files, restore: () => { globalThis.fetch = realFetch; } };
 }
 
 export const sharepointEnv = (over: Record<string, unknown> = {}) => ({

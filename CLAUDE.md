@@ -206,12 +206,18 @@ modules. Edit that code there and only there.
   standing after the driver's three retries (`graph` in `files/store.ts`,
   waits through `graphWaits`), throws: 502, the error on `last-run`, no row
   marked missing. On the hour the driver's waits stop at the hour's settling
-  time (`graphBudget.until`, set by `scheduled()` around the whole hour, the
-  Retry-After honoured in full under it and capped at a minute without one):
-  a wait that would run past it throws at once, and the hour's record is
-  written before the sync so a cut-off invocation still leaves this hour's
-  line. The single-file folders under the home (`opms/spreadsheet`) are
-  nobody's crew folder. The hold-back guard in `apply` (missing > max(25, 10%
+  time (`graphBudget.until`, set by `scheduled()` from the tick before the
+  backup's first call on the library, drawn in to the lease's deadline once
+  it is held, and cleared in one `finally` on every way out; the Retry-After
+  honoured in full under it and capped at a minute without one): a wait that
+  would run past it throws at once, and the hour's record is written before
+  the sync so a cut-off invocation still leaves this hour's line. A budget
+  more than fifteen minutes past - the platform's cut - is an hour the
+  platform cut before its clearing ran, and counts for nothing
+  (`STALE_BUDGET_MS`). The driver's failure sentence decodes the path only
+  when there is a failure to say, so a path it cannot decode is still sent.
+  The single-file folders under the home (`opms/spreadsheet`) are nobody's
+  crew folder, whatever case the office spelt them in. The hold-back guard in `apply` (missing > max(25, 10%
   of the live rows the walk covered)) holds every mirror-off and is not a
   failure: `last-run.heldBack` carries the count, `error` stays null, and the
   SharePoint page's last-import line says it on its missing clause. Tests:

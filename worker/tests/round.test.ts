@@ -30,7 +30,7 @@ import roundRoute, { BUDGET_MS, LEASE_FOR_MS, progressAnswer } from "../src/rout
 import files from "../src/routes/files.js";
 import renameFile from "../src/routes/rename-file.js";
 import importSingle from "../src/routes/import-single.js";
-import worker, { hourWaits, hourDeadline, syncLastAnswer } from "../src/index.js";
+import worker, { hourWaits, hourDeadline, syncLastAnswer, SETTLE_MS } from "../src/index.js";
 import { graphBudget } from "../src/files/store.js";
 import { writeZip, readZip, partOf, partText, datedWorkbookName } from "../../source/shared/workbook.js";
 import { asKnownPerson, crewRegister } from "../../source/shared/names.js";
@@ -2957,6 +2957,34 @@ test("the backup lands even while somebody holds the lease, and the hour stands 
   assert.equal(backupRecord(portal).day, "2026-09-24");
   assert.equal(JSON.parse(portal.blobs.get("sync|last-hourly")!).roundSkipped, "another round is still running");
   assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).by, "Update portal", "the page's lease is untouched");
+  assert.equal(graphBudget.until, 0, "the library's budget is cleared on the way out, though the hour stood down before its lease");
+});
+
+test("the library's waits are under the hour's budget from the tick, before the backup asks the library anything", async () => {
+  /* The backup runs before the lease, and its calls on the library - the
+     look for its folder, the write into it, the drops of old dailies -
+     are Graph calls like any other. Without a budget over them a throttled
+     library could hold the hour in the backup for minutes before the
+     lease is even tried. So the budget is set from the tick first, twelve
+     minutes less the settling time, and drawn in once the lease is held.
+     On R2 the backup's first call on the library is its write, so that
+     is where the budget is read. */
+  const { portal, bucket } = await backupPortal();
+  const seen: number[] = [];
+  const realPut = bucket.put;
+  bucket.put = async (key, value) => {
+    if (key.startsWith("library/")) seen.push(graphBudget.until);
+    return realPut.call(bucket, key, value);
+  };
+  try {
+    await withClock(TEN_PAST_TWO, () => worker.scheduled({} as never, getEnvFor(portal, bucket) as never));
+  } finally {
+    bucket.put = realPut;
+  }
+  assert.ok(bucket.text(backupKey("2026-09-24")), "the backup landed");
+  assert.deepEqual(seen, [TEN_PAST_TWO + 12 * 60 * 1000 - SETTLE_MS], "the outer bound, from the tick, at the backup's write");
+  assert.equal(graphBudget.until, 0, "and cleared when the hour is done");
+  assert.equal(JSON.parse(portal.blobs.get("sync|last-hourly")!).applied, 1, "the hour went on to run the round");
 });
 
 test("after the backup lands, a month of dailies and a year of monthlies remain, by name", async () => {

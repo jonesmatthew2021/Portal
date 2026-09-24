@@ -219,48 +219,56 @@ export default {
     // and the write in flight, the record and the lease drop always keep
     // three of them whatever the wait cost.
     let lease: Lease | null;
-    try {
-      await ensureDocumentColumns();
-      // The nightly backup, before the lease and outside it: it reads the
-      // books and writes one file into the owner's folder, takes no lease
-      // and holds nothing up, and nothing it does can stop the sync, the
-      // reading or the round. Its own record says what it did (lib/backup.ts).
-      try {
-        await nightlyBackup(t0);
-      } catch (e) {
-        console.error("the nightly backup failed outside its own catch:", e);
-      }
-      lease = await takeLease("the round on the hour");
-      for (let tries = 0; !lease && tries < LEASE_RETRIES; tries++) {
-        await hourWaits.sleep(LEASE_RETRY_MS);
-        lease = await takeLease("the round on the hour");
-      }
-    } catch (e) {
-      await written({ roundError: "the hour could not start: " + said(e) });
-      console.error("the hour could not start:", e);
-      return;
-    }
-    if (!lease) {
-      await written({ roundSkipped: "another round is still running" });
-      return;
-    }
-    const deadline = hourDeadline(t0, Date.now());
     // The library's driver gives up on any wait that would run past the
     // hour's settling time, for everything the hour asks of it: three
     // throttled calls at a minute's Retry-After each were nine minutes of
     // sleeping, past the deadline and the platform's cut, with no record
-    // written. Cleared whatever happens, so a page's request after this
-    // in the same isolate waits on its own terms.
-    graphBudget.until = deadline - SETTLE_MS;
+    // written. Set from the tick before the backup asks the library
+    // anything - a throttled library could otherwise hold the hour in the
+    // backup for minutes before the lease is even tried - and drawn in to
+    // the lease's own deadline once it is held. Cleared whatever happens,
+    // on every way out, so a page's request after this in the same
+    // isolate waits on its own terms.
+    graphBudget.until = t0 + 12 * 60 * 1000 - SETTLE_MS;
     try {
-      await written(await theHour(env, lease, deadline, outcome, written));
+      try {
+        await ensureDocumentColumns();
+        // The nightly backup, before the lease and outside it: it reads the
+        // books and writes one file into the owner's folder, takes no lease
+        // and holds nothing up, and nothing it does can stop the sync, the
+        // reading or the round. Its own record says what it did (lib/backup.ts).
+        try {
+          await nightlyBackup(t0);
+        } catch (e) {
+          console.error("the nightly backup failed outside its own catch:", e);
+        }
+        lease = await takeLease("the round on the hour");
+        for (let tries = 0; !lease && tries < LEASE_RETRIES; tries++) {
+          await hourWaits.sleep(LEASE_RETRY_MS);
+          lease = await takeLease("the round on the hour");
+        }
+      } catch (e) {
+        await written({ roundError: "the hour could not start: " + said(e) });
+        console.error("the hour could not start:", e);
+        return;
+      }
+      if (!lease) {
+        await written({ roundSkipped: "another round is still running" });
+        return;
+      }
+      const deadline = hourDeadline(t0, Date.now());
+      graphBudget.until = deadline - SETTLE_MS;
+      try {
+        await written(await theHour(env, lease, deadline, outcome, written));
+      } finally {
+        try {
+          await dropLease(lease.token);
+        } catch (e) {
+          console.error("the hour's lease was not dropped:", e);
+        }
+      }
     } finally {
       graphBudget.until = 0;
-      try {
-        await dropLease(lease.token);
-      } catch (e) {
-        console.error("the hour's lease was not dropped:", e);
-      }
     }
   },
 };

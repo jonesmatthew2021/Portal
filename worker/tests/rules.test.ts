@@ -16,9 +16,6 @@ import { AI_BUSY, checkerRefusalLine } from "../src/lib/checker.js";
 import { crewFolderIn, looseIn, whoseFolder } from "../src/routes/sync.js";
 import { asKey } from "../src/db/cert-home.js";
 import { setEnv } from "../src/env.js";
-/* The sync's own tests ride in here: tools/check.mjs names the files it
-   runs, and this is one of them. */
-import "./sync.test.js";
 
 /** The office's equivalence sheet, as the portal stores it. */
 const SHEET = [

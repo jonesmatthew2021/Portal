@@ -14,15 +14,14 @@
  * the real folder layout from wrangler.toml; where it does not, the R2
  * bucket in memory. Each title says which.
  *
- *   npx tsx --test tests/sync.test.ts      (or: node tools/check.mjs, which
- *   runs this through rules.test.ts)
+ *   npx tsx --test tests/sync.test.ts      (or: node tools/check.mjs)
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setEnv } from "../src/env.js";
 import { todayThere } from "../src/lib/analysis.js";
 import sync, { runSync } from "../src/routes/sync.js";
-import { graphWaits, graphBudget } from "../src/files/store.js";
+import { graphWaits, graphBudget, fileStore } from "../src/files/store.js";
 import { fakeBucket, portalDb, graphLibrary, sharepointEnv, wranglerVars, keptRow, type FakeFile } from "./helpers.js";
 
 /* The library's real folders, read off wrangler.toml so a map that moves
@@ -188,6 +187,53 @@ test("Graph: with time in hand the minute Graph names is waited in full under a 
   }
 });
 
+test("Graph: a budget left behind by an hour the platform cut is no budget - a page's request twenty minutes on waits as it would with none", async () => {
+  const portal = booksOf([]);
+  const graph = libraryOf(portal, [{ path: `${BRENTON}/master.pdf`, size: 6 }]);
+  const waits = recordedWaits();
+  try {
+    // The hour clears its budget in a finally; an invocation cut by the
+    // platform never reaches it, and the isolate lives on with this set.
+    graphBudget.until = Date.now() - 20 * 60 * 1000;
+    graph.fault({ status: 429, retryAfter: 3 }, (folder) => folder === OPMS);
+    await runSync("Import new files");
+    assert.deepEqual(waits.sleeps, [3000], "the three seconds Graph named, waited - not refused for a budget long gone");
+    assert.equal(lastRun(portal).error, null);
+    assert.equal(lastRun(portal).registered, 1);
+    nothingWritten(graph);
+  } finally {
+    graphBudget.until = 0;
+    waits.restore();
+    graph.restore();
+  }
+});
+
+/* ------------------------------------------------------------------------ *
+ * The driver's failure sentence names the call in plain words, and only
+ * when there is a failure to name: a path it cannot decode is still sent.
+ * ------------------------------------------------------------------------ */
+test("Graph: a call whose path carries a stray % is still made and answered, and a refusal on it is said with the path as sent", async () => {
+  const portal = booksOf([]);
+  const graph = libraryOf(portal, [], { folders: ["United Operations Team", "United Operations Team/Backups"] });
+  const waits = recordedWaits();
+  try {
+    // A write by a folder id the driver splices in as given. Decoding
+    // "%zz" throws; the call must still go out and be answered - here
+    // with Graph's 404 for a folder it does not know.
+    const store = fileStore();
+    const put = () => store.set("library/United Operations Team/Backups/x.json", new TextEncoder().encode("{}").buffer as ArrayBuffer, { intoFolderId: "item1%zz" });
+    await assert.rejects(put, { message: /^SharePoint write failed \(404\) for library\/United Operations Team\/Backups\/x\.json/ }, "answered by the library, not thrown before the call");
+    assert.deepEqual(graph.calls.filter((c) => c.method === "PUT").map((c) => c.path), ["/v1.0/drives/d1/items/item1%zz:/x.json:/content"], "the call went out as sent");
+    // Turned away four times: the sentence names the call, path as sent.
+    graph.refuse(503, (method, path) => method === "PUT" && path.includes("item1%zz"), 4);
+    await assert.rejects(put, { message: "SharePoint answered 503 4 times for PUT /drives/d1/items/item1%zz:/x.json:/content" });
+    assert.deepEqual(waits.sleeps, [1000, 2000, 4000], "three waits of its own before giving up");
+  } finally {
+    waits.restore();
+    graph.restore();
+  }
+});
+
 /* ------------------------------------------------------------------------ *
  * The home itself: a certificate location the library no longer has is a
  * fault, never an empty folder.
@@ -264,10 +310,15 @@ test("Graph: the same folder with nothing on the books under it is allowed not t
 
 test("Graph: a file in the OPMS sheet's own folder under the home is the single document, not a certificate of somebody called SPREADSHEET", async () => {
   const portal = booksOf([]);
-  const graph = libraryOf(portal, [{ path: `${OPMS}/spreadsheet/OPMS.xlsx`, size: 900 }]);
+  // The second file is under the folder as the office might spell it: the
+  // walk's keys carry that spelling, and it is the same folder still.
+  const graph = libraryOf(portal, [
+    { path: `${OPMS}/spreadsheet/OPMS.xlsx`, size: 900 },
+    { path: `${OPMS}/Spreadsheet/OPMS2.xlsx`, size: 901 },
+  ]);
   try {
     const out = await runSync("Import new files");
-    assert.deepEqual(out.registered, [], "no certificate taken on");
+    assert.deepEqual(out.registered, [], "no certificate taken on, whichever way the folder is spelt");
     assert.deepEqual(out.adopted, [{ category: "opms-sheet", key: "opms/spreadsheet/OPMS.xlsx" }]);
     assert.deepEqual(out.people, [], "and no such person");
     assert.deepEqual(portal.rows.map((r) => [r.category, r.blobKey, r.adoptedFromFolder]), [["opms-sheet", "opms/spreadsheet/OPMS.xlsx", 1]]);

@@ -139,6 +139,10 @@ const RETRY_AFTER_CAP_S = 60;
  *  of sleeping, with the hour's record still unwritten behind them. A
  *  page's request sets none. */
 export const graphBudget = { until: 0 };
+/** How far past a budget's time it is still the hour's and not a leftover:
+ *  the platform cuts a scheduled run at fifteen minutes, and the budget is
+ *  never more than nine and a half from the tick. */
+const STALE_BUDGET_MS = 15 * 60 * 1000;
 
 /* One call to Graph, tried again where Graph itself says to.
  *
@@ -153,7 +157,23 @@ export const graphBudget = { until: 0 };
  * a call whose next wait would run past the budget: it says so at once
  * and sleeps nothing. */
 async function graph(path: string, init: RequestInit = {}): Promise<Response> {
-  const what = `${(init.method || "GET").toUpperCase()} ${decodeURIComponent(path)}`;
+  const method = (init.method || "GET").toUpperCase();
+  // Only the failure sentence wants the path readable, so it is decoded
+  // there and not before: a stray "%" in a path is a URIError, and that
+  // must never fail a call that Graph would have answered.
+  const what = () => {
+    try {
+      return `${method} ${decodeURIComponent(path)}`;
+    } catch {
+      return `${method} ${path}`;
+    }
+  };
+  // The budget is the hour's: set at its start, cleared at its end. An
+  // hour the platform cut before its clearing ran leaves one behind in
+  // the isolate, and every throttled call a page made after would give up
+  // on its first refusal. The platform's cut is fifteen minutes, so a
+  // budget older than that is a leftover and counts for nothing.
+  const until = graphBudget.until && Date.now() < graphBudget.until + STALE_BUDGET_MS ? graphBudget.until : 0;
   for (let tries = 1; ; tries++) {
     // Asked for on every try: it is cached, so the happy path costs
     // nothing, and a token in its last minute cannot run out during a
@@ -168,14 +188,14 @@ async function graph(path: string, init: RequestInit = {}): Promise<Response> {
     // stream open across the wait.
     await res.body?.cancel().catch(() => {});
     if (tries > GRAPH_RETRIES) {
-      throw new Error(`SharePoint answered ${res.status} ${tries} times for ${what}`);
+      throw new Error(`SharePoint answered ${res.status} ${tries} times for ${what()}`);
     }
     const asked = Number(res.headers.get("Retry-After"));
     const wait = asked > 0
-      ? (graphBudget.until ? asked : Math.min(asked, RETRY_AFTER_CAP_S)) * 1000
+      ? (until ? asked : Math.min(asked, RETRY_AFTER_CAP_S)) * 1000
       : GRAPH_BACKOFF_MS[tries - 1];
-    if (graphBudget.until && Date.now() + wait > graphBudget.until) {
-      throw new Error(`SharePoint answered ${res.status} ${tries} time${tries === 1 ? "" : "s"} for ${what} and there is no time left to ask again`);
+    if (until && Date.now() + wait > until) {
+      throw new Error(`SharePoint answered ${res.status} ${tries} time${tries === 1 ? "" : "s"} for ${what()} and there is no time left to ask again`);
     }
     await graphWaits.sleep(wait);
   }
