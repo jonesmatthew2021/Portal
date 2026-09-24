@@ -199,6 +199,14 @@ modules. Edit that code there and only there.
   a change that nothing will send.
 - **The last 200 saves are kept** (`portal_state_history`) and any one of them
   can be put back from `Admin → Access Grants`, under Revisions.
+- **A listing the library refuses fails the survey and moves nothing.** A 404
+  on the certificate home (`hasFolder` before the walk in `survey`), or a 429
+  or 5xx still standing after the driver's three retries (`graph` in
+  `files/store.ts`, waits through `graphWaits`), throws: 502, the error on
+  `last-run`, no row marked missing. The hold-back guard in `apply` (missing
+  > max(25, 10% of the live rows the walk covered)) holds every mirror-off and
+  says so in one sentence on `last-run.error` (`heldBackLine`), which the
+  SharePoint page's last-import line shows. Tests: `worker/tests/sync.test.ts`.
 
 ## Working in parallel
 
