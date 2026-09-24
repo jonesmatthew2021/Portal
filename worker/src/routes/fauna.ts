@@ -7,6 +7,8 @@ import {
 } from "../lib/fauna-log.js";
 import { settle, monthName } from "../../../source/fauna/fields.js";
 import { XLSX_MIME } from "../../../source/shared/workbook.js";
+import { crewRegister } from "../../../source/shared/names.js";
+import { readDocument } from "../lib/shared-state.js";
 
 /**
  * The Marine Fauna Observation Log, filled in on a phone.
@@ -95,6 +97,39 @@ async function listMonth(month: string) {
     .all<Row>();
   return (rows.results || []).map(entryOf);
 }
+
+/* ------------------------------------------------------ who may log --- */
+
+/** The departments on Crew Details whose people keep the log: the Masters
+ *  and the deck officers (chief officers and second mates). Matthew's rule,
+ *  24 Sep 2026: only masters, chief officers and second officers fill it
+ *  out. Everyone else signed in may read the month and send it on. */
+const LOGGING_DEPTS = ["masters", "deck officers"];
+
+type Person = { name?: string; dept?: string | null; active?: boolean };
+
+/**
+ * A signed-in name held against the crew register: who the register says
+ * that is (a spelling difference does not lock a mate out), their department,
+ * and whether that department keeps the log.
+ */
+export function logRank(people: Person[], name: string): { mayLog: boolean; dept: string | null; person: string | null } {
+  const listed = (people || []).filter((p) => p && p.name);
+  const known = crewRegister(listed as never).nameOf(name);
+  const person = known ? listed.find((p) => String(p.name).trim() === known) : null;
+  const dept = person?.dept ? String(person.dept) : null;
+  return { mayLog: !!dept && LOGGING_DEPTS.includes(dept.trim().toLowerCase()), dept, person: known };
+}
+
+/** Whether this person may make entries. IT Help keeps the portal and is not
+ *  held out of it; everyone else by their rank on the register. */
+export async function mayLog(user: PortalUser): Promise<{ mayLog: boolean; dept: string | null; person: string | null }> {
+  if (user.role === "it") return { mayLog: true, dept: null, person: user.name };
+  const cur = await readDocument().catch(() => null);
+  return logRank((cur?.doc as { people?: Person[] } | undefined)?.people || [], user.name);
+}
+
+const NOT_AN_OBSERVER = "Entries are made by the Master, the Chief Officer or the Second Officer.";
 
 /* ------------------------------------------------------------- entries --- */
 
@@ -352,16 +387,29 @@ export default async (req: Request, user: PortalUser, path: string): Promise<Res
   const url = new URL(req.url);
   const thisMonth = new Date().toISOString().slice(0, 7);
 
+  // Who this is to the log: their name as the register writes it, and
+  // whether their rank lets them make entries.
+  if (path === "/api/fauna/me" && req.method === "GET") {
+    const who = await mayLog(user);
+    return json({ name: user.name, email: user.email, role: user.role, ...who });
+  }
+
   if (path === "/api/fauna/sightings") {
     if (req.method === "GET") {
       const month = url.searchParams.get("month") || thisMonth;
       if (!isMonth(month)) return json({ error: "The month is YYYY-MM." }, 400);
       return json({ month, entries: await listMonth(month) });
     }
-    if (req.method === "PUT" || req.method === "POST") return await saveOne(req, user);
+    if (req.method === "PUT" || req.method === "POST") {
+      if (!(await mayLog(user)).mayLog) return json({ error: NOT_AN_OBSERVER }, 403);
+      return await saveOne(req, user);
+    }
   }
   const one = /^\/api\/fauna\/sightings\/([a-z0-9-]+)$/i.exec(path);
-  if (one && req.method === "DELETE") return await removeOne(req, one[1], user);
+  if (one && req.method === "DELETE") {
+    if (!(await mayLog(user)).mayLog) return json({ error: NOT_AN_OBSERVER }, 403);
+    return await removeOne(req, one[1], user);
+  }
 
   if (path === "/api/fauna/log") {
     const month = url.searchParams.get("month") || thisMonth;

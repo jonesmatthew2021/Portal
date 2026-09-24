@@ -15634,6 +15634,35 @@ function CrewCertificateUpload() {
   );
 }
 
+/* The Marine Fauna Observation Log: the phone app at /fauna/, shown here as
+   it is, behind the same sign-in. Who may make entries is the app's own rule
+   - the Master, the Chief Officer or the Second Officer, by their rank on
+   Crew Details - decided on the server for the phone and this tab alike;
+   everyone else reads the month and can send it on. The offline preview has
+   no worker behind it, so there the tab points at the live portal. */
+function FaunaLog() {
+  const [there, setThere] = React.useState(null);
+  React.useEffect(() => {
+    let live = true;
+    fetch("/fauna/manifest.webmanifest", { method: "HEAD", cache: "no-store" })
+      .then((r) => { if (live) setThere(r.ok); })
+      .catch(() => { if (live) setThere(false); });
+    return () => { live = false; };
+  }, []);
+  return (
+    <div>
+      <SectionHead title="Fauna Log" />
+      {there === false ? (
+        <Empty>The Fauna Log runs on the live portal: <a href="https://coolibah-portal.com/fauna/" style={{ color: T.accent }}>coolibah-portal.com/fauna</a></Empty>
+      ) : (
+        <iframe title="Fauna Log" src="/fauna/"
+          style={{ width: "100%", height: "calc(100vh - 150px)", minHeight: 620, border: `1px solid ${T.rule}`,
+            borderRadius: 2, background: "#F2F6F9", display: "block" }} />
+      )}
+    </div>
+  );
+}
+
 /* The Admin tab's own pages. Kept as a list so the strip that switches between
    them and the page that is rendered can't disagree about what exists. */
 const ADMIN_PAGES = [
@@ -16937,6 +16966,7 @@ function CoolibahPortal({ role, onSignOut }) {
     { id: "handover", label: "Handover Notes" },
     { id: "training", label: "Crew Matrix" },
     { id: "crew-roster", label: "Roster" },
+    { id: "fauna", label: "Fauna Log" },
     { id: "documentation", label: "Documentation" },
     { id: "upload-certs", label: "Upload Crew Certificates" },
     { id: "suggestions", label: "Crew Suggestions" },
@@ -16968,6 +16998,7 @@ function CoolibahPortal({ role, onSignOut }) {
     correspondence: <PartnershipHub data={correspondence} setData={setCorrespondence} currentUser={currentUser} log={log} docs={docs} addDoc={addDoc} removeDoc={removeDoc} pwData={pwCorrespondence} setPwData={setPwCorrespondence} />,
     training: <TrainingMatrix />,
     "crew-roster": <RosterListPage />,
+    fauna: <FaunaLog />,
 
     documentation: <DocumentationHub docs={docs} addDoc={addDoc} removeDoc={removeDoc} currentUser={currentUser}
       people={people} setPeople={setPeople} overrides={overrides} setOverrides={setOverrides} log={log} />,

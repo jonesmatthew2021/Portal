@@ -51,8 +51,14 @@ filename order and a check confirms it arrived.
 
 `source/fauna/` is the **Marine Fauna Observation Log** phone app, served at
 `/fauna/` behind the same sign-in and installable from the phone's browser
-as its own icon. It is plain HTML and a module, copied into the worker's
-assets as they are (no JSX, no build step beyond the copy):
+as its own icon, and shown as the portal's **Fauna Log** tab (`FaunaLog` in
+the shell frames the same page). Entries are made only by the Master, the
+Chief Officer or the Second Officer — by department on Crew Details
+(`Masters`, `DECK OFFICERS`), decided on the server (`logRank`/`mayLog` in
+the route) for the phone and the tab alike; IT Help is never held out.
+Everyone else signed in reads the month and can send it on. It is plain
+HTML and a module, copied into the worker's assets as they are (no JSX, no
+build step beyond the copy):
 
 | File under `source/fauna/` | What |
 |---|---|

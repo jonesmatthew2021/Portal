@@ -14,7 +14,7 @@ import {
   settle, missingFields, blankRecord, latLongText, observerName, positionText, windKmh, compassOf, activityOf,
   sunUp, sheetValue, monthName, inZoneByTable,
 } from "../../source/fauna/fields.js";
-import { exportMonth, monthFileIn, recipients } from "../src/routes/fauna.js";
+import { exportMonth, monthFileIn, recipients, logRank } from "../src/routes/fauna.js";
 import { openLog, ensureMonthTab, writeRows, saveLog, monthTabs, newMonthWorkbook, monthFileName, isMonthFile } from "../src/lib/fauna-log.js";
 import { readZip, partOf, partText, listSheets, readSheetRows } from "../../source/shared/workbook.js";
 
@@ -191,6 +191,29 @@ test("the month goes into the office's own log, tab renamed and rows filled", { 
   assert.equal(rows[16][1], "2026-09-24", "the date is a real Excel date");
   const sheetXml = await partText(partOf(out, sheets[0].path));
   assert.ok(/<c r="A17" s="54"><v>0\.3194/.test(sheetXml), "the time keeps the column's time style and is a fraction of the day");
+});
+
+/* ------------------------------------------------------ who may log ---- */
+
+test("the Master and the deck officers make entries; nobody else does", () => {
+  // The register as Crew Details keeps it: a name and a department each.
+  const people = [
+    { id: "p1", name: "Evan Farmer", dept: "Masters", active: true },
+    { id: "p2", name: "Jack Cook", dept: "DECK OFFICERS", active: true },
+    { id: "p3", name: "Ruwan", dept: "DECK OFFICERS", active: true },
+    { id: "p4", name: "Sam Wilson", dept: "GPH", active: true },
+    { id: "p5", name: "Pat Lee", dept: "Engineers", active: true },
+    { id: "p6", name: "Chris Bell", dept: "Chefs", active: true },
+  ];
+  assert.equal(logRank(people, "Evan Farmer").mayLog, true, "a Master");
+  assert.equal(logRank(people, "Jack Cook").mayLog, true, "a Second Mate on the deck officers");
+  assert.equal(logRank(people, "COOK, Jack").mayLog, true, "however the sign-in spells him, the register knows him");
+  assert.equal(logRank(people, "Ruwan").dept, "DECK OFFICERS");
+  assert.equal(logRank(people, "Sam Wilson").mayLog, false, "a GPH");
+  assert.equal(logRank(people, "Pat Lee").mayLog, false, "an engineer");
+  assert.equal(logRank(people, "Chris Bell").mayLog, false, "a cook");
+  assert.deepEqual(logRank(people, "Test Manager"), { mayLog: false, dept: null, person: null }, "the office, not on the register");
+  assert.equal(logRank([], "Evan Farmer").mayLog, false, "an empty register lets nobody in");
 });
 
 /* --------------------------------------------------------- sending ---- */

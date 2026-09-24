@@ -174,6 +174,7 @@ const CARRY_HOURS = 3;
 
 /* -------------------------------------------------------------- state -- */
 let me = { name: "", role: "" };
+let canLog = true;                        // this person's rank lets them make entries
 let logInfo = null;                       // the log in SharePoint, from /api/fauna/log
 let entry = newEntry();
 let saved = [];                           // this month's entries from the server
@@ -638,6 +639,7 @@ function renderList() {
   }
 }
 function openSaved(s) {
+  if (!canLog) return;
   if (entry.touched && !confirm("Drop the entry you are on and open this one?")) return;
   entry = { record: { ...blankRecord(), ...s }, touched: false, id: s.id };
   delete entry.record.pending; delete entry.record.inLog; delete entry.record.logError;
@@ -661,11 +663,21 @@ async function boot() {
   windUnit = store.get("fauna.windUnit", "km/h");
   build();
   try {
-    const res = await fetch("/api/me", { cache: "no-store" });
+    const res = await fetch("/api/fauna/me", { cache: "no-store" });
     if (res.status === 401) { location.href = "/login?next=" + encodeURIComponent("/fauna/"); return; }
     me = await res.json();
   } catch {}
   $("who").textContent = observer || observerName(me.name) || "observer";
+  // Entries are the deck officers' to make; anyone else signed in reads the
+  // month and can send it on.
+  if (me.mayLog === false) {
+    canLog = false;
+    for (const id of ["observerPanel", "modeSighting", "modeNil", "groups"]) $(id).style.display = "none";
+    document.querySelector(".mode").style.display = "none";
+    document.querySelector(".actions").style.display = "none";
+    document.body.style.paddingBottom = "24px";
+    $("note").textContent = "View only";
+  }
   monthOptions();
   await loadLogInfo();
   await loadMonth();
@@ -675,7 +687,7 @@ async function boot() {
   else freshEntry();
   syncControls();
   // The first time on this phone: who is logging.
-  if (!observer) showObserverPanel();
+  if (!observer && canLog) showObserverPanel();
 }
 setInterval(() => { if (entry.touched) store.set("fauna.draft", entry); }, 2000);
 boot();
