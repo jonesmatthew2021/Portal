@@ -983,11 +983,25 @@ const is = (got, want, what) => {
      and the notes change every day, so a "$'" in one of them must not be the
      day the preview page stops opening. */
   const snapshot = { rev: 7, data: { note: "paid $' on the day, $$ later" } };
-  const withSnapshot = into("const SNAPSHOT = __SNAPSHOT__;\nconst ROWS = __FILE_ROWS__;", "__SNAPSHOT__", snapshot);
+  const withSnapshot = into("const SNAPSHOT = __SNAPSHOT__;\nconst ROWS = __FILE_ROWS__;", { __SNAPSHOT__: snapshot });
   is(withSnapshot, "const SNAPSHOT = " + JSON.stringify(snapshot) + ";\nconst ROWS = __FILE_ROWS__;",
-    "the crew snapshot goes into the shim byte for byte, and the next slot is left for its own value");
+    "the crew snapshot goes into the shim byte for byte, and a slot with no value is left for its own");
   is(JSON.parse(withSnapshot.slice("const SNAPSHOT = ".length, withSnapshot.indexOf(";\n"))), snapshot,
     "…and reads back as the same snapshot");
+  /* One pass over the original text: a note that happens to say the name of
+     another slot is a note, not a slot, and the file rows land in their own. */
+  const tricky = { rev: 8, data: { note: "the mark __FILE_ROWS__ is just words here" } };
+  const rows = [{ id: "r1" }];
+  const filled = into("const SNAPSHOT = __SNAPSHOT__;\nconst ROWS = __FILE_ROWS__;", { __SNAPSHOT__: tricky, __FILE_ROWS__: rows });
+  is(JSON.parse(filled.slice("const SNAPSHOT = ".length, filled.indexOf(";\n"))), tricky,
+    "a slot's name inside a note stays words");
+  is(filled.slice(filled.indexOf("const ROWS = ") + "const ROWS = ".length, -1), JSON.stringify(rows),
+    "…and the rows still land in their own slot");
+  /* The shim is a <script> block: a note saying "</script>" must not end it. */
+  const closing = { rev: 9, data: { note: "typed </script> by accident" } };
+  const safe = into("const SNAPSHOT = __SNAPSHOT__;", { __SNAPSHOT__: closing });
+  is(safe.includes("</script>"), false, "a closing script tag in a note is written so it cannot close the shim");
+  is(JSON.parse(safe.slice("const SNAPSHOT = ".length, -1)), closing, "…and still reads back as the same note");
 }
 
 /* ---- the vessel file, as the build reads it ---- */

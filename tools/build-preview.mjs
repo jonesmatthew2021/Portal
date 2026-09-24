@@ -24,15 +24,21 @@ const BANNER = `<!--
 -->
 `;
 
-/** The shim with the vessel file written into its __VESSEL__ slot. Split and
- *  join, not replace: a replacement string is read for "$" marks ($&, $', $1),
- *  so a "$" in a certificate note or a pattern would be mangled on the way in,
- *  and "$'" would splice the rest of the shim into the middle of the JSON. */
-export const vesselIntoShim = (shim, vessel) => into(shim, "__VESSEL__", vessel);
-/** Any value written into any slot of the shim, the same way: the crew
- *  snapshot is everyone's notes as typed, and a "$" in one of them would be
- *  read as a mark by replace() just as it would in the vessel file. */
-export const into = (text, mark, value) => text.split(mark).join(JSON.stringify(value));
+/** The shim's slots, filled in one pass.
+ *
+ *  A function replacer, not a replacement string: a string is read for "$"
+ *  marks ($&, $', $1), so a "$" in a certificate note or a pattern would be
+ *  mangled on the way in, and "$'" would splice the rest of the shim into the
+ *  middle of the JSON. One pass over the original text, so a value already
+ *  written in is never scanned again: a crew note that happens to say
+ *  "__FILE_ROWS__" stays a note. And "<" is written as <, because the
+ *  shim is a <script> block and a note saying "</script>" would end it early
+ *  and stop the preview page opening. Slots with no value are left as they
+ *  are. */
+const SLOTS = /__(VESSEL|SNAPSHOT|FILE_ROWS)__/g;
+export const into = (text, values) =>
+  text.replace(SLOTS, (mark) => (mark in values ? JSON.stringify(values[mark]).replace(/</g, "\\u003c") : mark));
+export const vesselIntoShim = (shim, vessel) => into(shim, { __VESSEL__: vessel });
 
 /** Returns the built preview. Writes it to preview.html unless write is false. */
 export function buildPreview({ write = true, quiet = false } = {}) {
@@ -48,16 +54,17 @@ export function buildPreview({ write = true, quiet = false } = {}) {
 
   // The shim runs outside the page's own script, so the vessel file is written
   // into it here rather than kept a second time in the shim.
-  let shim = vesselIntoShim(readFileSync(SHIM, "utf8").replace(/\n$/, ""), vessel);
+  const shimText = readFileSync(SHIM, "utf8").replace(/\n$/, "");
+  let shim;
   let note;
   if (existsSync(DATA)) {
     const held = JSON.parse(readFileSync(DATA, "utf8"));
-    shim = into(into(shim, "__SNAPSHOT__", held.snapshot), "__FILE_ROWS__", held.fileRows);
+    shim = into(shimText, { __VESSEL__: vessel, __SNAPSHOT__: held.snapshot, __FILE_ROWS__: held.fileRows });
     note = "crew snapshot rev " + held.snapshot.rev;
   } else {
     // No snapshot on this computer: the preview still builds and still runs,
     // it just opens empty. The snapshot is crew data and is kept out of git.
-    shim = into(into(shim, "__SNAPSHOT__", { rev: 0, data: {} }), "__FILE_ROWS__", []);
+    shim = into(shimText, { __VESSEL__: vessel, __SNAPSHOT__: { rev: 0, data: {} }, __FILE_ROWS__: [] });
     note = "no snapshot on this computer - preview will open empty";
   }
 

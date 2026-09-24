@@ -132,8 +132,9 @@ export function checkVessel(vessel, from = "source/vessel.json") {
   }
   for (const id of ["day", "night"]) if (!word(vessel.shift.sheetWords[id])) throw wrong("shift.sheetWords." + id, "a string");
   for (const letter of ["A", "B"]) if (!word(vessel.swings.labels[letter])) throw wrong("swings.labels." + letter, "a string");
-  // The page pairs the ids with the labels by order, so a file with one id,
-  // three, or the two the other way round would call a crew by the wrong name.
+  // The page pairs the ids with the labels by order, so a file with one id or
+  // three would call a crew by the wrong name. Only the count can be held
+  // here: which id is A and which is B is the file's to get right.
   if (vessel.swings.ids.length !== 2) throw wrong("swings.ids", "two ids, the first for swing A and the second for swing B");
   const poolNames = vessel.shift.pools.map((p) => p.pool);
   vessel.shift.establishment.forEach((e, i) => {
