@@ -88,9 +88,11 @@
      account, which the live portal would answer from its kept copy), so
      the page boots the way it does at sea rather than through the picker. */
   const OFFLINE_STAMP_HEADER = "X-Portal-Fetched-At";
-  const offlineStamp = () => new Date(Date.now() - 2 * 60 * 60000).toISOString();
+  // One stamp, set when the page opens: a kept copy was fetched once, so
+  // the badge's line stands still rather than ticking forward every poll.
+  const OFFLINE_STAMP = new Date(Date.now() - 2 * 60 * 60000).toISOString();
   const stamped = (answer) => {
-    if (flag("offline") === "1") answer.headers.set(OFFLINE_STAMP_HEADER, offlineStamp());
+    if (flag("offline") === "1") answer.headers.set(OFFLINE_STAMP_HEADER, OFFLINE_STAMP);
     return answer;
   };
   // The nightly backup's record: landed this morning, or, under

@@ -195,11 +195,11 @@ function AccessGrantsPage() {
                     <option key={l.id} value={l.id}>{l.label}</option>
                   ))}
                 </select>
-                <Button variant="quiet" disabled={busyId === g.id}
+                <Button writes variant="quiet" disabled={busyId === g.id}
                   onClick={() => change(g.id, { disabled: !g.disabled })}>
                   {g.disabled ? "Re-enable" : "Disable"}
                 </Button>
-                <Button variant="quiet" disabled={busyId === g.id} onClick={() => remove(g)}>
+                <Button writes variant="quiet" disabled={busyId === g.id} onClick={() => remove(g)}>
                   <span style={{ color: T.bRed }}>Delete</span>
                 </Button>
               </span>
@@ -232,7 +232,7 @@ function AccessGrantsPage() {
                       <option key={l.id} value={l.id}>{l.label}</option>
                     ))}
                   </select>
-                  <Button variant="quiet" disabled={busyId === p.name || !rowOf(p.name).email.trim()}
+                  <Button writes variant="quiet" disabled={busyId === p.name || !rowOf(p.name).email.trim()}
                     onClick={() => grantRow(p.name)}>Grant</Button>
                 </div>
               ))}
@@ -386,7 +386,7 @@ function Revisions() {
                   <td style={td}>
                     {i === 0
                       ? <span style={{ fontFamily: T.body, fontSize: 11.5, color: T.muted }}>current</span>
-                      : <Button variant="quiet" disabled={busy} onClick={() => setAsking(rv)}>Restore</Button>}
+                      : <Button writes variant="quiet" disabled={busy} onClick={() => setAsking(rv)}>Restore</Button>}
                   </td>
                 </tr>
               ))}
@@ -407,7 +407,7 @@ function Revisions() {
               same way; certificates on file are not touched.
             </div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <Button variant="solid" disabled={busy} onClick={() => restore(asking)}>{busy ? "Going back..." : "Yes, go back"}</Button>
+              <Button writes variant="solid" disabled={busy} onClick={() => restore(asking)}>{busy ? "Going back..." : "Yes, go back"}</Button>
               <Button variant="quiet" disabled={busy} onClick={() => setAsking(null)}>No</Button>
             </div>
           </div>

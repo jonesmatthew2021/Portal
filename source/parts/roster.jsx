@@ -133,7 +133,7 @@ function PersonEditor({ person, onSave, onRemove, onCancel, matrix, onRank }) {
       </label>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <Button onClick={() => {
+        <Button writes onClick={() => {
             if (!name) return;
             const canon = canonicalName(name);
             const r = rank.trim();
@@ -149,7 +149,7 @@ function PersonEditor({ person, onSave, onRemove, onCancel, matrix, onRank }) {
           {person.id ? "Save" : "Add to the roster"}
         </Button>
         {person.id && (
-          <Button variant="ghost" onClick={() => onRemove(person)}
+          <Button writes variant="ghost" onClick={() => onRemove(person)}
             title="Take them off the roster altogether. Turning them off above keeps the record instead.">
             Remove
           </Button>
@@ -756,7 +756,7 @@ function CrewRosters({ people, setPeople, board, setBoard, log, currentUser, vie
               <span style={{ fontFamily: T.body, fontSize: 13.5, color: T.text }}>
                 Switch them now?
               </span>
-              <Button onClick={switchSwings}>Yes — switch the swings</Button>
+              <Button writes onClick={switchSwings}>Yes — switch the swings</Button>
               <Button variant="quiet" onClick={() => setConfirmSwitch(false)}>Cancel</Button>
             </div>
           ) : (
@@ -1045,7 +1045,7 @@ function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, ca
                   : "From the four-week pattern. Type the office's dates over it."}
           </span>
           <span style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {(given || half || bust) && <Button variant="quiet" onClick={() => usePattern(k)}>Use the pattern</Button>}
+            {(given || half || bust) && <Button writes variant="quiet" onClick={() => usePattern(k)}>Use the pattern</Button>}
             <Button variant={on ? "ghost" : "quiet"} onClick={() => setAt(k)}>
               {on ? "Shown below" : "Show below"}
             </Button>
@@ -1409,8 +1409,8 @@ function GridRow({ row, days, today, swing, lastDay, colour, readOnly, offSwing,
         <td><input className="um-in" type="date" value={h} min={isoShift(swing.flyOut, 1)} max={swing.flyHome}
           onChange={(e) => { setH(e.target.value); commit(o, e.target.value); }} onBlur={() => commit(o, h)} /></td>
         <td style={{ whiteSpace: "nowrap" }}>
-          {!whole && <Button variant="quiet" onClick={onWhole}>Whole swing</Button>}{" "}
-          <Button variant="quiet" onClick={onOff}>Off swing</Button>
+          {!whole && <Button writes variant="quiet" onClick={onWhole}>Whole swing</Button>}{" "}
+          <Button writes variant="quiet" onClick={onOff}>Off swing</Button>
         </td>
       </tr>
       {backwards && (
@@ -1430,7 +1430,7 @@ function GridRow({ row, days, today, swing, lastDay, colour, readOnly, offSwing,
                 <option value="">Choose…</option>
                 {offSwing.map((p) => <option key={p.id} value={p.id}>{fullName(p)} — {positionOf(p)}</option>)}
               </select>
-              <Button variant="ghost" disabled={!cover[g.id]}
+              <Button writes variant="ghost" disabled={!cover[g.id]}
                 onClick={() => { const p = offSwing.find((x) => String(x.id) === cover[g.id]); if (p) { onCover(p, g.from, g.to); setCover({ ...cover, [g.id]: "" }); } }}>
                 Add for those days
               </Button>
@@ -1471,7 +1471,7 @@ function PartSwing({ swing, lastDay, offSwing, fullName, positionOf, onBring }) 
           <input className="um-in" type="date" value={h} min={isoShift(swing.flyOut, 1)} max={swing.flyHome} onChange={(e) => setH(e.target.value)} />
         </Field>
         <div style={{ paddingBottom: 1 }}>
-          <Button variant="ghost" disabled={!who || backwards || !o || !h}
+          <Button writes variant="ghost" disabled={!who || backwards || !o || !h}
             onClick={() => { const p = offSwing.find((x) => String(x.id) === who); if (p) { onBring(p, o, h); setWho(""); } }}>
             Bring onboard for those days
           </Button>
@@ -2751,7 +2751,7 @@ function RosterNewPerson({ names, positions, spine, onRoster, onAdd, onClose }) 
           </select>
         </Field>
       </div>
-      <Button variant="ghost" disabled={!name || !swing}
+      <Button writes variant="ghost" disabled={!name || !swing}
         onClick={() => onAdd({ name, rank: typed.trim() ? rank : rosterRankFor(positions[who] || ""),
           crew: swing.crew, on: swing.on, off: swing.off, key: swingKey, covers })}>
         Onto the swing
@@ -3033,7 +3033,7 @@ function RosterListPage() {
               <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.bRed }}>
                 Replace the roster with the spreadsheet? Crew added here are kept; other changes are not.
               </span>
-              <Button onClick={() => { setConfirmLoad(false); load("pressed"); }}>Replace it</Button>
+              <Button writes onClick={() => { setConfirmLoad(false); load("pressed"); }}>Replace it</Button>
               <Button variant="quiet" onClick={() => setConfirmLoad(false)}>Keep as is</Button>
             </>
           ) : (
@@ -3141,7 +3141,7 @@ function RosterListPage() {
                     {swingCrewCalled(now)}
                   </div>
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                    <Button variant="ghost"
+                    <Button writes variant="ghost"
                       onClick={() => { moveCrew(tableEdit.name, other); setTableEdit(null); }}>
                       Move to {swingCrewWord(other)} crew
                     </Button>
@@ -3151,7 +3151,7 @@ function RosterListPage() {
                         <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.bRed }}>
                           Take {tableEdit.name} off every swing on the roster?
                         </span>
-                        <Button onClick={() => { removePerson(tableEdit.name); setTableEdit(null); }}>
+                        <Button writes onClick={() => { removePerson(tableEdit.name); setTableEdit(null); }}>
                           Remove them
                         </Button>
                         <Button variant="quiet" onClick={() => setTableEdit({ ...tableEdit, sure: false })}>
@@ -3200,7 +3200,7 @@ function RosterListPage() {
                         onClick={() => setDates(row, { key: row.swing }, row.on, isoShift(row.off, 1))}>+</button>
                     </span>
                   </Field>
-                  <Button variant="quiet" onClick={() => { dropPerson(row); setTableEdit(null); }}>
+                  <Button writes variant="quiet" onClick={() => { dropPerson(row); setTableEdit(null); }}>
                     Off this swing
                   </Button>
                   <Button onClick={() => setTableEdit(null)}>Done</Button>
@@ -3211,7 +3211,7 @@ function RosterListPage() {
                 <span style={{ fontFamily: T.body, fontSize: 13.5, color: T.text }}>
                   {tableEdit.name} onto {fmtDate(tableEdit.on)} – {fmtDate(tableEdit.off)}?
                 </span>
-                <Button variant="ghost" onClick={() => { addNamed(tableEdit); setTableEdit(null); }}>Onto this swing</Button>
+                <Button writes variant="ghost" onClick={() => { addNamed(tableEdit); setTableEdit(null); }}>Onto this swing</Button>
                 <Button variant="quiet" onClick={() => setTableEdit(null)}>Cancel</Button>
               </div>
             )}
@@ -3334,7 +3334,7 @@ function GenerateAllocations({ people, log }) {
             This will possibly alter swing allocations. Do you want to proceed?
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <Button variant="solid" onClick={run}>Yes</Button>
+            <Button writes variant="solid" onClick={run}>Yes</Button>
             <Button variant="quiet" onClick={() => setAsking(false)}>No</Button>
           </div>
         </div>
@@ -4028,7 +4028,7 @@ function SwingShiftAllocation({ here }) {
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
         gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
-        <Button onClick={() => run(!!check)} disabled={!shiftAllocation || busy}>
+        <Button writes onClick={() => run(!!check)} disabled={!shiftAllocation || busy}>
           {busy
             ? (run_ && run_.phase === "sheet" ? "Reading the sheet..." : "Comparing...")
             : check ? (stale ? "Compare this swing" : "Compare again") : "Compare with AI"}

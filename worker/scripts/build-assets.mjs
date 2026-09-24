@@ -82,14 +82,17 @@ const copyTree = (from, to, served = "/vendor") => {
 const vendorPaths = copyTree(VENDOR, join(ASSETS, "vendor"));
 const vendorFiles = vendorPaths.length;
 // The service worker, stamped with this build: a hash of the compiled page
-// and the vendor files it serves, so a deploy that changes any of them is a
-// new worker with a new cache, and one that changes nothing is not. The
-// worker keeps the scripts and the fonts at install (the licences it has
-// no use for).
-const stamp = createHash("md5").update(out);
-for (const name of ["react.production.min.js", "react-dom.production.min.js"]) stamp.update(readFileSync(join(VENDOR, name)));
-const version = stamp.digest("hex");
+// and every vendor file the worker keeps, so a deploy that changes any of
+// them is a new worker with a new cache, and one that changes nothing is
+// not. Every kept file, the fonts included: the vendor files are served
+// from the cache first and only a new cache refetches them, so a font
+// replaced under the same name with the stamp unchanged would be served
+// from the old copy for ever. The worker keeps the scripts and the fonts
+// at install (the licences it has no use for).
 const kept = vendorPaths.filter((p) => /\.(js|woff2)$/.test(p));
+const stamp = createHash("md5").update(out);
+for (const p of kept) stamp.update(readFileSync(join(ASSETS, ...p.slice(1).split("/"))));
+const version = stamp.digest("hex");
 writeFileSync(join(ASSETS, "sw.js"), serviceWorkerSource(version, kept));
 // The fauna log — the phone app at /fauna/ — is its own folder, carried over
 // as it is: the page, its rules module, its manifest and icons, and the

@@ -446,7 +446,7 @@ function CrewDetails() {
                     onChange={(e) => setTyped(e.target.value)}
                     style={{ flex: "1 1 220px", fontFamily: T.mono, fontSize: 13, padding: "5px 8px",
                       borderRadius: 2, border: "1px solid " + T.rule, background: T.raised, color: T.text }} />
-                  <Button variant="solid" onClick={() => rename(p)}>Save</Button>
+                  <Button writes variant="solid" onClick={() => rename(p)}>Save</Button>
                   <Button variant="quiet" onClick={() => { setEditing(null); setTyped(""); }}>Leave it</Button>
                 </>
               ) : (
@@ -476,7 +476,7 @@ function CrewDetails() {
                   <Button variant="quiet" onClick={() => setPicking({ kind: "person", p })}>
                     Assign certificates folder
                   </Button>
-                  <Button variant="quiet" onClick={() => setDropping(p)}>Delete</Button>
+                  <Button writes variant="quiet" onClick={() => setDropping(p)}>Delete</Button>
                 </>
               )}
             </div>
@@ -538,11 +538,11 @@ function CrewDetails() {
                     onPick={(v) => setAttachTo((a) => ({ ...a, [x.name]: v }))}
                     options={[{ value: "", label: "Who is this?" },
                       ...crew.map((p) => ({ value: p.id, label: p.name }))]} />
-                  <Button variant="solid" disabled={!attachTo[x.name]}
+                  <Button writes variant="solid" disabled={!attachTo[x.name]}
                     onClick={() => attach(x, attachTo[x.name])}>
                     That's him
                   </Button>
-                  <Button variant="quiet" onClick={() => setAside(x)}>Delete</Button>
+                  <Button writes variant="quiet" onClick={() => setAside(x)}>Delete</Button>
                 </div>
 
                 {/* Or nobody the register has yet. The name, the rank and the
@@ -560,7 +560,7 @@ function CrewDetails() {
                       borderRadius: 2, border: "1px solid " + T.rule, background: T.raised, color: T.text }} />
                   {rankPicker(asRank[x.name], (v) => setAsRank((a) => ({ ...a, [x.name]: v })), 195)}
                   {swingPicker(asSwing[x.name], (v) => setAsSwing((a) => ({ ...a, [x.name]: v })), 125)}
-                  <Button variant="quiet" onClick={() => takeOn(x)}>Somebody new</Button>
+                  <Button writes variant="quiet" onClick={() => takeOn(x)}>Somebody new</Button>
                 </div>
               </div>
             ))}
@@ -642,7 +642,7 @@ function CrewDetails() {
               it stops reaching anybody.
             </div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <Button variant="solid" onClick={() => takeOff(dropping)}>Take him off</Button>
+              <Button writes variant="solid" onClick={() => takeOff(dropping)}>Take him off</Button>
               <Button variant="quiet" onClick={() => setDropping(null)}>Leave him on</Button>
             </div>
           </div>
@@ -731,7 +731,7 @@ function CertFolderPicker({ title, start, chosen, onPick, onAuto, onClose }) {
                   <span style={{ fontFamily: T.mono, fontSize: 10.5, color: T.muted }}>
                     {e.count == null ? "" : e.count + " item" + (e.count === 1 ? "" : "s")}
                   </span>
-                  <Button variant={on ? "ghost" : "quiet"} onClick={() => onPick(here)}>
+                  <Button writes variant={on ? "ghost" : "quiet"} onClick={() => onPick(here)}>
                     {on ? "This one" : "Use this one"}
                   </Button>
                 </div>
@@ -740,18 +740,18 @@ function CertFolderPicker({ title, start, chosen, onPick, onAuto, onClose }) {
         </div>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <Button variant="solid" disabled={!path} onClick={() => onPick(path)}>
+          <Button writes variant="solid" disabled={!path} onClick={() => onPick(path)}>
             Use the folder I'm in
           </Button>
           {/* Every folder on this screen assigned to its man in one press,
               where the register can say whose it is. The rest are left. */}
           {onAuto && (
-            <Button variant="quiet" disabled={busy || !(folders || []).length}
+            <Button writes variant="quiet" disabled={busy || !(folders || []).length}
               onClick={() => onAuto((folders || []).map((e) => e.name), path)}>
               Match folders to crew
             </Button>
           )}
-          {chosen ? <Button variant="quiet" onClick={() => onPick("")}>Clear it</Button> : null}
+          {chosen ? <Button writes variant="quiet" onClick={() => onPick("")}>Clear it</Button> : null}
           <span style={{ flex: 1 }} />
           <Button variant="quiet" onClick={onClose}>Leave it</Button>
         </div>

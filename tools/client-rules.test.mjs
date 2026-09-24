@@ -21,7 +21,7 @@ const NL = String.fromCharCode(10);
  * is re-implemented or hand-extracted: the code under test is the code that
  * ships. Same harness as insert-rows.test.mjs. */
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..").replace(/\\/g, "/");
-const { portalJsx } = await import("file:///" + ROOT.replaceAll(" ", "%20") + "/tools/source.mjs");
+const { portalJsx, serviceWorkerSource } = await import("file:///" + ROOT.replaceAll(" ", "%20") + "/tools/source.mjs");
 /* The matrix rules and the register the worker imports, imported the same
  * way, so what a round takes back is proved on the module and not only
  * through the page. */
@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, offlineLine, controlsLocked, showPicker };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, showPicker };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -1083,7 +1083,8 @@ const is = (got, want, what) => {
   const offline = await import(pathToFileURL(join(ROOT, "source", "shared", "offline-rules.js")).href);
   const ORIGIN = "https://portal.example";
   for (const [name, rules] of [["the module", offline], ["the page", lib]]) {
-    const { cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER } = rules;
+    const { cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER,
+      networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache } = rules;
     is(cacheable("GET", "/", ORIGIN), "page", name + ": the page is kept");
     is(cacheable("GET", ORIGIN + "/?tab=roster", ORIGIN), "page", name + ": …whatever the query on it");
     is(cacheable("GET", "/api/me", ORIGIN), "api", name + ": /api/me is kept");
@@ -1120,6 +1121,28 @@ const is = (got, want, what) => {
     is(anotherPerson({ email: "A@Example.com " }, { email: "a@example.com" }), false, name + ": the same email, however spelt, is the same person");
     is(anotherPerson(null, { email: "a@example.com" }), false, name + ": nothing kept decides nothing");
     is(anotherPerson({ email: "a@example.com" }, {}), false, name + ": …nor a live answer with no email");
+    /* How long the network is given to start answering before the kept
+       copy stands in: short for the page (a blank screen at sea), long
+       for the four API answers - a slow link that answers in ten seconds
+       is a link, and a kept copy handed back then would put a connected
+       portal into offline mode, read only. */
+    is(networkWait("page"), NETWORK_WAIT_MS, name + ": the page waits NETWORK_WAIT_MS for the network to start answering");
+    is(networkWait("api"), API_WAIT_MS, name + ": an API answer waits API_WAIT_MS");
+    is(NETWORK_WAIT_MS, 4000, name + ": …four seconds for the page");
+    is(API_WAIT_MS, 30000, name + ": …thirty for the document, so a slow link is never taken for a dead one");
+    /* When everything kept must go: the sign-in is over. */
+    is(forgetsOn("api", 401, headers({})), true, name + ": a refused API call clears everything kept");
+    is(forgetsOn("api", 200, headers({})), false, name + ": a good answer clears nothing");
+    is(forgetsOn("api", 500, headers({})), false, name + ": nor a failure - the server being down is not the sign-in ending");
+    is(forgetsOn("page", 200, headers({})), true, name + ": the sign-in form served where the page should be clears everything kept");
+    is(forgetsOn("page", 200, headers({ "X-Portal-Page": "portal" })), false, name + ": the page itself clears nothing");
+    is(forgetsOn("page", 502, headers({})), false, name + ": nor a page that could not be served");
+    is(forgetsOn("vendor", 401, headers({})), false, name + ": a vendor file never decides this");
+    /* Whose kept answers come across on a new build. */
+    is(earlierPortalCache("portal-aaa", "portal-bbb"), true, name + ": an earlier build's cache is carried across");
+    is(earlierPortalCache("portal-bbb", "portal-bbb"), false, name + ": …not this build's own");
+    is(earlierPortalCache("workbox-precache-v2", "portal-bbb"), false, name + ": …and never the cache of the worker from years ago");
+    is(earlierPortalCache("", "portal-bbb"), false, name + ": …nor a nameless one");
   }
   is(offline.FETCHED_AT_HEADER, lib.FETCHED_AT_HEADER, "the stamp's header is the same word in the worker and the page");
   is(offline.KEPT_APIS, ["/api/me", "/api/state", "/api/files", "/api/sync/last"], "the four answers kept, and no more");
@@ -1129,6 +1152,218 @@ const is = (got, want, what) => {
   const shim = readFileSync(join(ROOT, "tools", "preview", "shim.js"), "utf8");
   is(shim.includes('const OFFLINE_STAMP_HEADER = "' + offline.FETCHED_AT_HEADER + '";'), true,
     "the preview's shim stamps its answers under the same header the service worker uses");
+  is(/const OFFLINE_STAMP = new Date\(/.test(shim), true,
+    "the preview's stamp is set once when the page opens, so the badge's line stands still between polls");
+}
+
+/* ---- the service worker at work: a pretend network, a pretend clock ---- */
+{
+  /* source/app/sw.js as the build ships it (tools/source.mjs folds the
+     rules in), run here against a network and a clock the test controls.
+     What it proves is the thing that bit: with the link UP and slow, the
+     page gets the live answer, never the kept copy. The race is on the
+     fetch settling - the headers - not on the copy being kept, which reads
+     the whole body first: raced on that, a 400 KB document on a slow sea
+     link lost to the timer every poll, the page was handed its previous
+     copy, stamped, and a connected portal went "Offline" and read only. */
+  const ORIGIN = "https://portal.example";
+  const offline = await import(pathToFileURL(join(ROOT, "source", "shared", "offline-rules.js")).href);
+  const tick = () => new Promise((r) => setImmediate(r));
+  const settle = async () => { for (let i = 0; i < 12; i++) await tick(); };
+  const world = () => {
+    let now = 0;
+    const timers = [];
+    const setTimeoutFake = (fn, ms) => { timers.push({ at: now + (ms || 0), fn, done: false }); return timers.length; };
+    const advance = async (ms) => {
+      const end = now + ms;
+      for (;;) {
+        const due = timers.filter((t) => !t.done && t.at <= end).sort((a, b) => a.at - b.at)[0];
+        if (!due) break;
+        now = due.at; due.done = true; due.fn();
+        await settle();
+      }
+      now = end;
+      await settle();
+    };
+    const keyOf = (k) => (typeof k === "string" ? k : new URL(k.url).pathname);
+    const stores = new Map();
+    const cacheOf = (name) => {
+      if (!stores.has(name)) {
+        const store = new Map();
+        stores.set(name, {
+          store,
+          match: async (k) => (store.has(keyOf(k)) ? store.get(keyOf(k)).clone() : undefined),
+          put: async (k, r) => { store.set(keyOf(k), r); },
+          delete: async (k) => store.delete(keyOf(k)),
+        });
+      }
+      return stores.get(name);
+    };
+    const caches = { open: async (n) => cacheOf(n), keys: async () => [...stores.keys()], delete: async (n) => stores.delete(n) };
+    const listeners = {};
+    const self = { location: { origin: ORIGIN }, addEventListener: (t, f) => { listeners[t] = f; },
+      skipWaiting: async () => {}, clients: { claim: async () => {} } };
+    let fetchFake = async () => { throw new TypeError("no network in this test"); };
+    const sw = serviceWorkerSource("testbuild", ["/vendor/react.production.min.js"]);
+    const run = new Function("self", "caches", "fetch", "setTimeout", sw + NL + ";return { networkFirst, keep, stamped, NAME };");
+    const w = run(self, caches, (...a) => fetchFake(...a), setTimeoutFake);
+    return { ...w, caches, cacheOf, listeners, advance, setFetch: (f) => { fetchFake = f; }, now: () => now };
+  };
+  const json = (body, headers = {}) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json", ...headers } });
+  const event = (path) => ({ request: new Request(ORIGIN + path), waitUntil(p) { this.done = (this.done || Promise.resolve()).then(() => p); } });
+  const stampOf = (r) => r.headers.get(offline.FETCHED_AT_HEADER);
+
+  {
+    // The headers at once, the body six seconds later (the way a 400 KB
+    // document comes down a slow sea link), a kept copy waiting.
+    const w = world();
+    const cache = w.cacheOf(w.NAME);
+    cache.store.set("/api/state", await w.stamped(json({ rev: 8 })));
+    w.setFetch(() => Promise.resolve(new Response(new ReadableStream({
+      start(c) { w.bodyStart = () => { c.enqueue(new TextEncoder().encode('{"rev":9}')); c.close(); }; },
+    }), { status: 200, headers: { "Content-Type": "application/json", "Content-Encoding": "gzip", "Content-Length": "999" } })));
+    const ev = event("/api/state");
+    let answered = null;
+    w.networkFirst(ev, "api").then((a) => { answered = a; });
+    await settle();
+    is(!!answered, true, "the page gets the live answer the moment its headers are in - the clock has not moved");
+    is(stampOf(answered), null, "…and it is the live one, not the kept copy");
+    is(w.now(), 0, "…at 0 s");
+    // Six seconds on, the body lands: the page reads it, and the copy is kept.
+    await w.advance(6000);
+    w.bodyStart();
+    await settle();
+    is(await answered.text(), '{"rev":9}', "the body streams through to the page when it comes");
+    await ev.done;
+    const kept = cache.store.get("/api/state");
+    is(await kept.clone().text(), '{"rev":9}', "the copy is refreshed with the live body once it has all come");
+    is(!!stampOf(kept), true, "…stamped");
+    is(kept.headers.get("Content-Encoding"), null, "…without the edge's Content-Encoding: the kept body is already decoded");
+    is(kept.headers.get("Content-Length"), null, "…nor its Content-Length");
+  }
+  {
+    // A slow link: nothing for five seconds, then the answer. Ten times
+    // the page's wait, and still the live answer.
+    const w = world();
+    const cache = w.cacheOf(w.NAME);
+    cache.store.set("/api/state", await w.stamped(json({ rev: 8 })));
+    let give;
+    w.setFetch(() => new Promise((r) => { give = r; }));
+    let answered = null;
+    w.networkFirst(event("/api/state"), "api").then((a) => { answered = a; });
+    await settle();   // the worker sets its timer once the cache is open
+    await w.advance(4500);
+    is(answered, null, "four and a half seconds of silence on an API call is not yet the kept copy");
+    give(json({ rev: 9 }));
+    await w.advance(500);
+    is(answered && stampOf(answered), null, "the answer that came at five seconds is the live one");
+    is(answered && (await answered.json()).rev, 9, "…rev 9, not the kept rev 8");
+  }
+  {
+    // A link that says nothing at all: the kept copy after API_WAIT_MS.
+    const w = world();
+    const cache = w.cacheOf(w.NAME);
+    cache.store.set("/api/state", await w.stamped(json({ rev: 8 })));
+    w.setFetch(() => new Promise(() => {}));
+    let answered = null;
+    w.networkFirst(event("/api/state"), "api").then((a) => { answered = a; });
+    await settle();   // the worker sets its timer once the cache is open
+    await w.advance(offline.API_WAIT_MS - 1);
+    is(answered, null, "…not before API_WAIT_MS");
+    await w.advance(1);
+    is(answered && !!stampOf(answered), true, "a link that has said nothing for API_WAIT_MS is down: the kept copy, stamped");
+    is(answered && (await answered.json()).rev, 8, "…the kept rev 8");
+  }
+  {
+    // The link off outright: the kept copy at once.
+    const w = world();
+    const cache = w.cacheOf(w.NAME);
+    cache.store.set("/api/state", await w.stamped(json({ rev: 8 })));
+    w.setFetch(() => Promise.reject(new TypeError("Failed to fetch")));
+    let answered = null;
+    w.networkFirst(event("/api/state"), "api").then((a) => { answered = a; });
+    await settle();   // the worker sets its timer once the cache is open
+    await settle();
+    is(answered && !!stampOf(answered), true, "a fetch that fails gets the kept copy without waiting");
+    is(w.now(), 0, "…at once");
+  }
+  {
+    // The page itself waits only NETWORK_WAIT_MS: a blank screen at sea
+    // is worse than a page four seconds old, and the live one refreshes
+    // the copy for the next opening when it comes.
+    const w = world();
+    const cache = w.cacheOf(w.NAME);
+    cache.store.set("/", await w.stamped(new Response("<html>old", { status: 200, headers: { "X-Portal-Page": "portal" } })));
+    let give;
+    w.setFetch(() => new Promise((r) => { give = r; }));
+    const ev = event("/");
+    let answered = null;
+    w.networkFirst(ev, "page").then((a) => { answered = a; });
+    await settle();
+    await w.advance(offline.NETWORK_WAIT_MS);
+    is(answered && !!stampOf(answered), true, "the page not started after NETWORK_WAIT_MS is the kept page");
+    give(new Response("<html>new", { status: 200, headers: { "X-Portal-Page": "portal" } }));
+    await w.advance(1000);
+    await ev.done;
+    is(await cache.store.get("/").clone().text(), "<html>new", "…and the live page, when it comes, is kept for the next opening");
+  }
+  {
+    // The sign-in over: a 401 on a kept API clears the crew's answers and
+    // the page, and leaves the build's own files.
+    const w = world();
+    const cache = w.cacheOf(w.NAME);
+    for (const k of offline.KEPT_APIS) cache.store.set(k, await w.stamped(json({ k })));
+    cache.store.set("/", await w.stamped(new Response("<html>", { status: 200, headers: { "X-Portal-Page": "portal" } })));
+    cache.store.set("/vendor/react.production.min.js", new Response("react"));
+    w.setFetch(() => Promise.resolve(new Response("{}", { status: 401 })));
+    const ev = event("/api/me");
+    const answered = await w.networkFirst(ev, "api");
+    is(answered.status, 401, "the refusal reaches the page as it is");
+    await ev.done;
+    is([...cache.store.keys()], ["/vendor/react.production.min.js"], "…and everything kept of the crew's is gone: the four answers and the page, the vendor file left");
+  }
+  {
+    // The sign-in form served where the page should be says the same.
+    const w = world();
+    const cache = w.cacheOf(w.NAME);
+    cache.store.set("/api/state", await w.stamped(json({ rev: 8 })));
+    cache.store.set("/", await w.stamped(new Response("<html>", { status: 200, headers: { "X-Portal-Page": "portal" } })));
+    w.setFetch(() => Promise.resolve(new Response("<form>sign in", { status: 200 })));
+    const ev = event("/");
+    await w.networkFirst(ev, "page");
+    await ev.done;
+    is([...cache.store.keys()], [], "the sign-in form at the page's address clears the kept page and document");
+  }
+  {
+    // A new build taking over: only an earlier portal cache's stamped
+    // answers come across, and never another person's.
+    const w = world();
+    const mine = w.cacheOf(w.NAME);
+    const old = w.cacheOf("portal-earlier");
+    old.store.set("/api/me", await w.stamped(json({ email: "a@example.com" })));
+    old.store.set("/api/state", await w.stamped(json({ rev: 8 })));
+    old.store.set("/api/files", json([]));           // no stamp: not one of the worker's copies
+    const stray = w.cacheOf("workbox-years-ago");
+    stray.store.set("/api/state", await w.stamped(json({ rev: 1 })));
+    const activate = { waitUntil(p) { this.done = p; } };
+    w.listeners.activate(activate);
+    await activate.done;
+    is([...mine.store.keys()].sort(), ["/api/me", "/api/state"], "with nothing kept yet, the earlier build's stamped answers come across - the unstamped one does not");
+    is(await w.caches.keys(), [w.NAME], "…and every other cache is gone, the stray one unread");
+  }
+  {
+    const w = world();
+    const mine = w.cacheOf(w.NAME);
+    mine.store.set("/api/me", await w.stamped(json({ email: "b@example.com" })));
+    const old = w.cacheOf("portal-earlier");
+    old.store.set("/api/me", await w.stamped(json({ email: "a@example.com" })));
+    old.store.set("/api/state", await w.stamped(json({ rev: 8 })));
+    const activate = { waitUntil(p) { this.done = p; } };
+    w.listeners.activate(activate);
+    await activate.done;
+    is([...mine.store.keys()], ["/api/me"], "an earlier cache kept for somebody else brings nothing across");
+    is((await (await mine.match("/api/me")).json()).email, "b@example.com", "…and this build's own /api/me stands");
+  }
 }
 
 /* ---- the page offline: the badge's line, the lock, the picker ---- */

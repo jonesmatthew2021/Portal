@@ -11,6 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gate, publicPath } from "../src/auth.js";
@@ -18,7 +19,7 @@ import { assetHeaders, withAssetHeaders } from "../src/lib/offline.js";
 import state from "../src/routes/state.js";
 import { setEnv } from "../src/env.js";
 import { fakeDb } from "./helpers.js";
-import { keepable, PAGE_HEADER } from "../../source/shared/offline-rules.js";
+import { forgetsOn, keepable, PAGE_HEADER } from "../../source/shared/offline-rules.js";
 
 const WORKER = join(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = join(WORKER, "..");
@@ -44,8 +45,13 @@ test("the page without a session is still the sign-in form, and /api without one
   assert.equal(page.barred!.headers.get(PAGE_HEADER), null, "…and it does not carry the page's mark");
   assert.equal(keepable("page", page.barred!.status, page.barred!.headers), false,
     "so the service worker never keeps the sign-in form as the page");
+  assert.equal(forgetsOn("page", page.barred!.status, page.barred!.headers), true,
+    "…and, seeing it where the page should be, lets go of everything it kept: nobody is signed in on this device");
   const api = await ask("/api/state");
   assert.equal(api.barred!.status, 401);
+  assert.equal(keepable("api", api.barred!.status, api.barred!.headers), false, "a refused call is never kept");
+  assert.equal(forgetsOn("api", api.barred!.status, api.barred!.headers), true,
+    "…and clears the kept answers: a sign-in that is over online is over offline too");
 });
 
 test("/sw.js is served no-cache and allowed the whole site; the page carries its mark; nothing else changes", () => {
@@ -95,8 +101,15 @@ test("the assets build wrote the service worker with its version, the rules fold
   assert.ok(vendorList, "the worker carries the list of vendor files it keeps at install");
   const kept = JSON.parse(vendorList![1]) as string[];
   assert.ok(kept.includes("/vendor/react.production.min.js") && kept.includes("/vendor/react-dom.production.min.js"));
-  assert.equal(kept.filter((p) => p.endsWith(".woff2")).length, 9, "…the nine fonts among them");
+  assert.equal(kept.filter((p) => p.endsWith(".woff2")).length, 18, "…the eighteen fonts among them: latin and latin-ext, three families, three weights");
   assert.equal(kept.some((p) => p.endsWith(".txt")), false, "…and not the licences");
+  // The version is a hash of the compiled page and every file the worker
+  // keeps, the fonts included: the vendor files are served from the cache
+  // first and only a new version refetches them, so a font replaced under
+  // the same name must make a new version or the old one is served for ever.
+  const stamp = createHash("md5").update(readFileSync(join(WORKER, "assets", "index.html")));
+  for (const p of kept) stamp.update(readFileSync(join(WORKER, "assets", ...p.slice(1).split("/"))));
+  assert.equal(version![1], stamp.digest("hex"), "the version is the hash of the page and every kept vendor file, the fonts included");
   // The worker file parses as a script. Compiled, never run: it reads
   // self.location at the top, which only a browser has.
   assert.doesNotThrow(() => new Function(sw), "worker/assets/sw.js does not parse");
@@ -107,7 +120,7 @@ test("the assets build wrote the service worker with its version, the rules fold
   const assets = join(WORKER, "assets", "vendor");
   const files = walk(source);
   assert.ok(files.includes("react.production.min.js") && files.includes("react-dom.production.min.js"));
-  assert.equal(files.filter((f) => f.endsWith(".woff2")).length, 9, "three families, three weights each");
+  assert.equal(files.filter((f) => f.endsWith(".woff2")).length, 18, "three families, three weights each, latin and latin-ext");
   assert.deepEqual(walk(assets).sort(), files.sort(), "the assets carry exactly the files source/vendor has");
   for (const f of files) {
     assert.equal(Buffer.compare(readFileSync(join(source, f)), readFileSync(join(assets, f))), 0, "worker/assets/vendor/" + f + " is byte for byte source/vendor/" + f);

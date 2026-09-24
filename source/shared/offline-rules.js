@@ -11,9 +11,9 @@
  * cache or a request: these are the rules, the worker does the work.
  *
  * Network first, always: a kept copy is used only when the network fails
- * or has not answered within NETWORK_WAIT_MS, and every good answer
- * refreshes the copy. So a deploy is picked up the moment the link is up,
- * and a stale page is never preferred to a live one.
+ * or has not started answering within networkWait(kind), and every good
+ * answer refreshes the copy. So a deploy is picked up the moment the link
+ * is up, and a stale page is never preferred to a live one.
  */
 
 /** The header the service worker puts on a copy it kept: when that answer
@@ -27,8 +27,29 @@ export const FETCHED_AT_HEADER = "X-Portal-Fetched-At";
  *  an answer carrying this header is kept as the page. */
 export const PAGE_HEADER = "X-Portal-Page";
 
-/** How long a request waits on the network before the kept copy is used. */
+/** How long the page's own address waits for the network to start
+ *  answering before the kept page is opened instead: short, so a phone at
+ *  sea is not left on a blank screen. "Start answering" is the headers -
+ *  the page's bytes then stream in at whatever speed the link has, so a
+ *  slow link is never mistaken for a dead one. */
 export const NETWORK_WAIT_MS = 4000;
+
+/** How long one of the four kept API answers waits for the network to
+ *  start answering before the kept copy is used. Long: the page polls the
+ *  document every eight seconds, and a satellite link that takes ten
+ *  seconds to answer is still a link - a kept copy handed back then would
+ *  put a connected portal into offline mode, read only, while every save
+ *  would have gone through. Only a link that says nothing at all for this
+ *  long is treated as down; a link that is off outright fails at once. */
+export const API_WAIT_MS = 30000;
+
+/** How long a request of each kind waits for the network to start
+ *  answering before the kept copy stands in.
+ *  @param {"page"|"api"} kind
+ *  @returns {number} milliseconds */
+export function networkWait(kind) {
+  return kind === "page" ? NETWORK_WAIT_MS : API_WAIT_MS;
+}
 
 /** The word the page sends the service worker to clear everything it
  *  kept - on sign-out, so a signed-out device holds nothing. */
@@ -103,6 +124,43 @@ export function keepable(kind, status, headers) {
   if (status !== 200) return false;
   if (kind === "page") return !!(headers && headers.get(PAGE_HEADER));
   return true;
+}
+
+/**
+ * Whether an answer from the network says the sign-in is over, so
+ * everything kept for reading offline must go: a refused API call (401 -
+ * the session has expired, or the grant was taken away and the person was
+ * signed out everywhere), or the sign-in form served where the page should
+ * be (200 without the page's mark: nobody is signed in on this device).
+ * Online the page goes to /login; without this a phone that then lost its
+ * link would open the last person's portal from the kept copies - the
+ * sign-in gate holding online and not offline.
+ *
+ * @param {"page"|"api"|"vendor"} kind
+ * @param {number} status
+ * @param {{ get(name: string): string | null }} headers
+ * @returns {boolean}
+ */
+export function forgetsOn(kind, status, headers) {
+  if (kind === "api") return status === 401;
+  if (kind === "page") return status === 200 && !(headers && headers.get(PAGE_HEADER));
+  return false;
+}
+
+/**
+ * Whether a cache found on taking over is an earlier build's of this
+ * portal, whose kept answers are worth carrying across so a deploy does
+ * not leave a phone with nothing to read. Only a cache this worker's own
+ * builds named (cacheName): never the leftover cache of the worker from
+ * years ago, nor one another script made, whose entries are not stamped
+ * copies of the crew's answers.
+ *
+ * @param {string} name  a cache's name
+ * @param {string} mine  this build's cache
+ * @returns {boolean}
+ */
+export function earlierPortalCache(name, mine) {
+  return typeof name === "string" && name !== mine && name.startsWith("portal-");
 }
 
 /** The stamp on a kept copy, or null for a live answer.

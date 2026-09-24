@@ -1433,7 +1433,7 @@ function UploadCertificates() {
                         </Field>
                       </div>
                       <div style={{ display: "flex", gap: 8 }}>
-                        <Button onClick={() => saveRank(f.person)}
+                        <Button writes onClick={() => saveRank(f.person)}
                           disabled={!(rankEdit.value || "").trim()}>Save</Button>
                         <Button variant="quiet" onClick={() => setRankEdit(null)}>Cancel</Button>
                       </div>
@@ -1451,7 +1451,7 @@ function UploadCertificates() {
                         </Field>
                       </div>
                       <div style={{ display: "flex", gap: 8 }}>
-                        <Button onClick={() => saveName(f.person)}
+                        <Button writes onClick={() => saveName(f.person)}
                           disabled={!!nameEdit.busy || !(nameEdit.value || "").trim() || nameEdit.value.trim() === f.person}>
                           {nameEdit.busy ? "Saving everywhere..." : "Save"}
                         </Button>
@@ -1562,7 +1562,7 @@ function UploadCertificates() {
                             </Field>
                           </div>
                           <div style={{ display: "flex", gap: 8 }}>
-                            <Button onClick={() => saveEdit(c)} disabled={edit.busy}>
+                            <Button writes onClick={() => saveEdit(c)} disabled={edit.busy}>
                               {edit.busy ? "Saving…" : "Save"}
                             </Button>
                             <Button variant="quiet" onClick={() => setEdit(null)} disabled={edit.busy}>Cancel</Button>
@@ -1718,10 +1718,10 @@ function UploadCertificates() {
               options={[{ value: "", label: "Choose the crew member" },
                 ...names.map((n) => ({ value: n, label: n }))]} />
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
-              <Button variant="solid" disabled={!whosePick} onClick={() => answerWhose(whosePick)}>
+              <Button writes variant="solid" disabled={!whosePick} onClick={() => answerWhose(whosePick)}>
                 File it against {whosePick || "…"}
               </Button>
-              <Button variant="quiet" onClick={() => answerWhose("")}>Leave this one</Button>
+              <Button writes variant="quiet" onClick={() => answerWhose("")}>Leave this one</Button>
             </div>
           </div>
         </div>
@@ -1763,9 +1763,9 @@ function UploadCertificates() {
             </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Button onClick={() => respond("replace")}>Replace it</Button>
-              <Button variant="ghost" onClick={() => respond("keep")}>Keep both</Button>
-              <Button variant="quiet" onClick={() => respond("skip")}>Skip this file</Button>
+              <Button writes onClick={() => respond("replace")}>Replace it</Button>
+              <Button writes variant="ghost" onClick={() => respond("keep")}>Keep both</Button>
+              <Button writes variant="quiet" onClick={() => respond("skip")}>Skip this file</Button>
             </div>
 
             {queue.length > 1 && (
@@ -2111,11 +2111,11 @@ function SyncPeople({ found, onClose }) {
                     <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.bRed }}>
                       Take them off the portal entirely?
                     </span>
-                    <Button variant="solid" onClick={() => takeOff(n)}>Yes</Button>
+                    <Button writes variant="solid" onClick={() => takeOff(n)}>Yes</Button>
                     <Button variant="quiet" onClick={() => setGone("")}>No</Button>
                   </>
                 ) : (
-                  <Button variant="quiet" onClick={() => setGone(n)}>Take off the portal</Button>
+                  <Button writes variant="quiet" onClick={() => setGone(n)}>Take off the portal</Button>
                 )}
               </div>
             ))}
@@ -2163,7 +2163,7 @@ function SyncPeople({ found, onClose }) {
                     {/* No swing picker. The swing a man is on is the roster's
                         answer, seeded from it above, and asking again here only
                         offered a way of disagreeing with it. */}
-                    <Button variant="ghost" disabled={!String(row.name || "").trim() || !String(row.rank || "").trim()}
+                    <Button writes variant="ghost" disabled={!String(row.name || "").trim() || !String(row.rank || "").trim()}
                       onClick={() => takeOn(p, false)}>
                       Take on
                     </Button>
@@ -2186,7 +2186,7 @@ function SyncPeople({ found, onClose }) {
             {strangers.length > 1 && (
               <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
                 marginTop: 12, paddingTop: 10, borderTop: "1px solid " + T.rule }}>
-                <Button variant="solid"
+                <Button writes variant="solid"
                   disabled={!strangers.some((p) => String(entry(p).name || "").trim() && String(entry(p).rank || "").trim())}
                   onClick={takeOnEveryone}>
                   Take on everyone above
@@ -2640,7 +2640,7 @@ function UpdateDocumentation() {
             </div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <Button variant="quiet" onClick={() => setOrphaned(null)}>Leave it as it is</Button>
-              <Button variant="solid" onClick={() => {
+              <Button writes variant="solid" onClick={() => {
                 if (orphaned.includes("the crew matrix")) {
                   setQuals({ cols: [], rows: [] });
                   setCertAnalysis(null);

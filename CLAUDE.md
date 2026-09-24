@@ -119,8 +119,9 @@ there and only there.
 readable offline, built to `/sw.js` with the build's stamp written in as its
 version and `offline-rules.js` folded in at `/* @offline-rules */`.
 `source/vendor/` holds the portal's own copies of React and React DOM (the
-18.2.0 builds, from `tools/node_modules`) and the latin font files with their
-licences, served at `/vendor/` and copied into the worker's assets at build;
+18.2.0 builds, from `tools/node_modules`) and the font files (latin and
+latin-ext, from the `@fontsource` packages) with their licences, served at
+`/vendor/` and copied into the worker's assets at build;
 the preview asks for the same files as `source/vendor/` beside `preview.html`.
 
 `source/vessel.json` — everything that is this vessel's (name, brand, timezone,
@@ -237,17 +238,27 @@ on any line that still names this one.
   the page, the vendor scripts and fonts, `/api/me`, `/api/state`,
   `/api/files` and `/api/sync/last`, each stamped with when it was fetched.
   Network first, always - a kept copy is used only when the network fails or
-  has not answered in four seconds, and every good answer replaces it, so a
-  deploy is picked up the moment the link is up and a stale page is never
-  preferred. Offline the page is read only, with one line on the badge
-  ("Offline - showing the portal as at ...", `offlineLine`), `put()` refusing
-  every change and the buttons that write held down under that line
-  (`Button`'s `writes`, `controlsLocked`). Sign-out tells the worker to
-  forget everything (`forgetOffline`), a different person signing in on the
-  same device clears the last person's copies, and nothing else is ever
-  cached - file bytes, the CDN scripts, the fauna app and every write go to
-  the network untouched. The preview's name picker never shows on the live
-  site (`showPicker`: only under the shim's flag).
+  has not started answering (`networkWait`: four seconds for the page,
+  thirty for the four answers, because a slow link that answers in ten is a
+  link and a kept copy handed back then would put a connected portal into
+  offline mode), and the race is on the headers, never on the copy being
+  kept - the body streams to the page at the link's own speed. Every good
+  answer replaces the copy, so a deploy is picked up the moment the link is
+  up and a stale page is never preferred. Offline the page is read only,
+  with one line on the badge ("Offline - showing the portal as at ...",
+  `offlineLine`), `put()` refusing every change and every control that
+  writes held down under that line (`Button`'s `writes`, `DeleteBtn`,
+  `DropSpot`, `controlsLocked`). Sign-out tells the worker to forget
+  everything (`forgetOffline`); a sign-in that is over - a 401, or the
+  sign-in form served where the page should be - clears the kept copies
+  (`forgetsOn`), so a revoked device reads nothing offline; a different
+  person signing in on the same device clears the last person's copies; a
+  new build carries the kept answers across only from an earlier
+  `portal-*` cache and only for the same person (`earlierPortalCache`);
+  and nothing else is ever cached - file bytes, the CDN scripts, the fauna
+  app and every write go to the network untouched. The preview's name
+  picker never shows on the live site (`showPicker`: only under the shim's
+  flag).
 - **A listing the library refuses fails the survey and moves nothing.** A 404
   on the certificate home, or on a man's folder outside it once anything
   live is on the books under it (`hasFolder` before the walk in `survey`; a

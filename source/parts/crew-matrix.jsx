@@ -929,7 +929,7 @@ function TrainingMatrix() {
               {swings > 0 && <> Press Save roster on the Roster tab afterwards to write the swings back to the spreadsheet.</>}
             </div>
             <div style={{ display: "flex", gap: 8 }}>
-              <Button variant="solid" onClick={() => { removeCrew(leaving.name); setLeaving(null); }}>
+              <Button writes variant="solid" onClick={() => { removeCrew(leaving.name); setLeaving(null); }}>
                 Yes, take them off
               </Button>
               <Button variant="quiet" onClick={() => setLeaving(null)}>No</Button>
@@ -2335,7 +2335,7 @@ function MatrixItems({ onClose }) {
                     <span style={{ fontFamily: T.mono, fontSize: 11, color: T.accent, minWidth: 46 }}>{c[0]}</span>
                     <span style={{ fontFamily: T.body, fontSize: 13.5, fontWeight: 600, color: T.text, flex: 1 }}>{c[1]}</span>
                     {dropping !== c[0] && (
-                      <Button variant="quiet" onClick={() => setDropping(c[0])}>Take off the portal</Button>
+                      <Button writes variant="quiet" onClick={() => setDropping(c[0])}>Take off the portal</Button>
                     )}
                   </div>
                   {dropping === c[0] && (
@@ -2348,7 +2348,7 @@ function MatrixItems({ onClose }) {
                         {" "}The column stays in the office's own spreadsheet until they take it out there.
                       </div>
                       <div style={{ display: "flex", gap: 8 }}>
-                        <Button variant="solid" onClick={() => takeOff(c[0])}>Yes, take it off</Button>
+                        <Button writes variant="solid" onClick={() => takeOff(c[0])}>Yes, take it off</Button>
                         <Button variant="quiet" onClick={() => setDropping("")}>No</Button>
                       </div>
                     </div>
@@ -2371,7 +2371,7 @@ function MatrixItems({ onClose }) {
             {fresh.length > 3 && (
               <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
                 padding: "10px 0", borderTop: "1px solid " + T.rule }}>
-                <Button variant="solid" onClick={() => fresh.forEach(takeOn)}>
+                <Button writes variant="solid" onClick={() => fresh.forEach(takeOn)}>
                   Add all {fresh.length} to the portal
                 </Button>
                 <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted }}>
@@ -2384,7 +2384,7 @@ function MatrixItems({ onClose }) {
                 padding: "9px 0", borderTop: "1px solid " + T.rule }}>
                 <span style={{ fontFamily: T.mono, fontSize: 11, color: T.accent, minWidth: 46 }}>{x.code}</span>
                 <span style={{ fontFamily: T.body, fontSize: 13.5, fontWeight: 600, color: T.text, flex: 1 }}>{x.title}</span>
-                <Button variant="quiet" onClick={() => takeOn(x)}>Add to the portal</Button>
+                <Button writes variant="quiet" onClick={() => takeOn(x)}>Add to the portal</Button>
               </div>
             ))}
           </div>

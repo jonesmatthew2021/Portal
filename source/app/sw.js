@@ -6,24 +6,26 @@
    the last good answer to the four calls the page reads by (/api/me,
    /api/state, /api/files, /api/sync/last), each stamped with the time it
    was fetched so the page can say how old what it shows is. Network first,
-   always: the copy is used only when the network fails or has not answered
-   in NETWORK_WAIT_MS, and every good answer replaces the copy - so a deploy
-   is picked up the moment the link is up, and a stale page is never
-   preferred to a live one. Nothing else is ever kept: file bytes, the CDN
-   scripts, the fauna app and every write go straight to the network and,
-   offline, fail as they always did.
+   always: the copy is used only when the network fails or has not started
+   answering in networkWait(kind), and every good answer replaces the copy -
+   so a deploy is picked up the moment the link is up, and a stale page is
+   never preferred to a live one. Nothing else is ever kept: file bytes,
+   the CDN scripts, the fauna app and every write go straight to the
+   network and, offline, fail as they always did.
 
    Built into worker/assets/sw.js by worker/scripts/build-assets.mjs, which
    writes the build's stamp in as VERSION and folds source/shared/offline-
    rules.js in at the marker below. A new build is a new worker with a new
    cache; on taking over it deletes every other cache, carrying the four
-   kept answers across so there is never a moment with nothing to read. A
-   worker left over from years ago, which once served a months-old page,
-   goes the same way: its caches are not this build's.
+   kept answers across from an earlier build's cache (and only from one of
+   those) so there is never a moment with nothing to read. A worker left
+   over from years ago, which once served a months-old page, goes the same
+   way: its caches are not this build's, and nothing in them is carried.
 
    The rules themselves (what is kept, under what name, when a copy is
-   worth keeping) are in offline-rules.js and proved by
-   tools/client-rules.test.mjs. This file only does the work. */
+   worth keeping, when everything kept must go) are in offline-rules.js and
+   proved by tools/client-rules.test.mjs, which also runs this file against
+   a pretend network. This file only does the work. */
 
 const VERSION = "__BUILD_VERSION__";
 
@@ -38,24 +40,34 @@ const VENDOR = __VENDOR_FILES__;
 
 /* A copy of an answer, stamped with the time it was fetched. The body is
    read whole so the stamp can be set on a fresh Response: an answer's own
-   headers cannot be changed. */
+   headers cannot be changed. The body read here is the decoded one, so the
+   edge's Content-Encoding and Content-Length come off the copy - left on,
+   the browser would try to decode the kept page a second time. */
 async function stamped(answer) {
   const headers = new Headers(answer.headers);
   headers.set(FETCHED_AT_HEADER, new Date().toISOString());
+  headers.delete("Content-Encoding");
+  headers.delete("Content-Length");
   return new Response(await answer.arrayBuffer(), { status: answer.status, statusText: answer.statusText, headers });
 }
 
+/* The crew's answers go: the page and the four kept calls. The vendor
+   files stay - they are this build's code, not anybody's data. */
+const forgetKept = (cache) => Promise.all([...KEPT_APIS, "/"].map((k) => cache.delete(k)));
+
 /* Keeps a good answer under its key. A live /api/me for somebody other
    than the person whose copies are kept clears the kept answers first, so
-   nobody reads the last person's portal offline. */
+   nobody reads the last person's portal offline; and an answer that says
+   the sign-in is over (forgetsOn) clears them and keeps nothing. */
 async function keep(cache, kind, key, answer) {
+  if (forgetsOn(kind, answer.status, answer.headers)) { await forgetKept(cache); return; }
   if (!keepable(kind, answer.status, answer.headers)) return;
   const copy = await stamped(answer);
   if (key === "/api/me") {
     const before = await cache.match(key);
     const kept = before ? await before.clone().json().catch(() => null) : null;
     const live = await copy.clone().json().catch(() => null);
-    if (anotherPerson(kept, live)) await Promise.all(KEPT_APIS.map((k) => cache.delete(k)));
+    if (anotherPerson(kept, live)) await forgetKept(cache);
   }
   await cache.put(key, copy);
 }
@@ -80,19 +92,32 @@ self.addEventListener("install", (event) => {
   })());
 });
 
+/* The kept answers are the crew's data, not a build's code: they come
+   across from an earlier build's cache, so a deploy does not leave a phone
+   with nothing to read until its next poll. Only a stamped copy comes
+   (anything else is not one of this worker's), what this build has
+   already kept wins, and nothing comes from a cache whose /api/me is a
+   different person from the one this build has already kept - the last
+   person's document must not land in the next person's cache. */
+async function carry(old, mine) {
+  const who = async (cache) => {
+    const kept = await cache.match("/api/me");
+    return kept ? await kept.clone().json().catch(() => null) : null;
+  };
+  const [was, am] = await Promise.all([who(old), who(mine)]);
+  if (am && anotherPerson(was, am)) return;
+  for (const key of KEPT_APIS) {
+    const kept = await old.match(key);
+    if (kept && isCachedAnswer(kept.headers) && !(await mine.match(key))) await mine.put(key, kept);
+  }
+}
+
 self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
     const mine = await caches.open(NAME);
     for (const name of await caches.keys()) {
       if (name === NAME) continue;
-      // The kept answers are the crew's data, not this build's code: they
-      // come across, so a deploy does not leave a phone with nothing to
-      // read until its next poll. What this build has already kept wins.
-      const old = await caches.open(name);
-      for (const key of KEPT_APIS) {
-        const kept = await old.match(key);
-        if (kept && !(await mine.match(key))) await mine.put(key, kept);
-      }
+      if (earlierPortalCache(name, NAME)) await carry(await caches.open(name), mine);
       await caches.delete(name);
     }
     await self.clients.claim();
@@ -107,20 +132,24 @@ self.addEventListener("message", (event) => {
   if (event.data && event.data.type === FORGET_MESSAGE) event.waitUntil(forget());
 });
 
-/* Network first: the network's answer if it comes in time, else the kept
-   copy, else whatever the network finally says (its failure included, so
-   the page sees exactly what it saw before this worker existed). A good
-   answer refreshes the copy even when the wait was lost, so the next
-   look is current. */
+/* Network first: the network's answer if it starts coming in time, else
+   the kept copy, else whatever the network finally says (its failure
+   included, so the page sees exactly what it saw before this worker
+   existed). The race is on the fetch itself - it settles when the headers
+   are in, and the body then streams to the page at the link's own speed -
+   never on the copy being kept, which reads the whole body first: raced on
+   that, a slow link would lose to the timer every poll and a connected
+   portal would be shown its kept copy and go read only. The copy is kept
+   in the background, so a good answer refreshes it even when the wait was
+   lost and the next look is current. */
 async function networkFirst(event, kind) {
   const key = cacheKey(event.request.url);
   const cache = await caches.open(NAME);
-  const fromNetwork = fetch(event.request).then(async (answer) => {
-    await keep(cache, kind, key, answer.clone());
-    return answer;
-  });
-  event.waitUntil(fromNetwork.catch(() => {}));
-  const wait = new Promise((done) => setTimeout(() => done(null), NETWORK_WAIT_MS));
+  const fromNetwork = fetch(event.request);
+  // The clone is taken the moment the answer is in, before the page has
+  // started reading the body: this handler was set first, so it runs first.
+  event.waitUntil(fromNetwork.then((answer) => keep(cache, kind, key, answer.clone())).catch(() => {}));
+  const wait = new Promise((done) => setTimeout(() => done(null), networkWait(kind)));
   const answer = await Promise.race([fromNetwork.catch(() => null), wait]);
   if (answer) return answer;
   const kept = await cache.match(key);

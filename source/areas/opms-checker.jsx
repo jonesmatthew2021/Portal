@@ -362,11 +362,11 @@ function OPMSChecker() {
           A new upload compares itself.
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 13 }}>
-          <Button onClick={() => runAnalysis(false)} disabled={busy || !ready}>
+          <Button writes onClick={() => runAnalysis(false)} disabled={busy || !ready}>
             {running ? "Working..." : "Analyse spreadsheets and certificates"}
           </Button>
           {opmsAnalysis && ready && (
-            <Button variant="quiet" onClick={() => runAnalysis(true)} disabled={busy}
+            <Button writes variant="quiet" onClick={() => runAnalysis(true)} disabled={busy}
               title="Ask the question again from the documents as they stand now, rather than showing the answer from last time">
               Run it again
             </Button>
@@ -579,7 +579,7 @@ function OPMSChecker() {
                       const ta = document.getElementById("opms-email-draft");
                       if (ta) { ta.select(); try { navigator.clipboard.writeText(ta.value); } catch (e) { document.execCommand("copy"); } }
                     }}>Copy</Button>
-                    <Button variant="quiet" onClick={() => {
+                    <Button writes variant="quiet" onClick={() => {
                       const next = { ...(opmsMarks || {}) };
                       openOnes.forEach((f) => { const k = markKey("opms", f);
                         if (!next[k]) next[k] = { status: "sent", on: todayISO(), by: role || "admin" }; });

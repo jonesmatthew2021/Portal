@@ -222,7 +222,7 @@ function AiChecker({ log }) {
             </div>
           )}
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <Button onClick={send} disabled={busy || reading || (!input.trim() && !files.length)}>{busy ? "Answering..." : "Ask"}</Button>
+            <Button writes onClick={send} disabled={busy || reading || (!input.trim() && !files.length)}>{busy ? "Answering..." : "Ask"}</Button>
             <input ref={pickRef} type="file" multiple accept={AI_ATTACH_ACCEPT}
               style={{ display: "none" }}
               onChange={(e) => { attach(e.target.files); e.target.value = ""; }} />

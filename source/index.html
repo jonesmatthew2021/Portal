@@ -834,21 +834,27 @@ function useScheme() {
 }
 
 /* The three families the page is set in, served from the portal itself
-   (source/vendor/fonts, the latin files from the @fontsource packages) rather
-   than from Google: a phone at sea with no link still has them, and nothing
-   about the page waits on another company's server. The same weights the
-   Google import used to ask for, the same letters it used to serve (the
-   unicode-range is Google's latin range), swap so text is never invisible
-   while a file loads. */
+   (source/vendor/fonts, the latin and latin-ext files from the @fontsource
+   packages) rather than from Google: a phone at sea with no link still has
+   them, and nothing about the page waits on another company's server. The
+   same weights the Google import used to ask for, the same letters it used
+   to serve - the latin file for plain letters and the latin-ext one for a
+   name with a ł, a ž or an ő in it, each under Google's own range for that
+   file so only the file a letter needs is fetched - and swap, so text is
+   never invisible while a file loads. */
 const FONT_FILES = [
   ["Archivo Narrow", "archivo-narrow", [500, 600, 700]],
   ["IBM Plex Sans", "ibm-plex-sans", [400, 500, 600]],
   ["IBM Plex Mono", "ibm-plex-mono", [400, 500, 600]],
 ];
-const fontFaces = () => FONT_FILES.map(([family, file, weights]) => weights.map((w) => `
+const FONT_SUBSETS = [
+  ["latin", "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD"],
+  ["latin-ext", "U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF"],
+];
+const fontFaces = () => FONT_FILES.map(([family, file, weights]) => weights.map((w) => FONT_SUBSETS.map(([subset, range]) => `
 @font-face { font-family: '${family}'; font-style: normal; font-weight: ${w}; font-display: swap;
-  src: url('/vendor/fonts/${file}-latin-${w}-normal.woff2') format('woff2');
-  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }`).join("")).join("\n");
+  src: url('/vendor/fonts/${file}-${subset}-${w}-normal.woff2') format('woff2');
+  unicode-range: ${range}; }`).join("")).join("")).join("\n");
 
 const stylesNow = () => `
 ${fontFaces()}
@@ -1194,7 +1200,7 @@ const Ctx = React.createContext(null);
 const usePortal = () => React.useContext(Ctx);
 
 function Comments({ itemId }) {
-  const { comments, addComment, removeComment, canDelete } = usePortal();
+  const { comments, addComment, removeComment, canDelete, offlineAt } = usePortal();
   const [text, setText] = useState("");
   const [name, setName] = useState("");
   const list = comments[itemId] || [];
@@ -1218,7 +1224,8 @@ function Comments({ itemId }) {
                 </div>
               </div>
               {canDelete(c) && (
-                <button className="um-btn" onClick={() => removeComment(itemId, c.id)}
+                <button className="um-btn" onClick={() => removeComment(itemId, c.id)} disabled={!!offlineAt}
+                  title={offlineAt ? offlineLine(offlineAt) : undefined}
                   style={{ background: "transparent", color: T.muted, fontSize: 10, fontWeight: 700,
                     padding: "2px 0", height: "fit-content" }}>
                   Delete
@@ -1245,14 +1252,18 @@ function Comments({ itemId }) {
   );
 }
 
+/* A delete always writes, so offline (read only, see offlineLine) the
+   button is held down under the badge's line before it asks anything. */
 function DeleteBtn({ item, onDelete, label = "Delete" }) {
-  const { canDelete } = usePortal();
+  const { canDelete, offlineAt } = usePortal();
   const [confirm, setConfirm] = useState(false);
   if (!canDelete(item)) return null;
-  if (!confirm) {
+  if (!confirm || offlineAt) {
     return (
-      <button className="um-btn" onClick={() => setConfirm(true)}
-        style={{ background: "transparent", color: T.muted, fontSize: 10, fontWeight: 700, padding: "4px 0" }}>
+      <button className="um-btn" onClick={() => setConfirm(true)} disabled={!!offlineAt}
+        title={offlineAt ? offlineLine(offlineAt) : undefined}
+        style={{ background: "transparent", color: T.muted, fontSize: 10, fontWeight: 700, padding: "4px 0",
+          cursor: offlineAt ? "not-allowed" : "pointer", opacity: offlineAt ? 0.5 : 1 }}>
         {label}
       </button>
     );
@@ -1410,6 +1421,11 @@ function FileIcon({ name }) {
  */
 function DropSpot({ onFile, onFiles, disabled, accept, onReject, style, children }) {
   const [hot, setHot] = useState(false);
+  // A dropped file is on its way to being written: offline (read only,
+  // see offlineLine) the box takes nothing, the same as the Choose file
+  // button beside it, which is held down.
+  const portal = usePortal();
+  if (portal && portal.offlineAt) disabled = true;
 
   const takes = (name) =>
     !accept || accept.split(",").some((ext) => name.toLowerCase().endsWith(ext.trim().toLowerCase()));
@@ -2116,7 +2132,7 @@ function ImportFromSharePoint({ category, noun, onFiled, logAction }) {
                   {f.filename}
                   {f.wasOnFile && <span style={{ color: T.muted }}> · was on file before</span>}
                 </span>
-                <Button variant="solid" disabled={busy} onClick={() => take(f)}>File this one</Button>
+                <Button writes variant="solid" disabled={busy} onClick={() => take(f)}>File this one</Button>
               </div>
             ))}
             {err && <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.bRed, marginTop: 10 }}>{err}</div>}
@@ -2274,7 +2290,7 @@ function SingleDocumentUpload({
                 </div>
 
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <Button onClick={() => send(pending.file, "replace")}>
+                  <Button writes onClick={() => send(pending.file, "replace")}>
                     {busy ? "Overwriting..." : "Overwrite it"}
                   </Button>
                   <Button variant="quiet" onClick={() => { setPending(null); setStep("file"); }}>
@@ -3601,12 +3617,12 @@ function StartAgain() {
             spreadsheet until the next update settles a date.
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <Button variant="solid" onClick={go}>Yes, start again</Button>
+            <Button writes variant="solid" onClick={go}>Yes, start again</Button>
             <Button variant="quiet" onClick={() => setAsking(false)}>No</Button>
           </div>
         </div>
       ) : (
-        <Button variant="quiet" onClick={() => setAsking(true)}>Start again</Button>
+        <Button writes variant="quiet" onClick={() => setAsking(true)}>Start again</Button>
       )}
     </div>
   );
@@ -3764,7 +3780,7 @@ function EverythingHidden({ admin, onRestoreAll }) {
       </div>
       {admin ? (
         <div style={{ marginTop: 18 }}>
-          <Button onClick={onRestoreAll}>Restore every section</Button>
+          <Button writes onClick={onRestoreAll}>Restore every section</Button>
         </div>
       ) : (
         <div style={{ fontFamily: T.body, fontSize: 14, color: T.muted, lineHeight: 1.7, marginTop: 10 }}>
@@ -3785,7 +3801,10 @@ function EverythingHidden({ admin, onRestoreAll }) {
  * separate confirmation.
  */
 function RemovedFiles() {
-  const { log } = usePortal();
+  const { log, offlineAt } = usePortal();
+  // Deleting for good writes to the server: offline (read only, see
+  // offlineLine) both steps of it are held down under the badge's line.
+  const held = offlineAt ? { disabled: true, title: offlineLine(offlineAt) } : {};
   const [state, setState] = useState({ status: "loading", items: [], msg: "" });
   const [busy, setBusy] = useState(null);
   const [confirm, setConfirm] = useState(null);
@@ -3907,7 +3926,7 @@ function RemovedFiles() {
                     <span style={{ fontFamily: T.body, fontSize: 13, color: T.text }}>
                       Delete for good? This can't be undone.
                     </span>
-                    <button className="um-btn" onClick={() => purge(it)}
+                    <button className="um-btn" onClick={() => purge(it)} {...held}
                       style={{ background: T.accent, color: "#fff", fontSize: 10, fontWeight: 700, padding: "5px 9px", borderRadius: 2 }}>
                       Delete for good
                     </button>
@@ -3919,11 +3938,11 @@ function RemovedFiles() {
                 ) : (
                   <>
                     <OpenLink url={r.url} />
-                    <Button variant="quiet" onClick={() => restore(it)}>Restore</Button>
+                    <Button writes variant="quiet" onClick={() => restore(it)}>Restore</Button>
                     {/* The office's own file, kept where the office put it: the
                         portal will not delete it, so it is not offered. */}
                     {!it.keptInPlace && (
-                      <button className="um-btn" onClick={() => setConfirm(r.id)}
+                      <button className="um-btn" onClick={() => setConfirm(r.id)} {...held}
                         style={{ background: "transparent", color: T.muted, fontSize: 10, fontWeight: 700, padding: "4px 0" }}>
                         Delete for good
                       </button>
@@ -4429,7 +4448,7 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
               ? "Every section is hidden, so the crew are seeing an empty portal. Nothing has been deleted."
               : `${hiddenTabs.length} of ${allTabs.length} sections are hidden from everyone. Nothing in them has been deleted.`}
           </span>
-          <Button onClick={onRestoreAllTabs}>Restore all sections</Button>
+          <Button writes onClick={onRestoreAllTabs}>Restore all sections</Button>
         </div>
       )}
 
@@ -4508,7 +4527,7 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
                   <span style={{ ...tx.name, opacity: hidden ? 0.45 : 1,
                     textDecoration: hidden ? "line-through" : "none" }}>{t.label}</span>
                   {hidden
-                    ? <Button variant="quiet" onClick={() => onRestoreTab(t.id, t.label)}>Restore</Button>
+                    ? <Button writes variant="quiet" onClick={() => onRestoreTab(t.id, t.label)}>Restore</Button>
                     : <DeleteBtn item={{ session: SESSION }} onDelete={() => onHideTab(t.id, t.label)} label="Remove tab" />}
                 </div>
               );
@@ -4956,6 +4975,12 @@ function Portal({ role, onSignOut }) {
      the portal is read only - put() refuses every change, the badge says
      so and the buttons that write are held down (see offlineLine). */
   const [offlineAt, setOfflineAt] = useState(null);
+  /* The same, for put(): a setter handed out before the link dropped (an
+     effect's, a timer's, a save's) and used after must be refused too, and
+     a setter reads whatever the render it came from saw. The ref is the
+     latest word. */
+  const offlineRef = useRef(null);
+  offlineRef.current = offlineAt;
   /* Whether anything typed is still on its way up.
    *
    * The badge used to read the connection and nothing else, so it said SAVED
@@ -5003,7 +5028,7 @@ function Portal({ role, onSignOut }) {
     // Offline the portal is read only: a change made now could not be
     // saved and would sit in the tab as an unsaved edit of a copy that is
     // already old, so it is not taken at all (see offlineLine).
-    if (offlineAt) return;
+    if (offlineRef.current) return;
     dirty.current.add(key);
     gen.current.set(key, (gen.current.get(key) || 0) + 1);
     setPending(true);
@@ -6459,7 +6484,9 @@ function App() {
     (async () => {
       try {
         const r = await fetch("/api/me");
-        if (r.status === 401) { window.location.href = "/login"; return; }
+        // A sign-in that is over (expired, or taken away) is over offline
+        // too: what the service worker kept goes before the sign-in page.
+        if (r.status === 401) { forgetOffline(); window.location.href = "/login"; return; }
         if (!r.ok) { setMeFailed(`Couldn't reach the portal (${r.status})`); return; }
         const who = await r.json();
         SESSION_USER = { name: who.name, role: who.role, email: who.email || "", fitToSail: who.fitToSail || "" };
