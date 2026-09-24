@@ -351,6 +351,12 @@ export async function survey(tick: (pct: number, word: string) => Promise<void> 
   return { newCertificates, singles, strays, missing, returned, scannedLive, moved, trainingSheet, sheetSeen, people };
 }
 
+/** The one sentence the record carries when the missing files were too
+ *  many to act on (the guard in apply): the SharePoint page shows it on
+ *  its last-import line, and a person goes and looks at the library. */
+export const heldBackLine = (n: number) =>
+  `${n} on the books but not in the folders is too many to be believed in one pass, so nothing was taken off the books.`;
+
 /** What the last applied sync did — shown on the SharePoint page. */
 export type SyncRecord = {
   at: number;
@@ -446,7 +452,10 @@ export async function runSync(by: string) {
       strays: out.strays.length,
       missing: out.missing.length,
       leftAlone: out.leftAlone.length,
-      error: null,
+      // A shortfall too big to believe is said here, where the page's
+      // last-import line shows it: the files are still on the books, and
+      // somebody has to look at the library to see why they are not in it.
+      error: out.heldBack ? heldBackLine(out.heldBack) : null,
     });
     await sayProgress(100, "Done", { done: true });
     return out;

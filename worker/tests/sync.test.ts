@@ -20,7 +20,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setEnv } from "../src/env.js";
-import sync, { runSync } from "../src/routes/sync.js";
+import sync, { runSync, heldBackLine } from "../src/routes/sync.js";
 import { graphWaits } from "../src/files/store.js";
 import { portalDb, graphLibrary, sharepointEnv, wranglerVars, type FakeFile } from "./helpers.js";
 
@@ -147,5 +147,78 @@ test("Graph: the certificate home renamed in the library fails the survey by nam
     assert.ok(portal.blobs.has("certificate-readings|r1/sum-c1.json"), "and its reading is still there");
   } finally {
     graph.restore();
+  }
+});
+
+/* ------------------------------------------------------------------------ *
+ * The hold-back guard. A listing cut short - a page whose @odata.nextLink
+ * went missing - looks to the driver like a folder with fewer files in
+ * it, and the guard in apply is all that stands between that and the
+ * books: nothing is mirrored off when the missing are more than
+ * max(25, 10% of the live rows the walk covered). At the boundary the
+ * code reads ">", so exactly that many is mirrored and one more is held.
+ * ------------------------------------------------------------------------ */
+/** `n` of Brenton's certificates on the books, all `n` in his folder, and
+ *  his folder's listing cut short so only the first `seen` are listed. */
+const cutShort = (n: number, seen: number) => {
+  const rows = Array.from({ length: n }, (_, i) => certRow(`c${i}`, `opms/Brenton - OPMS/ticket ${i}.pdf`));
+  const portal = booksOf(rows);
+  const graph = libraryOf(portal, rows.map((r) => ({ path: `${BRENTON}/${r.filename}`, size: 6 })), { pageSize: seen });
+  graph.fault({ cut: true }, (folder, skip) => folder === BRENTON && skip === 0);
+  return { portal, graph };
+};
+
+test("Graph, listing cut short: 25 missing of 100 live are mirrored off (25 is not more than 25)", async () => {
+  const { portal, graph } = cutShort(100, 75);
+  try {
+    const out = await runSync("hourly schedule");
+    assert.equal(out.missing.length, 25);
+    assert.equal(out.mirrored, 25, "at the boundary the files come off the books");
+    assert.equal(out.heldBack, 0);
+    assert.equal(portal.rows.filter((r) => r.removedAt).length, 25);
+    assert.equal(lastRun(portal).error, null, "nothing to say on the record");
+    assert.equal(lastRun(portal).missing, 25);
+  } finally {
+    graph.restore();
+  }
+});
+
+test("Graph, listing cut short: 26 missing of 100 live are held, and the record says so in one sentence", async () => {
+  const { portal, graph } = cutShort(100, 74);
+  try {
+    const out = await runSync("hourly schedule");
+    assert.equal(out.missing.length, 26);
+    assert.equal(out.mirrored, 0, "one over the boundary and nothing comes off");
+    assert.equal(out.heldBack, 26);
+    assert.equal(portal.rows.filter((r) => r.removedAt).length, 0, "every row still live");
+    assert.equal(lastRun(portal).error, heldBackLine(26), "the sentence the SharePoint page shows");
+    assert.equal(lastRun(portal).error, "26 on the books but not in the folders is too many to be believed in one pass, so nothing was taken off the books.");
+    assert.equal(lastRun(portal).missing, 26);
+  } finally {
+    graph.restore();
+  }
+});
+
+test("Graph, listing cut short: with 400 live the line is 10% - 40 missing mirrored, 41 held", async () => {
+  const forty = cutShort(400, 360);
+  try {
+    const out = await runSync("hourly schedule");
+    assert.equal(out.missing.length, 40);
+    assert.equal(out.mirrored, 40, "40 is not more than 10% of 400");
+    assert.equal(forty.portal.rows.filter((r) => r.removedAt).length, 40);
+    assert.equal(lastRun(forty.portal).error, null);
+  } finally {
+    forty.graph.restore();
+  }
+  const fortyOne = cutShort(400, 359);
+  try {
+    const out = await runSync("hourly schedule");
+    assert.equal(out.missing.length, 41);
+    assert.equal(out.mirrored, 0, "41 is more than 10% of 400, so nothing comes off");
+    assert.equal(out.heldBack, 41);
+    assert.equal(fortyOne.portal.rows.filter((r) => r.removedAt).length, 0);
+    assert.equal(lastRun(fortyOne.portal).error, heldBackLine(41));
+  } finally {
+    fortyOne.graph.restore();
   }
 });
