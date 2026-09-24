@@ -201,7 +201,17 @@ export async function survey(tick: (pct: number, word: string) => Promise<void> 
      a name. */
   const apart: { key: string; size?: number; man: (typeof where.assigned)[number] }[] = [];
   for (const a of outside) {
-    const listing = await store.list({ prefix: a.key + "/" });
+    const under = a.key + "/";
+    /* The same for a man's folder outside the home as for the home itself,
+       once anything is on the books under it: a folder the library answers
+       404 to lists as empty, and empty against his rows is every one of
+       his certificates missing - a man's ten or twenty are always under
+       the guard, so they would come off the books with their readings.
+       A folder with nothing under it yet is allowed not to exist. */
+    if (rows.some((r) => !r.removedAt && r.blobKey.startsWith(under)) && !(await store.hasFolder(a.key))) {
+      throw new Error(`the folder ${toReal(under).replace(/\/+$/, "")} is not in the library`);
+    }
+    const listing = await store.list({ prefix: under });
     for (const f of listing.blobs) {
       if (f.key.slice(a.key.length + 1).includes("/")) continue;
       apart.push({ key: f.key, size: f.size, man: a });
@@ -218,8 +228,14 @@ export async function survey(tick: (pct: number, word: string) => Promise<void> 
      A folder is how SharePoint says a person is on the strength; the portal
      compares this against its own crew list, and asks about the difference
      rather than acting on it. */
+  /* The OPMS sheet's own folder sits one level under the home, exactly
+     where a crew folder does, and it is nobody's: a file in it is a single
+     document, taken below, not a certificate of somebody called
+     SPREADSHEET. */
+  const inSingleFolder = (key: string) => singleFolders.some((p) => key.startsWith(p));
   const folks = new Map<string, string>();
   for (const f of opmsListing.blobs) {
+    if (inSingleFolder(f.key)) continue;
     const who = crewFolderOf(f.key);
     if (!who) continue;
     const { token, person } = whoseFolder(where, `${where.home}/${who}`, who);
@@ -252,6 +268,7 @@ export async function survey(tick: (pct: number, word: string) => Promise<void> 
   };
 
   for (const f of opmsListing.blobs) {
+    if (inSingleFolder(f.key)) continue;
     const m = crewFolderOf(f.key);
     if (!m) continue;
     const { token, person } = whoseFolder(where, `${where.home}/${m}`, m);

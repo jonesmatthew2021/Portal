@@ -202,6 +202,68 @@ test("Graph: the certificate home renamed in the library fails the survey by nam
   }
 });
 
+/* A man Crew Details has pointed at a folder outside the home: Kyle, in a
+   folder of his own elsewhere in the library, with his certificates on the
+   books under it. */
+const KYLE_FOLDER = "United Operations Team/Elsewhere/Kyle";
+const kylesBooks = (rows: Record<string, unknown>[]) => portalDb(
+  { people: [{ name: "SMITH, Kyle", certFolder: KYLE_FOLDER }], quals: { cols: [], rows: [] } },
+  rows,
+  { "r1/sum-k1.json": { version: "r1", readable: true } },
+);
+const kylesRow = () => certRow("k1", `library/${KYLE_FOLDER}/ticket.pdf`, { bucket: "smith-kyle", folder: "smith-kyle", person: "SMITH, Kyle" });
+
+test("Graph: a man's folder outside the home, with his certificates on the books under it, gone from the library fails the survey by name - nothing off the books", async () => {
+  const portal = kylesBooks([kylesRow(), certRow("c1", "opms/Brenton - OPMS/master.pdf")]);
+  // The office renamed Kyle's folder; Crew Details still points at the old name.
+  const graph = libraryOf(portal, [{ path: `${BRENTON}/master.pdf`, size: 6 }, { path: "United Operations Team/Elsewhere/Kyle Smith/ticket.pdf", size: 6 }]);
+  try {
+    const res = await post("Update portal");
+    assert.equal(res.status, 502);
+    const said = (await res.json()) as { error: string };
+    assert.equal(said.error, `the folder ${KYLE_FOLDER} is not in the library`);
+    assert.equal(lastRun(portal).error, said.error);
+    assert.equal(portal.rows.find((r) => r.id === "k1")!.removedAt, null, "Kyle's row is still live");
+    assert.ok(portal.blobs.has("certificate-readings|r1/sum-k1.json"), "and its reading is still there");
+    assert.equal(portal.rows.length, 2, "nothing registered");
+    assert.deepEqual(graph.made, [], "no folder was made");
+    assert.deepEqual([...graph.posts(), ...graph.puts()], [], "nothing was written to the library");
+  } finally {
+    graph.restore();
+  }
+});
+
+test("Graph: the same folder with nothing on the books under it is allowed not to exist yet - a quiet empty listing, and the home still walked", async () => {
+  const portal = kylesBooks([certRow("c1", "opms/Brenton - OPMS/master.pdf")]);
+  const graph = libraryOf(portal, [{ path: `${BRENTON}/master.pdf`, size: 6 }, { path: `${BRENTON}/new.pdf`, size: 7 }]);
+  try {
+    const out = await runSync("Update portal");
+    assert.deepEqual(out.registered.map((r) => r.key), ["opms/Brenton - OPMS/new.pdf"], "the home was walked");
+    assert.deepEqual(out.missing, []);
+    assert.equal(out.mirrored, 0);
+    assert.equal(lastRun(portal).error, null);
+    assert.deepEqual(graph.made, [], "no folder was made");
+  } finally {
+    graph.restore();
+  }
+});
+
+test("Graph: a file in the OPMS sheet's own folder under the home is the single document, not a certificate of somebody called SPREADSHEET", async () => {
+  const portal = booksOf([]);
+  const graph = libraryOf(portal, [{ path: `${OPMS}/spreadsheet/OPMS.xlsx`, size: 900 }]);
+  try {
+    const out = await runSync("Import new files");
+    assert.deepEqual(out.registered, [], "no certificate taken on");
+    assert.deepEqual(out.adopted, [{ category: "opms-sheet", key: "opms/spreadsheet/OPMS.xlsx" }]);
+    assert.deepEqual(out.people, [], "and no such person");
+    assert.deepEqual(portal.rows.map((r) => [r.category, r.blobKey, r.adoptedFromFolder]), [["opms-sheet", "opms/spreadsheet/OPMS.xlsx", 1]]);
+    assert.deepEqual(graph.made, [], "no folder was made");
+    assert.deepEqual([...graph.posts(), ...graph.puts()], [], "nothing was written to the library");
+  } finally {
+    graph.restore();
+  }
+});
+
 /* ------------------------------------------------------------------------ *
  * The hold-back guard. A listing cut short - a page whose @odata.nextLink
  * went missing - looks to the driver like a folder with fewer files in
