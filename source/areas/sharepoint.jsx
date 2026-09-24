@@ -6,6 +6,24 @@
  * The shell holds the theme, the shared components and the state; this
  * holds what is only this section's. See tools/source.mjs.
  */
+
+/* The weekly reminder emails' own line: off, or what the last week's did -
+   in red where a send failed, went unanswered or none could go. Unanswered
+   is kept apart from failed: the service may still deliver it, and a man
+   sent it again by hand would have it twice. Pure, so the red can be
+   proved (tools/client-rules.test.mjs). */
+function reminderLineFor(reminders, r) {
+  if (!reminders || !reminders.on) return { bad: false, text: "Reminders are off" };
+  if (!r) return null;
+  const when = new Date(r.at).toLocaleString("en-AU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  if (r.error) return { bad: true, text: "Reminders " + when + " failed: " + r.error };
+  if (r.skipped) return { bad: false, text: "Reminders " + when + " — " + r.skipped };
+  const sent = r.own + " crew, " + r.summary + " summar" + (r.summary === 1 ? "y" : "ies");
+  const failed = (r.failed || []).length ? "; failed: " + r.failed.join(", ") : "";
+  const unanswered = (r.unanswered || []).length ? "; no answer for: " + r.unanswered.join(", ") : "";
+  return { bad: !!(failed || unanswered), text: "Reminders " + when + " — " + sent + failed + unanswered };
+}
+
 function SharePointPage() {
   // Whether the worker's hour holds the workbook: the import is held down while it does.
   const { roundRunning, offlineAt, reminders } = usePortal();
@@ -105,22 +123,7 @@ function SharePointPage() {
     if (b.error) return { bad: true, text: "Backup " + when + " failed: " + b.error + (landed ? " (last one landed " + landed + ")" : "") };
     return { bad: false, text: "Last backup " + when + ", " + fmtBytes(b.bytes) };
   };
-  // The weekly reminder emails' own line: off, or what the last week's did -
-  // in red where a send failed, went unanswered or none could go. Unanswered
-  // is kept apart from failed: the service may still deliver it, and a man
-  // sent it again by hand would have it twice.
-  const reminderLine = () => {
-    if (!reminders.on) return { bad: false, text: "Reminders are off" };
-    const r = listing && listing.lastReminder;
-    if (!r) return null;
-    const when = new Date(r.at).toLocaleString("en-AU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
-    if (r.error) return { bad: true, text: "Reminders " + when + " failed: " + r.error };
-    if (r.skipped) return { bad: false, text: "Reminders " + when + " — " + r.skipped };
-    const sent = r.own + " crew, " + r.summary + " summar" + (r.summary === 1 ? "y" : "ies");
-    const failed = (r.failed || []).length ? "; failed: " + r.failed.join(", ") : "";
-    const unanswered = (r.unanswered || []).length ? "; no answer for: " + r.unanswered.join(", ") : "";
-    return { bad: !!(failed || unanswered), text: "Reminders " + when + " — " + sent + failed + unanswered };
-  };
+  const reminderLine = () => reminderLineFor(reminders, listing && listing.lastReminder);
   const fmtWhen = (s) => !s ? "" :
     new Date(s).toLocaleDateString("en-AU", { day: "2-digit", month: "short", year: "numeric" });
 

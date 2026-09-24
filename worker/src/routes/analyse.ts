@@ -9,7 +9,7 @@ import {
 import { imageToPdf } from "../lib/pdf-wrap.js";
 import { readDocument } from "../lib/shared-state.js";
 import { asKnownPerson, crewRegister } from "../../../source/shared/names.js";
-import { msicCodeIn, openToCertificates, particularsKeyOf } from "../../../source/shared/particulars.js";
+import { isMsicCard, msicCodeIn, newestCard, openToCertificates, particularsKeyOf, ticketCodesIn } from "../../../source/shared/particulars.js";
 import { vessel } from "../vessel.js";
 import { getEnv } from "../env.js";
 import {
@@ -1269,20 +1269,29 @@ const TOP_UP_AT_ONCE = 4;
  *
  * For each man on the register whose box is empty or still the
  * certificates' own (openToCertificates):
- *  - MSIC: his newest MSIC card, where its reading has no documentNumber key.
- *  - Date of birth: where no certificate of his gives one yet and none of
- *    the ones below has the holderBirthDate key, his certificates of
- *    competency and proficiency (the QL- columns) newest first, then his
- *    medical, until one gives a date - at most DOB_TRIES.
+ *  - MSIC: the MSIC card he holds now (newestCard, of the ones the reading
+ *    says are the card itself), where its reading has no documentNumber key.
+ *  - Date of birth: where no certificate in his name gives one yet, his
+ *    certificates of competency and proficiency (the vessel file's
+ *    Qualification columns) newest first, then his medical, until one gives
+ *    a date - those whose reading has no holderBirthDate key, and at most
+ *    DOB_TRIES re-reads in all, counted by the mark each one leaves
+ *    (particularsAsked). A ticket uploaded since carries the key, null
+ *    where it prints no date, and is neither re-read nor counted: it does
+ *    not stand in for the medical that does print one.
  * A re-read reading carries both keys, so it is never read again: that is
  * all the memory there is, and no other store. Only readable certificates
- * in his own name are asked about - one in another man's name could give
- * him nothing.
+ * not in another man's name are asked about - one in another man's name
+ * could give him nothing.
  *
  * What a re-read gives is added to the reading already held - the two new
- * keys and nothing else - so a second look can never move a date or a code
- * on the matrix, and a second look that could not read the scan leaves the
- * first reading standing, with the keys null.
+ * keys, the mark, and the holder's name where the first look had none and
+ * the second found his - and nothing else, so a second look can never move
+ * a date or a code on the matrix, nor the certificate to another man (the
+ * refile goes by the printed name). A second look that finds another man's
+ * name gives nothing: the keys go in null, so it is not asked again. A
+ * second look that could not read the scan leaves the first reading
+ * standing, with the keys null.
  *
  * Stops on the first answer about the model's account, as the reading
  * does, and stores nothing for it. Never more than `cap` reads, and none
@@ -1300,60 +1309,66 @@ export async function topUpParticulars(
   const register = crewRegister(people);
   const msic = msicCodeIn(vessel.qualColumns);
   const medical = new Set(Object.keys(vessel.certStated).map((c) => c.trim().toUpperCase()));
+  const ticketCodes = new Set(ticketCodesIn(vessel.qualColumns));
 
   const certs = await liveCertificates();
   const held = await allReadings();
   const eqTable = await equivalences();
   const store = readingStore();
 
-  type Cert = { row: Row; reading: Reading; code: string };
+  // `at` is the certificate's place in the listing, newest upload first.
+  type Cert = { row: Row; reading: Reading; code: string; at: number };
   const newestFirst = (a: Cert, b: Cert) =>
     String(b.reading.expiresOn || "").localeCompare(String(a.reading.expiresOn || ""))
     || String(b.reading.issuedOn || "").localeCompare(String(a.reading.issuedOn || ""))
-    || String(b.row.filedOn || "").localeCompare(String(a.row.filedOn || ""));
+    || String(b.row.filedOn || "").localeCompare(String(a.row.filedOn || ""))
+    || a.at - b.at;
 
-  // Each man's jobs: a list read in turn until one gives what is wanted.
-  const jobs: { certs: Cert[]; wants: "documentNumber" | "holderBirthDate" }[] = [];
+  // Each man's jobs: a list read in turn until one gives what is wanted,
+  // with the man it is for, so what a second look reads is held against him.
+  const jobs: { me: string; certs: Cert[]; wants: "documentNumber" | "holderBirthDate" }[] = [];
   const asked = new Set<string>();
   for (const p of people) {
     const me = p && p.name ? register.nameOf(p.name) : null;
     if (!me || !particularsKeyOf(p)) continue;
     const mine: Cert[] = [];
-    for (const row of certs) {
-      if (!row.person || register.nameOf(row.person) !== me) continue;
+    certs.forEach((row, at) => {
+      if (!row.person || register.nameOf(row.person) !== me) return;
       const reading = held.get(readingKey(row));
-      if (!reading || reading.readable === false) continue;
-      if (reading.holderName && register.nameOf(reading.holderName) !== me) continue;
-      mine.push({ row, reading, code: String(codeFor(row, reading, eqTable) || "").trim().toUpperCase() });
-    }
+      if (!reading || reading.readable === false) return;
+      if (reading.holderName && register.nameOf(reading.holderName) !== me) return;
+      mine.push({ row, reading, code: String(codeFor(row, reading, eqTable) || "").trim().toUpperCase(), at });
+    });
     const fresh = (list: Cert[]) => list.filter((c) => !asked.has(readingKey(c.row)));
     if (msic && openToCertificates(p, "msic", fromCert)) {
-      const newest = mine.filter((c) => c.code === msic).sort(newestFirst)[0];
+      const newest = newestCard(mine.filter((c) => c.code === msic && isMsicCard(c.reading, msic)));
       if (newest && !("documentNumber" in newest.reading) && fresh([newest]).length) {
-        jobs.push({ certs: [newest], wants: "documentNumber" });
+        jobs.push({ me, certs: [newest], wants: "documentNumber" });
         asked.add(readingKey(newest.row));
       }
     }
-    // Looked for only where no certificate of his gives a date yet and
-    // none of the ones it would be looked for on has been asked: an MSIC
-    // card topped up for its number carries the key too, and must not
-    // stand for his tickets having been asked.
-    const tickets = mine.filter((c) => c.code.startsWith("QL-") && !medical.has(c.code)).sort(newestFirst);
+    // Looked for only where no certificate in his name gives a date yet
+    // (the rule takes nothing from one that names nobody), on the ones not
+    // yet asked, and only while this pass has asked fewer than DOB_TRIES of
+    // them: the mark is the count, so a ticket uploaded since, which
+    // carries the key and prints no date, never ends the search.
+    const tickets = mine.filter((c) => ticketCodes.has(c.code) && !medical.has(c.code)).sort(newestFirst);
     const medicals = mine.filter((c) => medical.has(c.code)).sort(newestFirst);
     const candidates = [...tickets, ...medicals];
+    const tried = candidates.filter((c) => c.reading.particularsAsked).length;
     if (openToCertificates(p, "dob", fromCert)
-      && !mine.some((c) => c.reading.holderBirthDate)
-      && !candidates.some((c) => "holderBirthDate" in c.reading)) {
-      const list = fresh(candidates).slice(0, DOB_TRIES);
+      && !mine.some((c) => c.reading.holderBirthDate && c.reading.holderName)
+      && tried < DOB_TRIES) {
+      const list = fresh(candidates.filter((c) => !("holderBirthDate" in c.reading))).slice(0, DOB_TRIES - tried);
       if (list.length) {
-        jobs.push({ certs: list, wants: "holderBirthDate" });
+        jobs.push({ me, certs: list, wants: "holderBirthDate" });
         list.forEach((c) => asked.add(readingKey(c.row)));
       }
     }
   }
 
   let left = opts.cap;
-  const readOne = async (c: Cert): Promise<Reading | "halt" | "skip"> => {
+  const readOne = async (c: Cert, me: string): Promise<Reading | "halt" | "skip"> => {
     if (out.stopped || !opts.timeLeft()) return "halt";
     let again: Reading;
     try {
@@ -1369,12 +1384,32 @@ export async function topUpParticulars(
       console.error("a certificate was not read again for its particulars:", c.row.filename, e);
       return "skip";
     }
+    // The second look is held against the man it was asked for: the first
+    // look may have named nobody, and a card in his folder can be another
+    // man's. Another man's name gives him nothing, and is not kept either -
+    // the refile would move the certificate on it, and this pass moves
+    // nothing. His own name is kept where the first look had none, so the
+    // rule, which takes nothing from a certificate naming nobody, can use it.
+    const holder = again.readable ? again.holderName ?? null : null;
+    const his = !!holder && register.nameOf(holder) === me;
+    const gives = again.readable && (!holder || his);
     const topped: Reading = {
       ...c.reading,
-      documentNumber: again.readable ? again.documentNumber ?? null : null,
-      holderBirthDate: again.readable ? again.holderBirthDate ?? null : null,
+      holderName: c.reading.holderName ?? (his ? holder : null),
+      documentNumber: gives ? again.documentNumber ?? null : null,
+      holderBirthDate: gives ? again.holderBirthDate ?? null : null,
+      particularsAsked: true,
     };
-    await store.setJSON(readingKey(c.row), topped);
+    try {
+      await store.setJSON(readingKey(c.row), topped);
+    } catch (e) {
+      // Paid for and not kept: this certificate loses its turn and the
+      // others go on - one store fault must not end the pass while the
+      // rest are still reading.
+      out.failed++;
+      console.error("a certificate read again for its particulars was not kept:", c.row.filename, e);
+      return "skip";
+    }
     out.read++;
     return topped;
   };
@@ -1385,10 +1420,11 @@ export async function topUpParticulars(
     left -= job.certs.length;
     let used = 0;
     for (const c of job.certs) {
-      const r = await readOne(c);
+      const r = await readOne(c, job.me);
       if (r === "halt") break;
       used++;
-      if (r !== "skip" && r[job.wants]) break;
+      // Found, in his name: the rest of his list is not needed.
+      if (r !== "skip" && r[job.wants] && r.holderName) break;
     }
     left += job.certs.length - used;
   };

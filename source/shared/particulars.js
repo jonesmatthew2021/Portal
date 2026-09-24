@@ -12,10 +12,10 @@
  *
  * Three things these rules will not do:
  *  - take either value from a certificate printed in another man's name,
- *    whatever folder it was filed in;
+ *    or in no name that could be read, whatever folder it was filed in;
  *  - guess a date of birth where his certificates disagree;
- *  - write over a box somebody typed. A box still holding exactly what the
- *    certificates last put there is the certificates' to change (a new card
+ *  - write over a box somebody typed. A box still holding what the
+ *    certificates put there is the certificates' to change (a new card
  *    brings a new number); anything else in it was typed, and stays.
  *
  * A shared file cannot import another, so the register (crewRegister in
@@ -26,12 +26,19 @@
  * @typedef {{ person?: string | null, code?: string | null, key: string, filedOn?: string | null }} ParticularRow
  *   One certificate on the books: the name it is filed under, the matrix
  *   code it answers to (as the round works it out), the key of its reading,
- *   and when it was filed.
+ *   and when it was filed. Handed in as the library's listing hands them
+ *   over - the newest upload first - so of two cards alike in every date,
+ *   the one earlier in the list is the one uploaded last.
  * @typedef {{ readable?: boolean, holderName?: string | null, issuedOn?: string | null,
- *   expiresOn?: string | null, documentNumber?: string | null, holderBirthDate?: string | null }} ParticularReading
+ *   expiresOn?: string | null, documentNumber?: string | null, holderBirthDate?: string | null,
+ *   qualCode?: string | null, certificateTitle?: string | null }} ParticularReading
  * @typedef {{ nameOf: (spelling: unknown) => string | null }} Register
  * @typedef {{ msic: string | null, dob: string | null }} Particulars
+ * @typedef {{ msic?: string | null, dob?: string | null, was?: { msic?: string[], dob?: string[] } }} FromCert
+ *   What the certificates last put in a man's two boxes, and what they put
+ *   there before that (`was`).
  * @typedef {{ id?: unknown, name?: string, msic?: unknown, dob?: unknown }} ParticularPerson
+ * @typedef {{ row: { filedOn?: string | null }, reading: ParticularReading, at: number }} ParticularCard
  */
 
 /** The two boxes, by the field the person record keeps them in. */
@@ -48,6 +55,67 @@ export function msicCodeIn(cols) {
   const found = (Array.isArray(cols) ? cols : []).find((c) =>
     Array.isArray(c) && String(c[1] || "").replace(/\s+/g, " ").trim().toUpperCase() === want);
   return found ? String(found[0]).trim().toUpperCase() : null;
+}
+
+/** The columns for certificates of competency and proficiency - the ones
+ *  most likely to print the holder's date of birth - found by their group
+ *  on the vessel file, not by the letters their codes start with.
+ * @param {unknown} cols the vessel file's qualColumns: [code, title, group][]
+ * @returns {string[]}
+ */
+export function ticketCodesIn(cols) {
+  return (Array.isArray(cols) ? cols : [])
+    .filter((c) => Array.isArray(c) && String(c[2] || "").replace(/\s+/g, " ").trim().toUpperCase() === "QUALIFICATION")
+    .map((c) => String(c[0]).trim().toUpperCase());
+}
+
+/** Whether the reading itself says the document is an MSIC card - the
+ *  model put it in the MSIC column, or its title is the card's. Being
+ *  filed in the column is not enough: an AusCheck letter or an application
+ *  receipt filed there prints a reference number that is not his card's.
+ * @param {ParticularReading | null | undefined} reading
+ * @param {string | null} msicCode
+ */
+export function isMsicCard(reading, msicCode) {
+  if (!reading || !msicCode) return false;
+  const want = String(msicCode).trim().toUpperCase();
+  if (String(reading.qualCode || "").trim().toUpperCase() === want) return true;
+  const title = String(reading.certificateTitle || "").replace(/\s+/g, " ").trim().toUpperCase();
+  return title.includes("MARITIME SECURITY IDENTIFICATION");
+}
+
+/** Of a man's MSIC cards, the one he holds now: the one that runs out
+ *  last, then the one issued last, then filed last, then uploaded last.
+ *  A card whose expiry went unread still takes the place of the one that
+ *  runs out last where it was issued after it - or, with either issue
+ *  date unread, filed after it - so a renewed card is not beaten by the
+ *  old one only because its expiry could not be made out.
+ * @template {ParticularCard} C
+ * @param {C[]} cards
+ * @returns {C | null}
+ */
+export function newestCard(cards) {
+  const text = (/** @type {unknown} */ v) => (typeof v === "string" ? v : "");
+  /**
+   * @param {C} a
+   * @param {C} b
+   */
+  const byIssue = (a, b) =>
+    text(b.reading.issuedOn).localeCompare(text(a.reading.issuedOn))
+    || text(b.row.filedOn).localeCompare(text(a.row.filedOn))
+    || a.at - b.at; // earlier in the listing is the later upload
+  const list = Array.isArray(cards) ? cards : [];
+  const dated = list.filter((c) => text(c.reading.expiresOn))
+    .sort((a, b) => text(b.reading.expiresOn).localeCompare(text(a.reading.expiresOn)) || byIssue(a, b));
+  const undated = list.filter((c) => !text(c.reading.expiresOn)).sort(byIssue);
+  const best = dated[0] || null;
+  const plain = undated[0] || null;
+  if (!best || !plain) return best || plain;
+  const issued = text(plain.reading.issuedOn) && text(best.reading.issuedOn);
+  const later = issued
+    ? text(plain.reading.issuedOn) > text(best.reading.issuedOn)
+    : text(plain.row.filedOn) > text(best.row.filedOn);
+  return later ? plain : best;
 }
 
 /** An MSIC number as the box holds it: trimmed, inner spaces one, capitals.
@@ -80,10 +148,13 @@ function yearsBefore(today, years) {
  * What one man's certificates say his MSIC number and date of birth are.
  *
  * Only certificates filed under him (through the register) that were read,
- * and whose printed holder - where the reading has one - is him through the
- * register too.
- *  - MSIC: off his MSIC cards whose reading has a number: the one that runs
- *    out last, then the one issued last, then the one filed last.
+ * and whose printed holder is him through the register too. A reading that
+ * names no holder gives nothing: a card misfiled in his folder whose name
+ * could not be made out would otherwise put another man's number or birth
+ * date in his box, and with no name the refile could never move it.
+ *  - MSIC: off his MSIC cards - filed in the column and read as the card
+ *    itself (isMsicCard) - whose reading has a number: the one he holds
+ *    now (newestCard).
  *  - Date of birth: every one of his certificates that prints a real date
  *    between 15 and 90 years ago has a say; the date most of them give wins,
  *    and a tie between two dates is no answer.
@@ -108,8 +179,9 @@ export function particularsFor(person, rows, readings, register, todayISO, msicC
     if (!row.person || register.nameOf(row.person) !== me) return;
     const reading = readingOf(row.key);
     if (!reading || reading.readable === false) return;
-    // Filed under him but printed in another man's name: his folder, not his card.
-    if (reading.holderName && register.nameOf(reading.holderName) !== me) return;
+    // Filed under him but printed in another man's name - or in no name
+    // that could be read: his folder, not necessarily his card.
+    if (!reading.holderName || register.nameOf(reading.holderName) !== me) return;
     seen.add(row.key);
     mine.push({ row, reading, at });
   });
@@ -118,15 +190,11 @@ export function particularsFor(person, rows, readings, register, todayISO, msicC
   let msic = null;
   const want = msicCode ? String(msicCode).trim().toUpperCase() : "";
   if (want) {
-    const text = (/** @type {unknown} */ v) => (typeof v === "string" ? v : "");
-    const cards = mine
-      .filter((x) => String(x.row.code || "").trim().toUpperCase() === want && msicAsWritten(x.reading.documentNumber))
-      .sort((a, b) =>
-        text(b.reading.expiresOn).localeCompare(text(a.reading.expiresOn))
-        || text(b.reading.issuedOn).localeCompare(text(a.reading.issuedOn))
-        || text(b.row.filedOn).localeCompare(text(a.row.filedOn))
-        || b.at - a.at);
-    if (cards.length) msic = msicAsWritten(cards[0].reading.documentNumber);
+    const card = newestCard(mine.filter((x) =>
+      String(x.row.code || "").trim().toUpperCase() === want
+      && isMsicCard(x.reading, want)
+      && msicAsWritten(x.reading.documentNumber)));
+    if (card) msic = msicAsWritten(card.reading.documentNumber);
   }
 
   /** @type {string | null} */
@@ -170,20 +238,31 @@ function sameParticular(field, a, b) {
     : String(a == null ? "" : a).trim() === String(b == null ? "" : b).trim();
 }
 
+/** How many of the values the certificates put in a box before are
+ *  remembered beside the last one. */
+const EARLIER_KEPT = 5;
+
 /** Whether a man's box is the certificates' to fill: empty, or still
- *  holding exactly what they last put there. Anything else was typed. The
- *  hour asks this before it pays to read a certificate again for it.
+ *  holding what they last put there - or what they put there before that.
+ *  An old card's number can come back into the box without anybody typing
+ *  it: a tab still running a page from before the round filled boxes lays
+ *  its whole crew list back over the round's on a collision. Taken for
+ *  typed, it would hold the new card off for good. Anything else was
+ *  typed. The hour asks this before it pays to read a certificate again.
  * @param {ParticularPerson} p
  * @param {"msic" | "dob"} field
- * @param {Record<string, Partial<Particulars>> | null | undefined} fromCert
+ * @param {Record<string, FromCert> | null | undefined} fromCert
  */
 export function openToCertificates(p, field, fromCert) {
   const box = p && typeof p[field] === "string" ? String(p[field]).trim() : "";
   if (!box) return true;
   const key = particularsKeyOf(p);
   const had = key && fromCert && typeof fromCert === "object" ? fromCert[key] : null;
-  const last = had && typeof had === "object" && typeof had[field] === "string" ? had[field] : "";
-  return !!last && sameParticular(field, box, last);
+  if (!had || typeof had !== "object") return false;
+  const last = typeof had[field] === "string" ? had[field] : "";
+  if (last && sameParticular(field, box, last)) return true;
+  const earlier = had.was && typeof had.was === "object" && Array.isArray(had.was[field]) ? had.was[field] : [];
+  return earlier.some((v) => typeof v === "string" && !!v && sameParticular(field, box, v));
 }
 
 /**
@@ -193,17 +272,18 @@ export function openToCertificates(p, field, fromCert) {
  * certificates put there last time (`fromCert`) - so a renewed card's
  * number takes the old card's place. Anything else in a box was typed by
  * hand and is left as typed; the record of what the certificates said is
- * kept beside it. A typed value that is what the certificates say is the
- * certificates' from then on. Nothing found never clears a box.
+ * kept beside it, with what they said before (`was`, see
+ * openToCertificates). A typed value that is what the certificates say is
+ * the certificates' from then on. Nothing found never clears a box.
  * @param {ParticularPerson[] | null | undefined} people
  * @param {Record<string, Particulars | null | undefined> | null | undefined} found by particularsKeyOf
- * @param {Record<string, Partial<Particulars>> | null | undefined} fromCert what the certificates last put in each box
- * @returns {{ people: ParticularPerson[], fromCert: Record<string, Partial<Particulars>>, changed: boolean }}
+ * @param {Record<string, FromCert> | null | undefined} fromCert what the certificates last put in each box
+ * @returns {{ people: ParticularPerson[], fromCert: Record<string, FromCert>, changed: boolean }}
  */
 export function fillParticulars(people, found, fromCert) {
   const list = Array.isArray(people) ? people : [];
   const was = fromCert && typeof fromCert === "object" ? fromCert : {};
-  /** @type {Record<string, Partial<Particulars>>} */
+  /** @type {Record<string, FromCert>} */
   const record = { ...was };
   let changed = false;
   const next = list.map((p) => {
@@ -225,7 +305,12 @@ export function fillParticulars(people, found, fromCert) {
         changed = true;
       }
       if (last !== value) {
-        record[key] = { ...had, [field]: value };
+        // The value it replaces is remembered, so it is never taken for
+        // typed if it comes back into the box.
+        const before = had.was && typeof had.was === "object" && Array.isArray(had.was[field]) ? had.was[field] : [];
+        const earlier = last ? [last, ...before.filter((v) => v !== last && v !== value)].slice(0, EARLIER_KEPT) : before;
+        const kept = earlier.length ? { ...(had.was || {}), [field]: earlier } : had.was;
+        record[key] = { ...had, [field]: value, ...(kept ? { was: kept } : {}) };
         changed = true;
       }
     });

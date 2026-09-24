@@ -14,7 +14,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setEnv } from "../src/env.js";
-import analyse, { compareMatrix, extract, refile } from "../src/routes/analyse.js";
+import analyse, { compareMatrix, extract, refile, topUpParticulars } from "../src/routes/analyse.js";
 import readOne from "../src/routes/read-one.js";
 import restoreFile from "../src/routes/restore-file.js";
 import { MAX_BYTES } from "../src/lib/shared-state.js";
@@ -2654,7 +2654,9 @@ test("the hour stops reading on the first credit answer, says so in red, and sti
   assert.equal(portal.blobs.has("sync|credit"), false, "nothing kept about the credit between hours");
 
   // Topped up: the next hour reads both with nothing reset, and the line is gone.
-  const answers = modelAnswers(() => ({ status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans", certificateTitle: "Master <500GT", expiresOn: "2032-01-01" }) }));
+  // The new readings print his date of birth, so his older Master ticket is
+  // not read again for it: only the reading's own calls are counted here.
+  const answers = modelAnswers(() => ({ status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans", certificateTitle: "Master <500GT", expiresOn: "2032-01-01", holderBirthDate: "1980-03-10" }) }));
   try {
     await quiet(() => worker.scheduled({} as never, env as never));
   } finally {
@@ -2685,7 +2687,9 @@ test("a busy model stops the hour's reading as an aside, not an error, and the n
 
   // Next hour the model answers: the certificate is read with no reset,
   // and the line is gone from the record.
-  const answers = modelAnswers(() => ({ status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans", certificateTitle: "Master <500GT", expiresOn: "2032-01-01" }) }));
+  // The new reading prints his date of birth, so his older Master ticket is
+  // not read again for it: only the reading's own calls are counted here.
+  const answers = modelAnswers(() => ({ status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans", certificateTitle: "Master <500GT", expiresOn: "2032-01-01", holderBirthDate: "1980-03-10" }) }));
   try {
     await quiet(() => worker.scheduled({} as never, env as never));
   } finally {
@@ -3705,7 +3709,7 @@ test("a box somebody typed is left as typed, and a renewed card's number replace
   });
   await worker.scheduled({} as never, renewed.env as never);
   assert.equal(person(renewed.portal).msic, "MSIC 2222", "the box held the old card's number as the certificates put it: the new card's replaces it");
-  assert.deepEqual(renewed.portal.doc().particularsFromCert, { p1: { msic: "MSIC 2222" } });
+  assert.deepEqual(renewed.portal.doc().particularsFromCert, { p1: { msic: "MSIC 2222", was: { msic: ["MSIC 1111"] } } });
 });
 
 test("a card filed under one man and printed in another's name gives neither of them anything", async () => {
@@ -3779,7 +3783,9 @@ test("no more than twenty certificates are read again in an hour; the rest wait 
   const { portal, env } = await particularsPortal({ model: true, people: crew,
     certs: crew.map((p, i) => ({ id: `v${i}`, checksum: `card-${i}`, code: "VS-01", person: p.name,
       reading: oldReading({ qualCode: "VS-01", holderName: p.name }) })) });
-  const first = modelByFile((file) => ({ status: 200, body: readingStream({ ...reading, documentNumber: file }) }));
+  // The second look reads each card in its own man's name.
+  const crewOn = (file: string) => crew[Number(/card-(\d+)/.exec(file)?.[1])]?.name ?? null;
+  const first = modelByFile((file) => ({ status: 200, body: readingStream({ ...reading, holderName: crewOn(file), documentNumber: file }) }));
   try {
     await quiet(() => worker.scheduled({} as never, env as never));
   } finally {
@@ -3787,7 +3793,7 @@ test("no more than twenty certificates are read again in an hour; the rest wait 
   }
   assert.equal(first.calls.length, 20, "twenty this hour");
   assert.equal(hourly(portal).particularsRead, 20);
-  const second = modelByFile((file) => ({ status: 200, body: readingStream({ ...reading, documentNumber: file }) }));
+  const second = modelByFile((file) => ({ status: 200, body: readingStream({ ...reading, holderName: crewOn(file), documentNumber: file }) }));
   try {
     await quiet(() => worker.scheduled({} as never, env as never));
   } finally {
@@ -3814,4 +3820,189 @@ test("the account saying no stops the topping up: nothing stored, the line in re
   assert.equal(h.applied, 1, "the round still ran");
   assert.deepEqual(readingWrites(portal.db), [], "nothing stored against the certificates: they are asked again once there is credit");
   assert.equal("documentNumber" in JSON.parse(portal.blobs.get("certificate-readings|r1/card.json")!), false);
+});
+
+test("a card whose first look named nobody, read again and found in another man's name, gives the man it is filed under nothing", async () => {
+  const { portal, env } = await particularsPortal({ model: true,
+    people: [EVANS_P, { id: "p2", name: "SITTIYOS, Kachin", aliases: [] }],
+    certs: [{ id: "k1", checksum: "kcard", code: "VS-01", reading: oldReading({ qualCode: "VS-01", holderName: null }) }] });
+  const model = modelByFile((file) => ({ status: 200, body: readingStream(file === "kcard.pdf"
+    ? { ...reading, holderName: "Kachin Sittiyos", qualCode: "VS-01", documentNumber: "MSIC 9999", holderBirthDate: "1975-05-05" }
+    : { ...reading, holderName: "Brenton Evans" }) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    model.restore();
+  }
+  assert.ok(model.calls.some((c) => c.includes("kcard.pdf")), "the card was asked about");
+  assert.equal(person(portal).msic, undefined, "Kachin's number is not put in Evans's box");
+  assert.equal(person(portal).dob, undefined, "nor Kachin's date of birth");
+  assert.equal(person(portal, "p2").msic, undefined, "nor in Kachin's: it is not filed under him");
+  const kept = JSON.parse(portal.blobs.get("certificate-readings|r1/kcard.json")!);
+  assert.deepEqual([kept.holderName, kept.documentNumber, kept.holderBirthDate, kept.particularsAsked], [null, null, null, true],
+    "the reading carries both keys, null, so it is not asked again; the other man's name is not kept, so nothing is moved on it");
+  assert.equal(portal.rows.find((r: { id?: unknown }) => r.id === "k1")!.person, "EVANS, Brenton", "the certificate is where it was filed");
+
+  const again = modelByFile(() => ({ status: 200, body: readingStream(reading) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    again.restore();
+  }
+  assert.equal(again.calls.filter((c) => c.includes("kcard.pdf")).length, 0, "and it is never asked again");
+});
+
+test("a card whose first look named nobody, read again and found in his own name, fills his box and keeps his name", async () => {
+  const { portal, env } = await particularsPortal({ model: true,
+    certs: [{ id: "v1", checksum: "card", code: "VS-01", reading: oldReading({ qualCode: "VS-01", holderName: null }) }] });
+  const model = modelByFile((file) => ({ status: 200, body: readingStream(file === "card.pdf"
+    ? { ...reading, holderName: "Brenton Evans", qualCode: "VS-01", documentNumber: "MSIC 5555" }
+    : { ...reading, holderName: "Brenton Evans" }) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    model.restore();
+  }
+  assert.equal(person(portal).msic, "MSIC 5555");
+  assert.equal(JSON.parse(portal.blobs.get("certificate-readings|r1/card.json")!).holderName, "Brenton Evans",
+    "the name the second look read is kept, so the rule can see whose card it is");
+});
+
+test("his date of birth is looked for on three certificates at most, and not again the next hour", async () => {
+  // Evans's Master ticket and four more, all read before the question was asked.
+  const { portal, env } = await particularsPortal({ model: true,
+    certs: ["QL-02", "QL-03", "QL-04", "QL-05"].map((code, i) => ({ id: `t${i}`, checksum: `ticket-${i}`, code, reading: oldReading({ qualCode: code }) })) });
+  const model = modelByFile(() => ({ status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans" }) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    model.restore();
+  }
+  assert.equal(model.calls.length, 3, "none printed a date: three asked, and no more");
+  assert.equal(hourly(portal).particularsRead, 3);
+  const next = modelByFile(() => ({ status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans" }) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    next.restore();
+  }
+  assert.equal(next.calls.length, 0, "the next hour asks nothing: his three are spent");
+});
+
+test("a ticket uploaded since that prints no date of birth does not end the search for it", async () => {
+  const { portal, env } = await particularsPortal({ model: true, certs: [
+    { id: "n1", checksum: "first-aid", code: "QL-18", reading: newReading({ qualCode: "QL-18" }) },
+    { id: "m1", checksum: "medical", code: "QL-17", reading: oldReading({ qualCode: "QL-17" }) },
+  ] });
+  const model = modelByFile((file) => ({ status: 200, body: readingStream(/medical/i.test(file)
+    ? { ...reading, holderName: "Brenton Evans", holderBirthDate: "1980-03-10" }
+    : { ...reading, holderName: "Brenton Evans" }) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    model.restore();
+  }
+  assert.equal(model.calls.length, 2, "his Master ticket, then his medical");
+  assert.equal(model.calls.filter((c) => c.includes("first-aid.pdf")).length, 0, "the new ticket already said it prints none");
+  assert.equal(person(portal).dob, "1980-03-10", "the medical's date goes in");
+});
+
+test("the topping up starts nothing once the hour's time is up, and asks nothing about a card in another man's name", async () => {
+  const codes = vessel.qualColumns.map((c) => [c[0], c[1]] as [string, string]);
+  await particularsPortal({ model: true,
+    certs: [{ id: "t1", checksum: "ticket-2", code: "QL-02", reading: oldReading({ qualCode: "QL-02" }) }] });
+  const model = modelByFile(() => ({ status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans" }) }));
+  try {
+    const none = await quiet(() => topUpParticulars(codes, { cap: 20, timeLeft: () => false }));
+    assert.equal(none.read, 0);
+    assert.equal(model.calls.length, 0, "no time from the start: nothing asked");
+    let looks = 0;
+    const one = await quiet(() => topUpParticulars(codes, { cap: 20, timeLeft: () => ++looks <= 2 }));
+    assert.equal(model.calls.length, 1, "time ran out after his first certificate: his second is not started");
+    assert.equal(one.read, 1);
+  } finally {
+    model.restore();
+  }
+
+  await particularsPortal({ model: true,
+    people: [{ ...EVANS_P, dob: "1980-01-01" }, { id: "p2", name: "SITTIYOS, Kachin", aliases: [] }],
+    certs: [{ id: "k1", checksum: "kcard", code: "VS-01", reading: oldReading({ qualCode: "VS-01", holderName: "Kachin Sittiyos" }) }] });
+  const other = modelByFile(() => ({ status: 200, body: readingStream(reading) }));
+  try {
+    const out = await quiet(() => topUpParticulars(codes, { cap: 20, timeLeft: () => true }));
+    assert.equal(out.read, 0);
+  } finally {
+    other.restore();
+  }
+  assert.equal(other.calls.length, 0, "filed under Evans, printed in Kachin's name: not worth paying to ask about for either");
+});
+
+test("a reading read again that the store will not keep costs that certificate its turn, and the rest go on", async () => {
+  const { portal, env } = await particularsPortal({ model: true,
+    people: [{ ...EVANS_P, dob: "1980-01-01" }, { id: "p2", name: "SITTIYOS, Kachin", aliases: [], dob: "1975-05-05" }],
+    certs: [
+      { id: "v1", checksum: "bad", code: "VS-01", reading: oldReading({ qualCode: "VS-01" }) },
+      { id: "v2", checksum: "good", code: "VS-01", person: "SITTIYOS, Kachin", reading: oldReading({ qualCode: "VS-01", holderName: "Kachin Sittiyos" }) },
+    ] });
+  // The store refuses the one write: the bad card's reading.
+  type Stmt = { bind: (...a: unknown[]) => Stmt; run: () => Promise<unknown> };
+  const db = portal.db as unknown as { prepare: (sql: string) => Stmt };
+  const prepare = db.prepare;
+  db.prepare = (sql: string) => {
+    const st = prepare(sql);
+    if (!/^INSERT INTO blobs/.test(sql)) return st;
+    return { ...st, bind: (...args: unknown[]) => {
+      const bound = st.bind(...args);
+      if (args[1] !== "r1/bad.json") return bound;
+      return { ...bound, run: async () => { throw new Error("the store refused the write"); } };
+    } };
+  };
+  const model = modelByFile((file) => ({ status: 200, body: readingStream(file === "bad.pdf"
+    ? { ...reading, holderName: "Brenton Evans", documentNumber: "MSIC 1" }
+    : { ...reading, holderName: "Kachin Sittiyos", documentNumber: "MSIC 2" }) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    model.restore();
+    db.prepare = prepare;
+  }
+  assert.equal(model.calls.length, 2);
+  const h = hourly(portal);
+  assert.equal(h.particularsRead, 1, "the one kept is counted");
+  assert.equal(h.readError, null, "a store fault is not the account's: the reading's line is not red");
+  assert.equal(h.particularsError, null, "and the pass itself did not fail");
+  assert.equal(person(portal, "p2").msic, "MSIC 2", "Kachin's box is filled");
+  assert.equal(person(portal).msic, undefined, "Evans's waits for the next hour");
+  assert.equal("documentNumber" in JSON.parse(portal.blobs.get("certificate-readings|r1/bad.json")!), false, "so his card is asked again then");
+});
+
+test("a fault in the topping up is its own line on the hour's record, not the reading's red, and the round still runs", async () => {
+  const { portal, env } = await particularsPortal({ model: true,
+    certs: [{ id: "v1", checksum: "card", code: "VS-01", reading: oldReading({ qualCode: "VS-01" }) }] });
+  // The first statement the top-up itself asks for fails.
+  type Stmt = Record<string, unknown>;
+  const db = portal.db as unknown as { prepare: (sql: string) => Stmt };
+  const prepare = db.prepare;
+  let failed = false;
+  db.prepare = (sql: string) => {
+    const st = prepare(sql);
+    if (failed || !String(new Error().stack).includes("topUpParticulars")) return st;
+    failed = true;
+    const refuse = async () => { throw new Error("the database is away"); };
+    const broken: Stmt = { ...st, all: refuse, first: refuse, run: refuse, raw: refuse };
+    broken.bind = () => broken;
+    return broken;
+  };
+  const model = modelByFile(() => ({ status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans" }) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    model.restore();
+    db.prepare = prepare;
+  }
+  assert.ok(failed, "the top-up's statement was the one refused");
+  const h = hourly(portal);
+  assert.equal(h.particularsError, "the database is away");
+  assert.equal(h.readError, null, "the certificate reading is not painted red for it");
+  assert.equal(h.applied, 1, "the round still ran");
 });

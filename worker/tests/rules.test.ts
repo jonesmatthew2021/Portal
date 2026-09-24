@@ -21,7 +21,7 @@ import { vessel, checkVessel, vesselNow } from "../src/vessel.js";
 import { crewRowsOnly, crewRegister, nameLetters, registerWords } from "../../source/shared/names.js";
 import { RED_DAYS, daysUntil } from "../../source/shared/bands.js";
 import * as reminders from "../../source/shared/reminders.js";
-import { particularsFor, fillParticulars, mergeParticulars, msicCodeIn } from "../../source/shared/particulars.js";
+import { particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, ticketCodesIn, isMsicCard, openToCertificates } from "../../source/shared/particulars.js";
 import { expiringIn, EXPIRING_MEANS, PORTAL_TOOLS } from "../src/lib/portal.js";
 import { dueMeans } from "../src/lib/matrix.js";
 import { readFileSync } from "node:fs";
@@ -650,10 +650,10 @@ const P_ROWS = [
   { person: "SAMPLE, Sam", code: "QL-02", key: "s4" },
 ];
 const P_READINGS: Record<string, Record<string, unknown>> = {
-  m1: { readable: true, holderName: "Brenton Evans", documentNumber: "msic 0001", expiresOn: "2027-01-01", holderBirthDate: "1980-03-10" },
-  m2: { readable: true, holderName: "brenton EVANS", documentNumber: " msic  0002 ", expiresOn: "2030-01-01", holderBirthDate: "1980-03-10" },
+  m1: { readable: true, qualCode: "VS-01", holderName: "Brenton Evans", documentNumber: "msic 0001", expiresOn: "2027-01-01", holderBirthDate: "1980-03-10" },
+  m2: { readable: true, qualCode: "VS-01", holderName: "brenton EVANS", documentNumber: " msic  0002 ", expiresOn: "2030-01-01", holderBirthDate: "1980-03-10" },
   q1: { readable: true, holderName: "Evans Brenton", holderBirthDate: "1980-10-03" },
-  w1: { readable: true, holderName: "Kachin Sittiyos", documentNumber: "WRONG", expiresOn: "2035-01-01", holderBirthDate: "1970-01-01" },
+  w1: { readable: true, qualCode: "VS-01", holderName: "Kachin Sittiyos", documentNumber: "WRONG", expiresOn: "2035-01-01", holderBirthDate: "1970-01-01" },
   k1: { readable: true, holderName: "Kachin Sittiyos", holderBirthDate: "1975-05-05" },
   k2: { readable: true, holderName: "SITTIYOS Kachin", holderBirthDate: "1976-06-06" },
   s1: { readable: true, holderName: "Sam Sample", holderBirthDate: "2030-01-01" },
@@ -673,9 +673,67 @@ test("particulars: the newest MSIC card's number, in his name only, and the date
     "his certificates say two dates once each: no guess; the card in his name filed under Evans is not his to take");
   assert.deepEqual(particularsOf("SAMPLE, Sam"), { msic: null, dob: null },
     "a date in the future, five years ago, 120 years ago or not a day at all says nothing");
+  // Each impossible date as the only say Sam's certificates have: on its
+  // own it has no tie to hide behind, so only the age check can refuse it.
+  const samOnly = (key: string, date: string) => {
+    const r: Record<string, Record<string, unknown>> = { ...P_READINGS };
+    ["s1", "s2", "s3", "s4"].forEach((k) => { r[k] = { ...P_READINGS[k], readable: false }; });
+    r[key] = { readable: true, holderName: "Sam Sample", holderBirthDate: date };
+    return particularsOf("SAMPLE, Sam", "VS-01", r).dob;
+  };
+  assert.equal(samOnly("s1", "1985-01-01"), "1985-01-01", "a real date on its own is his date - so a null below is the date refused");
+  assert.equal(samOnly("s1", "2030-01-01"), null, "a date in the future, alone, says nothing");
+  assert.equal(samOnly("s2", "2021-06-01"), null, "a five-year-old, alone, says nothing");
+  assert.equal(samOnly("s3", "1906-01-01"), null, "a 120-year-old, alone, says nothing");
+  assert.equal(samOnly("s4", "1985-02-30"), null, "a day that does not exist, alone, says nothing");
+  const outvoted: Record<string, Record<string, unknown>> = { ...P_READINGS,
+    s1: { readable: true, holderName: "Sam Sample", holderBirthDate: "2030-01-01" },
+    s2: { readable: true, holderName: "Sam Sample", holderBirthDate: "2030-01-01" },
+    s3: { readable: true, holderName: "Sam Sample", holderBirthDate: "1985-01-01" },
+    s4: { readable: false } };
+  assert.equal(particularsOf("SAMPLE, Sam", "VS-01", outvoted).dob, "1985-01-01", "two certificates saying a future date do not outvote the one real date");
   assert.equal(particularsOf("EVANS, Brenton", msicCodeIn([["QL-01", "Master", "Qualification"]])).msic, null, "no MSIC column, no MSIC number");
   const unread = { ...P_READINGS, m2: { ...P_READINGS.m2, readable: false } };
   assert.equal(particularsOf("EVANS, Brenton", "VS-01", unread).msic, "MSIC 0001", "an unreadable reading gives nothing");
+});
+
+test("particulars: a certificate that names nobody gives nothing, however it is filed", () => {
+  const nameless = { ...P_READINGS,
+    m1: { ...P_READINGS.m1, holderName: null }, m2: { ...P_READINGS.m2, holderName: null }, q1: { ...P_READINGS.q1, holderName: "" } };
+  assert.deepEqual(particularsOf("EVANS, Brenton", "VS-01", nameless), { msic: null, dob: null },
+    "his folder, but no name to say it is his card: neither box takes it");
+});
+
+test("particulars: only the card itself gives an MSIC number, not a letter or a receipt filed in its column", () => {
+  const rows = [{ person: "EVANS, Brenton", code: "VS-01", key: "a1" }, { person: "EVANS, Brenton", code: "VS-01", key: "a2" }];
+  const letter = { readable: true, holderName: "Brenton Evans", qualCode: null, certificateTitle: "AusCheck MSIC application approved", documentNumber: "REF 7777" };
+  const card = { readable: true, holderName: "Brenton Evans", qualCode: null, certificateTitle: "Maritime  Security Identification Card", documentNumber: "MSIC 0003", expiresOn: "2020-01-01" };
+  assert.equal(particularsFor("EVANS, Brenton", rows, { a1: letter }, P_REGISTER, P_TODAY, "VS-01").msic, null, "the letter's reference is not his card number");
+  assert.equal(particularsFor("EVANS, Brenton", rows, { a1: letter, a2: card }, P_REGISTER, P_TODAY, "VS-01").msic, "MSIC 0003",
+    "the card, known by its title, gives it");
+  assert.equal(isMsicCard({ qualCode: "vs-01" }, "VS-01"), true, "read into the MSIC column by the model");
+  assert.equal(isMsicCard({ qualCode: "QL-01", certificateTitle: "Master <500GT" }, "VS-01"), false);
+  assert.deepEqual(ticketCodesIn(vessel.qualColumns).slice(0, 2), ["QL-01", "QL-02"], "the tickets are the vessel file's Qualification group");
+  assert.equal(ticketCodesIn(vessel.qualColumns).includes("VS-01"), false);
+});
+
+test("particulars: of two cards alike in every date the later upload wins, and a renewal whose expiry went unread still beats the old card", () => {
+  // The listing hands the newest upload first.
+  const card = (key: string, at: number, reading: Record<string, unknown>, filedOn = "2026-01-01") =>
+    ({ row: { key, filedOn }, reading, at });
+  const same = { expiresOn: "2030-01-01", issuedOn: "2026-01-01" };
+  assert.equal(newestCard([card("new", 0, same), card("old", 1, same)])!.row.key, "new", "the clearer scan uploaded last");
+  assert.equal(newestCard([card("old", 1, same), card("new", 0, same)])!.row.key, "new", "whatever order they are handed in");
+  const expired = card("old", 1, { expiresOn: "2024-01-01", issuedOn: "2020-01-01" }, "2020-02-01");
+  assert.equal(newestCard([expired, card("renewed", 0, { issuedOn: "2024-01-01" }, "2024-02-01")])!.row.key, "renewed",
+    "issued after the old card: the new card, its expiry unread or not");
+  assert.equal(newestCard([expired, card("undated", 0, {}, "2024-02-01")])!.row.key, "undated", "no issue date either: filed after it");
+  assert.equal(newestCard([card("current", 1, { expiresOn: "2030-01-01", issuedOn: "2026-01-01" }), card("older", 0, { issuedOn: "2022-01-01" })])!.row.key,
+    "current", "an undated card issued before the one that runs out last does not take its place");
+  const rows = [{ person: "EVANS, Brenton", code: "VS-01", key: "n1" }, { person: "EVANS, Brenton", code: "VS-01", key: "n2" }];
+  const r = { readable: true, holderName: "Brenton Evans", qualCode: "VS-01", expiresOn: "2030-01-01" };
+  assert.equal(particularsFor("EVANS, Brenton", rows, { n1: { ...r, documentNumber: "MSIC 0009" }, n2: { ...r, documentNumber: "MSIC 0008" } }, P_REGISTER, P_TODAY, "VS-01").msic,
+    "MSIC 0009", "the rule takes the one earlier in the listing: uploaded last");
 });
 
 test("particulars: an empty box is filled, a typed one kept, a renewed card replaces the old number, nothing found clears nothing", () => {
@@ -696,7 +754,16 @@ test("particulars: an empty box is filled, a typed one kept, a renewed card repl
 
   const renewed = fillParticulars([{ id: "p1", msic: "MSIC 0001" }], { p1: { msic: "MSIC 0002", dob: null } }, { p1: { msic: "MSIC 0001" } });
   assert.deepEqual(renewed.people, [{ id: "p1", msic: "MSIC 0002" }], "the new card's number replaces the old card's");
-  assert.deepEqual(renewed.fromCert, { p1: { msic: "MSIC 0002" } });
+  assert.deepEqual(renewed.fromCert, { p1: { msic: "MSIC 0002", was: { msic: ["MSIC 0001"] } } }, "and the old card's is remembered as the certificates'");
+  // A tab from before the round filled boxes lays its crew list back over
+  // the round's: the old card's number is in the box again. It is not typed.
+  const laidBack = [{ id: "p1", msic: "MSIC 0001" }];
+  assert.equal(openToCertificates(laidBack[0], "msic", renewed.fromCert), true, "an earlier certificate value is still the certificates'");
+  assert.deepEqual(fillParticulars(laidBack, { p1: { msic: "MSIC 0002", dob: null } }, renewed.fromCert).people, [{ id: "p1", msic: "MSIC 0002" }],
+    "so the new card's number goes back in");
+  assert.equal(openToCertificates({ id: "p1", msic: "TYPED 9" }, "msic", renewed.fromCert), false, "anything else is still typed");
+  const back = fillParticulars([{ id: "p1", msic: "MSIC 0002" }], { p1: { msic: "MSIC 0001", dob: null } }, renewed.fromCert);
+  assert.deepEqual(back.fromCert, { p1: { msic: "MSIC 0001", was: { msic: ["MSIC 0002"] } } }, "a value that comes back is the last one, not an earlier one too");
 
   const sameAsCert = fillParticulars([{ id: "p1", msic: "msic 0002" }], { p1: { msic: "MSIC 0002", dob: null } }, {});
   assert.deepEqual(sameAsCert.people, [{ id: "p1", msic: "msic 0002" }], "a typed value that is the certificate's stays as typed");

@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -580,6 +580,16 @@ const is = (got, want, what) => {
     { people: [{ id: "p1", name: "EVANS, Brenton", msic: "" }, { id: "p2", name: "SITTIYOS, Kachin", rank: "Master", dob: "1975-05-06" }] },
     crew, crewMine, ["people"]);
   is(crewAfter.people[0].msic, "MSIC 0002", "…and an edit made while that save was in the air does not take it off again");
+  /* The note of what the certificates put in each box, where a tab's save
+     carries it (no screen writes it today, but a save that does must not
+     wipe the round's): three ways, like the note of filled cells. The
+     round noted p2 since; the tab dropped p1 and added p3. */
+  const notes = lib.mergeSaved({ touched: ["particularsFromCert"],
+    mine: { particularsFromCert: { p3: { dob: "1990-01-01" } } },
+    theirs: { particularsFromCert: { p1: { msic: "MSIC 0002" }, p2: { dob: "1975-05-05" } } },
+    base: { particulars: { p1: { msic: "MSIC 0002" } } } });
+  is(notes.particularsFromCert, { p2: { dob: "1975-05-05" }, p3: { dob: "1990-01-01" } },
+    "the round's new note stays, the one the tab took off stays off, the tab's own goes up");
 
   /* An edit made while the merged copy was still in the air is laid back
      over it the same way, not raw: the local copy was built before the
@@ -2429,6 +2439,22 @@ const is = (got, want, what) => {
   is(online.filter((c) => c.title !== undefined).length, 0, "…nor carries the offline line");
 }
 
+/* ---- the SharePoint page's reminder line: red for a send that failed or
+        went unanswered, and saying which ---- */
+{
+  const { reminderLineFor } = lib;
+  const on = { on: true };
+  const week = { at: "2026-09-28T00:00:00.000Z", own: 2, summary: 1, failed: [], unanswered: [] };
+  is(reminderLineFor({ on: false }, week), { bad: false, text: "Reminders are off" }, "off says so, not red");
+  is(reminderLineFor(on, null), null, "on, and never sent: no line");
+  is(reminderLineFor(on, week).bad, false, "every send answered: not red");
+  const silent = reminderLineFor(on, { ...week, unanswered: ["a@b"] });
+  is(silent.bad, true, "a send the service never answered is red");
+  is(silent.text.includes("no answer for: a@b") && !silent.text.includes("failed"), true, "…named as unanswered, not as failed");
+  const failedSend = reminderLineFor(on, { ...week, failed: ["c@d"] });
+  is([failedSend.bad, failedSend.text.includes("failed: c@d")], [true, true], "a failed send is red and named");
+}
+
 /* ---- a man's MSIC number and date of birth, off his own certificates ---- */
 {
   /* The page's own copy of the rules (spliced in at @shared), and the
@@ -2454,10 +2480,10 @@ const is = (got, want, what) => {
     { person: "SAMPLE, Sam", code: "QL-01", key: "s3" },
   ];
   const readings = {
-    m1: { readable: true, holderName: "Brenton Evans", documentNumber: "msic 0001", expiresOn: "2027-01-01", holderBirthDate: "1980-03-10" },
-    m2: { readable: true, holderName: "brenton EVANS", documentNumber: " msic  0002 ", expiresOn: "2030-01-01", holderBirthDate: "1980-03-10" },
+    m1: { readable: true, qualCode: "VS-01", holderName: "Brenton Evans", documentNumber: "msic 0001", expiresOn: "2027-01-01", holderBirthDate: "1980-03-10" },
+    m2: { readable: true, qualCode: "VS-01", holderName: "brenton EVANS", documentNumber: " msic  0002 ", expiresOn: "2030-01-01", holderBirthDate: "1980-03-10" },
     q1: { readable: true, holderName: "Evans Brenton", holderBirthDate: "1980-10-03" },
-    w1: { readable: true, holderName: "Kachin Sittiyos", documentNumber: "WRONG", expiresOn: "2035-01-01", holderBirthDate: "1970-01-01" },
+    w1: { readable: true, qualCode: "VS-01", holderName: "Kachin Sittiyos", documentNumber: "WRONG", expiresOn: "2035-01-01", holderBirthDate: "1970-01-01" },
     k1: { readable: true, holderName: "Kachin Sittiyos", holderBirthDate: "1975-05-05" },
     k2: { readable: true, holderName: "SITTIYOS Kachin", holderBirthDate: "1976-06-06" },
     s1: { readable: true, holderName: "Sam Sample", holderBirthDate: "2030-01-01" },
@@ -2473,6 +2499,29 @@ const is = (got, want, what) => {
   is(of("brenton evans"), of("EVANS, Brenton"), "another order or case is the same man through the register");
   is(of("SITTIYOS, Kachin"), { msic: null, dob: null }, "Kachin: two dates once each is no answer");
   is(of("SAMPLE, Sam"), { msic: null, dob: null }, "a future date, a five-year-old and a 120-year-old say nothing");
+  // Each impossible date as Sam's only say: no tie to hide behind, so only
+  // the age check can refuse it.
+  const samOnly = (date) => particularsFor("SAMPLE, Sam", [{ person: "SAMPLE, Sam", code: "QL-12", key: "x" }],
+    { x: { readable: true, holderName: "Sam Sample", holderBirthDate: date } }, register, today, "VS-01").dob;
+  is(samOnly("1985-01-01"), "1985-01-01", "a real date on its own is his - so a null below is the date refused");
+  is([samOnly("2030-01-01"), samOnly("2021-06-01"), samOnly("1906-01-01"), samOnly("1985-02-30")], [null, null, null, null],
+    "a future date, a five-year-old, a 120-year-old and a day that does not exist each say nothing, even alone");
+  const three = [{ person: "SAMPLE, Sam", code: "QL-12", key: "y1" }, { person: "SAMPLE, Sam", code: "QL-17", key: "y2" }, { person: "SAMPLE, Sam", code: "QL-01", key: "y3" }];
+  is(particularsFor("SAMPLE, Sam", three, { y1: { readable: true, holderName: "Sam Sample", holderBirthDate: "2030-01-01" },
+    y2: { readable: true, holderName: "Sam Sample", holderBirthDate: "2030-01-01" }, y3: { readable: true, holderName: "Sam Sample", holderBirthDate: "1985-01-01" } },
+  register, today, "VS-01").dob, "1985-01-01", "two future dates do not outvote the one real date");
+  is(particularsFor("EVANS, Brenton", rows, { ...readings, m1: { ...readings.m1, holderName: null }, m2: { ...readings.m2, holderName: null }, q1: { ...readings.q1, holderName: "" } },
+    register, today, "VS-01"), { msic: null, dob: null }, "a certificate naming nobody gives nothing, whoever's folder it is in");
+  const letter = { readable: true, holderName: "Brenton Evans", qualCode: null, certificateTitle: "AusCheck MSIC application approved", documentNumber: "REF 7777" };
+  is(particularsFor("EVANS, Brenton", [{ person: "EVANS, Brenton", code: "VS-01", key: "l" }], { l: letter }, register, today, "VS-01").msic, null,
+    "a letter filed in the MSIC column does not give its reference as his card number");
+  is(lib.isMsicCard({ certificateTitle: "Maritime Security Identification Card" }, "VS-01"), true, "the card known by its title");
+  is(lib.ticketCodesIn(VESSEL.qualColumns).includes("QL-17") && !lib.ticketCodesIn(VESSEL.qualColumns).includes("VS-01"), true, "the tickets are the Qualification group");
+  const alike = { expiresOn: "2030-01-01", issuedOn: "2026-01-01" };
+  is(lib.newestCard([{ row: { key: "old" }, reading: alike, at: 1 }, { row: { key: "new" }, reading: alike, at: 0 }]).row.key, "new",
+    "alike in every date: the upload first in the listing, the newest");
+  is(lib.newestCard([{ row: { key: "old" }, reading: { expiresOn: "2024-01-01", issuedOn: "2020-01-01" }, at: 1 },
+    { row: { key: "renewed" }, reading: { issuedOn: "2024-01-01" }, at: 0 }]).row.key, "renewed", "a renewal whose expiry went unread still beats the old card");
   is(of("EVANS, Brenton", msicCodeIn([["QL-01", "Master", "Qualification"]])).msic, null, "no MSIC column, no number");
 
   const F = { p1: { msic: "MSIC 0002", dob: "1980-03-10" } };
@@ -2483,6 +2532,11 @@ const is = (got, want, what) => {
   is([typed.people[0].msic, typed.fromCert.p1.msic], ["TYPED 9", "MSIC 0001"], "a typed number is left as typed, the record kept");
   const renewed = fillParticulars([{ id: "p1", msic: "MSIC 0001" }], F, { p1: { msic: "MSIC 0001" } });
   is(renewed.people[0].msic, "MSIC 0002", "a renewed card's number replaces the old card's");
+  is(renewed.fromCert.p1.was, { msic: ["MSIC 0001"] }, "and the old card's is remembered as the certificates'");
+  is(lib.openToCertificates({ id: "p1", msic: "MSIC 0001" }, "msic", renewed.fromCert), true,
+    "laid back into the box by a tab from before the fill, the old number is still the certificates' - not typed");
+  is(fillParticulars([{ id: "p1", msic: "MSIC 0001" }], F, renewed.fromCert).people[0].msic, "MSIC 0002", "so the new card's goes back in");
+  is(lib.openToCertificates({ id: "p1", msic: "TYPED 9" }, "msic", renewed.fromCert), false, "anything else is typed");
   const same = fillParticulars([{ id: "p1", msic: "msic 0002" }], F, {});
   is([same.people[0].msic, same.fromCert.p1.msic], ["msic 0002", "MSIC 0002"], "typed as the certificate says: kept as typed, not marked typed");
   is(fillParticulars([{ id: "p1", msic: "MSIC 0001" }], null, { p1: { msic: "MSIC 0001" } }).changed, false, "nothing found clears nothing");

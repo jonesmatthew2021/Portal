@@ -138,6 +138,10 @@ export type Reading = {
   documentNumber?: string | null;
   /** The holder's date of birth as printed, YYYY-MM-DD; the same rule. */
   holderBirthDate?: string | null;
+  /** Set on a reading the hour read again for the two keys above
+   *  (topUpParticulars): the count of these is how many of a man's
+   *  certificates his date of birth has been looked for on. */
+  particularsAsked?: boolean;
 };
 
 export function readingStore() {

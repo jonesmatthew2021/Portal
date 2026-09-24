@@ -192,7 +192,7 @@ export default {
     // Whatever happens below is written down: the counts on a good hour,
     // the error on a bad one. A round that fails in silence is how the
     // matrix once sat empty for three hours with nobody told.
-    const outcome = { read: 0, refiled: 0, particularsRead: 0, syncError: null as string | null, readError: null as string | null, readStopped: null as string | null, readTried: false };
+    const outcome = { read: 0, refiled: 0, particularsRead: 0, particularsError: null as string | null, syncError: null as string | null, readError: null as string | null, readStopped: null as string | null, readTried: false };
     const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
     const written = async (round: Record<string, unknown>) => {
       try {
@@ -312,7 +312,7 @@ export const hourDeadline = (tick: number, leaseAt: number) =>
  */
 async function theHour(
   env: PortalEnv, lease: Lease, deadline: number,
-  outcome: { read: number; refiled: number; particularsRead: number; syncError: string | null; readError: string | null; readStopped: string | null; readTried: boolean },
+  outcome: { read: number; refiled: number; particularsRead: number; particularsError: string | null; syncError: string | null; readError: string | null; readStopped: string | null; readTried: boolean },
   written: (round: Record<string, unknown>) => Promise<void>,
 ): Promise<Record<string, unknown>> {
   const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -442,12 +442,21 @@ async function theHour(
         // is asked about under the man it is filed under now) and before the
         // round, which fills the boxes. Not on an hour the account already
         // said no to, and on the same terms if it says no now.
+        // A fault of its own (the store, the listing) is its own line on the
+        // record, shown nowhere: it is a back-fill, and must not paint the
+        // hour's certificate reading red. Only the account's no is the
+        // reading's.
         if (names.length && loopsLeft() && !outcome.readError && !outcome.readStopped && env.ANTHROPIC_BASE_URL) {
-          const top = await topUpParticulars(codes, { cap: MAX_PARTICULARS_READS, timeLeft: loopsLeft });
-          outcome.particularsRead += top.read;
-          if (top.stopped) {
-            if (top.stopped.kind === "credit" || top.stopped.kind === "key") outcome.readError = top.stopped.line;
-            else outcome.readStopped = top.stopped.line;
+          try {
+            const top = await topUpParticulars(codes, { cap: MAX_PARTICULARS_READS, timeLeft: loopsLeft });
+            outcome.particularsRead += top.read;
+            if (top.stopped) {
+              if (top.stopped.kind === "credit" || top.stopped.kind === "key") outcome.readError = top.stopped.line;
+              else outcome.readStopped = top.stopped.line;
+            }
+          } catch (e) {
+            outcome.particularsError = said(e);
+            console.error("topping up the readings for the particulars failed:", e);
           }
         }
         if (outcome.read || outcome.refiled || outcome.particularsRead) {
