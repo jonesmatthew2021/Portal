@@ -113,7 +113,14 @@ function CertChecker({ query }) {
 
   const kindOf = (x) => (x.band.date ? "expired" : x.band.key === "not" ? "missing" : "unknown");
 
-  const all = QUALS.rows.map((r) => ({ row: r, gaps: gapsFor(r) })).filter((x) => x.gaps.length);
+  /* Worked out once per matrix, not once per keystroke: the search box
+     narrows these lists below, and the four rules further down read every
+     crew row against every column, which is thousands of lookups nobody
+     needs re-done to filter a name. */
+  const all = useMemo(
+    () => QUALS.rows.map((r) => ({ row: r, gaps: gapsFor(r) })).filter((x) => x.gaps.length),
+    [QUALS],
+  );
 
   const count = (k) => all.reduce((n, x) => n + x.gaps.filter((g) => kindOf(g) === k).length, 0);
 
@@ -169,16 +176,18 @@ function CertChecker({ query }) {
     personBy.get(String(knownName(row[0]) || row[0]).trim().toUpperCase()), TODAY, orderRules,
   );
 
-  const orders = QUALS.rows
-    .map((row) => ({ row, lines: ordersFor(row) }))
-    .filter((x) => x.lines.length)
-    .filter((x) => hits(x.row[0] + " " + x.row[1]));
+  // Every man's lines, on the inputs the rules read; the search only narrows.
+  const ordersAll = useMemo(
+    () => QUALS.rows.map((row) => ({ row, lines: ordersFor(row) })).filter((x) => x.lines.length),
+    [QUALS, certDates, people, skillsRequirements],
+  );
+  const orders = ordersAll.filter((x) => hits(x.row[0] + " " + x.row[1]));
   const ordersCount = orders.reduce((n, x) => n + x.lines.length, 0);
 
   // Every item whose certificate was issued by an authority that doesn't read
   // as Australian — valid or not, because the flag is about who issued it,
   // not when it runs out.
-  const foreign = QUALS.rows
+  const foreignAll = useMemo(() => QUALS.rows
     .map((row) => ({
       row,
       items: QUALS.cols
@@ -186,7 +195,8 @@ function CertChecker({ query }) {
         .map((x) => ({ ...x, foreignIssuer: foreignIssuerOf(certDateFor(certDates, row[0], x.code), x.title) }))
         .filter((x) => x.foreignIssuer),
     }))
-    .filter((x) => x.items.length)
+    .filter((x) => x.items.length), [QUALS, certDates]);
+  const foreign = foreignAll
     .filter((x) => hits(x.row[0] + " " + x.row[1]))
     .sort((a, b) => b.items.length - a.items.length);
   const foreignCount = foreign.reduce((n, x) => n + x.items.length, 0);
