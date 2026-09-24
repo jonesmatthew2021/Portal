@@ -4006,3 +4006,98 @@ test("a fault in the topping up is its own line on the hour's record, not the re
   assert.equal(h.readError, null, "the certificate reading is not painted red for it");
   assert.equal(h.applied, 1, "the round still ran");
 });
+
+test("a date the rule throws out does not end the search for his date of birth: the next certificate is read and the box fills", async () => {
+  // His medical, read since the question was asked, printed its issue date
+  // where the birth date goes: six years ago, which no man's birth date is.
+  // His Master ticket (evans-master, read before) prints the real one.
+  const { portal, env } = await particularsPortal({ model: true, certs: [
+    { id: "m1", checksum: "medical", code: "QL-17", reading: newReading({ qualCode: "QL-17", holderBirthDate: "2020-01-01" }) },
+  ] });
+  const model = modelByFile(() => ({ status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans", holderBirthDate: "1980-03-10" }) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    model.restore();
+  }
+  assert.equal(model.calls.length, 1, "the medical's date is no answer, so his Master ticket is read");
+  assert.ok(model.calls[0].includes("Master.pdf"), "the Master ticket, as the refile named it");
+  assert.equal(person(portal).dob, "1980-03-10", "and the box fills");
+});
+
+test("two dates that tie are no answer: the search goes on until a third certificate breaks the tie", async () => {
+  // A tie already standing: the medical (read since) has the day and month
+  // the wrong way round, the Chief Mate ticket (read since) has them right.
+  // The Master ticket, read before, is read again and breaks it.
+  const standing = await particularsPortal({ model: true, certs: [
+    { id: "m1", checksum: "medical", code: "QL-17", reading: newReading({ qualCode: "QL-17", holderBirthDate: "1980-10-03" }) },
+    { id: "t1", checksum: "chief-mate", code: "QL-02", reading: newReading({ qualCode: "QL-02", expiresOn: "2028-01-01", holderBirthDate: "1980-03-10" }) },
+  ] });
+  const one = modelByFile(() => ({ status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans", holderBirthDate: "1980-03-10" }) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, standing.env as never));
+  } finally {
+    one.restore();
+  }
+  assert.equal(one.calls.length, 1, "one each is no answer, so the Master ticket is read");
+  assert.equal(person(standing.portal).dob, "1980-03-10", "two of three agree");
+
+  // And the next hour asks nothing: the rule has its answer.
+  const next = modelByFile(() => ({ status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans" }) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, standing.env as never));
+  } finally {
+    next.restore();
+  }
+  assert.equal(next.calls.length, 0);
+});
+
+test("the card looked at for his number is the one the rule reads from: a newer card the first look could not name is looked at once, and then the newest card in his name without the number", async () => {
+  // An older card in his name, read before the number was asked for; and a
+  // newer card read since, with the key but no name the model could make out.
+  const cards = (over: Record<string, unknown> = {}): PCert[] => [
+    { id: "a", checksum: "old-named", code: "VS-01", filedOn: "2024-01-01", reading: oldReading({ qualCode: "VS-01", expiresOn: "2027-01-01" }) },
+    { id: "b", checksum: "new-nameless", code: "VS-01", filedOn: "2026-06-01",
+      reading: newReading({ qualCode: "VS-01", holderName: null, expiresOn: "2030-01-01", ...over }) },
+  ];
+  // His date of birth typed, so only the card is looked for.
+  const two = [{ ...EVANS_P, dob: "1980-01-01" }, { id: "p2", name: "SITTIYOS, Kachin", aliases: [] }];
+  const answer = (file: string, nameless: Record<string, unknown>) => ({ status: 200, body: readingStream(
+    file === "new-nameless.pdf" ? { ...reading, qualCode: "VS-01", ...nameless } : { ...reading, qualCode: "VS-01", holderName: "Brenton Evans", documentNumber: "MSIC 1111" }) });
+
+  // The nameless card turns out to be another man's: the older card in his name is read next, and its number goes in.
+  const other = await particularsPortal({ model: true, people: two, certs: cards() });
+  const m1 = modelByFile((file) => answer(file, { holderName: "Kachin Sittiyos", documentNumber: "MSIC 9999" }));
+  try {
+    await quiet(() => worker.scheduled({} as never, other.env as never));
+  } finally {
+    m1.restore();
+  }
+  assert.deepEqual(m1.calls.map((c) => /Filename: (.+?)\\n/.exec(c)?.[1]), ["new-nameless.pdf", "old-named.pdf"], "the newer card first, then the named one");
+  assert.equal(person(other.portal).msic, "MSIC 1111");
+  assert.equal(person(other.portal, "p2").msic, undefined);
+  const b = JSON.parse(other.portal.blobs.get("certificate-readings|r1/new-nameless.json")!);
+  assert.deepEqual([b.holderName, b.documentNumber, b.particularsAsked], [null, null, true], "the other man's name and number are not kept, and it is not looked at again");
+
+  // The nameless card turns out to be his: it is the card he holds now, so the older card is not read.
+  const his = await particularsPortal({ model: true, people: two, certs: cards() });
+  const m2 = modelByFile((file) => answer(file, { holderName: "Brenton Evans", documentNumber: "MSIC 2222" }));
+  try {
+    await quiet(() => worker.scheduled({} as never, his.env as never));
+  } finally {
+    m2.restore();
+  }
+  assert.equal(m2.calls.length, 1, "his newest card, named now, has the number: the older card is not needed");
+  assert.equal(person(his.portal).msic, "MSIC 2222");
+
+  // The nameless card was looked at once already (another man's, or unreadable): only the named card is read.
+  const looked = await particularsPortal({ model: true, people: two, certs: cards({ documentNumber: null, particularsAsked: true }) });
+  const m3 = modelByFile((file) => answer(file, {}));
+  try {
+    await quiet(() => worker.scheduled({} as never, looked.env as never));
+  } finally {
+    m3.restore();
+  }
+  assert.deepEqual(m3.calls.map((c) => /Filename: (.+?)\\n/.exec(c)?.[1]), ["old-named.pdf"]);
+  assert.equal(person(looked.portal).msic, "MSIC 1111");
+});

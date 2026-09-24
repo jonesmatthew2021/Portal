@@ -9,7 +9,7 @@ import {
 import { imageToPdf } from "../lib/pdf-wrap.js";
 import { readDocument } from "../lib/shared-state.js";
 import { asKnownPerson, crewRegister } from "../../../source/shared/names.js";
-import { isMsicCard, msicCodeIn, newestCard, openToCertificates, particularsKeyOf, ticketCodesIn } from "../../../source/shared/particulars.js";
+import { isMsicCard, msicCodeIn, newestCard, openToCertificates, particularsFor, particularsKeyOf, ticketCodesIn } from "../../../source/shared/particulars.js";
 import { vessel } from "../vessel.js";
 import { getEnv } from "../env.js";
 import {
@@ -43,6 +43,7 @@ import {
   readingStore,
   refusalSays,
   str,
+  todayThere,
   type Matrix,
   type MatrixReading,
   type Reading,
@@ -1268,17 +1269,24 @@ const TOP_UP_AT_ONCE = 4;
  * is left alone for exactly that reason).
  *
  * For each man on the register whose box is empty or still the
- * certificates' own (openToCertificates):
- *  - MSIC: the MSIC card he holds now (newestCard, of the ones the reading
- *    says are the card itself), where its reading has no documentNumber key.
- *  - Date of birth: where no certificate in his name gives one yet, his
+ * certificates' own (openToCertificates), read the way the rule itself
+ * reads (particularsFor), so what is paid for is what the rule will use:
+ *  - MSIC: the rule takes the number off the newest card printed in his
+ *    name, so the newest card in his name whose reading has no
+ *    documentNumber key is read again for it. A card the first look could
+ *    not put a name to gives the rule nothing while it stands: where it is
+ *    his newest card it is looked at once, first, so its name is known
+ *    (particularsAsked is the mark) - his, and it is the card he holds
+ *    now; another man's, and the named card is read next.
+ *  - Date of birth: while the rule gives none - no date, a date it throws
+ *    out (an issue date read as the birth date), or two that tie - his
  *    certificates of competency and proficiency (the vessel file's
- *    Qualification columns) newest first, then his medical, until one gives
- *    a date - those whose reading has no holderBirthDate key, and at most
- *    DOB_TRIES re-reads in all, counted by the mark each one leaves
- *    (particularsAsked). A ticket uploaded since carries the key, null
- *    where it prints no date, and is neither re-read nor counted: it does
- *    not stand in for the medical that does print one.
+ *    Qualification columns) newest first, then his medical, until the
+ *    rule's answer moves: those whose reading has no holderBirthDate key,
+ *    and at most DOB_TRIES re-reads in all, counted by the mark each one
+ *    leaves (particularsAsked). A ticket uploaded since carries the key,
+ *    null where it prints no date, and is neither re-read nor counted: it
+ *    does not stand in for the medical that does print one.
  * A re-read reading carries both keys, so it is never read again: that is
  * all the memory there is, and no other store. Only readable certificates
  * not in another man's name are asked about - one in another man's name
@@ -1324,9 +1332,27 @@ export async function topUpParticulars(
     || String(b.row.filedOn || "").localeCompare(String(a.row.filedOn || ""))
     || a.at - b.at;
 
-  // Each man's jobs: a list read in turn until one gives what is wanted,
+  // What the rule finds for him off the readings as they stand: `held` is
+  // brought up to date as this pass tops readings up, so the same question
+  // asked after each read says whether the read gave the rule its answer.
+  const today = todayThere();
+  const ruleRows = particularsInput(certs, held, eqTable).rows;
+  const found = (me: string, field: "msic" | "dob") => particularsFor(me, ruleRows, held, register, today, msic)[field];
+  // Newest first, as the rule ranks cards.
+  const cardsInOrder = (list: Cert[]) => {
+    const out: Cert[] = [];
+    let rest = list;
+    while (rest.length) {
+      const next = newestCard(rest)!;
+      out.push(next);
+      rest = rest.filter((c) => c !== next);
+    }
+    return out;
+  };
+
+  // Each man's jobs: a list read in turn until the rule's answer moves,
   // with the man it is for, so what a second look reads is held against him.
-  const jobs: { me: string; certs: Cert[]; wants: "documentNumber" | "holderBirthDate" }[] = [];
+  const jobs: { me: string; certs: Cert[]; wants: "msic" | "dob" }[] = [];
   const asked = new Set<string>();
   for (const p of people) {
     const me = p && p.name ? register.nameOf(p.name) : null;
@@ -1341,27 +1367,33 @@ export async function topUpParticulars(
     });
     const fresh = (list: Cert[]) => list.filter((c) => !asked.has(readingKey(c.row)));
     if (msic && openToCertificates(p, "msic", fromCert)) {
-      const newest = newestCard(mine.filter((c) => c.code === msic && isMsicCard(c.reading, msic)));
-      if (newest && !("documentNumber" in newest.reading) && fresh([newest]).length) {
-        jobs.push({ me, certs: [newest], wants: "documentNumber" });
-        asked.add(readingKey(newest.row));
+      const cards = mine.filter((c) => c.code === msic && isMsicCard(c.reading, msic));
+      // The rule reads only cards printed in his name: of those, the newest
+      // without the number key is read again for it.
+      const named = newestCard(cards.filter((c) => c.reading.holderName && !("documentNumber" in c.reading)));
+      // His newest card, where the first look could not name it and no
+      // second look has been paid for: looked at once so its name is known.
+      const top = newestCard(cards);
+      const nameless = top && !top.reading.holderName && !top.reading.particularsAsked ? top : null;
+      const list = fresh(cardsInOrder([nameless, named].filter((c): c is Cert => !!c)));
+      if (list.length) {
+        jobs.push({ me, certs: list, wants: "msic" });
+        list.forEach((c) => asked.add(readingKey(c.row)));
       }
     }
-    // Looked for only where no certificate in his name gives a date yet
-    // (the rule takes nothing from one that names nobody), on the ones not
-    // yet asked, and only while this pass has asked fewer than DOB_TRIES of
-    // them: the mark is the count, so a ticket uploaded since, which
-    // carries the key and prints no date, never ends the search.
+    // Looked for only while the rule gives no date - none read, one it
+    // throws out, or two that tie - on the ones not yet asked, and only
+    // while this pass has asked fewer than DOB_TRIES of them: the mark is
+    // the count, so a ticket uploaded since, which carries the key and
+    // prints no date, never ends the search.
     const tickets = mine.filter((c) => ticketCodes.has(c.code) && !medical.has(c.code)).sort(newestFirst);
     const medicals = mine.filter((c) => medical.has(c.code)).sort(newestFirst);
     const candidates = [...tickets, ...medicals];
     const tried = candidates.filter((c) => c.reading.particularsAsked).length;
-    if (openToCertificates(p, "dob", fromCert)
-      && !mine.some((c) => c.reading.holderBirthDate && c.reading.holderName)
-      && tried < DOB_TRIES) {
+    if (openToCertificates(p, "dob", fromCert) && found(me, "dob") == null && tried < DOB_TRIES) {
       const list = fresh(candidates.filter((c) => !("holderBirthDate" in c.reading))).slice(0, DOB_TRIES - tried);
       if (list.length) {
-        jobs.push({ me, certs: list, wants: "holderBirthDate" });
+        jobs.push({ me, certs: list, wants: "dob" });
         list.forEach((c) => asked.add(readingKey(c.row)));
       }
     }
@@ -1419,12 +1451,17 @@ export async function topUpParticulars(
     if (left < job.certs.length) return;
     left -= job.certs.length;
     let used = 0;
+    const before = found(job.me, job.wants);
     for (const c of job.certs) {
       const r = await readOne(c, job.me);
       if (r === "halt") break;
       used++;
-      // Found, in his name: the rest of his list is not needed.
-      if (r !== "skip" && r[job.wants] && r.holderName) break;
+      if (r === "skip") continue;
+      held.set(readingKey(c.row), r);
+      // The rule's answer moved on this read: the rest of his list is not
+      // needed. Only the rule's own answer counts - a date it throws out,
+      // or one that only ties with another, leaves the search going.
+      if (found(job.me, job.wants) !== before) break;
     }
     left += job.certs.length - used;
   };

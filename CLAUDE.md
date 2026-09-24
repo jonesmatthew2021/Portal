@@ -156,7 +156,11 @@ on any line that still names this one.
   every certificate for `documentNumber` and `holderBirthDate` (both keys
   always written); `READING_VERSION` is unchanged, and the readings made
   before are topped up by a bounded pass on the hour (`topUpParticulars` in
-  `routes/analyse.ts`: only for a box still the certificates', at most
+  `routes/analyse.ts`: only for a box still the certificates', read the
+  way the rule reads - the newest card in his name without the key, a
+  newer card the first look could not name looked at once first, and his
+  date of birth while `particularsFor` gives none, a read ending the
+  search only when the rule's answer moves - at most
   twenty an hour and three per man for his date of birth (counted by
   `particularsAsked`), `particularsRead` on the hour's record, stopping on
   the account's first no, adding the two keys - null where the second look
