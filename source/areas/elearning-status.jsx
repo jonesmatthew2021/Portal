@@ -134,7 +134,7 @@ function ELearningStatus() {
             {lastUpdated ? fmtDate(lastUpdated) : "No spreadsheet uploaded yet"}
           </div>
         </div>
-        <UpdateMatrixButton label="Update certificate list" />
+        <UpdateMatrixButton />
       </div>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>

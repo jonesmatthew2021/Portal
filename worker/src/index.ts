@@ -191,8 +191,8 @@ export default {
         // comparison count are answered to a page that asked for the round,
         // not kept on the hour's line. A workbook the server cannot write
         // goes on roundSkipped too: an open tab reads that line to decide
-        // whether to run the round itself, and its own button can write
-        // a workbook of any size.
+        // whether to run the round itself (shouldTabRound), and the page
+        // shows the reason for a hand to fix.
         const { changes: _changes, summary: _summary, ...forRecord } = round;
         const roundSkipped = (forRecord.roundSkipped ?? forRecord.workbookProblem ?? null) as string | null;
         await recordHourly({ ...outcome, ...forRecord, roundSkipped, at: t0, durationMs: Date.now() - t0 });

@@ -50,7 +50,7 @@ export type RoundOutcome = {
   roundSkipped: string | null;
   /** Why the workbook cannot be written by the server at all - not a
    *  workbook, too big to rewrite here, no bytes on file. Another hour will
-   *  not better it; the page's own button can. */
+   *  not better it: said on the record and to the page, for a hand to fix. */
   workbookProblem: string | null;
   validityProblem: string | null;
   /** The cells the round moved on the matrix, as the last save tried them;
@@ -161,7 +161,7 @@ export async function renewLease(token: string, ms: number): Promise<boolean> {
 
 // The office's workbook is rewritten in memory, and a Worker has a fixed
 // amount of that. Six megabytes is well past the real workbook and well
-// inside the room; anything bigger is left to the page's own button.
+// inside the room; anything bigger is a workbookProblem, said and left alone.
 const MAX_WORKBOOK_BYTES = 6 * 1024 * 1024;
 
 const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -550,8 +550,8 @@ async function rememberOwed(by: string, owed: Set<string>) {
  * office's file or a removed copy's. Every reason not to is said rather
  * than thrown - in roundSkipped where another hour may do better, in
  * workbookProblem where none will (the file itself is not one the server
- * can rewrite); the matrix is already saved by now, and the page's own
- * button can always write the workbook from it.
+ * can rewrite); the matrix is already saved by now, and the reason is on
+ * the record for a hand to fix.
  *
  * Answers whether the workbook now carries every cell it was owed: yes
  * when it was written, and yes when there was nothing to write because it

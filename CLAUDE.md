@@ -114,7 +114,11 @@ modules. Edit that code there and only there.
 - **One round.** Every Update matrix button starts the server's round
   (`POST /api/round`, `runMatrixRound` in `source/index.html`); the page
   reads new certificates and refiles first, and never applies dates itself
-  — it re-pulls the document.
+  — it re-pulls the document. Every such button is called Update matrix
+  (`UpdateMatrixButton`, the default label, wherever it sits); the matrix
+  spreadsheet is a report built from the matrix as it stands
+  (`MatrixSpreadsheet`: Matrix spreadsheet to download it, File the matrix
+  spreadsheet to file it), never a reading.
 - **The round on the hour is the worker's.** `worker/src/lib/round.ts` puts
   the certificates' dates on the crew matrix and writes the office's CREW
   QUALIFICATION EXPIRY workbook by itself, every hour, with no browser open
