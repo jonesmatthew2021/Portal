@@ -4684,6 +4684,14 @@ const SWINGS = [
 ];
 
 const swingNamed = (letter) => (SWINGS.find((s) => s.letter === letter) || {}).name || `Swing ${letter}`;
+/* The crew's name on the roster, by the swing's id - "Alpha" for the swing
+   labelled "Swing Alpha", the way the worker says it (lib/portal.ts). A
+   roster row carries the id; the file lists the ids and the labels in the
+   same order, A then B. An id the file does not carry is shown as it is. */
+const SWING_CREW_WORD = Object.fromEntries(VESSEL.swings.ids.map((id, i) =>
+  [id, String((SWINGS[i] || {}).name || id).replace(/^Swing\s+/i, "")]));
+const swingCrewWord = (id) => SWING_CREW_WORD[id] || id;
+const swingCrewCalled = (id) => (SWING_CREW_WORD[id] ? SWING_CREW_WORD[id] + " crew" : id);
 
 
 
@@ -10786,7 +10794,7 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
     ["ALPHA", "BRAVO"].forEach((crew) => {
       const own = list.filter((p) => !p.coverOnly && p.crew === crew).sort(order);
       const cover = list.filter((p) => p.coverOnly && p.covered === crew).sort(order);
-      if (own.length) out.push({ label: crew === "ALPHA" ? "Alpha crew" : "Bravo crew", people: own, of: crew });
+      if (own.length) out.push({ label: swingCrewCalled(crew), people: own, of: crew });
       if (cover.length) out.push({ label: "Relief / cover", people: cover, relief: true, of: crew });
     });
     const placed = new Set(out.flatMap((b) => b.people.map((p) => p.name)));
@@ -12622,7 +12630,7 @@ function RosterListPage() {
   const moveCrew = (name, crew) => {
     change((plan) => {
       plan.rows = plan.rows.map((r) => (r.name === name ? { ...r, crew } : r));
-    }, name + " moved to " + (crew === "ALPHA" ? "Alpha" : "Bravo") + " crew");
+    }, name + " moved to " + swingCrewWord(crew) + " crew");
   };
 
   const dropPerson = (row) => {
@@ -12778,7 +12786,7 @@ function RosterListPage() {
                         <span style={{ fontWeight: 700 }}>
                           {g.from === g.to ? fmtDate(g.from) : fmtDate(g.from) + " – " + fmtDate(g.to)}
                         </span>
-                        {" · " + (g.crew === "ALPHA" ? "Alpha" : "Bravo") + " · "}
+                        {" · " + swingCrewWord(g.crew) + " · "}
                         <span style={{ fontFamily: T.mono, fontSize: 11.5 }}>{g.rank}</span>
                         {" — " + g.have + " aboard where " + g.want + " is usual."}
                         {g.away.length > 0 && (
@@ -12805,7 +12813,7 @@ function RosterListPage() {
                       <option value="">Choose…</option>
                       {onRoster.map((p) => (
                         <option key={p.name} value={p.name}>
-                          {p.name} — {p.crew === "ALPHA" ? "Alpha" : p.crew === "BRAVO" ? "Bravo" : p.crew}
+                          {p.name} — {swingCrewWord(p.crew)}
                         </option>
                       ))}
                     </select>
@@ -12822,12 +12830,12 @@ function RosterListPage() {
                     {tableEdit.name}
                   </div>
                   <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted, marginBottom: 12 }}>
-                    {now === "ALPHA" ? "Alpha crew" : now === "BRAVO" ? "Bravo crew" : now}
+                    {swingCrewCalled(now)}
                   </div>
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                     <Button variant="ghost"
                       onClick={() => { moveCrew(tableEdit.name, other); setTableEdit(null); }}>
-                      Move to {other === "ALPHA" ? "Alpha" : "Bravo"} crew
+                      Move to {swingCrewWord(other)} crew
                     </Button>
                     <span style={{ flex: 1 }} />
                     {tableEdit.sure ? (

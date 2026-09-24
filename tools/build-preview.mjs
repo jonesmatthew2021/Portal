@@ -24,6 +24,12 @@ const BANNER = `<!--
 -->
 `;
 
+/** The shim with the vessel file written into its __VESSEL__ slot. Split and
+ *  join, not replace: a replacement string is read for "$" marks ($&, $', $1),
+ *  so a "$" in a certificate note or a pattern would be mangled on the way in,
+ *  and "$'" would splice the rest of the shim into the middle of the JSON. */
+export const vesselIntoShim = (shim, vessel) => shim.split("__VESSEL__").join(JSON.stringify(vessel));
+
 /** Returns the built preview. Writes it to preview.html unless write is false. */
 export function buildPreview({ write = true, quiet = false } = {}) {
   const vessel = readVessel();
@@ -38,7 +44,7 @@ export function buildPreview({ write = true, quiet = false } = {}) {
 
   // The shim runs outside the page's own script, so the vessel file is written
   // into it here rather than kept a second time in the shim.
-  let shim = readFileSync(SHIM, "utf8").replace(/\n$/, "").replace("__VESSEL__", JSON.stringify(vessel));
+  let shim = vesselIntoShim(readFileSync(SHIM, "utf8").replace(/\n$/, ""), vessel);
   let note;
   if (existsSync(DATA)) {
     const held = JSON.parse(readFileSync(DATA, "utf8"));

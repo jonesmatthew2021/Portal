@@ -18,6 +18,7 @@ import { asKey } from "../src/db/cert-home.js";
 import { canonicalPersonName } from "../src/db/person-name.js";
 import { setEnv } from "../src/env.js";
 import { vessel, checkVessel } from "../src/vessel.js";
+import { crewRowsOnly } from "../../source/shared/names.js";
 
 /** The office's equivalence sheet, as the portal stores it. */
 const SHEET = [
@@ -382,4 +383,41 @@ test("the vessel file's lists are checked inside, so a rank group or a pool that
   qualColumns[0] = ["QL-01"];
   assert.throws(() => checkVessel({ ...vessel, qualColumns }, "a vessel file"), /"qualColumns\[0\]"/);
   assert.equal(checkVessel(vessel), vessel, "the file as it is passes every one of these");
+});
+
+test("an item the vessel file says never lapses reads as held, whatever date is in its column", () => {
+  /* The hour and the page both load the matrix through crewRowsOnly with the
+     file's noExpiryCodes; a caller that dropped the list would let an
+     e-learning sat in 2020 read as long lapsed, so the list is required. */
+  const quals = { cols: [["VS-04", "Helm CONNECT", "Vessel Specific"], ["QL-01", "Medical", "Qualification"]],
+    rows: [["SMITH, Alan", "Master", "1", ["2020-01-01", "2020-01-01"]]] };
+  assert.ok(vessel.noExpiryCodes.includes("VS-04"), "VS-04 is on this vessel's list");
+  assert.deepEqual(crewRowsOnly(quals as never, [], vessel.noExpiryCodes)!.rows[0][3], ["Y", "2020-01-01"]);
+  assert.deepEqual(crewRowsOnly(quals as never, [], [])!.rows[0][3], ["2020-01-01", "2020-01-01"], "without the list the date stays a date");
+  assert.throws(() => (crewRowsOnly as unknown as (q: unknown, p: unknown) => unknown)(quals, []),
+    /crewRowsOnly needs the vessel file's list of items that never lapse \(noExpiryCodes\)\./);
+});
+
+test("the ids the page keys on are the file's to carry and not to rename", () => {
+  /* A shift group called "dayshift" would reach the page with no rule to
+     take its requirements by, and the Swing Compliance page would throw; a
+     position in a pool the file does not name would never be filled. */
+  const groups = vessel.shift.groups.map((g) => ({ ...g }));
+  groups[0].id = "dayshift";
+  assert.throws(() => checkVessel({ ...vessel, shift: { ...vessel.shift, groups } }, "a vessel file"),
+    /a vessel file has no usable "shift.groups\[0\].id" - it must be one of day, night, swing\./);
+  assert.throws(() => checkVessel({ ...vessel, shift: { ...vessel.shift, groups: vessel.shift.groups.slice(1) } }, "a vessel file"),
+    /"shift.groups" - it must be a list with one group for each of day, night, swing\./);
+  assert.throws(() => checkVessel({ ...vessel, shift: { ...vessel.shift, sheetWords: { day: "Shift 1" } } }, "a vessel file"),
+    /"shift.sheetWords.night" - it must be a string\./);
+  assert.throws(() => checkVessel({ ...vessel, swings: { ...vessel.swings, labels: { A: "Swing Alpha" } } }, "a vessel file"),
+    /"swings.labels.B" - it must be a string\./);
+  const establishment = vessel.shift.establishment.map((e) => ({ ...e }));
+  establishment[2] = { ...establishment[2], pool: "purser" };
+  assert.throws(() => checkVessel({ ...vessel, shift: { ...vessel.shift, establishment } }, "a vessel file"),
+    /"shift.establishment\[2\].pool" - it must be one of the pools in shift.pools\./);
+  establishment[2] = { ...vessel.shift.establishment[2], shifts: ["day", "evening"] };
+  assert.throws(() => checkVessel({ ...vessel, shift: { ...vessel.shift, establishment } }, "a vessel file"),
+    /"shift.establishment\[2\].shifts\[1\]" - it must be day or night\./);
+  assert.equal(checkVessel(vessel), vessel, "the file as it is carries every id the page keys on");
 });

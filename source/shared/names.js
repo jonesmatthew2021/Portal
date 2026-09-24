@@ -191,6 +191,10 @@ export function asKnownPerson(people) {
  * @param {string[]} noExpiryCodes the items that never lapse (the vessel file's)
  */
 export function crewRowsOnly(quals, people, noExpiryCodes) {
+  // The list is the vessel file's and every caller has it. Without it an
+  // e-learning would quietly read as a date that can run out, so a caller
+  // that forgets the list is stopped here rather than found on the matrix.
+  if (!Array.isArray(noExpiryCodes)) throw new Error("crewRowsOnly needs the vessel file's list of items that never lapse (noExpiryCodes).");
   if (!quals || !Array.isArray(quals.rows)) return quals;
   let rows = quals.rows.filter(isCrewRow);
   let changed = rows.length !== quals.rows.length;
@@ -220,7 +224,7 @@ export function crewRowsOnly(quals, people, noExpiryCodes) {
   // loads through, so the grid, the tallies, the gap pages and every report
   // agree without asking.
   const cols = Array.isArray(quals.cols) ? quals.cols : [];
-  const never = (noExpiryCodes || []).map((code) => String(code).trim().toUpperCase());
+  const never = noExpiryCodes.map((code) => String(code).trim().toUpperCase());
   const noExp = cols.map((c) => never.includes(String((c && c[0]) || "").trim().toUpperCase()));
   if (noExp.some(Boolean)) {
     rows = rows.map((r) => {

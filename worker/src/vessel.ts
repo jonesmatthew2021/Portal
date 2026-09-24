@@ -156,6 +156,22 @@ export function checkVessel(value: unknown, from = "source/vessel.json"): Vessel
     if (!Array.isArray(e.shifts) || !e.shifts.every((s) => typeof s === "string")) throw wrong(`shift.establishment[${i}].shifts`, "a list of strings");
   });
   v.shift.groups.forEach((g, i) => { if (g.hours !== null && !word(g.hours)) throw wrong(`shift.groups[${i}].hours`, "a string or null"); });
+  /* The ids the code keys on - the same check as tools/source.mjs. The page
+   * hands each shift group its rule by id (day, night, swing), reads the
+   * sheet's words by day and night, and names the swings by A and B, so a
+   * file that spells any of these its own way is refused here, with the key. */
+  const GROUP_IDS = ["day", "night", "swing"];
+  v.shift.groups.forEach((g, i) => { if (!GROUP_IDS.includes(g.id)) throw wrong(`shift.groups[${i}].id`, "one of " + GROUP_IDS.join(", ")); });
+  for (const id of GROUP_IDS) {
+    if (v.shift.groups.filter((g) => g.id === id).length !== 1) throw wrong("shift.groups", "a list with one group for each of " + GROUP_IDS.join(", "));
+  }
+  for (const id of ["day", "night"]) if (!word(v.shift.sheetWords[id])) throw wrong(`shift.sheetWords.${id}`, "a string");
+  for (const letter of ["A", "B"]) if (!word(v.swings.labels[letter])) throw wrong(`swings.labels.${letter}`, "a string");
+  const poolNames = v.shift.pools.map((p) => p.pool);
+  v.shift.establishment.forEach((e, i) => {
+    if (!poolNames.includes(e.pool)) throw wrong(`shift.establishment[${i}].pool`, "one of the pools in shift.pools");
+    e.shifts.forEach((s, j) => { if (s !== "day" && s !== "night") throw wrong(`shift.establishment[${i}].shifts[${j}]`, "day or night"); });
+  });
   v.rankGroups.forEach((g, i) => {
     if (!Array.isArray(g) || g.length !== 2 || !word(g[0]) || !word(g[1])) throw wrong(`rankGroups[${i}]`, "a heading and a pattern, both strings");
     if (!compiles(g[1])) throw wrong(`rankGroups[${i}][1]`, "a pattern that compiles");

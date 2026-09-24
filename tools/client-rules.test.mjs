@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -935,6 +935,52 @@ const is = (got, want, what) => {
   is(lib.settleRound(round), rules.settleRound(round), "settleRound in the page answers as the module does");
 }
 
+/* ---- an item that never lapses reads as held, not as a date ---- */
+{
+  /* The vessel file names the e-learnings that carry no expiry (noExpiryCodes).
+     The matrix loads through crewRowsOnly, which is handed that list; a date
+     in one of those columns means the item was done, so it reads as held. A
+     caller that dropped the list would let a 2020 date read as long lapsed, so
+     the list is required and a forgotten one is said out loud. */
+  const quals = { cols: [["VS-04", "Helm CONNECT", "Vessel Specific"], ["QL-01", "Medical", "Qualification"]],
+    rows: [["SMITH, Alan", "Master", "1", ["2020-01-01", "2020-01-01"]]] };
+  is(lib.VESSEL.noExpiryCodes.includes("VS-04"), true, "VS-04 is on this vessel's list of items that never lapse");
+  is(lib.crewRowsOnly(quals, [], lib.VESSEL.noExpiryCodes).rows[0][3], ["Y", "2020-01-01"],
+    "the page's gate reads a date in a never-lapsing column as held, and leaves the other column's date alone");
+  is(names.crewRowsOnly(quals, [], lib.VESSEL.noExpiryCodes).rows[0][3], ["Y", "2020-01-01"],
+    "the module the worker imports answers the same");
+  is(names.crewRowsOnly(quals, [], []).rows[0][3], ["2020-01-01", "2020-01-01"],
+    "without VS-04 on the list, the date stays a date that ran out in 2020");
+  const forgot = (() => { try { names.crewRowsOnly(quals, []); return "nothing"; } catch (e) { return e.message; } })();
+  is(forgot, "crewRowsOnly needs the vessel file's list of items that never lapse (noExpiryCodes).",
+    "a caller that forgets the list is stopped, in one plain sentence");
+}
+
+/* ---- the roster's crew words come off the vessel file's swing labels ---- */
+{
+  /* A roster row carries the swing's id; what the page shows against it is
+     the swing's label with "Swing" taken off, so a vessel whose swings are
+     named otherwise shows its own names and this one shows what it always
+     did. An id the file does not carry is shown as it is. */
+  is(lib.VESSEL.swings.labels, { A: "Swing Alpha", B: "Swing Bravo" }, "this vessel's swings are Alpha and Bravo");
+  is(["ALPHA", "BRAVO", "OTHER"].map(lib.swingCrewWord), ["Alpha", "Bravo", "OTHER"], "the crew's name, by the swing's id");
+  is(["ALPHA", "BRAVO", "OTHER"].map(lib.swingCrewCalled), ["Alpha crew", "Bravo crew", "OTHER"], "…and the roster's heading for it");
+}
+
+/* ---- the preview's shim carries the vessel file as written ---- */
+{
+  /* A "$" in the file must survive the trip into the shim: replace() with a
+     string reads "$'" as "the rest of the text", which would splice the shim
+     into the middle of the JSON and break the preview page. */
+  const { vesselIntoShim } = await import("file:///" + ROOT.replaceAll(" ", "%20") + "/tools/build-preview.mjs");
+  const vessel = { note: "costs $' and $& - $1 each", pattern: "^\\$$" };
+  const shim = "const VESSEL = __VESSEL__;\nrest of the shim";
+  is(vesselIntoShim(shim, vessel), "const VESSEL = " + JSON.stringify(vessel) + ";\nrest of the shim",
+    "the vessel file goes into the shim byte for byte, dollar signs and all");
+  is(JSON.parse(vesselIntoShim(shim, vessel).slice("const VESSEL = ".length, -";\nrest of the shim".length)), vessel,
+    "…and reads back as the same file");
+}
+
 /* ---- the vessel file, as the build reads it ---- */
 {
   /* The build's loader is the one a new vessel's file meets first. A brand
@@ -965,6 +1011,31 @@ const is = (got, want, what) => {
     'a vessel file has no usable "shift.pools[0].is" - it must be a string.', "a pool without its \"is\" is refused");
   is(said(() => checkVessel({ ...example, brand: { ...example.brand, appleTouch: "" } }, "a vessel file")),
     'a vessel file has no usable "brand.appleTouch" - it must be a string.', "the home-screen icons are the vessel's");
+
+  /* The ids the page keys on are the file's to carry and not to rename: a
+     shift group called "dayshift" would reach the page with no rule to take
+     its requirements by, and the Swing Compliance page would throw. */
+  const groups = example.shift.groups.map((g) => ({ ...g }));
+  groups[0].id = "dayshift";
+  is(said(() => checkVessel({ ...example, shift: { ...example.shift, groups } }, "a vessel file")),
+    'a vessel file has no usable "shift.groups[0].id" - it must be one of day, night, swing.',
+    "a shift group under a name the page has no rule for is refused");
+  is(said(() => checkVessel({ ...example, shift: { ...example.shift, groups: example.shift.groups.slice(1) } }, "a vessel file")),
+    'a vessel file has no usable "shift.groups" - it must be a list with one group for each of day, night, swing.',
+    "…and so is a file missing one of the three");
+  is(said(() => checkVessel({ ...example, shift: { ...example.shift, sheetWords: { day: "Shift 1" } } }, "a vessel file")),
+    'a vessel file has no usable "shift.sheetWords.night" - it must be a string.', "the sheet's words are named for day and night");
+  is(said(() => checkVessel({ ...example, swings: { ...example.swings, labels: { A: "Swing Alpha" } } }, "a vessel file")),
+    'a vessel file has no usable "swings.labels.B" - it must be a string.', "the swings are labelled A and B");
+  const establishment = example.shift.establishment.map((e) => ({ ...e }));
+  establishment[2] = { ...establishment[2], pool: "purser" };
+  is(said(() => checkVessel({ ...example, shift: { ...example.shift, establishment } }, "a vessel file")),
+    'a vessel file has no usable "shift.establishment[2].pool" - it must be one of the pools in shift.pools.',
+    "a position in a pool the file does not name is refused");
+  establishment[2] = { ...example.shift.establishment[2], shifts: ["day", "evening"] };
+  is(said(() => checkVessel({ ...example, shift: { ...example.shift, establishment } }, "a vessel file")),
+    'a vessel file has no usable "shift.establishment[2].shifts[1]" - it must be day or night.',
+    "a position on a shift that is not day or night is refused");
   is(said(() => checkVessel(example, "a vessel file")), "nothing", "the example vessel passes as it is");
 
   const manifest = JSON.parse(manifestFor(example));
