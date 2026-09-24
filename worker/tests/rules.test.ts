@@ -23,6 +23,9 @@ import { RED_DAYS, daysUntil } from "../../source/shared/bands.js";
 import * as reminders from "../../source/shared/reminders.js";
 import { particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, ticketCodesIn, isMsicCard, openToCertificates } from "../../source/shared/particulars.js";
 import { coveredCells, coveredCodes, unitCodesIn, unitColumnsIn } from "../../source/shared/covers.js";
+import { medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote } from "../../source/shared/medical.js";
+import { renewalBlockers, renewalNeedsProblem } from "../../source/shared/renewals.js";
+import { coveredBy, evidenceKindsProblem, EVIDENCE_KINDS } from "../../source/shared/evidence.js";
 import { expiringIn, EXPIRING_MEANS, PORTAL_TOOLS } from "../src/lib/portal.js";
 import { dueMeans } from "../src/lib/matrix.js";
 import { readFileSync } from "node:fs";
@@ -902,4 +905,294 @@ test("the vessel file's covers table is checked: a pattern that will not compile
   assert.throws(() => checkVessel(without, "a vessel file"), /a vessel file has no usable "covers"/);
   assert.equal(checkVessel(vessel), vessel, "the file as it is passes");
   for (const rule of vessel.covers) assert.ok(rule.why && /MO\d\d/.test(rule.why), rule.code + " carries the clause it comes from");
+});
+
+/* ------------------------------------------------------------------------ *
+ * The medical (source/shared/medical.js): which one governs, and whether
+ * the expiry printed on it is longer than the law allows for the holder's
+ * age. Both rules are MO76's - s 16(3) for the first, s 16(1) and its Note
+ * for the second - and a wrong answer to either puts a wrong date against a
+ * man's name.
+ * ------------------------------------------------------------------------ */
+const MED_PEOPLE = [
+  { id: "p1", name: "EVANS, Brenton", aliases: ["bRENTON"] },
+  { id: "p2", name: "SITTIYOS, Kachin", aliases: [] },
+];
+const MED_REGISTER = crewRegister(MED_PEOPLE);
+const MED_TODAY = "2026-09-25";
+const MED_CODES = medicalCodesIn(vessel.certStated);
+/** His medicals, newest filed first, as the library hands them over. */
+const MED_ROWS = [
+  { id: "f2", key: "new", person: "bRENTON", code: "QL-17", filedOn: "2026-06-02" },
+  { id: "f1", key: "old", person: "EVANS, Brenton", code: "QL-17", filedOn: "2025-01-02" },
+  // His Master ticket - not a medical, whatever it prints.
+  { id: "f3", key: "ticket", person: "EVANS, Brenton", code: "QL-01", filedOn: "2026-01-01" },
+  // Filed in his folder, printed in Kachin's name.
+  { id: "f4", key: "hers", person: "EVANS, Brenton", code: "QL-17", filedOn: "2026-07-01" },
+];
+const MED_READINGS: Record<string, Record<string, unknown>> = {
+  // Issued last, and runs the shorter time - a condition wanted re-checking.
+  new: { readable: true, holderName: "Brenton Evans", issuedOn: "2026-06-01", assessedOn: "2026-05-28",
+    expiresOn: "2027-06-01", conditions: "Fit for particular duties only" },
+  old: { readable: true, holderName: "brenton EVANS", issuedOn: "2025-01-01", assessedOn: "2025-01-01",
+    expiresOn: "2029-01-01", conditions: null },
+  ticket: { readable: true, holderName: "Brenton Evans", issuedOn: "2026-01-01", expiresOn: "2031-05-26" },
+  hers: { readable: true, holderName: "Kachin Sittiyos", issuedOn: "2026-06-30", expiresOn: "2028-06-30" },
+};
+const medicalsOf = (name: string, rows = MED_ROWS, readings = MED_READINGS) =>
+  medicalOnFile(name, rows, readings, MED_REGISTER, MED_CODES);
+
+test("the medical: the one issued last governs, even where an older one prints a later expiry", () => {
+  // MO76 s 16(3): a medical expires the moment a further one is issued. The
+  // old card's 2029 date died the day the new one was signed, so taking the
+  // later expiry would put a man to sea on a certificate that has gone.
+  assert.deepEqual(medicalCodesIn(vessel.certStated), ["QL-17"], "the medical's column is the vessel file's certStated");
+  const mine = medicalsOf("EVANS, Brenton");
+  assert.deepEqual(mine.map((m) => m.rowId), ["f2", "f1"], "newest issued first, whatever they print");
+  assert.deepEqual(mine[0], { rowId: "f2", issuedOn: "2026-06-01", assessedOn: "2026-05-28",
+    expiresOn: "2027-06-01", conditions: "Fit for particular duties only" });
+  assert.deepEqual(medicalsOf("brenton evans").map((m) => m.rowId), ["f2", "f1"], "his name any way round is the same man");
+  assert.equal(medicalNote(mine[0]), "Fit for particular duties only", "the condition as printed");
+  assert.equal(medicalNote(mine[1]), null, "and nothing where none is printed");
+  assert.deepEqual(medicalsOf("SITTIYOS, Kachin"), [], "a medical printed in his name but filed in another man's folder is not his");
+  assert.deepEqual(medicalsOf("EVANS, Brenton", MED_ROWS.slice(2)), [], "no medical, nothing - his ticket is not one");
+});
+
+test("the medical: a printed expiry longer than the law allows for the holder's age, and never a guess", () => {
+  /* MO76 s 16(1) and Note: two years at most, one year where the person was
+     18 or younger or 55 or older on the day of the examination. The Note's
+     edges are "not more than 18" and "at least 55", so exactly 18 and
+     exactly 55 are in the one-year band - the office's guide reads
+     "under 18/over 55" and is wrong by a year each way (report Part 7.4). */
+  const med = (expiresOn: string | null, assessedOn: string | null = "2026-05-28", issuedOn: string | null = "2026-06-01") =>
+    ({ rowId: "f2", issuedOn, assessedOn, expiresOn, conditions: null });
+  const grown = "1990-04-01";      // 36 on the assessment day
+  assert.equal(medicalTooLong(med("2028-05-28"), grown, MED_TODAY), null, "two years to the day is two years");
+  assert.equal(medicalTooLong(med("2028-05-29"), grown, MED_TODAY),
+    "the expiry is more than two years after the assessment", "two years and a day is not");
+  // The day before his birthday he is 54, and the two-year band is his.
+  assert.equal(medicalTooLong(med("2027-11-28"), "1971-05-29", MED_TODAY), null, "he turns 55 the day after the assessment: two years");
+  assert.equal(medicalTooLong(med("2027-11-28"), "1971-05-28", MED_TODAY),
+    "the expiry is more than a year after the assessment, and the holder was 55 or older that day", "55 on the day: one year");
+  assert.equal(medicalTooLong(med("2027-05-28"), "1971-05-28", MED_TODAY), null, "a year to the day is a year");
+  assert.equal(medicalTooLong(med("2027-06-28"), "2009-01-01", MED_TODAY),
+    "the expiry is more than a year after the assessment, and the holder was 18 or younger that day", "17 at 13 months");
+  assert.equal(medicalTooLong(med("2027-06-28"), "2008-05-28", MED_TODAY),
+    "the expiry is more than a year after the assessment, and the holder was 18 or younger that day", "18 on the day is the one-year band too");
+  assert.equal(medicalTooLong(med("2027-06-28"), "2007-05-28", MED_TODAY), null, "19 on the assessment day: two years");
+  assert.equal(medicalTooLong(med("2028-05-29"), null, MED_TODAY), null, "no date of birth, no age, no flag");
+  assert.equal(medicalTooLong(med("2028-05-29"), "", MED_TODAY), null, "nor an empty box");
+  assert.equal(medicalTooLong(med("2028-05-29"), "not a date", MED_TODAY), null, "nor a box somebody typed words into");
+  assert.equal(medicalTooLong(null, grown, MED_TODAY), null, "no medical, nothing");
+  // Issued 1 June: two years and a day from the issue, and two years and
+  // five days from the examination - so which date it is measured from shows.
+  assert.equal(medicalTooLong(med("2028-06-02", null), grown, MED_TODAY),
+    "the expiry is more than two years after it was issued", "no assessment date printed: measured from the issue");
+  assert.equal(medicalTooLong(med("2028-06-01", null), grown, MED_TODAY), null, "two years from the issue to the day");
+  assert.equal(medicalTooLong(med("2028-06-02", null, null), grown, MED_TODAY), null,
+    "neither date printed: nothing to measure from");
+  assert.equal(medicalTooLong(med(null), grown, MED_TODAY), null, "no printed expiry, nothing to check");
+  assert.equal(medicalTooLong(med("2026-09-24"), "2009-01-01", MED_TODAY), null,
+    "a medical that has already run out is on the gaps list, not here");
+});
+
+/* ------------------------------------------------------------------------ *
+ * Renewal blockers (source/shared/renewals.js): a certificate in the red
+ * band that cannot be renewed until another one is put right. The pairs are
+ * the vessel file's (renewalNeeds), each with the clause it comes from, so
+ * the law's mapping is data and not code - and the table that ships is the
+ * one these hold against.
+ * ------------------------------------------------------------------------ */
+/* The vessel file carries the table; the worker's Vessel type gains the key
+   when the round is wired to it, so until then it is read as what it is. */
+const REN_TABLE = (vessel as unknown as { renewalNeeds: Record<string, { needs: string[]; why: string }> }).renewalNeeds;
+const REN_TODAY = "2026-09-25";
+const REN_RULES: { needs: typeof REN_TABLE | null; daysUntil: typeof daysUntil; redDays: number } =
+  { needs: REN_TABLE, daysUntil, redDays: RED_DAYS };
+/** A date `n` days from REN_TODAY - negative for one that has gone. */
+const renDay = (n: number) => new Date(Date.parse(REN_TODAY) + n * 86400000).toISOString().slice(0, 10);
+const blockersFor = (held: Record<string, string>, rules = REN_RULES) =>
+  renewalBlockers("EVANS, Brenton", held, REN_TODAY, rules);
+
+test("renewals: the pairs are the vessel file's, every code a column of it", () => {
+  const codes = vessel.qualColumns.map((c) => c[0]);
+  assert.equal(renewalNeedsProblem(REN_TABLE, codes), null, "this vessel's table names only its own columns");
+  const example = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "tools", "fixtures", "example-vessel.json"), "utf8"));
+  assert.equal(renewalNeedsProblem(example.renewalNeeds, example.qualColumns.map((c: string[]) => c[0])), null,
+    "and so does the made-up vessel's");
+  assert.match(String(renewalNeedsProblem({ "QL-11": { needs: ["QL-99"], why: "x" } }, codes)),
+    /renewalNeeds\["QL-11"\].*QL-99.*column/, "a need that is not a column is named");
+  assert.match(String(renewalNeedsProblem({ "ZZ-01": { needs: ["QL-17"], why: "x" } }, codes)),
+    /renewalNeeds\["ZZ-01"\].*column/, "and so is a certificate that is not one");
+  assert.match(String(renewalNeedsProblem({ "QL-11": { needs: [], why: "x" } }, codes)), /renewalNeeds\["QL-11"\]/,
+    "an entry that needs nothing is a table somebody half wrote");
+  // The clause travels with the pair, so a reader can check the rule against
+  // the order rather than against this code.
+  assert.match(String(REN_TABLE["QL-11"].why), /MO70 s 25/);
+  assert.match(String(REN_TABLE["QL-01"].why), /MO71 Sch 4/);
+  assert.match(String(REN_TABLE["QL-03"].why), /MO505 s 9\(3\)\(b\)/);
+});
+
+test("renewals: a cook whose safety training has lapsed cannot renew his cook certificate", () => {
+  // MO70 s 25: the marine cook certificate is revalidated on a certificate of
+  // safety training and a medical. His cook ticket is in the red band and the
+  // COST went last month, so the renewal is stopped before it is posted.
+  const cook = { "QL-11": renDay(40), "QL-12": renDay(-30), "QL-17": renDay(300) };
+  assert.deepEqual(blockersFor(cook), [{
+    person: "EVANS, Brenton", code: "QL-11", needs: ["QL-12"], expired: ["QL-12"], missing: [],
+    why: String(REN_TABLE["QL-11"].why),
+  }], "the entry names the certificate of safety training and nothing else");
+  assert.deepEqual(blockersFor({ ...cook, "QL-12": renDay(300) }), [], "a current COST and medical: nothing in the way");
+  assert.deepEqual(blockersFor({ ...cook, "QL-12": "Y" }), [], "an item the matrix marks held counts as held");
+  const bothGone = blockersFor({ "QL-11": renDay(0), "QL-12": renDay(-30), "QL-17": "" });
+  assert.deepEqual(bothGone[0].needs, ["QL-12", "QL-17"], "both, where both are in the way");
+  assert.deepEqual([bothGone[0].expired, bothGone[0].missing], [["QL-12"], ["QL-17"]],
+    "and which is expired and which is not held, so the line can say so");
+  assert.deepEqual(blockersFor({ "QL-11": renDay(40), "QL-12": "?", "QL-17": renDay(300) })[0].missing, ["QL-12"],
+    "a question mark is nobody saying yes: not held");
+});
+
+test("renewals: a deck certificate needs a medical and a GMDSS, and a certificate with time to run is never blocked", () => {
+  // MO71 Sch 4 4.2. The GMDSS is a certificate class of its own (MO70
+  // s 7(1)(ca)), so an empty QL-14 is a renewal that will not be granted.
+  const master = { "QL-01": renDay(-10), "QL-17": renDay(300), "QL-14": "" };
+  assert.deepEqual(blockersFor(master)[0].needs, ["QL-14"], "expired, with no GMDSS on file");
+  assert.deepEqual(blockersFor({ ...master, "QL-14": renDay(200) }), [], "GMDSS in date: nothing in the way");
+  assert.deepEqual(blockersFor({ ...master, "QL-01": renDay(RED_DAYS + 1) }), [],
+    "a certificate past the red band is not being renewed yet");
+  assert.deepEqual(blockersFor({ ...master, "QL-01": renDay(RED_DAYS) })[0].code, "QL-01", "the edge of the red band is in it");
+  assert.deepEqual(blockersFor({ ...master, "QL-01": "" }), [], "a certificate he does not hold is a gap, not a renewal");
+  assert.deepEqual(blockersFor({ ...master, "QL-01": "Y" }), [], "nor is one the matrix marks held, which never lapses");
+  // MO505 s 9(3)(c): renewing Master <24 m NC or MED Grade 2 NC wants a
+  // declaration of medical fitness, not a medical certificate - so neither
+  // has an entry in the table and neither is ever blocked for a medical.
+  assert.deepEqual(blockersFor({ "QL-08": renDay(-10), "QL-17": "" }), [], "Master <24 m NC: a declaration, and nothing the portal holds");
+  assert.deepEqual(blockersFor({ "QL-09": renDay(-10), "QL-17": "" }), [], "MED Grade 2 NC the same");
+  assert.deepEqual(blockersFor({ "QL-13": renDay(-10), "QL-17": "" }), [], "a code the table says nothing about is never blocked");
+  assert.deepEqual(blockersFor({ "QL-01": renDay(-10) }, { ...REN_RULES, needs: null }), [],
+    "no table, no blockers - never a pair written into the code");
+});
+
+/* ------------------------------------------------------------------------ *
+ * Alternative evidence (source/shared/evidence.js): the five documents that
+ * lawfully stand in for a certificate that has run out, each with its own
+ * ceiling and the columns it may cover. The kinds are the vessel file's
+ * (evidenceKinds), clause and all. Getting one wrong either hides a man
+ * with nothing behind him or reds a man who is lawfully covered.
+ * ------------------------------------------------------------------------ */
+const EV_TABLE = (vessel as unknown as {
+  evidenceKinds: Record<string, { days: number | null; from: string; covers: string[]; why: string; notWhenRecognition?: boolean }>;
+}).evidenceKinds;
+const EV_TODAY = "2026-09-25";
+const EV_PEOPLE = [{ name: "EVANS, Brenton", aliases: ["bRENTON"] }, { name: "SITTIYOS, Kachin", aliases: [] }];
+const EV_RULES = { kinds: EV_TABLE, register: crewRegister(EV_PEOPLE) };
+const EV_ROWS = [
+  { id: "ext", key: "ext", person: "EVANS, Brenton", code: null, filedOn: "2026-08-02" },
+  { id: "dec", key: "dec", person: "EVANS, Brenton", code: null, filedOn: "2026-09-01" },
+  { id: "lodged", key: "lodged", person: "bRENTON", code: "QL-03", filedOn: "2026-07-01" },
+  { id: "coc", key: "coc", person: "EVANS, Brenton", code: "QL-01", filedOn: "2021-02-01" },
+  { id: "nc", key: "nc", person: "EVANS, Brenton", code: "QL-03", filedOn: "2020-01-01" },
+];
+const EV_READINGS: Record<string, Record<string, unknown>> = {
+  // AMSA's letter, printing its own end date inside the six months.
+  ext: { readable: true, holderName: "Brenton Evans", evidenceKind: "extension", issuedOn: "2026-07-20", expiresOn: "2026-11-25" },
+  // A final assessor's declaration, signed three weeks ago.
+  dec: { readable: true, holderName: "Brenton Evans", evidenceKind: "assessor-declaration", issuedOn: "2026-09-01", expiresOn: null },
+  // The receipt for a near-coastal renewal lodged before the card expired.
+  lodged: { readable: true, holderName: "brenton EVANS", evidenceKind: "lodged-renewal", issuedOn: "2026-07-01", expiresOn: null },
+  // His certificates themselves: no evidenceKind, and both run out.
+  coc: { readable: true, holderName: "Brenton Evans", evidenceKind: null, isRecognition: false, expiresOn: "2026-08-01" },
+  nc: { readable: true, holderName: "Brenton Evans", evidenceKind: null, isRecognition: false, expiresOn: "2026-07-07" },
+};
+const coverOf = (code: string, rows = EV_ROWS, readings = EV_READINGS, today = EV_TODAY) =>
+  coveredBy(code, "EVANS, Brenton", rows, readings, today, EV_RULES);
+
+test("evidence: the five kinds are the vessel file's, each with its columns, its ceiling and its clause", () => {
+  assert.deepEqual(EVIDENCE_KINDS, ["extension", "lodged-renewal", "crewing-permit", "assessor-declaration", "issue-letter"]);
+  const codes = vessel.qualColumns.map((c) => c[0]);
+  assert.equal(evidenceKindsProblem(EV_TABLE, codes), null, "this vessel's table names only its own columns");
+  const example = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "tools", "fixtures", "example-vessel.json"), "utf8"));
+  assert.equal(evidenceKindsProblem(example.evidenceKinds, example.qualColumns.map((c: string[]) => c[0])), null,
+    "and so does the made-up vessel's");
+  assert.match(String(evidenceKindsProblem({ "letter-from-a-mate": { days: 30, from: "issued", covers: ["QL-01"], why: "x" } }, codes)),
+    /letter-from-a-mate/, "a kind the reading never gives is named");
+  assert.match(String(evidenceKindsProblem({ extension: { days: 30, from: "issued", covers: ["QL-99"], why: "x" } }, codes)),
+    /QL-99.*column/, "a column that is not one is named");
+  assert.match(String(evidenceKindsProblem({ extension: { days: 30, from: "yesterday", covers: ["QL-01"], why: "x" } }, codes)),
+    /"from"/, "and so is a ceiling counted from nowhere");
+  // The COST cannot be extended (MO70 s 15(3) does not list it) and neither
+  // can a recognition (s 30 note); the near-coastal grades are MO505's and
+  // have no extension at all.
+  assert.equal(EV_TABLE.extension.covers.includes("QL-12"), false, "no extension of a certificate of safety training");
+  assert.equal(EV_TABLE.extension.notWhenRecognition, true, "and none of a certificate of recognition");
+  assert.deepEqual(EV_TABLE["assessor-declaration"].covers, ["QL-08", "QL-09"], "a declaration is for the lower near-coastal grades only");
+  assert.equal(EV_TABLE["lodged-renewal"].days, 90, "MO505 s 7(3): 90 days after the certificate's expiry");
+  assert.equal(EV_TABLE["lodged-renewal"].from, "expiry");
+  assert.equal(EV_TABLE["issue-letter"].days, null, "an issue letter is the certificate until the card arrives: no end in law");
+  assert.match(EV_TABLE.extension.why, /MO70 s 15\(3\)/);
+  assert.match(EV_TABLE["lodged-renewal"].why, /MO505 s 7\(3\)/);
+  assert.match(EV_TABLE["assessor-declaration"].why, /MO505 ss 22-24/);
+  assert.match(EV_TABLE["crewing-permit"].why, /MO504 s 16/);
+  assert.match(EV_TABLE["issue-letter"].why, /MO505 s 12\(2\)/);
+});
+
+test("evidence: an extension letter covers the expired Master it was written for, and no COST ever", () => {
+  assert.deepEqual(coverOf("QL-01"), { kind: "extension", until: "2026-11-25", rowId: "ext" },
+    "the date AMSA printed on the letter, which is inside the six months");
+  assert.equal(coverOf("QL-12"), null, "the same letter covers no certificate of safety training (MO70 s 15(3))");
+  /* The round could put no code to this letter, so it stands for any column
+     its kind allows. Where the round did place it, it stands for that one
+     only: a letter about his Master certificate says nothing about his cook
+     certificate, though the order lets both be extended. */
+  const placed = [{ ...EV_ROWS[0], code: "QL-01" }, ...EV_ROWS.slice(1)];
+  assert.deepEqual(coverOf("QL-01", placed), { kind: "extension", until: "2026-11-25", rowId: "ext" });
+  assert.equal(coverOf("QL-11", placed), null, "not a column the letter was filed against");
+  assert.equal(coverOf("QL-11")!.kind, "extension", "unplaced, it stands for the cook certificate too");
+  // A letter printing longer than the six months the order allows.
+  const tooLong = { ...EV_READINGS, ext: { ...EV_READINGS.ext, expiresOn: "2027-06-01" } };
+  assert.deepEqual(coverOf("QL-01", EV_ROWS, tooLong), { kind: "extension", until: "2027-01-20", rowId: "ext" },
+    "six months from the letter's own issue is as far as it goes");
+  // MO70 s 30 note: a recognition's term can never be extended.
+  const recognised = { ...EV_READINGS, coc: { ...EV_READINGS.coc, isRecognition: true } };
+  assert.equal(coverOf("QL-01", EV_ROWS, recognised), null, "an extension of a certificate of recognition is no cover");
+  assert.equal(coverOf("QL-01", [EV_ROWS[3]]), null, "his certificate alone is not evidence of anything");
+  const before = { ...EV_READINGS, ext: { readable: true, holderName: "Brenton Evans", issuedOn: "2026-07-20", expiresOn: "2026-11-25" } };
+  assert.equal(coverOf("QL-01", EV_ROWS, before), null, "a reading made before the key existed says nothing either way");
+});
+
+test("evidence: a near-coastal renewal lodged before expiry covers 90 days and not 100", () => {
+  // MO505 s 7(3). The 90 days run from the card's own printed expiry, not
+  // from the day the receipt was issued, so the certificate on file is what
+  // the count is anchored to.
+  assert.deepEqual(coverOf("QL-03"), { kind: "lodged-renewal", until: "2026-10-05", rowId: "lodged" },
+    "the card expired 80 days ago: still covered");
+  const longGone = { ...EV_READINGS, nc: { ...EV_READINGS.nc, expiresOn: "2026-06-17" } };
+  assert.equal(coverOf("QL-03", EV_ROWS, longGone), null, "100 days after expiry: no cover left");
+  assert.equal(coverOf("QL-03", [EV_ROWS[2]]), null, "and with no card on file there is nothing to count 90 days from");
+  // MO505 ss 22-24: a declaration is for the lower grades, so it never
+  // reaches a Master <100 m NC.
+  assert.equal(coverOf("QL-03", [EV_ROWS[1], EV_ROWS[4]]), null, "a final assessor's declaration is no cover for Master <100 m NC");
+  assert.deepEqual(coverOf("QL-08", [EV_ROWS[1]]), { kind: "assessor-declaration", until: "2026-10-31", rowId: "dec" },
+    "for Master <24 m NC it is, for 60 days from the day it was signed");
+  const stale = { ...EV_READINGS, dec: { ...EV_READINGS.dec, issuedOn: "2026-06-01" } };
+  assert.equal(coverOf("QL-08", [EV_ROWS[1]], stale), null, "a declaration whose 60 days have run out is no cover");
+});
+
+test("evidence: a document in another man's name covers nobody, and an issue letter runs until the card comes", () => {
+  const hers = [{ id: "hers", key: "hers", person: "EVANS, Brenton", code: "QL-01", filedOn: "2026-09-01" }];
+  const readings = { hers: { readable: true, holderName: "Kachin Sittiyos", evidenceKind: "extension", issuedOn: "2026-09-01", expiresOn: "2026-12-01" } };
+  assert.equal(coverOf("QL-01", hers, readings), null, "filed in his folder, written for another man");
+  assert.equal(coveredBy("QL-01", "SITTIYOS, Kachin", hers, readings, EV_TODAY, EV_RULES), null,
+    "and it is not Kachin's either: it is not filed under him");
+  // MO505 s 12(2): the letter is the certificate until the card arrives, so
+  // the law gives it no end and the portal invents none.
+  const letter = [{ id: "iss", key: "iss", person: "EVANS, Brenton", code: "QL-04", filedOn: "2024-01-02" }];
+  const issued = { iss: { readable: true, holderName: "Brenton Evans", evidenceKind: "issue-letter", issuedOn: "2024-01-01", expiresOn: null } };
+  assert.deepEqual(coveredBy("QL-04", "EVANS, Brenton", letter, issued, EV_TODAY, EV_RULES),
+    { kind: "issue-letter", until: null, rowId: "iss" }, "no printed date and no ceiling: covered, with no end to say");
+  const dated = { iss: { ...issued.iss, expiresOn: "2024-03-01" } };
+  assert.equal(coveredBy("QL-04", "EVANS, Brenton", letter, dated, EV_TODAY, EV_RULES), null,
+    "where the letter prints its own end, that date governs - and this one has gone");
+  assert.equal(coveredBy("QL-04", "EVANS, Brenton", letter, issued, EV_TODAY, { ...EV_RULES, kinds: null }), null,
+    "no table, no cover - never a ceiling written into the code");
 });

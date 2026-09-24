@@ -207,6 +207,50 @@
     "QL-10": { "grade": 1, "stream": "both", "short": "Integrated Rating" },
     "QL-11": { "grade": 1, "stream": "catering", "short": "Marine Cook" }
   },
+  "renewalNeeds": {
+    "QL-01": { "needs": ["QL-17", "QL-14"], "why": "MO71 Sch 4 4.2 - a deck certificate is revalidated on a medical and a GMDSS radio operator certificate" },
+    "QL-02": { "needs": ["QL-17", "QL-14"], "why": "MO71 Sch 4 4.2 - a deck certificate is revalidated on a medical and a GMDSS radio operator certificate" },
+    "QL-03": { "needs": ["QL-17"], "why": "MO505 s 9(3)(b) - renewed on a current domestic medical (and 120 days' sea service, which the portal does not hold and never flags)" },
+    "QL-04": { "needs": ["QL-17"], "why": "MO505 s 9(3)(b) - renewed on a current domestic medical (and 120 days' sea service, which the portal does not hold and never flags)" },
+    "QL-05": { "needs": ["QL-17"], "why": "MO72 Sch 4 4.2 - an engineer's certificate is revalidated on a medical" },
+    "QL-06": { "needs": ["QL-17"], "why": "MO72 Sch 4 4.2 - an engineer's certificate is revalidated on a medical" },
+    "QL-07": { "needs": ["QL-17"], "why": "MO505 s 9(3)(b) - renewed on a current domestic medical (and 120 days' sea service, which the portal does not hold and never flags)" },
+    "QL-10": { "needs": ["QL-17"], "why": "MO70 Sch 2 Table 2.4 item 3(b) and MO73 Sch 4 - the Integrated Rating endorsement and the rating certificate are revalidated on a medical" },
+    "QL-11": { "needs": ["QL-12", "QL-17"], "why": "MO70 s 25 - the marine cook certificate is revalidated on a certificate of safety training and a medical" }
+  },
+  "evidenceKinds": {
+    "extension": {
+      "days": 184,
+      "from": "issued",
+      "covers": ["QL-01", "QL-02", "QL-05", "QL-06", "QL-10", "QL-11", "QL-14"],
+      "notWhenRecognition": true,
+      "why": "MO70 s 15(3)-(4) - AMSA may extend by up to six months, and only a certificate of competency, a rating certificate, a GMDSS radio operator certificate or a marine cook certificate. Never a certificate of safety training: s 15(3) does not list it. Never a certificate of recognition, whose term can never be extended (s 30 note). The near-coastal certificates are MO505's and it gives no extension. Six months at their longest is 184 days"
+    },
+    "lodged-renewal": {
+      "days": 90,
+      "from": "expiry",
+      "covers": ["QL-03", "QL-04", "QL-07", "QL-08", "QL-09"],
+      "why": "MO505 s 7(3) - a near-coastal certificate whose renewal was lodged before it expired keeps the holder lawful for 90 days after the expiry printed on the card"
+    },
+    "crewing-permit": {
+      "days": 92,
+      "from": "issued",
+      "covers": ["QL-02", "QL-03", "QL-04", "QL-05", "QL-06", "QL-07", "QL-08", "QL-09", "QL-10", "QL-11"],
+      "why": "MO504 s 16(2) and MO505 s 7(4) - AMSA may permit a vessel to go below its crewing for up to three months (92 days at their longest). QL-01 is left out because this vessel is 160 m: on a vessel of 24 m or more the master's role cannot be permitted away except in force majeure (MO504 s 16(3))"
+    },
+    "assessor-declaration": {
+      "days": 60,
+      "from": "issued",
+      "covers": ["QL-08", "QL-09"],
+      "why": "MO505 ss 22-24 - a final assessor's signed declaration stands for 60 days, and only for the lower near-coastal grades: Master <24 m NC, Marine Engine Driver Grade 2 and 3 NC and General Purpose Hand NC"
+    },
+    "issue-letter": {
+      "days": null,
+      "from": "issued",
+      "covers": ["QL-03", "QL-04", "QL-07", "QL-08", "QL-09"],
+      "why": "MO505 s 12(2) - AMSA's letter saying the certificate has been issued is the certificate until the card arrives, so the law gives it no end; where the letter prints one, that date governs"
+    }
+  },
   "docBuckets": ["vesselSafety", "partnershipSafety", "insurance", "travel", "templates", "agreements", "documentation"],
   "labels": {
     "correspondence": "Partnership Correspondence",

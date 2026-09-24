@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, EVIDENCE_KINDS };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -2611,6 +2611,99 @@ const is = (got, want, what) => {
   is(coveredCodes({ readable: true, expiresOn: "2031-05-26" }, table, cols, "QL-01"), [], "nor does a reading made before the question was asked");
   is(unitColumnsIn(cols), ["QL-18", "QL-19", "QL-20", "PT-02", "PT-03"], "the training columns are read off the column titles");
   is(unitCodesIn(["HLTAID011", " hltaid011 "]), ["HLTAID011"], "the same unit code twice is one code");
+}
+
+/* ---- the medical: which one governs, and an expiry longer than the law
+        allows for the holder's age (MO76 s 16(3), s 16(1)) ---- */
+{
+  /* The page's own copy of the rules (spliced in at @shared), and the
+     module the worker imports, answer the same. */
+  const shared = await import(pathToFileURL(join(ROOT, "source", "shared", "medical.js")).href);
+  const { medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, VESSEL, crewRegister } = lib;
+  const people = [{ id: "p1", name: "EVANS, Brenton", aliases: ["bRENTON"] }, { id: "p2", name: "SITTIYOS, Kachin", aliases: [] }];
+  const register = crewRegister(people);
+  const codes = medicalCodesIn(VESSEL.certStated);
+  is(codes, ["QL-17"], "the medical's column is the vessel file's certStated");
+  const rows = [
+    { id: "f2", key: "new", person: "bRENTON", code: "QL-17", filedOn: "2026-06-02" },
+    { id: "f1", key: "old", person: "EVANS, Brenton", code: "QL-17", filedOn: "2025-01-02" },
+    { id: "f4", key: "hers", person: "EVANS, Brenton", code: "QL-17", filedOn: "2026-07-01" },
+  ];
+  const readings = {
+    new: { readable: true, holderName: "Brenton Evans", issuedOn: "2026-06-01", assessedOn: "2026-05-28", expiresOn: "2027-06-01", conditions: " Daylight only " },
+    old: { readable: true, holderName: "brenton EVANS", issuedOn: "2025-01-01", assessedOn: "2025-01-01", expiresOn: "2029-01-01", conditions: null },
+    hers: { readable: true, holderName: "Kachin Sittiyos", issuedOn: "2026-06-30", expiresOn: "2028-06-30" },
+  };
+  const mine = medicalOnFile("EVANS, Brenton", rows, readings, register, codes);
+  is(mine.map((m) => m.rowId), ["f2", "f1"], "the medical issued last governs, though the older one prints 2029");
+  is(medicalNote(mine[0]), "Daylight only", "the condition as printed, tidied of its spaces");
+  is(shared.medicalOnFile("EVANS, Brenton", rows, readings, register, codes), mine, "the worker's module answers the same");
+  is(medicalTooLong(mine[0], "1990-04-01", "2026-09-25"), null, "a year out from a 36-year-old's assessment is well inside two years");
+  const twoAndADay = { ...mine[0], expiresOn: "2028-05-29" };
+  is(medicalTooLong(twoAndADay, "1990-04-01", "2026-09-25"), "the expiry is more than two years after the assessment", "two years and a day is flagged");
+  is(medicalTooLong(twoAndADay, null, "2026-09-25"), null, "with no date of birth on Crew Details, nothing is flagged");
+  is(shared.medicalTooLong(twoAndADay, "1971-05-28", "2026-09-25"),
+    "the expiry is more than a year after the assessment, and the holder was 55 or older that day", "55 on the assessment day: one year, module and page alike");
+  is(medicalTooLong(twoAndADay, "1971-05-28", "2026-09-25"), shared.medicalTooLong(twoAndADay, "1971-05-28", "2026-09-25"), "the page says it too");
+}
+
+/* ---- renewal blockers: a red ticket that cannot be renewed until
+        something else is put right (MO70 s 25, MO71 Sch 4 4.2) ---- */
+{
+  const shared = await import(pathToFileURL(join(ROOT, "source", "shared", "renewals.js")).href);
+  const { renewalBlockers, renewalNeedsProblem, daysUntil, RED_DAYS, VESSEL } = lib;
+  const codes = VESSEL.qualColumns.map((c) => c[0]);
+  // A table the page never got would pass the check below by being absent,
+  // so it is counted first.
+  is(Object.keys(VESSEL.renewalNeeds || {}).sort(), ["QL-01", "QL-02", "QL-03", "QL-04", "QL-05", "QL-06", "QL-07", "QL-10", "QL-11"],
+    "the page carries the vessel file's pairs, and not the two the law renews on a declaration (QL-08, QL-09)");
+  is(renewalNeedsProblem(VESSEL.renewalNeeds, codes), null, "the vessel file's pairs all name its own columns");
+  is(renewalNeedsProblem(VESSEL.renewalNeeds, codes), shared.renewalNeedsProblem(VESSEL.renewalNeeds, codes), "page and module agree");
+  const today = "2026-09-25";
+  const on = (n) => new Date(Date.parse(today) + n * 86400000).toISOString().slice(0, 10);
+  const rules = { needs: VESSEL.renewalNeeds, daysUntil, redDays: RED_DAYS };
+  const cook = { "QL-11": on(40), "QL-12": on(-30), "QL-17": on(300) };
+  const blocked = renewalBlockers("SITTIYOS, Kachin", cook, today, rules);
+  is(blocked.map((b) => [b.person, b.code, b.needs]), [["SITTIYOS, Kachin", "QL-11", ["QL-12"]]],
+    "his cook certificate cannot be renewed until the certificate of safety training is");
+  is(blocked[0].why.includes("MO70 s 25"), true, "and the clause travels with it");
+  is(shared.renewalBlockers("SITTIYOS, Kachin", cook, today, rules), blocked, "the worker's module answers the same");
+  is(renewalBlockers("SITTIYOS, Kachin", { ...cook, "QL-12": on(300) }, today, rules), [], "a current COST: nothing in the way");
+  is(renewalBlockers("EVANS, Brenton", { "QL-01": on(-10), "QL-17": on(300), "QL-14": "" }, today, rules)[0].missing, ["QL-14"],
+    "an expired deck certificate with no GMDSS on file");
+  is(renewalBlockers("EVANS, Brenton", { "QL-01": on(RED_DAYS + 1), "QL-14": "" }, today, rules), [],
+    "a certificate past the red band is not being renewed yet");
+}
+
+/* ---- alternative evidence: the papers that lawfully carry a man while a
+        certificate is out (MO70 s 15(3), MO505 s 7(3), ss 22-24, s 12(2)) ---- */
+{
+  const shared = await import(pathToFileURL(join(ROOT, "source", "shared", "evidence.js")).href);
+  const { coveredBy, evidenceKindsProblem, EVIDENCE_KINDS, VESSEL, crewRegister } = lib;
+  const codes = VESSEL.qualColumns.map((c) => c[0]);
+  is(EVIDENCE_KINDS, ["extension", "lodged-renewal", "crewing-permit", "assessor-declaration", "issue-letter"], "the five kinds");
+  // Absent, the table would pass the check below by having nothing in it.
+  is(Object.keys(VESSEL.evidenceKinds || {}), EVIDENCE_KINDS, "the page carries all five of the vessel file's kinds");
+  is(evidenceKindsProblem(VESSEL.evidenceKinds, codes), null, "the vessel file's kinds all name its own columns");
+  is(shared.evidenceKindsProblem(VESSEL.evidenceKinds, codes), null, "the module says so too");
+  const today = "2026-09-25";
+  const rules = { kinds: VESSEL.evidenceKinds, register: crewRegister([{ name: "EVANS, Brenton", aliases: [] }, { name: "SITTIYOS, Kachin", aliases: [] }]) };
+  const rows = [
+    { id: "ext", key: "ext", person: "EVANS, Brenton", code: "QL-01", filedOn: "2026-08-02" },
+    { id: "coc", key: "coc", person: "EVANS, Brenton", code: "QL-01", filedOn: "2021-02-01" },
+  ];
+  const readings = {
+    ext: { readable: true, holderName: "Brenton Evans", evidenceKind: "extension", issuedOn: "2026-07-20", expiresOn: "2026-11-25" },
+    coc: { readable: true, holderName: "Brenton Evans", evidenceKind: null, isRecognition: false, expiresOn: "2026-08-01" },
+  };
+  const cover = coveredBy("QL-01", "EVANS, Brenton", rows, readings, today, rules);
+  is(cover, { kind: "extension", until: "2026-11-25", rowId: "ext" }, "AMSA's letter carries his expired Master to 25 Nov");
+  is(shared.coveredBy("QL-01", "EVANS, Brenton", rows, readings, today, rules), cover, "the worker's module answers the same");
+  is(coveredBy("QL-12", "EVANS, Brenton", rows, readings, today, rules), null, "no extension of a certificate of safety training, ever");
+  const recognised = { ...readings, coc: { ...readings.coc, isRecognition: true } };
+  is(coveredBy("QL-01", "EVANS, Brenton", rows, recognised, today, rules), null, "and none of a certificate of recognition");
+  const spent = { ...readings, ext: { ...readings.ext, expiresOn: "2026-09-01" } };
+  is(coveredBy("QL-01", "EVANS, Brenton", rows, spent, today, rules), null, "a cover that has run out is no cover");
 }
 
 if (failed) {
