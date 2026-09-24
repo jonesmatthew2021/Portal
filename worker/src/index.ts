@@ -336,7 +336,7 @@ async function theHour(
       await ensureFaunaTable();
       const log = await settleFaunaLog(null, "the round on the hour");
       if (log.linked && (log.written || log.blanked || log.error)) {
-        round = { ...round, faunaLog: `${log.written} written, ${log.blanked} blanked into ${log.file}` + (log.made.length ? ` (${log.made.join(", ")} tab made)` : "") + (log.error ? ` — ${log.error}` : "") };
+        round = { ...round, faunaLog: `${log.written} written, ${log.blanked} blanked` + (log.files.length ? ` into ${log.files.join(", ")}` : "") + (log.made.length ? ` (${log.made.join(", ")} made)` : "") + (log.error ? ` — ${log.error}` : "") };
       }
     } catch (e) {
       round = { ...round, faunaLogError: said(e) };

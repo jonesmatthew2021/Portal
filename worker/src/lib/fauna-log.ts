@@ -51,6 +51,58 @@ export async function openLog(bytes: ArrayBuffer): Promise<LogWorkbook> {
   return { entries, sheets };
 }
 
+/* ------------------------------------------------------ a month's file -- */
+
+/** The office's own name for a month's workbook: "09.2026 - Marine Fauna Observation Log.xlsx". */
+export const monthFileName = (yyyyMm: string) =>
+  `${yyyyMm.slice(5, 7)}.${yyyyMm.slice(0, 4)} - Marine Fauna Observation Log.xlsx`;
+
+/**
+ * Whether a file in the folder is the month's log: a workbook that says
+ * fauna and carries the month as 09.2026, 2026-09, 09-2026, 2026.09 or
+ * "September 2026", however the office wrote it.
+ */
+export function isMonthFile(name: string, yyyyMm: string) {
+  if (!/\.xlsx$/i.test(name) || !/fauna/i.test(name) || /^~/.test(name)) return false;
+  const yyyy = yyyyMm.slice(0, 4);
+  const mm = yyyyMm.slice(5, 7);
+  const month = MONTHS[Number(mm) - 1] || "";
+  const sep = "[.\\-/ _]";
+  return new RegExp(`(^|\\D)${mm}${sep}${yyyy}(\\D|$)`).test(name)
+    || new RegExp(`(^|\\D)${yyyy}${sep}${mm}(\\D|$)`).test(name)
+    || new RegExp(`${month}\\s*${yyyy}|${yyyy}\\s*${month}`, "i").test(name);
+}
+
+/**
+ * A month's workbook made fresh from the template (the office's log with one
+ * month tab and the hidden lists): the tab, its print area and the file's
+ * own list of tabs all take the month's name.
+ */
+export async function newMonthWorkbook(template: ArrayBuffer, yyyyMm: string): Promise<LogWorkbook> {
+  const log = await openLog(template);
+  const name = monthName(yyyyMm);
+  if (!name) throw new Error(`${yyyyMm} is not a month`);
+  const tab = monthTabs(log)[0] || log.sheets.find((s) => s.name !== "Sheet1") || log.sheets[0];
+  if (!tab) throw new Error("the template has no month tab");
+  if (tab.name === name) return log;
+  const wbPart = partOf(log.entries, "xl/workbook.xml")!;
+  const relsPart = partOf(log.entries, "xl/_rels/workbook.xml.rels")!;
+  let wbXml = await partText(wbPart);
+  const old = xmlEsc(tab.name);
+  wbXml = wbXml.replace(/<sheet\b[^>]*>/g, (t) => (t.includes(`name="${old}"`) ? t.replace(/name="[^"]*"/, `name="${xmlEsc(name)}"`) : t));
+  wbXml = wbXml.replace(new RegExp(`>${escapeRe(old)}!`, "g"), `>${xmlEsc(name)}!`)
+    .replace(new RegExp(`>'${escapeRe(old)}'!`, "g"), `>'${xmlEsc(name)}'!`);
+  await setPartText(wbPart, wbXml);
+  const app = partOf(log.entries, "docProps/app.xml");
+  if (app) {
+    await setPartText(app, (await partText(app))
+      .split(`<vt:lpstr>${old}</vt:lpstr>`).join(`<vt:lpstr>${xmlEsc(name)}</vt:lpstr>`)
+      .split(`<vt:lpstr>${old}!`).join(`<vt:lpstr>${xmlEsc(name)}!`));
+  }
+  log.sheets = listSheets(wbXml, await partText(relsPart));
+  return log;
+}
+
 export async function saveLog(log: LogWorkbook): Promise<ArrayBuffer> {
   return await writeZip(log.entries).arrayBuffer();
 }

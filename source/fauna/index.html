@@ -12,106 +12,81 @@
 <title>Fauna Log - TSV Coolibah</title>
 <style>
   :root { --navy:#0B3D5C; --sea:#1C5C8C; --ink:#14283A; --mute:#5D7688; --line:#D6E0E8; --bg:#F2F6F9; --card:#fff;
-    --warn:#B8621B; --bad:#C0281F; --good:#1F7A4D; --carried:#7A8A99; }
+    --warn:#B8621B; --bad:#C0281F; --good:#1F7A4D; }
   * { box-sizing:border-box; }
   html,body { margin:0; padding:0; background:var(--bg); color:var(--ink); font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; -webkit-text-size-adjust:100%; }
-  body { padding-bottom:calc(24px + env(safe-area-inset-bottom)); }
+  body { padding-bottom:calc(92px + env(safe-area-inset-bottom)); }
   header { background:var(--navy); color:#fff; padding:calc(10px + env(safe-area-inset-top)) 16px 12px; position:sticky; top:0; z-index:5; }
   header .row { display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
   header h1 { font-size:15px; letter-spacing:.8px; margin:0; font-weight:700; }
-  header .who { font-size:12px; opacity:.8; }
+  header .who { font-size:12px; opacity:.85; background:transparent; border:0; color:#fff; font-family:inherit; padding:0; text-decoration:underline dotted; }
+  .observer { background:#fff; border:1px solid var(--line); border-radius:12px; padding:12px; margin:0 0 12px; display:none; }
+  .observer.show { display:block; }
+  .observer label { font-size:12px; color:var(--mute); display:block; margin-bottom:4px; }
+  .observer .row { display:flex; gap:8px; }
+  .observer input { flex:1; font:inherit; font-size:16px; padding:9px 10px; border:1px solid var(--line); border-radius:8px; min-height:42px; }
+  .observer button { font:inherit; font-size:15px; font-weight:600; padding:0 16px; border:0; border-radius:8px; background:var(--sea); color:#fff; }
   header .fix { font-size:13px; margin-top:4px; display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
   header .fix b { font-weight:600; font-variant-numeric:tabular-nums; }
+  header .fix .pos { background:transparent; border:0; color:#fff; font:inherit; font-size:13px; padding:0; text-decoration:underline dotted; }
   header .fix .pos.stale { opacity:.6; }
-  header button.mute { background:transparent; border:1px solid rgba(255,255,255,.4); color:#fff; border-radius:6px; font:inherit; font-size:12px; padding:3px 8px; }
   main { padding:14px 16px 0; max-width:640px; margin:0 auto; }
-  .talk { display:flex; flex-direction:column; align-items:center; gap:10px; margin:6px 0 14px; }
-  .mic { width:96px; height:96px; border-radius:50%; border:0; background:var(--sea); color:#fff; box-shadow:0 6px 18px rgba(11,61,92,.35); font-size:40px; display:flex; align-items:center; justify-content:center; touch-action:manipulation; }
-  .mic:active { transform:scale(.97); }
-  .mic.listening { background:var(--bad); animation:pulse 1.2s ease-in-out infinite; }
-  .mic.busy { background:var(--mute); }
-  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(192,40,31,.45)} 70%{box-shadow:0 0 0 22px rgba(192,40,31,0)} 100%{box-shadow:0 0 0 0 rgba(192,40,31,0)} }
-  .mic svg { width:44px; height:44px; fill:#fff; }
-  .state { font-size:13px; color:var(--mute); min-height:18px; text-align:center; }
-  .heard { width:100%; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px; font-size:15px; line-height:1.4; min-height:44px; color:var(--ink); }
-  .heard .interim { color:var(--mute); }
-  .heard:empty::before { content:"Tap the microphone and say what you saw."; color:var(--mute); }
-  .question { width:100%; background:#FFF6E8; border:1px solid #F0D3A8; color:#6B3E0E; border-radius:10px; padding:10px 12px; font-size:16px; line-height:1.35; display:none; }
-  .question.show { display:block; }
-  .question .k { font-size:12px; letter-spacing:.6px; text-transform:uppercase; color:#9A6A2E; display:block; margin-bottom:2px; }
-  .done { width:100%; background:#E9F5EE; border:1px solid #BFE0CC; color:#1F5A3A; border-radius:10px; padding:10px 12px; font-size:15px; display:none; }
-  .done.show { display:block; }
-  .typed { width:100%; display:none; gap:8px; }
-  .typed.show { display:flex; }
-  .typed input { flex:1; font:inherit; font-size:15px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; }
-  .typed button { font:inherit; font-size:14px; padding:10px 14px; border:0; border-radius:8px; background:var(--sea); color:#fff; }
-  .link { background:transparent; border:0; color:var(--sea); font:inherit; font-size:13px; text-decoration:underline; padding:2px 4px; }
+  .mode { display:flex; background:#fff; border:1px solid var(--line); border-radius:10px; overflow:hidden; margin:0 0 12px; }
+  .mode button { flex:1; font:inherit; font-size:15px; font-weight:600; padding:11px; border:0; background:#fff; color:var(--mute); }
+  .mode button.on { background:var(--sea); color:#fff; }
+  .note { font-size:13px; color:var(--mute); min-height:18px; margin:0 0 10px; }
   section.group { background:var(--card); border:1px solid var(--line); border-radius:12px; margin:0 0 12px; overflow:hidden; }
-  section.group h2 { font-size:12px; letter-spacing:.8px; text-transform:uppercase; color:var(--mute); margin:0; padding:10px 12px 6px; }
+  section.group h2 { font-size:12px; letter-spacing:.8px; text-transform:uppercase; color:var(--mute); margin:0; padding:10px 12px 4px; }
   .fields { display:grid; grid-template-columns:1fr 1fr; }
-  .f { display:flex; flex-direction:column; gap:2px; padding:8px 12px; border-top:1px solid var(--line); min-height:52px; cursor:pointer; }
-  .f:nth-child(odd) { border-right:1px solid var(--line); }
-  .f .l { font-size:11.5px; color:var(--mute); letter-spacing:.2px; }
-  .f .v { font-size:16px; font-weight:600; color:var(--ink); }
-  .f.empty .v { color:var(--line); font-weight:500; }
-  .f.empty.need .v { color:var(--warn); }
-  .f.empty.need { background:#FFFAF3; }
-  .f.carried .v { color:var(--carried); font-weight:500; font-style:italic; }
-  .f.locked .l::after { content:" · typed"; color:var(--good); }
-  .f.focus { outline:2px solid var(--warn); outline-offset:-2px; }
-  .f select, .f input { font:inherit; font-size:16px; padding:6px 8px; border:1px solid var(--line); border-radius:6px; width:100%; background:#fff; }
-  .f .yn { display:flex; gap:6px; }
-  .f .yn button { flex:1; font:inherit; font-size:15px; padding:8px; border:1px solid var(--line); border-radius:6px; background:#fff; }
-  .f .yn button.on { background:var(--sea); color:#fff; border-color:var(--sea); }
-  .actions { display:flex; gap:10px; margin:4px 0 18px; }
+  @media (max-width:420px) { .fields { grid-template-columns:1fr; } }
+  .f { display:flex; flex-direction:column; gap:4px; padding:8px 12px 10px; border-top:1px solid var(--line); }
+  .f label { font-size:12px; color:var(--mute); letter-spacing:.2px; }
+  .f.need label { color:var(--warn); }
+  .f.need { background:#FFFAF3; }
+  .f select, .f input { font:inherit; font-size:16px; padding:9px 10px; border:1px solid var(--line); border-radius:8px; width:100%; background:#fff; color:var(--ink); min-height:42px; }
+  .f select:focus, .f input:focus { outline:2px solid var(--sea); outline-offset:-1px; }
+  .f .unit { display:flex; align-items:center; gap:0; }
+  .f .unit input { border-radius:8px 0 0 8px; }
+  .f .unit .u { font-size:14px; color:var(--mute); border:1px solid var(--line); border-left:0; border-radius:0 8px 8px 0; padding:0 12px; min-height:42px; display:flex; align-items:center; background:#F7FAFC; white-space:nowrap; }
+  .f .unit select.u { width:auto; padding:0 8px; }
+  .actions { position:fixed; left:0; right:0; bottom:0; background:rgba(242,246,249,.96); border-top:1px solid var(--line); padding:10px 16px calc(10px + env(safe-area-inset-bottom)); display:flex; gap:10px; z-index:6; }
+  .actions .inner { display:flex; gap:10px; width:100%; max-width:608px; margin:0 auto; }
   .actions button { flex:1; font:inherit; font-size:16px; font-weight:600; padding:14px; border:0; border-radius:10px; }
-  .actions .save { background:var(--good); color:#fff; }
+  .actions .save { background:var(--good); color:#fff; flex:2; }
   .actions .save[disabled] { background:#9CC3AD; }
-  .actions .nil { background:#fff; border:1px solid var(--line); color:var(--ink); }
-  .actions .discard { background:#fff; border:1px solid var(--line); color:var(--bad); flex:0 0 auto; padding:14px 16px; }
-  .month { display:flex; justify-content:space-between; align-items:center; margin:6px 0 8px; }
+  .actions .discard { background:#fff; border:1px solid var(--line); color:var(--bad); }
+  .month { display:flex; justify-content:space-between; align-items:center; margin:6px 0 8px; gap:8px; }
   .month h2 { font-size:12px; letter-spacing:.8px; text-transform:uppercase; color:var(--mute); margin:0; }
-  .month .dl { font:inherit; font-size:13px; color:var(--sea); text-decoration:none; border:1px solid var(--line); background:#fff; border-radius:8px; padding:6px 10px; }
+  .month .dl { font:inherit; font-size:13px; color:var(--sea); text-decoration:none; border:1px solid var(--line); background:#fff; border-radius:8px; padding:6px 10px; white-space:nowrap; }
   .month select { font:inherit; font-size:13px; border:1px solid var(--line); border-radius:8px; padding:5px 8px; background:#fff; }
   .logline { font-size:12px; color:var(--mute); margin:-2px 0 8px; overflow-wrap:anywhere; }
   ul.list { list-style:none; margin:0; padding:0; }
   ul.list li { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:8px; display:flex; justify-content:space-between; gap:10px; align-items:center; }
   ul.list li .t { font-weight:600; font-variant-numeric:tabular-nums; }
   ul.list li .d { font-size:14px; color:var(--ink); flex:1; margin-left:10px; }
-  ul.list li .s { font-size:11.5px; color:var(--mute); }
+  ul.list li .s { font-size:11.5px; color:var(--mute); text-align:right; }
   ul.list li.pending .s { color:var(--warn); }
   ul.list li.empty { color:var(--mute); justify-content:center; font-size:14px; }
-  .toast { position:fixed; left:50%; bottom:calc(20px + env(safe-area-inset-bottom)); transform:translateX(-50%); background:var(--ink); color:#fff; padding:10px 16px; border-radius:10px; font-size:14px; opacity:0; transition:opacity .2s; pointer-events:none; max-width:90vw; text-align:center; z-index:9; }
+  .link { background:transparent; border:0; color:var(--sea); font:inherit; font-size:13px; text-decoration:underline; padding:2px 4px; }
+  .toast { position:fixed; left:50%; bottom:calc(84px + env(safe-area-inset-bottom)); transform:translateX(-50%); background:var(--ink); color:#fff; padding:10px 16px; border-radius:10px; font-size:14px; opacity:0; transition:opacity .2s; pointer-events:none; max-width:90vw; text-align:center; z-index:9; }
   .toast.show { opacity:1; }
   #fatal { display:none; color:#fff; background:var(--bad); font-family:ui-monospace,monospace; font-size:13px; line-height:1.6; padding:14px 16px; white-space:pre-wrap; word-break:break-word; }
 </style>
 </head>
 <body>
 <header>
-  <div class="row"><h1>FAUNA LOG</h1><span class="who" id="who"></span><button class="mute" id="mute" type="button">Voice on</button></div>
-  <div class="fix"><b id="clock">--:--</b><span id="today"></span><span class="pos stale" id="pos">no position yet</span></div>
+  <div class="row"><h1>FAUNA LOG</h1><button class="who" id="who" type="button"></button></div>
+  <div class="fix"><b id="clock">--:--</b><span id="today"></span><button class="pos stale" id="pos" type="button">no position yet</button></div>
 </header>
 <div id="fatal"></div>
 <main>
-  <div class="talk">
-    <button class="mic" id="mic" type="button" aria-label="Talk">
-      <svg viewBox="0 0 24 24"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 0 0-7 0v6A3.5 3.5 0 0 0 12 15zm5.3-3.5a5.3 5.3 0 0 1-10.6 0H4.9a7.1 7.1 0 0 0 6.2 7v2.5h1.8v-2.5a7.1 7.1 0 0 0 6.2-7h-1.8z"/></svg>
-    </button>
-    <div class="state" id="state"></div>
-    <div class="heard" id="heard"></div>
-    <div class="question" id="question"></div>
-    <div class="done" id="done"></div>
-    <div class="typed" id="typed"><input id="typedText" placeholder="Type what you saw instead" autocomplete="off"><button id="typedGo" type="button">Read</button></div>
-    <button class="link" id="typeToggle" type="button">Type instead</button>
+  <div class="observer" id="observerPanel">
+    <label for="observerName">Observer, as the log writes it</label>
+    <div class="row"><input id="observerName" autocomplete="name" placeholder="M. Jones"><button type="button" id="observerKeep">Keep</button></div>
   </div>
-
+  <div class="mode"><button type="button" id="modeSighting" class="on">Sighting</button><button type="button" id="modeNil">Nil sightings</button></div>
+  <div class="note" id="note"></div>
   <div id="groups"></div>
-
-  <div class="actions">
-    <button class="discard" id="discard" type="button">Clear</button>
-    <button class="nil" id="nil" type="button">Nil sightings</button>
-    <button class="save" id="save" type="button">Save</button>
-  </div>
 
   <div class="month">
     <h2>Saved entries</h2>
@@ -121,13 +96,14 @@
   <div class="logline" id="logline" style="display:none"></div>
   <ul class="list" id="list"></ul>
 </main>
+<div class="actions"><div class="inner">
+  <button class="discard" id="discard" type="button">Clear</button>
+  <button class="save" id="save" type="button">Save</button>
+</div></div>
 <div class="toast" id="toast"></div>
 
 <script type="module">
-import {
-  FIELDS, FIELD, SPECIES, blankRecord, settle, mergeParsed, missingFields, nextQuestion, parseSpoken,
-  latLongText, observerName, monthName, isBlank,
-} from "./fields.js";
+import { FIELDS, FIELD, SPECIES, blankRecord, settle, missingFields, latLongText, observerName, monthName, isBlank, toNumber, windKmh } from "./fields.js";
 
 /* ------------------------------------------------------------ helpers -- */
 const $ = (id) => document.getElementById(id);
@@ -143,7 +119,7 @@ const store = {
 let toastTimer = null;
 function toast(msg) {
   const t = $("toast"); t.textContent = msg; t.classList.add("show");
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 2600);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 3200);
 }
 window.addEventListener("error", (e) => { const f = $("fatal"); f.style.display = "block"; f.textContent = "SOMETHING BROKE - screenshot this\n\n" + (e.message || e) + "\n" + (e.filename || "") + ":" + (e.lineno || ""); });
 
@@ -159,18 +135,25 @@ const CARRY_HOURS = 3;
 
 /* -------------------------------------------------------------- state -- */
 let me = { name: "", role: "" };
-let logInfo = null;                      // the log in SharePoint, from /api/fauna/log
+let logInfo = null;                       // the log in SharePoint, from /api/fauna/log
 let entry = newEntry();
-let saved = [];                         // this month's entries from the server
+let saved = [];                           // this month's entries from the server
 let queue = store.get("fauna.queue", []); // saves that could not reach the server yet
-let fix = store.get("fauna.fix", null);  // { lat, lon, at }
-let voiceOn = store.get("fauna.voice", true);
+let fix = store.get("fauna.fix", null);   // { lat, lon, at }
 let month = localDate().slice(0, 7);
-let listening = false, busy = false, wantAnswer = null;
-let typedLast = false;   // the last words were typed, so the answer is typed too
+const controls = {};                      // key -> the input or select on the page
+let windUnit = "km/h";                    // how the wind speed box is being typed
+let windTyped = "";
 
 function newEntry() {
-  return { record: blankRecord(), locked: [], carried: [], transcript: "", id: null };
+  return { record: blankRecord(), touched: false, stamped: false, id: null };
+}
+/** A fresh entry shown with what the phone knows already filled in. */
+function freshEntry() {
+  entry = newEntry();
+  carryOver();
+  stampNow(true);
+  entry.stamped = true;
 }
 
 /* ---------------------------------------------------------- the clock -- */
@@ -193,160 +176,197 @@ function takeFix() {
   return new Promise((resolve) => {
     if (!navigator.geolocation) return resolve(fix);
     navigator.geolocation.getCurrentPosition(
-      (p) => { fix = { lat: p.coords.latitude, lon: p.coords.longitude, at: Date.now() }; store.set("fauna.fix", fix); showFix(); resolve(fix); },
+      (p) => { fix = { lat: p.coords.latitude, lon: p.coords.longitude, at: Date.now() }; store.set("fauna.fix", fix); showFix(); fillPosition(!entry.touched); resolve(fix); },
       () => { showFix(); resolve(fix); },
       { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 },
     );
   });
 }
+$("pos").onclick = () => { $("pos").textContent = "finding position..."; takeFix(); };
 showFix();
 takeFix();
 
-/* --------------------------------------------------------------- voice -- */
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition || null;
-const SILENCE_MS = 3000;     // a pause this long ends what is being said
-const NO_SPEECH_MS = 15000;  // nothing at all heard for this long: give up
-let rec = null, takeFinal = "", silenceTimer = null, quietTimer = null, restarts = 0, stopping = false, previewTimer = null;
-function say(text) {
-  return new Promise((resolve) => {
-    if (!voiceOn || !("speechSynthesis" in window) || !text) return resolve();
-    try {
-      speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = "en-AU";
-      const voices = speechSynthesis.getVoices();
-      u.voice = voices.find((v) => /en[-_]AU/i.test(v.lang)) || voices.find((v) => /en[-_]GB/i.test(v.lang)) || null;
-      u.rate = 1.02;
-      u.onend = () => resolve(); u.onerror = () => resolve();
-      speechSynthesis.speak(u);
-      setTimeout(resolve, 12000);
-    } catch { resolve(); }
-  });
+/* ------------------------------------------------------- the observer -- */
+// Asked for once, the first time the app is opened on this phone, offered
+// as the signed-in name; kept on the phone and written on every entry.
+let observer = store.get("fauna.observer", "");
+function showObserverPanel() {
+  $("observerName").value = observer || observerName(me.name);
+  $("observerPanel").classList.add("show");
+  setTimeout(() => $("observerName").focus(), 0);
 }
-$("mute").textContent = voiceOn ? "Voice on" : "Voice off";
-$("mute").onclick = () => { voiceOn = !voiceOn; store.set("fauna.voice", voiceOn); $("mute").textContent = voiceOn ? "Voice on" : "Voice off"; if (!voiceOn) try { speechSynthesis.cancel(); } catch {} };
-
-function setState(s) { $("state").textContent = s; }
-function showHeard(finalText, interim) {
-  const h = $("heard");
-  h.innerHTML = "";
-  if (finalText) h.append(document.createTextNode(finalText + " "));
-  if (interim) { const i = document.createElement("span"); i.className = "interim"; i.textContent = interim; h.append(i); }
-}
-
-/* One take: the microphone stays open while the watchkeeper talks the whole
-   entry through, reading off the instruments as they go. A pause of three
-   seconds ends the take; the phone's own recogniser stopping earlier does
-   not - it is started again until the silence says the take is over. What
-   has been heard so far is read into the columns as it comes, so the list
-   fills in while they talk. */
-function startListening(focus) {
-  if (!SR) { $("typed").classList.add("show"); $("typedText").focus(); setState("This browser cannot listen - type it instead."); return; }
-  if (listening || busy) return;
-  wantAnswer = focus || null;
-  takeFinal = ""; restarts = 0; stopping = false;
-  listening = true; $("mic").classList.add("listening");
-  setState(focus ? "Listening for the answer..." : "Listening...");
-  if (!entry.record.time) stampNow();
-  takeFix();
-  armQuiet();
-  beginRecognition();
-}
-function beginRecognition() {
-  rec = new SR();
-  rec.lang = "en-AU"; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1;
-  rec.onresult = (e) => {
-    let interim = "";
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      const r = e.results[i];
-      if (r.isFinal) takeFinal += (takeFinal ? " " : "") + r[0].transcript.trim();
-      else interim += r[0].transcript;
-    }
-    showHeard(takeFinal, interim);
-    clearTimeout(quietTimer);
-    armSilence();
-    if (takeFinal) { clearTimeout(previewTimer); previewTimer = setTimeout(() => previewParse(takeFinal), 250); }
-  };
-  rec.onerror = (e) => {
-    if (e.error === "not-allowed" || e.error === "service-not-allowed") { setState("The microphone is blocked. Allow it in the browser and try again."); finishTake(); }
-    else if (e.error !== "no-speech" && e.error !== "aborted") setState("Listening stopped: " + e.error);
-  };
-  rec.onend = () => {
-    if (!listening || stopping) return;
-    // The recogniser gave up on its own; the take has not ended until the
-    // silence says so.
-    if (restarts++ < 30) { try { rec.start(); } catch { finishTake(); } }
-    else finishTake();
-  };
-  try { rec.start(); } catch (e) { setState("Could not start listening: " + (e.message || e)); finishTake(); }
-}
-function armSilence() { clearTimeout(silenceTimer); silenceTimer = setTimeout(finishTake, SILENCE_MS); }
-function armQuiet() { clearTimeout(quietTimer); quietTimer = setTimeout(() => { if (listening && !takeFinal) { setState("Nothing heard. Tap and try again."); finishTake(); } }, NO_SPEECH_MS); }
-function previewParse(text) {
-  if (!listening) return;
-  const r = entry.record;
-  const parsed = parseSpoken(text, r, { focus: wantAnswer });
-  entry.record = { ...settle(mergeParsed(r, parsed, entry.locked), { latDec: r.latDec ?? fix?.lat ?? null, lonDec: r.lonDec ?? fix?.lon ?? null, tzHours }), latDec: r.latDec, lonDec: r.lonDec };
-  render();
-}
-function finishTake() {
-  if (!listening) return;
-  listening = false; stopping = true;
-  clearTimeout(silenceTimer); clearTimeout(quietTimer); clearTimeout(previewTimer);
-  $("mic").classList.remove("listening");
-  let finished = false;
-  const done = () => {
-    if (finished) return;
-    finished = true; clearTimeout(fallback);
-    const text = takeFinal.trim();
-    const focus = wantAnswer; wantAnswer = null;
-    if (text) { entry.transcript = (entry.transcript ? entry.transcript + " " : "") + text; showHeard(text, ""); heard(text, focus); }
-    else if (/Listening/.test($("state").textContent)) setState("");
-  };
-  // The last words arrive after stop() is called, so the reading waits for
-  // the recogniser to say it has ended - or a moment and a half, whichever
-  // comes first.
-  const fallback = setTimeout(done, 1500);
-  if (rec) { rec.onend = done; try { rec.stop(); } catch { done(); } }
-  else done();
-}
-
-$("mic").onclick = () => {
-  if (listening) { finishTake(); return; }
-  try { speechSynthesis.cancel(); } catch {}
-  typedLast = false;
-  startListening(pendingQuestion ? pendingQuestion.keys : null);
+$("observerKeep").onclick = () => {
+  const v = $("observerName").value.trim();
+  if (!v) return;
+  observer = v; store.set("fauna.observer", observer);
+  $("who").textContent = observer;
+  $("observerPanel").classList.remove("show");
+  if (!entry.record.observer || !entry.touched) { entry.record.observer = observer; syncControls(); }
 };
-$("typeToggle").onclick = () => { $("typed").classList.toggle("show"); if ($("typed").classList.contains("show")) $("typedText").focus(); };
-const typedGo = () => {
-  const t = $("typedText").value.trim();
-  if (!t) return;
-  $("typedText").value = "";
-  typedLast = true;
-  if (!entry.record.time) stampNow();
-  entry.transcript = (entry.transcript ? entry.transcript + " " : "") + t;
-  showHeard(t, "");
-  heard(t, currentFocus());
-};
-$("typedGo").onclick = typedGo;
-$("typedText").addEventListener("keydown", (e) => { if (e.key === "Enter") typedGo(); });
+$("observerName").addEventListener("keydown", (e) => { if (e.key === "Enter") $("observerKeep").click(); });
+$("who").onclick = showObserverPanel;
 
-let pendingQuestion = null;
-function currentFocus() { return pendingQuestion ? pendingQuestion.keys : null; }
-
-/* -------------------------------------------------------- the reading -- */
-function stampNow() {
+/* ------------------------------------------------------------- the form -- */
+// What the phone already knows, put on the entry: the time and date now,
+// the observer, and the position. Stamped when a fresh entry is shown and
+// again when it is first touched, so the time is when the logging started,
+// not when the app was opened.
+function stampNow(fresh = false) {
   const r = entry.record;
-  if (!r.time) r.time = localTime();
-  if (!r.date) r.date = localDate();
-  if (!r.observer && me.name) r.observer = observerName(me.name);
-  if (fix && (!r.lat || !r.long) && !entry.locked.includes("lat")) {
+  if (!r.time || fresh) r.time = localTime();
+  if (!r.date || fresh) r.date = localDate();
+  if (!r.observer) r.observer = observer || observerName(me.name);
+  fillPosition(fresh);
+}
+// The position from the phone, unless one was typed in.
+function fillPosition(force) {
+  const r = entry.record;
+  if (!fix) return;
+  if (force || (!r.lat && !r.long)) {
     const [la, lo] = latLongText(fix.lat, fix.lon);
     r.lat = la; r.long = lo; r.latDec = fix.lat; r.lonDec = fix.lon;
+    syncControls();
   }
-  render();
 }
 
+function build() {
+  const host = $("groups");
+  host.innerHTML = "";
+  for (const g of GROUPS) {
+    const sec = document.createElement("section"); sec.className = "group"; sec.dataset.group = g.key;
+    const h = document.createElement("h2"); h.textContent = g.title; sec.append(h);
+    const grid = document.createElement("div"); grid.className = "fields";
+    for (const key of g.keys) grid.append(cell(FIELD[key]));
+    sec.append(grid); host.append(sec);
+  }
+}
+
+function cell(f) {
+  const wrap = document.createElement("div"); wrap.className = "f"; wrap.dataset.key = f.key;
+  const label = document.createElement("label"); label.textContent = f.label; label.htmlFor = "in-" + f.key;
+  wrap.append(label);
+  let el;
+  if (f.kind === "list" || f.kind === "yesno") {
+    el = document.createElement("select");
+    fillOptions(el, f);
+    el.onchange = () => changed(f.key, el.value);
+  } else if (f.kind === "time" || f.kind === "date") {
+    el = document.createElement("input"); el.type = f.kind;
+    el.onchange = () => changed(f.key, el.value);
+  } else if (f.kind === "number") {
+    el = document.createElement("input"); el.type = "text"; el.inputMode = "decimal"; el.autocomplete = "off";
+    el.oninput = () => changed(f.key, el.value, true);
+    el.onchange = () => changed(f.key, el.value);
+  } else {
+    el = document.createElement("input"); el.type = "text"; el.autocomplete = "off";
+    if (f.key === "windDir") el.placeholder = "N, NE, SW...";
+    el.oninput = () => changed(f.key, el.value, true);
+    el.onchange = () => changed(f.key, el.value);
+  }
+  el.id = "in-" + f.key;
+  controls[f.key] = el;
+  if (f.key === "windSpeed") {
+    // Typed in knots or km/h; the log keeps km/h.
+    const box = document.createElement("div"); box.className = "unit";
+    const unit = document.createElement("select"); unit.className = "u";
+    for (const u of ["km/h", "knots"]) { const o = document.createElement("option"); o.value = u; o.textContent = u; unit.append(o); }
+    unit.value = windUnit;
+    unit.onchange = () => { windUnit = unit.value; store.set("fauna.windUnit", windUnit); changed("windSpeed", el.value); };
+    box.append(el, unit); wrap.append(box);
+    controls.windUnit = unit;
+  } else if (f.unit) {
+    const box = document.createElement("div"); box.className = "unit";
+    const u = document.createElement("span"); u.className = "u"; u.textContent = f.unit;
+    box.append(el, u); wrap.append(box);
+  } else wrap.append(el);
+  return wrap;
+}
+
+function fillOptions(sel, f) {
+  const current = sel.value;
+  sel.innerHTML = "";
+  const blank = document.createElement("option"); blank.value = ""; blank.textContent = "—"; sel.append(blank);
+  const options = f.kind === "yesno" ? ["Yes", "No"] : f.key === "species" ? (SPECIES[entry.record.faunaType] || []) : f.options;
+  for (const o of options) { const op = document.createElement("option"); op.value = o; op.textContent = o; sel.append(op); }
+  sel.value = options.includes(current) ? current : "";
+}
+
+/** A column typed or picked. Numbers still being typed are not tidied yet. */
+function changed(key, value, typing = false) {
+  const r = entry.record;
+  if (!entry.touched) {
+    entry.touched = true;
+    // The first touch of a fresh entry is when the sighting is being logged.
+    if (entry.stamped && !["time", "date", "lat", "long"].includes(key)) stampNow(true);
+    else stampNow();
+  }
+  if (key === "windSpeed") {
+    windTyped = value;
+    const n = toNumber(value);
+    r.windSpeed = n == null ? null : windKmh(n, windUnit);
+  } else if (key === "faunaType") {
+    r.faunaType = value || null;
+    r.species = null;
+    fillOptions(controls.species, FIELD.species);
+  } else if (key === "lat" || key === "long") {
+    r[key] = value === "" ? null : value;
+    r.latDec = null; r.lonDec = null;
+  } else {
+    r[key] = value === "" ? null : value;
+  }
+  if (typing) { markNeeds(); return; }
+  // Committed (picked, or typed and left): tidied into the log's words and
+  // shown that way, the box just left included.
+  entry.record = settle(r, { latDec: r.latDec ?? fix?.lat ?? null, lonDec: r.lonDec ?? fix?.lon ?? null, tzHours });
+  syncControls(key === "windSpeed" ? key : null);
+}
+
+/** The controls shown from the record - all but the one being typed in. */
+function syncControls(except = null) {
+  const r = entry.record;
+  for (const f of FIELDS) {
+    const el = controls[f.key];
+    if (!el || f.key === except) continue;
+    if (f.key === "species") fillOptions(el, f);
+    if (f.key === "windSpeed") {
+      el.value = except === "windSpeed" ? el.value : isBlank(r.windSpeed) ? "" : windUnit === "knots" ? String(Math.round(r.windSpeed / 1.852)) : String(r.windSpeed);
+      continue;
+    }
+    const v = isBlank(r[f.key]) ? "" : String(r[f.key]);
+    if (el.tagName === "SELECT") {
+      if (v && ![...el.options].some((o) => o.value === v)) { const op = document.createElement("option"); op.value = v; op.textContent = v; el.append(op); }
+      el.value = v;
+    } else el.value = v;
+  }
+  markNeeds();
+  $("modeSighting").classList.toggle("on", r.kind !== "nil");
+  $("modeNil").classList.toggle("on", r.kind === "nil");
+  for (const sec of document.querySelectorAll("section.group")) {
+    sec.style.display = r.kind === "nil" && (sec.dataset.group === "animal" || sec.dataset.group === "response") ? "none" : "";
+  }
+  $("save").textContent = entry.id ? "Save changes" : "Save";
+}
+
+function markNeeds() {
+  const missing = new Set(missingFields(entry.record));
+  for (const f of FIELDS) {
+    const el = controls[f.key];
+    if (el) el.closest(".f").classList.toggle("need", missing.has(f.key));
+  }
+}
+
+function setMode(kind) {
+  const r = entry.record;
+  if (!entry.touched) { entry.touched = true; stampNow(!!entry.stamped); }
+  r.kind = kind;
+  if (kind === "sighting" && r.comments === "Nil sightings") r.comments = null;
+  entry.record = settle(r, { latDec: r.latDec ?? fix?.lat ?? null, lonDec: r.lonDec ?? fix?.lon ?? null, tzHours });
+  syncControls();
+}
+$("modeSighting").onclick = () => setMode("sighting");
+$("modeNil").onclick = () => setMode("nil");
+
+/* ----------------------------------------------------- the last entry -- */
 function lastConditions() {
   // The most recent saved entry today, within a few hours: its conditions
   // are almost certainly still the conditions.
@@ -362,166 +382,35 @@ function lastConditions() {
   if (out.activity === "Transiting") delete out.heading;
   return Object.keys(out).length ? out : null;
 }
-
-async function heard(text, focus) {
-  busy = true; $("mic").classList.add("busy"); setState("Reading...");
-  const r = entry.record;
-  const ctx = { latDec: r.latDec ?? fix?.lat ?? null, lonDec: r.lonDec ?? fix?.lon ?? null, tzHours };
-  let result = null;
-  try {
-    const res = await fetch("/api/fauna/parse", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ transcript: text, record: r, focus, locked: entry.locked, lastConditions: lastConditions(), ...ctx }),
-    });
-    if (res.status === 401) { location.href = "/login"; return; }
-    if (res.ok) result = await res.json();
-  } catch {}
-  if (!result || !result.record) {
-    // Off the air: the same rules, run here.
-    const parsed = parseSpoken(text, r, { focus });
-    const merged = settle(mergeParsed(r, parsed, entry.locked), ctx);
-    result = { record: merged, by: "rules (offline)" };
-  }
-  // Anything the reading filled that a carried value stood in for is now real.
-  entry.carried = entry.carried.filter((k) => result.record[k] === r[k]);
-  entry.record = { ...r, ...result.record, latDec: r.latDec, lonDec: r.lonDec };
-  busy = false; $("mic").classList.remove("busy");
-  setState(result.by && result.by !== "model" ? "Read without the AI (" + result.by.replace(/^rules \(|\)$/g, "") + ")" : "");
-  render();
-  await askNext();
-}
-
-async function askNext() {
-  const q = nextQuestion(entry.record);
-  pendingQuestion = q;
-  const qEl = $("question"), dEl = $("done");
-  if (!q) {
-    qEl.classList.remove("show");
-    dEl.textContent = entry.record.kind === "nil" ? "Nil sightings for this watch. Save it." : "That is everything. Check it and save.";
-    dEl.classList.add("show");
-    render();
-    await say("That's everything.");
-    return;
-  }
-  dEl.classList.remove("show");
-  qEl.innerHTML = "";
-  const k = document.createElement("span"); k.className = "k"; k.textContent = "Still needed";
-  qEl.append(k, document.createTextNode(q.text));
-  qEl.classList.add("show");
-  render();
-  if (typedLast) { $("typedText").focus(); return; }
-  await say(q.text);
-  if (voiceOn && SR) startListening(q.keys);
-}
-
-/* ------------------------------------------------------------- render -- */
-function valueText(f, v) {
-  if (isBlank(v)) return "—";
-  if (f.key === "heading" || f.key === "bearing") return v + "°";
-  if (f.key === "windSpeed") return v + " km/h";
-  if (f.key === "waveHeight") return v + " m";
-  if (f.key === "distance" || f.key === "platformHeight") return v + " m";
-  if (f.key === "date") { const [y, m, d] = String(v).split("-"); return `${d}/${m}/${y}`; }
-  return String(v);
-}
-let editing = null;
-function render() {
-  const r = entry.record;
-  const missing = new Set(missingFields(r));
-  const focus = new Set(currentFocus() || []);
-  const host = $("groups");
-  host.innerHTML = "";
-  for (const g of GROUPS) {
-    if (r.kind === "nil" && (g.key === "animal" || g.key === "response")) continue;
-    const sec = document.createElement("section"); sec.className = "group";
-    const h = document.createElement("h2"); h.textContent = g.title; sec.append(h);
-    const grid = document.createElement("div"); grid.className = "fields";
-    for (const key of g.keys) {
-      const f = FIELD[key]; const v = r[key];
-      const cell = document.createElement("div");
-      cell.className = "f" + (isBlank(v) ? " empty" : "") + (missing.has(key) ? " need" : "") + (entry.carried.includes(key) ? " carried" : "") + (entry.locked.includes(key) ? " locked" : "") + (focus.has(key) ? " focus" : "");
-      const l = document.createElement("div"); l.className = "l"; l.textContent = f.label;
-      cell.append(l);
-      if (editing === key) cell.append(editor(f));
-      else { const val = document.createElement("div"); val.className = "v"; val.textContent = valueText(f, v); cell.append(val); cell.onclick = () => { editing = key; render(); }; }
-      grid.append(cell);
-    }
-    sec.append(grid); host.append(sec);
-  }
-  $("save").disabled = false;
-  $("save").textContent = entry.id ? "Save changes" : "Save";
-  $("nil").style.display = entry.id ? "none" : "";
-}
-function editor(f) {
-  const r = entry.record;
-  const commit = (v) => {
-    // Only a value actually typed is held against what is said later; a
-    // column tapped and left alone is not.
-    const changed = String(isBlank(v) ? "" : v) !== String(isBlank(r[f.key]) ? "" : r[f.key]);
-    r[f.key] = isBlank(v) ? null : v;
-    if (changed && !isBlank(v) && !entry.locked.includes(f.key)) entry.locked.push(f.key);
-    if (isBlank(v)) entry.locked = entry.locked.filter((k) => k !== f.key);
-    if (changed) entry.carried = entry.carried.filter((k) => k !== f.key);
-    if (f.key === "faunaType") r.species = null;
-    entry.record = settle(r, { latDec: r.latDec, lonDec: r.lonDec, tzHours });
-    editing = null;
-    pendingQuestion = nextQuestion(entry.record);
-    render();
-    if (!pendingQuestion) { $("question").classList.remove("show"); $("done").textContent = "That is everything. Check it and save."; $("done").classList.add("show"); }
-    else { $("done").classList.remove("show"); }
-  };
-  let el;
-  if (f.kind === "yesno") {
-    el = document.createElement("div"); el.className = "yn";
-    for (const o of ["Yes", "No"]) { const b = document.createElement("button"); b.type = "button"; b.textContent = o; if (r[f.key] === o) b.classList.add("on"); b.onclick = (e) => { e.stopPropagation(); commit(o); }; el.append(b); }
-    const x = document.createElement("button"); x.type = "button"; x.textContent = "–"; x.onclick = (e) => { e.stopPropagation(); commit(null); }; el.append(x);
-    return el;
-  }
-  const options = f.key === "species" ? (SPECIES[r.faunaType] || []) : f.options;
-  if (f.kind === "list" && options) {
-    el = document.createElement("select");
-    const blank = document.createElement("option"); blank.value = ""; blank.textContent = "—"; el.append(blank);
-    for (const o of options) { const op = document.createElement("option"); op.value = o; op.textContent = o; if (r[f.key] === o) op.selected = true; el.append(op); }
-    if (!isBlank(r[f.key]) && !options.includes(r[f.key])) { const op = document.createElement("option"); op.value = r[f.key]; op.textContent = r[f.key]; op.selected = true; el.append(op); }
-    el.onchange = () => commit(el.value);
-    el.onblur = () => { if (editing === f.key) { editing = null; render(); } };
-    setTimeout(() => el.focus(), 0);
-    return el;
-  }
-  el = document.createElement("input");
-  el.type = f.kind === "number" ? "text" : f.kind === "time" ? "time" : f.kind === "date" ? "date" : "text";
-  if (f.kind === "number") el.inputMode = "decimal";
-  el.value = isBlank(r[f.key]) ? "" : String(r[f.key]);
-  el.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); commit(el.value); } if (e.key === "Escape") { editing = null; render(); } };
-  el.onchange = () => { if (editing === f.key) commit(el.value); };
-  el.onblur = () => { if (editing === f.key) commit(el.value); };
-  setTimeout(() => { el.focus(); el.select && el.select(); }, 0);
-  return el;
+function carryOver() {
+  if (entry.id) return;
+  const last = lastConditions();
+  if (!last) return;
+  for (const [k, v] of Object.entries(last)) if (isBlank(entry.record[k])) entry.record[k] = v;
 }
 
 /* -------------------------------------------------------------- saving -- */
 async function saveEntry() {
   const r = settle(entry.record, { latDec: entry.record.latDec, lonDec: entry.record.lonDec, tzHours });
-  if (!r.time || !r.date) stampNow();
-  const missing = missingFields(r);
+  if (!r.time || !r.date) { entry.record = r; stampNow(); }
+  const missing = missingFields(entry.record);
   if (missing.length) {
     const first = FIELD[missing[0]];
     if (!confirm(`${missing.length} column${missing.length > 1 ? "s are" : " is"} still empty (${first.label}${missing.length > 1 ? " and more" : ""}). Save anyway?`)) return;
   }
   // An entry still waiting on the phone has a local id the server never sees.
   const localId = entry.id && String(entry.id).startsWith("local-") ? entry.id : null;
-  const record = { ...r, id: entry.id && !localId ? entry.id : undefined, transcript: entry.transcript || null };
+  const record = { ...entry.record, id: entry.id && !localId ? entry.id : undefined };
   $("save").disabled = true;
   try {
     const res = await fetch("/api/fauna/sightings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ record }) });
-    if (res.status === 401) { location.href = "/login"; return; }
+    if (res.status === 401) { location.href = "/login?next=" + encodeURIComponent("/fauna/"); return; }
     const out = await res.json();
     if (!res.ok) throw new Error(out.error || res.status);
     if (localId) { queue = queue.filter((q) => q.id !== localId); store.set("fauna.queue", queue); saved = saved.filter((s) => s.id !== localId); }
     const inLog = out.log && out.log.linked && out.record && out.record.inLog;
     const logWord = !out.log || !out.log.linked ? "" : inLog ? " In the log." : " Not in the log yet" + (out.log.error ? ": " + out.log.error : ".");
     toast((entry.id && !localId ? "Saved the changes." : "Saved.") + logWord);
-    await say(inLog ? "Saved, and in the log." : "Saved.");
     finishEntry(out.record);
   } catch (e) {
     // Kept on the phone and sent the next time the server can be reached.
@@ -531,15 +420,19 @@ async function saveEntry() {
     store.set("fauna.queue", queue);
     toast("No connection - kept on the phone, it will save when back in range.");
     finishEntry({ ...record, id, pending: true });
+  } finally {
+    $("save").disabled = false;
   }
 }
 function finishEntry(savedRecord) {
   const m = String(savedRecord.date || "").slice(0, 7);
   if (m === month) { saved = saved.filter((s) => s.id !== savedRecord.id); saved.push(savedRecord); saved.sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`)); }
-  entry = newEntry(); store.del("fauna.draft");
-  pendingQuestion = null; editing = null;
-  $("question").classList.remove("show"); $("done").classList.remove("show"); showHeard("", ""); setState("");
-  render(); renderList();
+  store.del("fauna.draft");
+  windTyped = "";
+  freshEntry();
+  $("note").textContent = "";
+  syncControls(); renderList(); loadLogInfo();
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 async function flushQueue() {
   if (!queue.length || !navigator.onLine) return;
@@ -562,28 +455,13 @@ async function flushQueue() {
 window.addEventListener("online", flushQueue);
 
 $("save").onclick = saveEntry;
-$("nil").onclick = () => {
-  stampNow();
-  entry.record = settle({ ...entry.record, kind: "nil" }, { latDec: entry.record.latDec, lonDec: entry.record.lonDec, tzHours });
-  carryOver();
-  render();
-  askNext();
-};
 $("discard").onclick = () => {
-  if (entry.transcript || entry.id || entry.locked.length) { if (!confirm(entry.id ? "Drop the changes to this entry?" : "Clear this entry?")) return; }
-  entry = newEntry(); store.del("fauna.draft"); pendingQuestion = null; editing = null;
-  $("question").classList.remove("show"); $("done").classList.remove("show"); showHeard("", ""); setState("");
-  render();
+  if (entry.touched || entry.id) { if (!confirm(entry.id ? "Drop the changes to this entry?" : "Clear this entry?")) return; }
+  store.del("fauna.draft"); windTyped = "";
+  freshEntry();
+  $("note").textContent = "";
+  syncControls();
 };
-
-function carryOver() {
-  if (entry.id) return;
-  const last = lastConditions();
-  if (!last) return;
-  for (const [k, v] of Object.entries(last)) {
-    if (isBlank(entry.record[k]) && !entry.locked.includes(k)) { entry.record[k] = v; if (!entry.carried.includes(k)) entry.carried.push(k); }
-  }
-}
 
 /* --------------------------------------------------------- the month -- */
 function monthOptions() {
@@ -594,22 +472,23 @@ function monthOptions() {
     const o = document.createElement("option"); o.value = ym; o.textContent = `${monthName(ym)} ${ym.slice(0, 4)}`; if (ym === month) o.selected = true; sel.append(o);
     d.setMonth(d.getMonth() - 1);
   }
-  sel.onchange = () => { month = sel.value; loadMonth(); };
+  sel.onchange = () => { month = sel.value; loadLogInfo(); loadMonth(); };
 }
 async function loadLogInfo() {
   try {
-    const res = await fetch("/api/fauna/log", { cache: "no-store" });
+    const res = await fetch(`/api/fauna/log?month=${month}`, { cache: "no-store" });
     if (res.ok) logInfo = await res.json();
   } catch {}
   const line = $("logline");
-  if (logInfo && logInfo.linked) { line.textContent = "In SharePoint: " + logInfo.file; line.style.display = ""; }
+  if (logInfo && logInfo.linked && logInfo.file) { line.textContent = "In SharePoint: " + logInfo.file; line.style.display = ""; }
+  else if (logInfo && logInfo.linked) { line.textContent = "In SharePoint: " + logInfo.folder + " (no workbook for this month yet)"; line.style.display = ""; }
   else line.style.display = "none";
 }
 async function loadMonth() {
   $("download").href = `/api/fauna/export?month=${month}`;
   try {
     const res = await fetch(`/api/fauna/sightings?month=${month}`, { cache: "no-store" });
-    if (res.status === 401) { location.href = "/login"; return; }
+    if (res.status === 401) { location.href = "/login?next=" + encodeURIComponent("/fauna/"); return; }
     const out = await res.json();
     saved = (out.entries || []);
   } catch { saved = saved.filter((s) => String(s.date || "").slice(0, 7) === month); }
@@ -633,55 +512,46 @@ function renderList() {
   }
 }
 function openSaved(s) {
-  if ((entry.transcript || entry.locked.length) && !confirm("Drop the entry you are on and open this one?")) return;
-  entry = { record: { ...blankRecord(), ...s }, locked: FIELDS.map((f) => f.key).filter((k) => !isBlank(s[k])), carried: [], transcript: s.transcript || "", id: s.id };
-  delete entry.record.pending;
-  pendingQuestion = null; editing = null;
-  $("question").classList.remove("show"); $("done").classList.remove("show");
-  showHeard(entry.transcript, ""); setState(s.pending ? "Not yet on the server." : "Saved entry - tap a column to change it.");
-  render();
+  if (entry.touched && !confirm("Drop the entry you are on and open this one?")) return;
+  entry = { record: { ...blankRecord(), ...s }, touched: false, id: s.id };
+  delete entry.record.pending; delete entry.record.inLog; delete entry.record.logError;
+  windTyped = "";
+  syncControls();
+  $("note").textContent = s.pending ? "Not yet on the server. " : "Saved entry. ";
   const del = document.createElement("button"); del.className = "link"; del.textContent = "Remove this entry"; del.style.color = "#C0281F";
   del.onclick = async () => {
     if (!confirm("Remove this entry from the log?")) return;
     if (String(s.id).startsWith("local-")) { queue = queue.filter((q) => q.id !== s.id); store.set("fauna.queue", queue); }
     else { try { await fetch(`/api/fauna/sightings/${encodeURIComponent(s.id)}`, { method: "DELETE" }); } catch { toast("No connection - try again in range."); return; } }
     saved = saved.filter((x) => x.id !== s.id);
-    entry = newEntry(); pendingQuestion = null; showHeard("", ""); setState(""); render(); renderList(); toast("Removed.");
+    freshEntry(); $("note").textContent = ""; syncControls(); renderList(); toast("Removed.");
   };
-  $("state").append(document.createTextNode(" "), del);
+  $("note").append(del);
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 /* ---------------------------------------------------------------- boot -- */
 async function boot() {
+  windUnit = store.get("fauna.windUnit", "km/h");
+  build();
   try {
     const res = await fetch("/api/me", { cache: "no-store" });
     if (res.status === 401) { location.href = "/login?next=" + encodeURIComponent("/fauna/"); return; }
     me = await res.json();
-    $("who").textContent = observerName(me.name);
-  } catch { $("who").textContent = ""; }
+  } catch {}
+  $("who").textContent = observer || observerName(me.name) || "observer";
   monthOptions();
   await loadLogInfo();
   await loadMonth();
   flushQueue();
   const draft = store.get("fauna.draft", null);
-  if (draft && draft.record) {
-    // An entry that was under way when the app was closed carries on, with
-    // the question it was up to shown but not spoken.
-    entry = { ...newEntry(), ...draft };
-    showHeard(entry.transcript, "");
-    pendingQuestion = nextQuestion(entry.record);
-    if (pendingQuestion) {
-      const qEl = $("question"); qEl.innerHTML = "";
-      const k = document.createElement("span"); k.className = "k"; k.textContent = "Still needed";
-      qEl.append(k, document.createTextNode(pendingQuestion.text)); qEl.classList.add("show");
-    }
-  }
-  else carryOver();
-  render();
-  if ("speechSynthesis" in window) speechSynthesis.getVoices();
+  if (draft && draft.record) entry = { ...newEntry(), ...draft };
+  else freshEntry();
+  syncControls();
+  // The first time on this phone: who is logging.
+  if (!observer) showObserverPanel();
 }
-setInterval(() => { if (entry.transcript || entry.locked.length) store.set("fauna.draft", entry); }, 2000);
+setInterval(() => { if (entry.touched) store.set("fauna.draft", entry); }, 2000);
 boot();
 </script>
 </body></html>

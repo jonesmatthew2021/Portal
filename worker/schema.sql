@@ -151,12 +151,14 @@ CREATE TABLE IF NOT EXISTS fauna_sightings (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER,
-  -- Where the entry sits in the office's workbook in SharePoint
-  -- (SHAREPOINT_FAUNA_FOLDER): the tab and row it was written to and when,
-  -- so a change rewrites the same row and a removal blanks it. write_error
-  -- is why the last attempt failed; the hour tries again. The worker adds
-  -- these to an existing table itself.
+  -- Where the entry sits in the month's workbook in SharePoint
+  -- (SHAREPOINT_FAUNA_FOLDER): which month's file, the tab and row it was
+  -- written to and when, so a change rewrites the same row, a removal blanks
+  -- it, and an entry moved to another month is blanked in the old file.
+  -- write_error is why the last attempt failed; the hour tries again. The
+  -- worker adds these to an existing table itself.
   written_at INTEGER,
+  written_month TEXT,
   written_tab TEXT,
   written_row INTEGER,
   write_error TEXT

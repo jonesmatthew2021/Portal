@@ -109,13 +109,14 @@ SHAREPOINT_LIBRARY = "Documents"
 # A Teams channel's files sit inside a folder named after the channel in the
 # site's Documents library, so every path starts with the channel folder.
 SHAREPOINT_ROOT = "United Operations Team/Crew Portal"
-# Where the Marine Fauna Observation Log workbook lives in the library. The
-# fauna app (/fauna/) writes each saved sighting into the month's tab of the
-# newest .xlsx in this folder whose name says "fauna" — a tab that is not
-# there yet is copied from the latest month's. The folder is Matthew's to
-# make and the workbook his to put there; empty, and the app only offers
-# the month as a download.
-SHAREPOINT_FAUNA_FOLDER = "United Operations Team/Crew Portal/Marine Fauna Observations"
+# Where the Marine Fauna Observation Logs live in the library: one workbook
+# a month, "09.2026 - Marine Fauna Observation Log.xlsx", made from the
+# app's template the first time the month has a sighting and written into
+# on every save after that. The folder is Matthew's to make (in Teams, a
+# subfolder called Fauna under the team's files); the portal makes the
+# files, never the folder. Empty, and the app only offers the month as a
+# download.
+SHAREPOINT_FAUNA_FOLDER = "United Operations Team/Fauna"
 SHAREPOINT_MAP = """
 {
   "certification/spreadsheet/": "United Operations Team/Crew Portal/Crew Certificates Spreadsheet/",

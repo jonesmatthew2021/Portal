@@ -56,26 +56,28 @@ assets as they are (no JSX, no build step beyond the copy):
 
 | File under `source/fauna/` | What |
 |---|---|
-| `index.html` | the app: talk, the columns fill in, it asks for what is missing, save |
-| `fields.js` | the log's 31 columns, which must be filled, the questions, the rules that read a spoken sentence — the page, the worker and the tests all run this one file |
+| `index.html` | the app: a form — dropdowns where the log has them, typed boxes otherwise, units on the boxes; date, time, position and observer filled in; save |
+| `fields.js` | the log's 31 columns and their dropdown lists, which must be filled, what the phone settles for itself (the head count, the zone, the light), and how each is written to the sheet — the page, the worker and the tests all run this one file |
 | `template.xlsx` | the office's own workbook with one month tab, made by `node tools/fauna-template.mjs "<the office's log.xlsx>"`; the month export is written into it |
 | `manifest.webmanifest`, `icon.svg` | the home-screen app; `node tools/fauna-icons.mjs` redraws the PNGs |
 
-The worker side is `worker/src/routes/fauna.ts`: the AI reads the sentence
-(`POST /api/fauna/parse`, falling back to the rules in `fields.js` when the
-model cannot be reached), the entries live in `fauna_sightings`, and
-`GET /api/fauna/export?month=` hands back the month as the office's workbook.
+The worker side is `worker/src/routes/fauna.ts`: the entries live in
+`fauna_sightings`, and `GET /api/fauna/export?month=` hands back the month as
+the office's workbook. Voice and AI reading were built first and taken out on
+24 Sep 2026 at Matthew's word: it is a form, nothing more.
 
-**The log in SharePoint.** `SHAREPOINT_FAUNA_FOLDER` (wrangler.toml) names
-the library folder the office's log workbook sits in; the newest `.xlsx`
-there whose name says "fauna" is the log. Every save writes the entry into
-its month's tab straight away (`settleLog` in the route, the workbook work
-in `worker/src/lib/fauna-log.ts`), the hour writes whatever could not be
-written then, and `fauna_sightings.written_tab/written_row` remember where
-each entry sits so a change rewrites its own row and a removal blanks it. A
-month with no tab gets one copied from the latest month's, put in after it.
-Rows the office typed by hand are never touched. The folder is Matthew's to
-make and the workbook his to put there — the portal makes neither.
+**The logs in SharePoint.** `SHAREPOINT_FAUNA_FOLDER` (wrangler.toml) names
+the library folder — Matthew's choice, 24 Sep 2026: a subfolder called
+Fauna under the team's files, one new workbook each month. Every save
+writes the entry into the month's workbook straight away (`settleLog` in the
+route, the workbook work in `worker/src/lib/fauna-log.ts`): the file whose
+name carries the month ("09.2026 - Marine Fauna Observation Log.xlsx"), made
+from `template.xlsx` the first time the month has an entry. The hour writes
+whatever could not be written then. `fauna_sightings.written_month/
+written_tab/written_row` remember where each entry sits, so a change rewrites
+its own row, a removal blanks it and an entry moved to another month is
+blanked in the file it left. Rows anyone typed by hand are never touched. The
+folder is Matthew's to make — the portal makes the files, never the folder.
 
 `source/shared/` holds the code the page and the worker both run: the workbook
 writer (`workbook.js`), the matrix rules (`matrix-rules.js`) and the names

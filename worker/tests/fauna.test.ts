@@ -1,7 +1,7 @@
 /**
- * The fauna log's rules: what a spoken sentence becomes, what the phone can
- * settle on its own, what is still to be asked, and the month written into
- * the office's workbook.
+ * The fauna log's rules: what the phone settles on its own, what is still to
+ * be filled, the position and the light, the month written into the office's
+ * workbook, and a month tab made where the log has none.
  *
  *   npx tsx --test tests/fauna.test.ts      (or: node tools/check.mjs)
  */
@@ -11,146 +11,86 @@ import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  parseSpoken, settle, mergeParsed, missingFields, nextQuestion, blankRecord, latLongText, observerName, positionText,
-  windKmh, compassOf, bearingOf, distanceOf, wordsToNumber, sunUp, sheetValue, modelSchema, monthName,
+  settle, missingFields, blankRecord, latLongText, observerName, positionText, windKmh, compassOf, activityOf,
+  sunUp, sheetValue, monthName, inZoneByTable,
 } from "../../source/fauna/fields.js";
-import { exportMonth } from "../src/routes/fauna.js";
-import { openLog, ensureMonthTab, writeRows, saveLog, monthTabs } from "../src/lib/fauna-log.js";
+import { exportMonth, monthFileIn } from "../src/routes/fauna.js";
+import { openLog, ensureMonthTab, writeRows, saveLog, monthTabs, newMonthWorkbook, monthFileName, isMonthFile } from "../src/lib/fauna-log.js";
 import { readZip, partOf, partText, listSheets, readSheetRows } from "../../source/shared/workbook.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TEMPLATE = join(HERE, "..", "..", "source", "fauna", "template.xlsx");
 
-/* ---------------------------------------------------------- the words ---- */
+/* ------------------------------------------------------- the settling ---- */
 
-test("a whole sighting said in one breath lands in the right columns", () => {
-  const said = "Humpback whale, two adults and a calf, about 500 metres on the starboard bow, travelling, calm, we altered course to starboard, no stop work";
-  const got = settle(mergeParsed(blankRecord(), parseSpoken(said, blankRecord())));
-  assert.equal(got.faunaType, "Whale");
-  assert.equal(got.species, "Humpback");
-  assert.equal(got.adults, 2);
-  assert.equal(got.calves, 1);
-  assert.equal(got.total, 3);
-  assert.equal(got.distance, 500);
-  assert.equal(got.bearing, 45);
-  assert.equal(got.behaviour, "Travelling");
-  assert.equal(got.condition, "Calm");
-  assert.equal(got.action, "Altered course to stbd");
-  assert.equal(got.stopWork, "No");
-  assert.equal(got.certainty, "Certain");
+test("what the phone settles for itself once a sighting is typed in", () => {
+  const got = settle({ ...blankRecord(), faunaType: "Whale", species: "Humpback", adults: 2, calves: 1, distance: 500, bearing: 45 });
+  assert.equal(got.total, 3, "the total from adults and calves");
   assert.equal(got.inZone, "No", "500 m is outside a whale's 300 m caution zone");
+  assert.equal(got.certainty, "Certain", "a named species is certain unless said otherwise");
+  assert.equal(got.condition, "Calm");
+  assert.equal(got.action, "None");
+  assert.equal(got.stopWork, "No");
+  const near = settle({ ...blankRecord(), faunaType: "Dolphin", species: "Bottlenose", total: 6, distance: 30, bearing: 270 });
+  assert.equal(near.adults, 6, "no calves mentioned: all adults");
+  assert.equal(near.calves, 0);
+  assert.equal(near.inZone, "Yes");
+  assert.equal(inZoneByTable({ faunaType: "Turtle", distance: 100 }), "Yes");
+  assert.equal(inZoneByTable({ faunaType: "Turtle", distance: 101 }), "No");
+  const other = settle({ ...blankRecord(), faunaType: "Turtle", species: "Other", total: 1 });
+  assert.equal(other.certainty, "Uncertain");
+  const dugong = settle({ ...blankRecord(), faunaType: "Dugong", total: 1 });
+  assert.equal(dugong.species, "Dugong");
 });
 
-test("the conditions said the way a bridge says them", () => {
-  const said = "Underway heading 270, wind south west 15 knots, half a metre swell, cloud 2, glare 1, vis 4, sea state 2, sunny, full light";
-  const got = settle(mergeParsed(blankRecord(), parseSpoken(said, blankRecord())));
+test("a head count that disagrees is made to add up", () => {
+  const got = settle({ ...blankRecord(), faunaType: "Whale", species: "Humpback", total: 2, adults: 2, calves: 1 });
+  assert.equal(got.total, 3);
+  const fromTotal = settle({ ...blankRecord(), faunaType: "Whale", species: "Humpback", total: 4, adults: 3 });
+  assert.equal(fromTotal.calves, 1);
+});
+
+test("typed values are tidied into the log's own words", () => {
+  const got = settle({ ...blankRecord(), activity: "underway", windDir: "south west", heading: "270", windSpeed: "27.8", glare: "1", cloud: 2, stopWork: "y" });
   assert.equal(got.activity, "Transiting");
-  assert.equal(got.heading, 270);
   assert.equal(got.windDir, "SW");
-  assert.equal(got.windSpeed, 28, "15 knots is 28 km/h");
-  assert.equal(got.waveHeight, 0.5);
-  assert.equal(got.cloud, "2");
+  assert.equal(got.heading, 270);
+  assert.equal(got.windSpeed, 28);
   assert.equal(got.glare, "1");
-  assert.equal(got.visibility, "4");
-  assert.equal(got.seaState, "2");
-  assert.equal(got.weather, "Sunny");
-  assert.equal(got.light, "Full Light");
-});
-
-test("a pod of dolphins bow riding, and a turtle nobody is sure about", () => {
-  const a = settle(mergeParsed(blankRecord(), parseSpoken("pod of six bottlenose dolphins bow riding, 20 metres off the port beam", blankRecord())));
-  assert.equal(a.faunaType, "Dolphin");
-  assert.equal(a.species, "Bottlenose");
-  assert.equal(a.total, 6);
-  assert.equal(a.adults, 6);
-  assert.equal(a.calves, 0);
-  assert.equal(a.behaviour, "Socialising");
-  assert.equal(a.bearing, 270);
-  assert.equal(a.distance, 20);
-  assert.equal(a.inZone, "Yes");
-  const b = settle(mergeParsed(blankRecord(), parseSpoken("possibly a green turtle, one, dead ahead about 80 metres, resting", blankRecord())));
-  assert.equal(b.faunaType, "Turtle");
-  assert.equal(b.species, "Green");
-  assert.equal(b.certainty, "Uncertain");
-  assert.equal(b.total, 1);
-  assert.equal(b.bearing, 0);
-  assert.equal(b.distance, 80);
-  assert.equal(b.behaviour, "Resting");
+  assert.equal(got.cloud, "2");
+  assert.equal(got.stopWork, "Yes");
+  assert.equal(activityOf("at anchor"), "Anchored");
+  assert.equal(compassOf("sw"), "SW");
+  assert.equal(compassOf("sou'west"), "SW");
+  assert.equal(compassOf("north north east"), "NNE");
+  assert.equal(compassOf("westerly"), "W");
+  assert.equal(compassOf("variable"), "Variable");
+  assert.equal(windKmh(10, "knots"), 19);
+  assert.equal(windKmh(28, "km/h"), 28);
 });
 
 test("nil sightings need only the conditions", () => {
-  const got = settle(mergeParsed(blankRecord(), parseSpoken("nil sightings this watch", blankRecord())));
+  const got = settle({ ...blankRecord(), kind: "nil", faunaType: "Whale" });
   assert.equal(got.kind, "nil");
   assert.equal(got.comments, "Nil sightings");
+  assert.equal(got.faunaType, null, "nothing about an animal on a nil watch");
   const missing = missingFields(got);
   assert.ok(!missing.includes("faunaType"));
   assert.ok(missing.includes("windSpeed"));
 });
 
-test("a bare answer lands in the column that was asked for", () => {
-  const r = { ...blankRecord(), faunaType: "Whale", species: "Humpback" };
-  assert.equal(parseSpoken("about four hundred", r, { focus: ["distance"] }).distance, 400);
-  assert.equal(parseSpoken("Minke", r, { focus: ["species"] }).species, "Minke");
-  assert.equal(parseSpoken("yes it was", r, { focus: ["stopWork"] }).stopWork, "Yes");
-  assert.equal(parseSpoken("overcast", r, { focus: ["weather"] }).weather, "Overcast");
-  assert.equal(parseSpoken("south west", r, { focus: ["windDir"] }).windDir, "SW");
-  assert.equal(parseSpoken("three", r, { focus: ["seaState"] }).seaState, "3");
-});
-
-test("the next question follows the log's order, one column at a time", () => {
+test("what is still empty, in the log's order", () => {
   const empty = settle({ ...blankRecord(), time: "07:40", date: "2026-09-24", observer: "M. Jones", lat: "21°23.4'S", long: "114°52.1'E" });
-  const q1 = nextQuestion(empty);
-  assert.deepEqual(q1 && q1.keys, ["activity"], "the vessel first");
-  assert.equal(parseSpoken("discharging", empty, { focus: q1!.keys }).activity, "Discharging");
-  const withVessel = { ...empty, activity: "Transiting", heading: 270 };
-  const q2 = nextQuestion(withVessel);
-  assert.deepEqual(q2 && q2.keys, ["glare"], "then the first condition, on its own");
-  assert.equal(parseSpoken("one", withVessel, { focus: q2!.keys }).glare, "1");
-  const nearlyDone = settle({ ...withVessel, glare: "1", visibility: "4", windSpeed: 20, windDir: "SW", waveHeight: 0.5, cloud: "2", light: "Full Light", weather: "Sunny", seaState: "2",
-    faunaType: "Whale", species: "Humpback", total: 2, distance: 500, bearing: 45, behaviour: "Travelling", platformHeight: 6 });
-  assert.equal(nextQuestion(nearlyDone), null, "everything else the rules settle themselves");
-});
-
-test("a hand-typed column is never talked over", () => {
-  const r = { ...blankRecord(), distance: 250 };
-  const merged = mergeParsed(r, parseSpoken("humpback about 800 metres", r), ["distance"]);
-  assert.equal(merged.distance, 250);
-  assert.equal(merged.faunaType, "Whale");
-});
-
-test("what the vessel did is not read as where the animal was", () => {
-  const got = parseSpoken("one humpback 300 metres, we altered course to starboard and reduced speed", blankRecord());
-  assert.equal(got.bearing, undefined, "no bearing was said");
-  assert.equal(got.action, "Altered course to stbd");
-  assert.equal(got.distance, 300);
-  assert.equal(parseSpoken("dolphins bow riding on the port side", blankRecord()).bearing, 270);
+  const missing = missingFields(empty);
+  assert.equal(missing[0], "activity", "the vessel first");
+  assert.ok(missing.includes("faunaType") && missing.includes("distance"));
+  assert.ok(!missing.includes("comments"), "comments are never required");
+  const done = settle({ ...empty, activity: "Transiting", heading: 270, glare: "1", visibility: "4", windSpeed: 20, windDir: "SW", waveHeight: 0.5, cloud: "2",
+    light: "Full Light", weather: "Sunny", seaState: "2", faunaType: "Whale", species: "Humpback", total: 2, distance: 500, bearing: 45, behaviour: "Travelling", platformHeight: 6 });
+  assert.deepEqual(missingFields(done), [], "everything else the rules settle themselves");
 });
 
 /* ------------------------------------------------------- the helpers ---- */
-
-test("figures, bearings, distances and the compass", () => {
-  assert.equal(wordsToNumber("two hundred and fifty"), 250);
-  assert.equal(wordsToNumber("1.5"), 1.5);
-  assert.equal(wordsToNumber("a dozen"), 12);
-  assert.equal(bearingOf("green 40"), 40);
-  assert.equal(bearingOf("red 20"), 340);
-  assert.equal(bearingOf("fine on the port bow"), 340);
-  assert.equal(bearingOf("on the starboard quarter"), 135);
-  assert.equal(bearingOf("bearing three four zero"), 340);
-  assert.equal(distanceOf("half a k off"), 500);
-  assert.equal(distanceOf("two cables"), 370);
-  assert.equal(distanceOf("about a mile"), 1852);
-  assert.equal(distanceOf("1.5 k away"), 1500);
-  assert.equal(distanceOf("full light, one adult, half a metre swell"), null, "a wave height is not a distance");
-  assert.equal(distanceOf("swell of one metre, whale 300 metres off"), 300);
-  assert.equal(parseSpoken("half a metre swell", { ...blankRecord(), distance: 500 }).distance, undefined);
-  assert.equal(compassOf("north north east"), "NNE");
-  assert.equal(compassOf("westerly"), "W");
-  assert.equal(compassOf("sou'west"), "SW");
-  assert.equal(compassOf("variable"), "Variable");
-  assert.equal(windKmh(10, "knots"), 19);
-  assert.equal(windKmh(28, "km/h"), 28);
-});
 
 test("a position and a name the way the log writes them", () => {
   assert.deepEqual(latLongText(-21.39, 114.868), ["21°23.4'S", "114°52.1'E"]);
@@ -176,6 +116,8 @@ test("full light by the sun off Onslow", () => {
   assert.equal(sunUp("2026-06-21", "18:30", -21.4, 114.9, 8), false, "after sunset in June");
   const got = settle({ ...blankRecord(), date: "2026-09-24", time: "11:00" }, { latDec: -21.4, lonDec: 114.9, tzHours: 8 });
   assert.equal(got.light, "Full Light");
+  const chosen = settle({ ...blankRecord(), date: "2026-09-24", time: "11:00", light: "Low Light" }, { latDec: -21.4, lonDec: 114.9, tzHours: 8 });
+  assert.equal(chosen.light, "Low Light", "what was picked stands");
 });
 
 test("what a column is written to the sheet as", () => {
@@ -184,25 +126,53 @@ test("what a column is written to the sheet as", () => {
   assert.deepEqual(sheetValue("species", "Hawksbill"), { kind: "inline", value: "Hawskbill" });
   assert.deepEqual(sheetValue("cloud", "2"), { kind: "number", value: 2 });
   assert.deepEqual(sheetValue("comments", null), { kind: "blank" });
-  const schema = modelSchema() as { required: string[]; properties: Record<string, unknown> };
-  assert.ok(schema.required.includes("faunaType") && schema.properties.windSpeedUnit);
   assert.equal(monthName("2026-09"), "September");
 });
 
 /* ------------------------------------------------------ the workbook ---- */
 
+test("a month's workbook is known by its name, however the office wrote the month", () => {
+  assert.equal(monthFileName("2026-09"), "09.2026 - Marine Fauna Observation Log.xlsx");
+  assert.ok(isMonthFile("09.2026 - Marine Fauna Observation Log.xlsx", "2026-09"));
+  assert.ok(isMonthFile("2026-09 Marine Fauna Observation Log.xlsx", "2026-09"));
+  assert.ok(isMonthFile("Marine Fauna Observation Log September 2026.xlsx", "2026-09"));
+  assert.ok(!isMonthFile("08.2026 - Marine Fauna Observation Log.xlsx", "2026-09"), "another month");
+  assert.ok(!isMonthFile("09.2026 - Crew Roster.xlsx", "2026-09"), "not a fauna log");
+  assert.ok(!isMonthFile("~$09.2026 - Marine Fauna Observation Log.xlsx", "2026-09"), "Excel's lock file");
+  const pick = monthFileIn([
+    { name: "09.2026 - Marine Fauna Observation Log.xlsx", path: "United Operations Team/Fauna/09.2026 - Marine Fauna Observation Log.xlsx", modified: "2026-09-20T01:00:00Z" },
+    { name: "09.2026 - Marine Fauna Observation Log (2).xlsx", path: "United Operations Team/Fauna/09.2026 - Marine Fauna Observation Log (2).xlsx", modified: "2026-09-24T01:00:00Z" },
+    { name: "08.2026 - Marine Fauna Observation Log.xlsx", path: "United Operations Team/Fauna/08.2026 - Marine Fauna Observation Log.xlsx", modified: "2026-09-25T01:00:00Z" },
+  ], "2026-09");
+  assert.equal(pick && pick.name, "09.2026 - Marine Fauna Observation Log (2).xlsx", "the newest of the month's");
+  assert.equal(monthFileIn([], "2026-09"), null);
+});
+
+test("a fresh month's workbook from the template carries the month's name through", { skip: !existsSync(TEMPLATE) && "no template built yet (node tools/fauna-template.mjs)" }, async () => {
+  const template = readFileSync(TEMPLATE);
+  const log = await newMonthWorkbook(template.buffer.slice(template.byteOffset, template.byteOffset + template.byteLength), "2026-10");
+  assert.deepEqual(log.sheets.map((s) => s.name), ["October", "Sheet1"]);
+  const wbXml = await partText(partOf(log.entries, "xl/workbook.xml"));
+  assert.ok(wbXml.includes("October!$A$1:$G$29"), "the print area follows the tab");
+  const appXml = await partText(partOf(log.entries, "docProps/app.xml"));
+  assert.ok(appXml.includes("<vt:lpstr>October</vt:lpstr>") && !appXml.includes("<vt:lpstr>August</vt:lpstr>"));
+  const tab = await ensureMonthTab(log, "2026-10");
+  assert.equal(tab.made, false, "the renamed tab is the month's tab");
+});
+
+const BASE = { activity: "Transiting", heading: 270, glare: "1", visibility: "4", windSpeed: 28, windDir: "SW", waveHeight: 0.5, cloud: "2",
+  light: "Full Light", observer: "M. Jones", weather: "Sunny", seaState: "2", lat: "21°23.4'S", long: "114°52.1'E", platformHeight: 6 };
+
 test("the month goes into the office's own log, tab renamed and rows filled", { skip: !existsSync(TEMPLATE) && "no template built yet (node tools/fauna-template.mjs)" }, async () => {
   const template = readFileSync(TEMPLATE);
   const entries = [
-    settle({ ...blankRecord(), time: "07:40", date: "2026-09-24", activity: "Transiting", heading: 270, glare: "1", visibility: "4", windSpeed: 28, windDir: "SW",
-      waveHeight: 0.5, cloud: "2", light: "Full Light", observer: "M. Jones", weather: "Sunny", seaState: "2", lat: "21°23.4'S", long: "114°52.1'E",
-      faunaType: "Whale", species: "Humpback", total: 3, adults: 2, calves: 1, platformHeight: 6, bearing: 45, distance: 500, behaviour: "Travelling",
-      action: "Altered course to stbd", comments: "Cow and calf" }),
-    settle({ ...blankRecord(), kind: "nil", time: "06:00", date: "2026-09-23", activity: "Mooring", heading: 120, glare: "0", visibility: "4", windSpeed: 10, windDir: "NE",
-      waveHeight: 0, cloud: "7", light: "Low Light", observer: "M. Jones", weather: "Cloudy", seaState: "1", lat: "21°32.0'S", long: "114°59.0'E" }),
+    settle({ ...blankRecord(), ...BASE, time: "07:40", date: "2026-09-24", faunaType: "Whale", species: "Humpback", total: 3, adults: 2, calves: 1,
+      bearing: 45, distance: 500, behaviour: "Travelling", action: "Altered course to stbd", comments: "Cow and calf" }),
+    settle({ ...blankRecord(), ...BASE, kind: "nil", time: "06:00", date: "2026-09-23", activity: "Mooring", heading: 120, glare: "0", windSpeed: 10, windDir: "NE",
+      waveHeight: 0, cloud: "7", light: "Low Light", weather: "Cloudy", seaState: "1", lat: "21°32.0'S", long: "114°59.0'E" }),
   ];
-  const blob = await exportMonth(template.buffer.slice(template.byteOffset, template.byteOffset + template.byteLength), "2026-09", entries);
-  const out = readZip(await blob.arrayBuffer());
+  const bytes = await exportMonth(template.buffer.slice(template.byteOffset, template.byteOffset + template.byteLength), "2026-09", entries);
+  const out = readZip(bytes);
   const wbXml = await partText(partOf(out, "xl/workbook.xml"));
   const sheets = listSheets(wbXml, await partText(partOf(out, "xl/_rels/workbook.xml.rels")));
   assert.equal(sheets[0].name, "September");
@@ -248,10 +218,8 @@ test("a month with no tab gets one copied from the latest month, and rows keep t
   const rows = await readSheetRows(log.entries, sept.path);
   assert.equal(rows[14][0], "Time", "the header came across");
 
-  const base = { activity: "Transiting", heading: 270, glare: "1", visibility: "4", windSpeed: 28, windDir: "SW", waveHeight: 0.5, cloud: "2",
-    light: "Full Light", observer: "M. Jones", weather: "Sunny", seaState: "2", lat: "21°23.4'S", long: "114°52.1'E", platformHeight: 6 };
-  const a = settle({ ...blankRecord(), ...base, time: "07:40", date: "2026-09-24", faunaType: "Whale", species: "Humpback", total: 3, adults: 2, calves: 1, bearing: 45, distance: 500, behaviour: "Travelling" });
-  const b = settle({ ...blankRecord(), ...base, time: "09:15", date: "2026-09-24", faunaType: "Dolphin", species: "Bottlenose", total: 6, bearing: 270, distance: 30, behaviour: "Socialising" });
+  const a = settle({ ...blankRecord(), ...BASE, time: "07:40", date: "2026-09-24", faunaType: "Whale", species: "Humpback", total: 3, adults: 2, calves: 1, bearing: 45, distance: 500, behaviour: "Travelling" });
+  const b = settle({ ...blankRecord(), ...BASE, time: "09:15", date: "2026-09-24", faunaType: "Dolphin", species: "Bottlenose", total: 6, bearing: 270, distance: 30, behaviour: "Socialising" });
   const first = await writeRows(log, sept.path, [{ id: "a", values: a, row: null }, { id: "b", values: b, row: null }]);
   assert.deepEqual(first.placed, { a: 16, b: 17 });
 
@@ -260,7 +228,7 @@ test("a month with no tab gets one copied from the latest month, and rows keep t
   const reopened = await openLog(await saveLog(log));
   const tab = await ensureMonthTab(reopened, "2026-09");
   assert.equal(tab.made, false);
-  const c = settle({ ...blankRecord(), ...base, time: "16:05", date: "2026-09-25", kind: "nil" });
+  const c = settle({ ...blankRecord(), ...BASE, time: "16:05", date: "2026-09-25", kind: "nil" });
   const second = await writeRows(reopened, tab.path, [
     { id: "b", values: { ...b, distance: 45 }, row: first.placed.b },
     { id: "c", values: c, row: null },
