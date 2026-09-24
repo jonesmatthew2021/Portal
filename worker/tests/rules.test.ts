@@ -23,6 +23,7 @@ import { RED_DAYS, daysUntil } from "../../source/shared/bands.js";
 import * as reminders from "../../source/shared/reminders.js";
 import { particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, ticketCodesIn, isMsicCard, openToCertificates } from "../../source/shared/particulars.js";
 import { medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote } from "../../source/shared/medical.js";
+import { renewalBlockers, renewalNeedsProblem } from "../../source/shared/renewals.js";
 import { expiringIn, EXPIRING_MEANS, PORTAL_TOOLS } from "../src/lib/portal.js";
 import { dueMeans } from "../src/lib/matrix.js";
 import { readFileSync } from "node:fs";
@@ -875,4 +876,81 @@ test("the medical: a printed expiry longer than the law allows for the holder's 
   assert.equal(medicalTooLong(med(null), grown, MED_TODAY), null, "no printed expiry, nothing to check");
   assert.equal(medicalTooLong(med("2026-09-24"), "2009-01-01", MED_TODAY), null,
     "a medical that has already run out is on the gaps list, not here");
+});
+
+/* ------------------------------------------------------------------------ *
+ * Renewal blockers (source/shared/renewals.js): a certificate in the red
+ * band that cannot be renewed until another one is put right. The pairs are
+ * the vessel file's (renewalNeeds), each with the clause it comes from, so
+ * the law's mapping is data and not code - and the table that ships is the
+ * one these hold against.
+ * ------------------------------------------------------------------------ */
+/* The vessel file carries the table; the worker's Vessel type gains the key
+   when the round is wired to it, so until then it is read as what it is. */
+const REN_TABLE = (vessel as unknown as { renewalNeeds: Record<string, { needs: string[]; why: string }> }).renewalNeeds;
+const REN_TODAY = "2026-09-25";
+const REN_RULES: { needs: typeof REN_TABLE | null; daysUntil: typeof daysUntil; redDays: number } =
+  { needs: REN_TABLE, daysUntil, redDays: RED_DAYS };
+/** A date `n` days from REN_TODAY - negative for one that has gone. */
+const renDay = (n: number) => new Date(Date.parse(REN_TODAY) + n * 86400000).toISOString().slice(0, 10);
+const blockersFor = (held: Record<string, string>, rules = REN_RULES) =>
+  renewalBlockers("EVANS, Brenton", held, REN_TODAY, rules);
+
+test("renewals: the pairs are the vessel file's, every code a column of it", () => {
+  const codes = vessel.qualColumns.map((c) => c[0]);
+  assert.equal(renewalNeedsProblem(REN_TABLE, codes), null, "this vessel's table names only its own columns");
+  const example = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "tools", "fixtures", "example-vessel.json"), "utf8"));
+  assert.equal(renewalNeedsProblem(example.renewalNeeds, example.qualColumns.map((c: string[]) => c[0])), null,
+    "and so does the made-up vessel's");
+  assert.match(String(renewalNeedsProblem({ "QL-11": { needs: ["QL-99"], why: "x" } }, codes)),
+    /renewalNeeds\["QL-11"\].*QL-99.*column/, "a need that is not a column is named");
+  assert.match(String(renewalNeedsProblem({ "ZZ-01": { needs: ["QL-17"], why: "x" } }, codes)),
+    /renewalNeeds\["ZZ-01"\].*column/, "and so is a certificate that is not one");
+  assert.match(String(renewalNeedsProblem({ "QL-11": { needs: [], why: "x" } }, codes)), /renewalNeeds\["QL-11"\]/,
+    "an entry that needs nothing is a table somebody half wrote");
+  // The clause travels with the pair, so a reader can check the rule against
+  // the order rather than against this code.
+  assert.match(String(REN_TABLE["QL-11"].why), /MO70 s 25/);
+  assert.match(String(REN_TABLE["QL-01"].why), /MO71 Sch 4/);
+  assert.match(String(REN_TABLE["QL-03"].why), /MO505 s 9\(3\)\(b\)/);
+});
+
+test("renewals: a cook whose safety training has lapsed cannot renew his cook certificate", () => {
+  // MO70 s 25: the marine cook certificate is revalidated on a certificate of
+  // safety training and a medical. His cook ticket is in the red band and the
+  // COST went last month, so the renewal is stopped before it is posted.
+  const cook = { "QL-11": renDay(40), "QL-12": renDay(-30), "QL-17": renDay(300) };
+  assert.deepEqual(blockersFor(cook), [{
+    person: "EVANS, Brenton", code: "QL-11", needs: ["QL-12"], expired: ["QL-12"], missing: [],
+    why: String(REN_TABLE["QL-11"].why),
+  }], "the entry names the certificate of safety training and nothing else");
+  assert.deepEqual(blockersFor({ ...cook, "QL-12": renDay(300) }), [], "a current COST and medical: nothing in the way");
+  assert.deepEqual(blockersFor({ ...cook, "QL-12": "Y" }), [], "an item the matrix marks held counts as held");
+  const bothGone = blockersFor({ "QL-11": renDay(0), "QL-12": renDay(-30), "QL-17": "" });
+  assert.deepEqual(bothGone[0].needs, ["QL-12", "QL-17"], "both, where both are in the way");
+  assert.deepEqual([bothGone[0].expired, bothGone[0].missing], [["QL-12"], ["QL-17"]],
+    "and which is expired and which is not held, so the line can say so");
+  assert.deepEqual(blockersFor({ "QL-11": renDay(40), "QL-12": "?", "QL-17": renDay(300) })[0].missing, ["QL-12"],
+    "a question mark is nobody saying yes: not held");
+});
+
+test("renewals: a deck certificate needs a medical and a GMDSS, and a certificate with time to run is never blocked", () => {
+  // MO71 Sch 4 4.2. The GMDSS is a certificate class of its own (MO70
+  // s 7(1)(ca)), so an empty QL-14 is a renewal that will not be granted.
+  const master = { "QL-01": renDay(-10), "QL-17": renDay(300), "QL-14": "" };
+  assert.deepEqual(blockersFor(master)[0].needs, ["QL-14"], "expired, with no GMDSS on file");
+  assert.deepEqual(blockersFor({ ...master, "QL-14": renDay(200) }), [], "GMDSS in date: nothing in the way");
+  assert.deepEqual(blockersFor({ ...master, "QL-01": renDay(RED_DAYS + 1) }), [],
+    "a certificate past the red band is not being renewed yet");
+  assert.deepEqual(blockersFor({ ...master, "QL-01": renDay(RED_DAYS) })[0].code, "QL-01", "the edge of the red band is in it");
+  assert.deepEqual(blockersFor({ ...master, "QL-01": "" }), [], "a certificate he does not hold is a gap, not a renewal");
+  assert.deepEqual(blockersFor({ ...master, "QL-01": "Y" }), [], "nor is one the matrix marks held, which never lapses");
+  // MO505 s 9(3)(c): renewing Master <24 m NC or MED Grade 2 NC wants a
+  // declaration of medical fitness, not a medical certificate - so neither
+  // has an entry in the table and neither is ever blocked for a medical.
+  assert.deepEqual(blockersFor({ "QL-08": renDay(-10), "QL-17": "" }), [], "Master <24 m NC: a declaration, and nothing the portal holds");
+  assert.deepEqual(blockersFor({ "QL-09": renDay(-10), "QL-17": "" }), [], "MED Grade 2 NC the same");
+  assert.deepEqual(blockersFor({ "QL-13": renDay(-10), "QL-17": "" }), [], "a code the table says nothing about is never blocked");
+  assert.deepEqual(blockersFor({ "QL-01": renDay(-10) }, { ...REN_RULES, needs: null }), [],
+    "no table, no blockers - never a pair written into the code");
 });

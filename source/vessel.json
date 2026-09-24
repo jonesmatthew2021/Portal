@@ -194,6 +194,17 @@
     "QL-10": { "grade": 1, "stream": "both", "short": "Integrated Rating" },
     "QL-11": { "grade": 1, "stream": "catering", "short": "Marine Cook" }
   },
+  "renewalNeeds": {
+    "QL-01": { "needs": ["QL-17", "QL-14"], "why": "MO71 Sch 4 4.2 - a deck certificate is revalidated on a medical and a GMDSS radio operator certificate" },
+    "QL-02": { "needs": ["QL-17", "QL-14"], "why": "MO71 Sch 4 4.2 - a deck certificate is revalidated on a medical and a GMDSS radio operator certificate" },
+    "QL-03": { "needs": ["QL-17"], "why": "MO505 s 9(3)(b) - renewed on a current domestic medical (and 120 days' sea service, which the portal does not hold and never flags)" },
+    "QL-04": { "needs": ["QL-17"], "why": "MO505 s 9(3)(b) - renewed on a current domestic medical (and 120 days' sea service, which the portal does not hold and never flags)" },
+    "QL-05": { "needs": ["QL-17"], "why": "MO72 Sch 4 4.2 - an engineer's certificate is revalidated on a medical" },
+    "QL-06": { "needs": ["QL-17"], "why": "MO72 Sch 4 4.2 - an engineer's certificate is revalidated on a medical" },
+    "QL-07": { "needs": ["QL-17"], "why": "MO505 s 9(3)(b) - renewed on a current domestic medical (and 120 days' sea service, which the portal does not hold and never flags)" },
+    "QL-10": { "needs": ["QL-17"], "why": "MO70 Sch 2 Table 2.4 item 3(b) and MO73 Sch 4 - the Integrated Rating endorsement and the rating certificate are revalidated on a medical" },
+    "QL-11": { "needs": ["QL-12", "QL-17"], "why": "MO70 s 25 - the marine cook certificate is revalidated on a certificate of safety training and a medical" }
+  },
   "docBuckets": ["vesselSafety", "partnershipSafety", "insurance", "travel", "templates", "agreements", "documentation"],
   "labels": {
     "correspondence": "Partnership Correspondence",

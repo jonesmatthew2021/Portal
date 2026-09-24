@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -2609,6 +2609,30 @@ const is = (got, want, what) => {
   is(shared.medicalTooLong(twoAndADay, "1971-05-28", "2026-09-25"),
     "the expiry is more than a year after the assessment, and the holder was 55 or older that day", "55 on the assessment day: one year, module and page alike");
   is(medicalTooLong(twoAndADay, "1971-05-28", "2026-09-25"), shared.medicalTooLong(twoAndADay, "1971-05-28", "2026-09-25"), "the page says it too");
+}
+
+/* ---- renewal blockers: a red ticket that cannot be renewed until
+        something else is put right (MO70 s 25, MO71 Sch 4 4.2) ---- */
+{
+  const shared = await import(pathToFileURL(join(ROOT, "source", "shared", "renewals.js")).href);
+  const { renewalBlockers, renewalNeedsProblem, daysUntil, RED_DAYS, VESSEL } = lib;
+  const codes = VESSEL.qualColumns.map((c) => c[0]);
+  is(renewalNeedsProblem(VESSEL.renewalNeeds, codes), null, "the vessel file's pairs all name its own columns");
+  is(renewalNeedsProblem(VESSEL.renewalNeeds, codes), shared.renewalNeedsProblem(VESSEL.renewalNeeds, codes), "page and module agree");
+  const today = "2026-09-25";
+  const on = (n) => new Date(Date.parse(today) + n * 86400000).toISOString().slice(0, 10);
+  const rules = { needs: VESSEL.renewalNeeds, daysUntil, redDays: RED_DAYS };
+  const cook = { "QL-11": on(40), "QL-12": on(-30), "QL-17": on(300) };
+  const blocked = renewalBlockers("SITTIYOS, Kachin", cook, today, rules);
+  is(blocked.map((b) => [b.person, b.code, b.needs]), [["SITTIYOS, Kachin", "QL-11", ["QL-12"]]],
+    "his cook certificate cannot be renewed until the certificate of safety training is");
+  is(blocked[0].why.includes("MO70 s 25"), true, "and the clause travels with it");
+  is(shared.renewalBlockers("SITTIYOS, Kachin", cook, today, rules), blocked, "the worker's module answers the same");
+  is(renewalBlockers("SITTIYOS, Kachin", { ...cook, "QL-12": on(300) }, today, rules), [], "a current COST: nothing in the way");
+  is(renewalBlockers("EVANS, Brenton", { "QL-01": on(-10), "QL-17": on(300), "QL-14": "" }, today, rules)[0].missing, ["QL-14"],
+    "an expired deck certificate with no GMDSS on file");
+  is(renewalBlockers("EVANS, Brenton", { "QL-01": on(RED_DAYS + 1), "QL-14": "" }, today, rules), [],
+    "a certificate past the red band is not being renewed yet");
 }
 
 if (failed) {
