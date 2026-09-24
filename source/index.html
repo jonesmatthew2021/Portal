@@ -3209,6 +3209,24 @@ function UpdateTableButton() {
   );
 }
 
+/* The one button that brings the matrix up to date with the certificates on
+   file, wherever it sits: it starts the round from the page (runMatrixRound),
+   which reads the new certificates, refiles them and has the server put
+   what they settle on the matrix and into the office's workbook. Admin
+   only; held down while a round runs here or the hour holds the lease. */
+function UpdateMatrixButton({ variant = "quiet", label = "Update matrix" }) {
+  const { admin, matrixRun, runMatrixRound, roundRunning } = usePortal();
+  if (!admin) return null;
+  const running = !!matrixRun && matrixRun.phase !== "done" && matrixRun.phase !== "failed";
+  return (
+    <Button variant={variant} disabled={running || roundRunning}
+      title={!running && roundRunning ? ROUND_BUSY : undefined}
+      onClick={() => { if (!running) runMatrixRound({ origin: "button" }); }}>
+      {running ? "Updating…" : label}
+    </Button>
+  );
+}
+
 function ItemLine({ x, person, dates, validity }) {
   const { certificates } = usePortal();
   // With a person given, the line carries the two date columns: the issue date
@@ -4446,7 +4464,7 @@ function TrainingMatrix() {
             read. Everything under Report writes the matrix out as it stands —
             the crew report, one person's report, or the spreadsheet itself,
             downloaded and opened — nothing read, nothing changed. */}
-        {admin && <GenerateLatestMatrix variant="quiet" />}
+        {admin && <UpdateMatrixButton variant="quiet" />}
         <Button onClick={() => setReportMenu(!reportMenu)}>{reportMenu ? "Report ▴" : "Report ▾"}</Button>
         {reportMenu && (
           <>

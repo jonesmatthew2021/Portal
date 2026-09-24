@@ -144,7 +144,7 @@ function RequiredDocuments() {
         <div style={{ flex: "1 1 320px" }}>
           <Eyebrow color={T.accent}>Crew certificates</Eyebrow>
         </div>
-        <UpdateTableButton />
+        <UpdateMatrixButton label="Update certificate list" />
       </div>
       <UploadCertificates />
 

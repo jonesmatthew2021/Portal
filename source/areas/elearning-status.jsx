@@ -6,7 +6,10 @@
  * holds what is only this tab's. See tools/source.mjs.
  */
 function ELearningStatus() {
-  const { quals: QUALS, certSheet, certDates, validityPeriods, validityMatrix } = usePortal();
+  const { quals: QUALS, certSheet, certDates, validityPeriods, validityMatrix, matrixUpdated } = usePortal();
+  // When the matrix was last brought up to the certificates - the round's
+  // own stamp, or the spreadsheet's filing date where none has run yet.
+  const lastUpdated = matrixUpdated || (certSheet && certSheet.uploaded) || "";
   const [view, setView] = useState("crew");
   const [q, setQ] = useState("");
   const [onlyOpen, setOnlyOpen] = useState(false);
@@ -127,11 +130,11 @@ function ELearningStatus() {
         <div style={{ textAlign: "right" }}>
           <Eyebrow>Matrix last updated</Eyebrow>
           <div style={{ fontFamily: T.mono, fontSize: 12, marginTop: 4,
-            color: certSheet && certSheet.uploaded ? T.text : T.muted }}>
-            {certSheet && certSheet.uploaded ? fmtDate(certSheet.uploaded) : "No spreadsheet uploaded yet"}
+            color: lastUpdated ? T.text : T.muted }}>
+            {lastUpdated ? fmtDate(lastUpdated) : "No spreadsheet uploaded yet"}
           </div>
         </div>
-        <UpdateTableButton />
+        <UpdateMatrixButton label="Update certificate list" />
       </div>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
