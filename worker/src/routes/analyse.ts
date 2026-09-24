@@ -148,7 +148,9 @@ Return exactly this JSON object and nothing else — no prose, no markdown fence
   "neverExpires": true|false,       // true only when the document states it does not expire
   "qualCode": string|null,          // the matrix code it answers to, from the list given, or null
   "codeConfidence": "high"|"medium"|"low",
-  "notes": string|null              // at most 15 words, only if something matters
+  "notes": string|null,             // at most 15 words, only if something matters
+  "documentNumber": string|null,    // the card, licence or certificate number as printed; on an MSIC card, the card number
+  "holderBirthDate": "YYYY-MM-DD"|null  // the holder's date of birth, only if printed
 }
 
 Rules:
@@ -160,8 +162,8 @@ Rules:
 - Only give qualCode when the document is plainly that item. Use "high" only when
   the printed title and the item title are the same qualification. If two codes
   could fit, pick neither and return null.
-- Never invent a name, a date or a code. null is the right answer when it is not
-  on the page.`;
+- Never invent a name, a date, a number or a code. null is the right answer when
+  it is not on the page.`;
 
 function instructionFor(row: Row, codes: [string, string][]) {
   const list = codes.map(([code, title]) => `${code} — ${title}`).join("\n");
@@ -231,6 +233,11 @@ async function askModel(row: Row, bytes: ArrayBuffer, codes: [string, string][])
           .filter(Boolean)
           .join(" ")
       : str(parsed.notes),
+    // Always written, null where the page has none: a reading carrying the
+    // keys is one that was asked for them, so the hour never pays to ask
+    // this certificate again (topUpParticulars).
+    documentNumber: str(parsed.documentNumber),
+    holderBirthDate: date(parsed.holderBirthDate),
   };
 
   if (!reading.readable && !reading.reason) {
@@ -239,14 +246,23 @@ async function askModel(row: Row, bytes: ArrayBuffer, codes: [string, string][])
   return reading;
 }
 
+/** A reading that says the certificate could not be read, and why. It
+ *  carries the two particulars' keys, null, like every reading made now:
+ *  asked again it would say no more. */
+function unreadableReading(reason: string): Reading {
+  return {
+    version: READING_VERSION, at: new Date().toISOString(), model: null, readable: false, reason,
+    documentNumber: null, holderBirthDate: null,
+  };
+}
+
 /** One certificate read now — the same checks and the same question the
  * batch read puts, for a file that has just been filed. A document the
  * model turned away is written down as unreadable; anything about the
  * account - no credit, the rate, a busy model, the key - throws, to be
  * tried again once the account is in order. */
 export async function readCertificate(row: Row, codes: [string, string][]): Promise<Reading> {
-  const unreadable = (reason: string) =>
-    ({ version: READING_VERSION, at: new Date().toISOString(), model: null, readable: false, reason }) as Reading;
+  const unreadable = (reason: string) => unreadableReading(reason);
   const shape = mediaFor(row);
   if (!shape) return unreadable(`${row.filename} isn't a PDF or an image, so it can't be read.`);
   if (row.sizeBytes > MAX_READ_BYTES) {
@@ -303,35 +319,17 @@ export async function extract(codes: [string, string][], limit: number) {
       try {
         const shape = mediaFor(row);
         if (!shape) {
-          await store.setJSON(readingKey(row), {
-            version: READING_VERSION,
-            at: new Date().toISOString(),
-            model: null,
-            readable: false,
-            reason: `${row.filename} isn't a PDF or an image, so it can't be read.`,
-          } satisfies Reading);
+          await store.setJSON(readingKey(row), unreadableReading(`${row.filename} isn't a PDF or an image, so it can't be read.`));
           return;
         }
         if (row.sizeBytes > MAX_READ_BYTES) {
-          await store.setJSON(readingKey(row), {
-            version: READING_VERSION,
-            at: new Date().toISOString(),
-            model: null,
-            readable: false,
-            reason: `${row.filename} is too large to read. Re-save it under 4 MB and upload it again.`,
-          } satisfies Reading);
+          await store.setJSON(readingKey(row), unreadableReading(`${row.filename} is too large to read. Re-save it under 4 MB and upload it again.`));
           return;
         }
 
         const bytes = await fileStore().get(row.blobKey, { type: "arrayBuffer" });
         if (!bytes) {
-          await store.setJSON(readingKey(row), {
-            version: READING_VERSION,
-            at: new Date().toISOString(),
-            model: null,
-            readable: false,
-            reason: "The file is no longer in the store.",
-          } satisfies Reading);
+          await store.setJSON(readingKey(row), unreadableReading("The file is no longer in the store."));
           return;
         }
 
@@ -358,13 +356,9 @@ export async function extract(codes: [string, string][], limit: number) {
         if (e instanceof ModelRefusal && e.kind === "document") {
           const said = refusalSays(e);
           try {
-            await store.setJSON(readingKey(row), {
-              version: READING_VERSION,
-              at: new Date().toISOString(),
-              model: null,
-              readable: false,
-              reason: `The model turned this file away${said ? `: ${said}` : " as one it can't read."} That usually means ${row.filename} is corrupted or password-protected — open it, re-save it as a fresh PDF or a clear photo, and upload it again.`,
-            } satisfies Reading);
+            await store.setJSON(readingKey(row), unreadableReading(
+              `The model turned this file away${said ? `: ${said}` : " as one it can't read."} That usually means ${row.filename} is corrupted or password-protected — open it, re-save it as a fresh PDF or a clear photo, and upload it again.`,
+            ));
             return;
           } catch {
             // The store refusing the write is a failure of this call, not of

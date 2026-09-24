@@ -131,6 +131,13 @@ export type Reading = {
   qualCode?: string | null;
   codeConfidence?: "high" | "medium" | "low" | null;
   notes?: string | null;
+  /** The card, licence or certificate number as printed (on the MSIC card,
+   *  the card number). Present, null or not, on every reading made since
+   *  it was first asked for; a reading without the key is one made before,
+   *  which is how the hour knows what to top up (topUpParticulars). */
+  documentNumber?: string | null;
+  /** The holder's date of birth as printed, YYYY-MM-DD; the same rule. */
+  holderBirthDate?: string | null;
 };
 
 export function readingStore() {

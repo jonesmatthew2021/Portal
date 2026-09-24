@@ -18,7 +18,7 @@ import analyse, { compareMatrix, extract, refile } from "../src/routes/analyse.j
 import readOne from "../src/routes/read-one.js";
 import restoreFile from "../src/routes/restore-file.js";
 import { MAX_BYTES } from "../src/lib/shared-state.js";
-import { OUT_OF_CREDIT, READING_UNAVAILABLE } from "../src/lib/analysis.js";
+import { OUT_OF_CREDIT, READING_UNAVAILABLE, READING_VERSION } from "../src/lib/analysis.js";
 import { KeptInPlace, ensureDocumentColumns, forgetDocumentColumns, purgeDocument, relocateToRemovedBlob, removeDocument, restoreDocument } from "../src/db/documents.js";
 import { replaceSingleFile } from "../src/db/single-file.js";
 import { saveDocument } from "../src/lib/shared-state.js";
@@ -2434,6 +2434,34 @@ test("out of credit: the batch stores nothing, and says why in one line", async 
     model.restore();
   }
   assert.deepEqual(readingWrites(portal.db), [], "no reading was stored: the certificates queue again after a top-up");
+});
+
+test("a reading asks for the document's number and the holder's date of birth, and always carries both keys", async () => {
+  // Three certificates: one printing both, one printing neither, one the
+  // model turns away. Every reading made now has both keys, null where the
+  // page has nothing, so a reading without them is one made before.
+  const { portal } = await unreadPortal(3);
+  const model = modelAnswers((n) => n === 3
+    ? { status: 400, body: BAD_PDF_BODY }
+    : { status: 200, body: readingStream(n === 1
+      ? { ...reading, documentNumber: "  msic   01234 ", holderBirthDate: "1980-03-10T00:00:00" }
+      : { ...reading, documentNumber: "", holderBirthDate: "10/03/1980" }) });
+  try {
+    await extract([["QL-01", "Master"]], 4);
+  } finally {
+    model.restore();
+  }
+  assert.ok(model.calls.every((c) => c.includes("documentNumber") && c.includes("holderBirthDate")), "the question asks for both");
+  const stored = [1, 2, 3].map((i) => JSON.parse(portal.blobs.get(`certificate-readings|r1/unread-${i}.json`)!));
+  const got = stored.map((r) => [r.readable, r.documentNumber, r.holderBirthDate]);
+  // Which call answered which certificate is the batch's order, so sorted.
+  assert.deepEqual(got.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))), [
+    [false, null, null],
+    [true, "msic   01234", "1980-03-10"],
+    [true, null, null],
+  ], "trimmed as printed, a date only as YYYY-MM-DD, and null where there is none");
+  assert.ok(stored.every((r) => "documentNumber" in r && "holderBirthDate" in r), "every reading carries both keys");
+  assert.equal(READING_VERSION, "r1", "no reading made before is thrown away");
 });
 
 test("a PDF the model turns away is stored as unreadable, with the plain reason, and stops nothing", async () => {
