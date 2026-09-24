@@ -6,14 +6,15 @@ before saying it is done.
 
 ## The one rule about editing
 
-Edit **`source/index.html`**, a file under **`source/areas/`**, or
-**`source/vessel.json`** (what is this vessel's, not the portal's). Nothing
-else in the frontend is a source file:
+Edit **`source/index.html`**, a file under **`source/parts/`** or
+**`source/areas/`**, or **`source/vessel.json`** (what is this vessel's, not
+the portal's). Nothing else in the frontend is a source file:
 
 - `preview.html`, `portal.html`, `worker/assets/index.html` are **built**. Edit
   them and the next build throws the work away.
-- `tools/source.mjs` assembles the portal: the shell plus every area, spliced in
-  at the `/* @areas */` marker. Both builds and all six checks come through it.
+- `tools/source.mjs` assembles the portal: the shell plus every part, spliced in
+  at the `/* @parts */` marker, plus every area, spliced in at the `/* @areas */`
+  marker just after. Both builds and all six checks come through it.
 
 ```
 node tools/build.mjs      # rebuild everything
@@ -27,6 +28,20 @@ fail.
 
 `source/index.html` is the shell: the page, the theme (`T`), the shared
 components, and the state everything hangs off (`usePortal()`).
+
+One file per big crew-facing page, spliced in at `/* @parts */` just before
+the areas, by the same rules as an area (no import or export, filename order,
+a check confirms each arrived):
+
+| File under `source/parts/` | Page |
+|---|---|
+| `certificate-cells.jsx` | the certificate cells the three pages and the Admin tabs share: the bands, the tickets, the skills matrix read, a cell's dates and links, the viewer, the Update matrix button |
+| `crew-matrix.jsx` | Crew Matrix — the round's rules, the grid and its reports, the workbook and the round window, the items held against the office's list, the swing compliance report |
+| `roster.jsx` | Roster — the swing board and its editor, the swing compliance and day grid, the crew-roster workbook, the timeline and the roster page, the shift matrix |
+| `upload-certificates.jsx` | Upload Crew Certificates — the folder and name helpers, the upload page, who SharePoint says is on the strength, the tab's turn at the round, the crew's camera upload |
+
+`runMatrixRound`, the swing dates (`swingAt`, `swingWithDates`) and the upload
+transports stay in the shell: they are the state's, and the areas read them.
 
 One file per Admin tab, so two jobs on two tabs are two files:
 
