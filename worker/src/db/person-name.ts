@@ -13,6 +13,8 @@
  * and every name the portal writes down is put into the one form.
  */
 
+import { vessel } from "../vessel.js";
+
 /** A word capitalised the way a name is: Evgeny, O'Brien, Macknamara-Smith. */
 const cased = (w: string) =>
   w
@@ -20,9 +22,14 @@ const cased = (w: string) =>
     .map((p) => (p === "-" || p === "'" ? p : p ? p[0].toUpperCase() + p.slice(1).toLowerCase() : p))
     .join("");
 
-/** Anything that is a rank, a code, or otherwise not part of somebody's name. */
-const NOT_A_NAME =
-  /^(?:the|and|of|for|crew|alpha|bravo|others|united|marine|minres|mrl|portal|copy|scan|final|new|old|draft)$/i;
+/** Anything that is a rank, a code, or otherwise not part of somebody's name:
+ *  the words a filename carries around a name, and the operator's, the
+ *  customer's and the swings' names, which are the vessel file's. */
+const NOT_A_NAME = new RegExp(
+  "^(?:" + ["the", "and", "of", "for", "crew", "others", "portal", "copy", "scan", "final", "new", "old", "draft"]
+    .concat(vessel.customerMarks.nameStopWords.map((w) => w.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))).join("|") + ")$",
+  "i",
+);
 
 /**
  * The name as the portal writes it, out of however it was written down.

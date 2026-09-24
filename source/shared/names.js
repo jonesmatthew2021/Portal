@@ -188,8 +188,9 @@ export function asKnownPerson(people) {
  * never carrying furniture doesn't count as having changed.
  * @param {Quals | null | undefined} quals
  * @param {Person[] | null | undefined} people
+ * @param {string[]} noExpiryCodes the items that never lapse (the vessel file's)
  */
-export function crewRowsOnly(quals, people) {
+export function crewRowsOnly(quals, people, noExpiryCodes) {
   if (!quals || !Array.isArray(quals.rows)) return quals;
   let rows = quals.rows.filter(isCrewRow);
   let changed = rows.length !== quals.rows.length;
@@ -212,13 +213,15 @@ export function crewRowsOnly(quals, people) {
     });
   }
 
-  // Items that never lapse (NO_EXPIRY_CODES — VS-04 Helm CONNECT) carry no
-  // expiry date: any date ever typed or read into one of their columns means
-  // the item was completed, so it reads as held rather than as a date that can
-  // run out. Done here, at the one gate the matrix loads through, so the grid,
-  // the tallies, the gap pages and every report agree without asking.
+  // Items that never lapse (noExpiryCodes, the vessel file's - an e-learning
+  // sat once) carry no expiry date: any date ever typed or read into one of
+  // their columns means the item was completed, so it reads as held rather
+  // than as a date that can run out. Done here, at the one gate the matrix
+  // loads through, so the grid, the tallies, the gap pages and every report
+  // agree without asking.
   const cols = Array.isArray(quals.cols) ? quals.cols : [];
-  const noExp = cols.map((c) => NO_EXPIRY_CODES.includes(String((c && c[0]) || "").trim().toUpperCase()));
+  const never = (noExpiryCodes || []).map((code) => String(code).trim().toUpperCase());
+  const noExp = cols.map((c) => never.includes(String((c && c[0]) || "").trim().toUpperCase()));
   if (noExp.some(Boolean)) {
     rows = rows.map((r) => {
       const cells = r[3];
@@ -239,18 +242,6 @@ export function crewRowsOnly(quals, people) {
   return changed ? { ...quals, rows } : quals;
 }
 
-/* Matrix items that carry no expiry date at all, for every crew member.
-
-   The validity periods matrix is a document the office files and the model
-   reads, so anything it doesn't list leaves the column blank. A handful of items
-   don't need asking: they are sat once and never lapse, which is a fact about
-   the item rather than something to be read off a scan. Written down here they
-   read as "Doesn't expire" for the whole crew whether or not a validity periods
-   matrix is on file, and they are what the certificate comparison settles them
-   against too.
-
-   The server's comparison (worker/src/lib/analysis.ts) reads this same list,
-   so there is one place to add to.
-
-     VS-04  Helm CONNECT - Crew Basic + Jobs — e-learning, completed once, no expiry. */
-export const NO_EXPIRY_CODES = ["VS-04"];
+/* The matrix items that carry no expiry date at all are the vessel file's
+   (noExpiryCodes): the page and the server's comparison (worker/src/lib/
+   analysis.ts) both read that one list, and hand it to crewRowsOnly above. */

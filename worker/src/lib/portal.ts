@@ -54,6 +54,14 @@ import {
 } from "./analysis.js";
 import { heldOpmsAnswer, type OpmsHeld } from "./opms.js";
 import { shiftKeyFor, shiftSheetRow, shiftStore, type ShiftHeld } from "./shift.js";
+import { vessel } from "../vessel.js";
+
+/** The swings' names as the office says them, "Alpha and Bravo", off the
+ *  vessel file's labels ("Swing Alpha" -> "Alpha"). */
+const swingWords = () => {
+  const names = Object.values(vessel.swings.labels).map((l) => l.replace(/^Swing\s+/i, ""));
+  return names.length > 1 ? names.slice(0, -1).join(", ") + " and " + names[names.length - 1] : names.join("");
+};
 
 // What one tool answer may run to. A tool that hands back everything it found
 // would spend the room the answer itself needs — and the whole conversation,
@@ -107,7 +115,7 @@ const SECTIONS: Record<string, string> = {
   overrides: "one-off changes to the swing rotation, by person",
   swingBoard: "who is onboard now and which watch they are on",
   swingBoards: "the same, worked ahead for a coming swing, by swing number",
-  swingLists: "the two swing lists as the office sent them, Alpha and Bravo",
+  swingLists: `the two swing lists as the office sent them, ${swingWords()}`,
   swingDates: "the dates the office has given for a swing, by swing number",
   rosterPattern: "the swing pattern: the first onswing's day out, and days per swing",
   history: "the change log — who changed what, and when",

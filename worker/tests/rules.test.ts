@@ -15,7 +15,9 @@ import { equivalentCode, codeFor, ModelRefusal, plainLine, errorLine, OUT_OF_CRE
 import { AI_BUSY, checkerRefusalLine } from "../src/lib/checker.js";
 import { crewFolderIn, looseIn, whoseFolder } from "../src/routes/sync.js";
 import { asKey } from "../src/db/cert-home.js";
+import { canonicalPersonName } from "../src/db/person-name.js";
 import { setEnv } from "../src/env.js";
+import { vessel, checkVessel } from "../src/vessel.js";
 
 /** The office's equivalence sheet, as the portal stores it. */
 const SHEET = [
@@ -331,4 +333,28 @@ test("the AI Checker says what is true on its screen: nothing asks its question 
 test("every shared sentence fits the badge whole", () => {
   // The badge under Update portal shows the first 60 characters of an error.
   for (const line of [OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM]) assert.ok(line.length <= 60, line);
+});
+
+/* ------------------------------------------------------------------------ *
+ * The vessel file: the words a filename carries around a name that are the
+ * operator's, the customer's or a swing's are read from it, so a name filed
+ * as "SMITH, Alan - <operator> <swing>" still comes back as the man alone,
+ * whatever vessel the portal is built for. The file's own shape is proved
+ * here too, in the same words the build uses.
+ * ------------------------------------------------------------------------ */
+test("the vessel file's stop words are not part of anybody's name", () => {
+  const words = vessel.customerMarks.nameStopWords;
+  assert.ok(words.length > 0, "the vessel file names its stop words");
+  for (const w of words) {
+    assert.equal(canonicalPersonName(`SMITH, Alan ${w}`), "SMITH, Alan", `"${w}" is dropped from a name`);
+    assert.equal(canonicalPersonName(`SMITH, Alan ${w.toUpperCase()}`), "SMITH, Alan", `"${w}" is dropped whatever its case`);
+  }
+  assert.equal(canonicalPersonName("SMITH, Alan James"), "SMITH, Alan James", "a real given name is kept");
+});
+
+test("the vessel file has every key the portal reads, and a missing one is named", () => {
+  assert.equal(checkVessel(vessel), vessel);
+  const { timezone: _dropped, ...without } = vessel;
+  assert.throws(() => checkVessel(without, "a vessel file"), /a vessel file has no usable "timezone"/);
+  assert.throws(() => checkVessel({ ...vessel, theme: { ...vessel.theme, light: { deep: "#fff" } } }), /"theme.light"/);
 });

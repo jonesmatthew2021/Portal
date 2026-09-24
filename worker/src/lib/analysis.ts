@@ -20,7 +20,6 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
 import { fileStore } from "../db/documents.js";
-import { NO_EXPIRY_CODES as NO_EXPIRY_LIST } from "../../../source/shared/names.js";
 import { OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM } from "../../../source/shared/reading-lines.js";
 
 // Certificates are read with a vision model — most of them are scans rather than
@@ -53,12 +52,10 @@ export const IMAGE_TYPES: Record<string, string> = {
  * down here settles them for the whole crew whether or not a validity periods
  * matrix is on file, and whether or not the certificate itself thought to say so.
  *
- * The list itself lives in source/shared/names.js, which the page runs too, so
- * the page and the server can never disagree about it.
- *
- *   VS-04  Helm CONNECT - Crew Basic + Jobs — e-learning, completed once, no expiry.
+ * The list itself is the vessel file's (noExpiryCodes), which the page reads
+ * too, so the page and the server can never disagree about it.
  */
-export const NO_EXPIRY_CODES = new Set(NO_EXPIRY_LIST);
+export const NO_EXPIRY_CODES = new Set(vessel.noExpiryCodes);
 
 /**
  * Items whose expiry is printed on the certificate itself and only there. The
@@ -67,9 +64,9 @@ export const NO_EXPIRY_CODES = new Set(NO_EXPIRY_LIST);
  * must never be used to work its expiry out — the printed date is the answer,
  * and a reading without one is a certificate to chase, not a date to derive.
  *   QL-17  AMSA Certificate of Medical Fitness — Form 303.
- * Mirrored by hand in index.html as CERT_STATED; change one, change the other.
+ * The list is the vessel file's (certStated); the page reads the same one.
  */
-export const CERT_STATED_CODES = new Set(["QL-17"]);
+export const CERT_STATED_CODES = new Set(Object.keys(vessel.certStated));
 
 export const certStatesOwnExpiry = (code: string | null | undefined) =>
   CERT_STATED_CODES.has(String(code || "").trim().toUpperCase());

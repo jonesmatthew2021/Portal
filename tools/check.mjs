@@ -159,9 +159,12 @@ run("Every rank has a heading to sit under", () => {
      ENGINEER: eight men picked it and landed under "Other". */
   const jsx = portalJsx();
   const cut = (a, b) => { const i = jsx.indexOf(a); return jsx.slice(i, jsx.indexOf(b, i) + b.length); };
+  // Both lists are the vessel file's now, so the page's VESSEL is lifted out
+  // with them: what is checked is still what the page runs.
   const { RANK_GROUPS, ROSTER_RANKS, rankGroupAt } = new Function([
-    cut("const RANK_GROUPS = [", "\n];"),
-    cut("const ROSTER_RANKS = [", "];"),
+    cut("const VESSEL = {", "};\n"),
+    cut("const RANK_GROUPS = ", ";\n"),
+    cut("const ROSTER_RANKS = ", ";\n"),
     cut("const rankGroupAt =", "\n};"),
     "return { RANK_GROUPS, ROSTER_RANKS, rankGroupAt };",
   ].join("\n"))();

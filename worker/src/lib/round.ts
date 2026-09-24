@@ -1,4 +1,5 @@
 import { asKnownPerson, crewRowsOnly } from "../../../source/shared/names.js";
+import { vessel } from "../vessel.js";
 import { applySettled, readExpiryRules, settleRound } from "../../../source/shared/matrix-rules.js";
 import {
   datedWorkbookName, listSheets, partOf, partText, readSheetRows, readZip, updateFiledWorkbook, XLSX_MIME,
@@ -398,7 +399,7 @@ export async function runMatrixRound(opts: {
     // (a) the matrix as the register names people. No crew, no round.
     const cur = await readDocument();
     if (!cur) return skip("no shared document yet");
-    const quals = crewRowsOnly(cur.doc.quals as Quals | null, cur.doc.people) as Quals | null;
+    const quals = crewRowsOnly(cur.doc.quals as Quals | null, cur.doc.people, vessel.noExpiryCodes) as Quals | null;
     if (!quals || !(quals.cols || []).length || !(quals.rows || []).length) return skip("the crew matrix has no items");
 
     // (b) the expiry rules, where none are held for the skills matrix on file.
@@ -605,7 +606,7 @@ async function writeWorkbook(
   // The matrix as it is now, after this round's save and anything since.
   const fresh = await readDocument();
   if (!fresh) { out.roundSkipped = "no shared document yet"; return false; }
-  const next = crewRowsOnly(fresh.doc.quals as Quals | null, fresh.doc.people) as Quals | null;
+  const next = crewRowsOnly(fresh.doc.quals as Quals | null, fresh.doc.people, vessel.noExpiryCodes) as Quals | null;
   if (!next || !(next.rows || []).length) { out.roundSkipped = "the crew matrix has no items"; return false; }
   const nameOf = asKnownPerson(fresh.doc.people);
 

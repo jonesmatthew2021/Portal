@@ -29,6 +29,7 @@ import { runMatrixRound, roundRunning, leaseHolder, takeLease, dropLease, keepEq
 import { readDocument } from "./lib/shared-state.js";
 import { nightlyBackup } from "./lib/backup.js";
 import { crewRowsOnly } from "../../source/shared/names.js";
+import { vessel } from "./vessel.js";
 
 /** What GET /api/sync/last answers: when the folders were last read and
  *  what the hourly round last did - the round's own word for it, error
@@ -352,7 +353,7 @@ async function theHour(
   let round: Record<string, unknown> = {};
   try {
     const cur = await readDocument();
-    const quals = cur ? crewRowsOnly(cur.doc.quals as never, cur.doc.people) as { cols?: string[][]; rows?: string[][] } | null : null;
+    const quals = cur ? crewRowsOnly(cur.doc.quals as never, cur.doc.people, vessel.noExpiryCodes) as { cols?: string[][]; rows?: string[][] } | null : null;
     codes = (quals?.cols || []).map((c) => [c[0], c[1]]);
     names = (quals?.rows || []).map((r) => r[0]).filter(Boolean);
     if (!codes.length || !names.length) round = { roundSkipped: "the crew matrix has no items" };

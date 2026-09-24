@@ -151,33 +151,20 @@ const LOGO = VESSEL.brand.logo;
 
 // Swings that Handover Notes were filed against before the portal followed the
 // roster pattern. Notes on file carry these ids, so the labels are kept exactly
-// as they were — the current swing and everything since is worked out from the
-// pattern itself (see noteSwings), never written down here.
-const LEGACY_NOTE_SWINGS = [
-  { id: "sw-2026-08", label: "28 Jul – 25 Aug 2026" },
-  { id: "sw-2026-07", label: "30 Jun – 28 Jul 2026" },
-  { id: "sw-2026-06", label: "02 Jun – 30 Jun 2026" },
-];
+// as they were (in the vessel file) — the current swing and everything since is
+// worked out from the pattern itself (see noteSwings), never written down.
+const LEGACY_NOTE_SWINGS = VESSEL.swings.legacyNotes;
 
-// Ranks that file handover notes, grouped by department.
-const RANKS = [
-  { id: "master", label: "Master", dept: "Deck" },
-  { id: "chief-officer", label: "Chief Officer", dept: "Deck" },
-  { id: "second-officer", label: "Second Officer", dept: "Deck" },
-  { id: "gph", label: "GPH", dept: "Deck" },
-  { id: "chief-engineer", label: "Chief Engineer", dept: "Engine" },
-  { id: "first-engineer", label: "First Engineer", dept: "Engine" },
-  { id: "junior-engineers", label: "Junior Engineers", dept: "Engine" },
-  { id: "chef", label: "Chef", dept: "Catering" },
-];
+// Ranks that file handover notes, grouped by department (the vessel file).
+const RANKS = VESSEL.ranks;
 
-const DEPTS = ["Deck", "Engine", "Catering"];
+const DEPTS = VESSEL.depts;
 
 // Whose name sits on the seeded correspondence items.
 const CORRESPONDENCE_POSTER = VESSEL.contacts.correspondencePoster;
 
-// Who the correspondence is with.
-const PARTIES = ["United Marine", "PortWays Australia", "MinRes / MRL", "TSV Coolibah", "Other"];
+// Who the correspondence is with (the vessel file).
+const PARTIES = VESSEL.parties;
 
 // Who can do what: crew read and post; admins edit everything.
 // Crew is open. Picking your own name from the management team signs you straight
@@ -222,19 +209,20 @@ const canPostCorrespondence = isAdmin;
 // Swing rotation. The roster runs four weeks, Wednesday to Wednesday: ANCHOR is
 // a changeover Wednesday — crew B flies out, crew A flies home — and every
 // changeover after it is CYCLE days later. The first onswing flew out on
-// 12 Aug 2026. These two are only the starting values: the live pattern is kept
-// with everything else the portal shares, so it can be moved on the Swing
-// Compliance page without a redeploy, and the two variables are re-pointed at
-// whatever is stored before anything reads them.
-const ROSTER_DEFAULTS = { anchor: "2026-08-12", cycle: 28 };
+// 12 Aug 2026. These two (the vessel file's swing pattern) are only the
+// starting values: the live pattern is kept with everything else the portal
+// shares, so it can be moved on the Swing Compliance page without a redeploy,
+// and the two variables are re-pointed at whatever is stored before anything
+// reads them.
+const ROSTER_DEFAULTS = { ...VESSEL.swings.pattern };
 let ROSTER_ANCHOR = ROSTER_DEFAULTS.anchor;
 let CYCLE = ROSTER_DEFAULTS.cycle;
-const DEPT_ORDER = ["Masters", "DECK OFFICERS", "GPH", "Engineers", "Chefs"];
+const DEPT_ORDER = VESSEL.deptOrder;
 
 // What the deck officers' department used to be called. Rosters saved before
 // the rename still say the old name, so it is turned into the new one on the
 // way in rather than leaving two departments that are really one.
-const DEPT_RENAMES = { "C/O": "DECK OFFICERS" };
+const DEPT_RENAMES = VESSEL.deptRenames;
 const renameDepts = (list) =>
   (list || []).map((p) => (p && DEPT_RENAMES[p.dept] ? { ...p, dept: DEPT_RENAMES[p.dept] } : p));
 
@@ -944,17 +932,19 @@ const todayISO = () => new Intl.DateTimeFormat("en-CA", { timeZone: VESSEL_TZ })
  * It is the real day now, in the vessel's own time. */
 const TODAY = todayISO();
 
-// Crew qualification expiry, imported from 20260808 - CREW QUALIFICATION EXPIRY.xlsx
-// cols: [code, title, group]   rows: [name, position, SAM #, [values...]]
-// A value is an expiry date (YYYY-MM-DD), "Y"/"N" for held/not held, "?" where unknown, or blank if not required.
-const QUALS = {"cols":[["QL-01","Master","Qualification"],["QL-02","Chief Mate","Qualification"],["QL-03","Master <100m NC","Qualification"],["QL-04","Master <45m NC","Qualification"],["QL-05","Engineer Class 1, Chief Engineer (Motor)","Qualification"],["QL-06","Engineer Class 2, Second Engineer, Chief Engineer <3000 kW (Motor)","Qualification"],["QL-07","Engineer Class 3 NC","Qualification"],["QL-08","Master <24m NC","Qualification"],["QL-09","Marine Engine Driver Grade 2 NC","Qualification"],["QL-10","Integrated Rating, Able Seafarer - Deck, Able Seafarer - Engineer (STCW Reg II/5 & III/5)","Qualification"],["QL-11","Marine Cook","Qualification"],["QL-12","Certificate of Safety Training (COST)","Qualification"],["QL-13","ECDIS - STCW Reg II/1 & II/2","Qualification"],["QL-14","GMDSS - STCW Reg IV/2","Qualification"],["QL-15","Long Range Operator Certificate of Proficiency (LROCP)","Qualification"],["QL-16","Fast Rescue Craft (FRC)","Qualification"],["QL-17","AMSA Certificate of Medical Fitness - Form 303","Qualification"],["QL-18","Provide First Aid - HLTAID011","Qualification"],["QL-19","Adv Resuscitation and Oxygen Therapy - HLTIAD015","Qualification"],["QL-20","Use hygienic practices for food safety - SITXFSA005","Qualification"],["VS-01","Maritime Security Identification Card","Vessel Specific"],["VS-02","ECDIS Type Specific - Furuno ECDIS, FMD series","Vessel Specific"],["VS-04","Helm CONNECT - Crew Basic + Jobs","Vessel Specific"],["VS-05","MRN - Connecting Tug to Barge Articouple System","Vessel Specific"],["PS-01","MRN - Marine Fauna Observer","Project Specific"],["PS-02","MinRes - Mooring Operations Awareness - Onslow","Project Specific"],["MS-01","Phase 1 - ASD and ATB Theory & Assessment","Master Specific"],["MS-02","Phase 2 - Simulator Training & Practical Assessment ASD","Master Specific"],["MS-03","Phase 3 - Simulator Training & Practical Assessment ATB","Master Specific"],["MS-04","Phase 4a - On-Water Training & Practical Assessment ASD","Master Specific"],["MS-05","Phase 4b - On-Water Training & Practical Assessment ATB","Master Specific"],["MS-06","Phase 5 - On-Water Passing in the LNG Swing Basin","Master Specific"],["MS-07","Pilbara Ports Port of Ashburton Pilotage Exemption Certificate","Master Specific"],["CS-01","MRN - EMS Tech Material Handling Systems - Single Point Loading System","Cargo System"],["CS-02","MRN - EMS Tech Material Handling Systems - Self-Unloading System","Cargo System"],["CS-03","Cargo System - Operator - Practical","Cargo System"],["CS-04","Cargo System - Trainer - Practical","Cargo System"],["HR-01","HRWL - Dogging - Dogging (DG)","High Risk Work Licence (HRWL)"],["HR-02","HRWL - Vehicle loading crane (CV)","High Risk Work Licence (HRWL)"],["PT-01","MinRes - Lock Holder, Isolation and Tagging","Permit to Work"],["PT-02","Enter and Work in Confined Spaces - RIIWHS202E","Permit to Work"],["PT-03","Work Safely at Heights - RIIWHS204E","Permit to Work"],["VI-01","Onboard induction, familiarisation and training - Tug and Barge","Vessel Induction"],["VI-02","MRN - Tug and Barge Induction","Vessel Induction"],["PI-01","MinRes - Code of Conduct & Business Integrity","Project Induction"],["PI-02","MinRes - Corporate Safety Induction","Project Induction"],["PI-03","MinRes - Hazard Report Card, Take Time & JHA","Project Induction"],["PI-04","MinRes - Manual Handling","Project Induction"],["PI-05","MinRes - Operational Health and Safety Induction","Project Induction"],["PI-06","MinRes - Safe and Respectful Behaviours","Project Induction"],["PI-07","MinRes - Welcome to MinRes","Project Induction"],["PI-08","MinRes - Cybersecurity Awareness Training","Project Induction"],["PI-09","MinRes - Critical Risk Management (CRM) Awareness","Project Induction"],["PI-10","MinRes - Airborne Contaminant Awareness Training","Project Induction"]],"rows":[["EVANS, Brenton","Master","e91754E",["2031-05-26","","","","","","","","","","","","2031-05-26","2029-10-07","","2029-06-18","2028-02-02","2028-02-28","","","2027-02-01","Y","Y","2028-01-06","2028-01-05","2027-12-01","Y","Y","Y","Y","Y","Y","2027-04-10","2027-10-06","2027-09-14","Y","","","","2030-02-07","2028-04-17","2028-04-17","Y","2027-03-18","2028-01-03","2027-02-06","2030-02-07","2028-02-06","2026-10-13","2028-01-03","Y","2027-11-23","2028-01-03","2027-01-05"]],["TYMOFEYEV, Arthur","Master","t83382T",["2027-09-26","","","","","","","","","","","","2027-09-26","N","","2026-09-09","2027-07-18","2027-06-16","","","2030-02-01","Y","Y","2028-01-19","2028-01-16","2027-11-22","Y","Y","Y","Y","Y","Y","2028-07-30","2027-11-24","2027-11-24","Y","","","","2029-05-12","2027-10-16","2027-10-16","Y","2027-04-01","2028-02-28","2028-02-28","2029-05-11","2027-05-11","2026-10-13","2028-02-28","Y","2028-01-04","2028-01-04","2028-01-20"]],["KUMAR, Preetham","Master","k83381K",["2028-03-25","","","","","","","","","","","","?","2027-09-20","","?","2027-08-20","2026-06-12","","","2029-06-01","Y","Y","2027-12-22","2027-12-22","2027-12-12","Y","Y","Y","Y","Y","Y","2026-06-26","2027-11-30","2027-11-30","Y","","2028-08-23","","2029-05-13","2027-10-07","2027-10-07","Y","2027-12-10","2027-11-30","2028-05-15","2029-05-13","2027-05-13","2026-08-26","2027-11-30","Y","2027-11-30","2028-01-31","2027-12-22"]],["JONES, Matthew James","Master","j83385J",["2026-12-31","","","","","","","","","","","","2031-01-21","2027-02-14","","2026-10-13","2026-10-10","2026-05-24","","","2029-12-01","Y","Y","2028-01-18","2028-01-14","2027-12-08","Y","Y","Y","Y","Y","Y","2026-09-03","2027-12-08","2027-12-08","Y","","","","2029-05-11","2028-01-27","2028-01-27","Y","2027-05-18","2028-04-09","2028-04-08","2029-05-11","2027-05-11","2029-07-26","2028-01-26","Y","2027-12-08","2028-01-17","2028-01-17"]],["FARMER, Evan","Master","f86373F",["2028-04-18","","","","","","","","","","","","2028-04-18","2029-12-08","","","2026-11-13","2027-07-15","","","2029-06-01","Y","Y","2027-12-23","2027-12-21","2027-12-07","Y","Y","Y","Y","Y","Y","2026-09-19","2027-08-28","2027-08-27","Y","","","","2029-06-30","2027-12-08","2027-10-07","Y","2027-03-08","2027-08-31","2028-05-22","2029-07-01","2027-06-29","2029-07-19","2028-04-30","Y","2028-01-17","2028-04-30","2027-12-21"]],["WITHARANA, Ruwan","Chief Officer - Unlimited","w83384W",["2026-10-31","","","","","","","","","","","","?","2026-10-31","","2029-03-08","2027-10-13","2027-01-16","","","2028-12-01","Y","Y","2028-01-18","2028-01-12","2027-11-22","Y","","","","","Y","","2027-09-19","2027-09-17","Y","Y","","","2029-04-13","","","Y","2027-04-07","2028-01-26","2028-01-26","2029-04-13","2027-04-15","2026-10-13","2028-01-26","Y","2028-01-17","2028-01-20","2028-01-17"]],["JITENDER, Rohin","Chief Officer - Unlimited","j84281J",["2031-01-21","","","","","","","","","","","","2031-01-21","2031-01-29","","2029-10-17","2028-03-11","2027-05-03","2027-05-06","","2028-12-01","Y","Y","2027-12-22","2027-12-22","2027-12-22","Y","Y","Y","Y","Y","Y","N","2027-10-25","2027-10-25","Y","Y","","","2029-05-08","","","Y","2027-04-16","2028-04-30","2028-04-19","2029-05-08","2027-05-08","2029-07-27","2028-03-31","Y","2027-12-06","2028-01-17","2028-01-18"]],["STEWART, Ryan","Chief Officer - 100m","s84589S",["","","2030-10-12","","","","","","","","","2031-08-08","2031-04-29","2030-10-19","","2026-08-08","2027-02-20","2027-02-26","2027-02-19","","2028-11-01","Y","Y","2028-01-28","2027-12-22","2027-11-30","","","","","","Y","","2027-10-17","2027-10-17","Y","Y","","","2029-05-10","","","Y","2027-03-07","2028-03-12","2028-03-12","2029-05-10","2027-05-10","2029-07-26","2028-03-14","Y","2027-12-09","2027-10-18","2027-12-09"]],["ROGERS, Michael","Chief Officer - 100m","r83383R",["","","2030-09-28","","","","","","","","","2031-04-28","2031-04-28","2029-08-15","","2031-04-27","2027-01-23","2027-01-15","2026-03-07","","2029-07-01","Y","Y","2028-01-16","2028-01-04","2027-07-23","","","","","","Y","","2027-10-06","2027-10-06","Y","Y","","","2029-04-16","","","Y","2027-03-29","2028-01-21","2028-08-21","2029-04-16","2027-04-16","2029-07-15","2027-10-06","Y","2027-11-29","2028-01-05","2028-10-05"]],["RUBOCK, Zachary","Second Mate","r84283R",["","","","2027-05-15","","","","","2026-12-23","","","2026-12-31","2029-04-01","2027-09-20","","","2027-05-28","2027-04-24","","","2027-10-01","Y","Y","2027-12-12","2027-12-19","2027-11-30","","","","","","","","2027-11-30","2027-10-20","Y","","2027-09-08","2027-09-08","2029-05-09","2028-01-08","2028-01-09","Y","2027-03-07","2028-02-19","2028-03-30","2029-05-06","2027-05-06","2029-07-15","2028-02-19","Y","2027-11-30","2027-06-21","2027-12-21"]],["AYERS, Christopher James","Second Mate","a90100A",["","","","2029-07-22","","","","","","","","2027-12-18","2031-01-29","2029-09-22","","","2028-02-05","2026-11-18","","Y","2030-01-01","Y","Y","2027-12-24","2027-12-19","2027-12-10","","","","","","","","2027-09-03","2027-09-03","Y","","2029-08-29","2029-08-29","2029-11-11","","","Y","2027-12-24","2027-12-10","2027-12-10","2029-11-11","2027-11-11","2026-10-13","2027-12-10","Y","2027-12-22","2028-02-03","2027-12-24"]],["COOK, Jack","Second Mate","c84297C",["","","2031-07-13","2031-03-22","","","","","","","","2029-09-25","2031-02-04","2028-10-28","","","2028-01-05","2028-07-19","2026-03-04","","2028-06-01","Y","Y","2027-12-19","2027-12-21","2027-11-30","Y","Y","","","","","","2027-12-01","2027-11-30","Y","","2031-06-24","","2029-05-09","","","Y","2027-12-19","2028-02-23","2027-05-08","2029-05-08","2027-05-09","2029-07-16","2028-02-23","Y","2027-12-02","2028-12-23","2027-12-22"]],["KINGDON, Matthew","Second Mate","k84420K",["","","","2028-12-09","","","","","2030-03-08","","","2028-08-08","2029-04-01","2029-08-14","","","2028-04-13","2028-08-20","","","2027-09-01","Y","Y","2028-01-04","2028-01-04","2027-11-23","","","","","","","","2027-10-05","2027-10-05","Y","","2027-06-27","2027-06-27","2029-05-08","","","Y","2027-03-14","2028-01-17","2028-04-10","2027-05-08","2027-05-08","2026-10-13","2028-01-17","Y","2027-11-23","2028-01-17","2028-01-04"]],["BAUTISTA, John Leo","Second Mate","b91092B",["","","","2029-06-27","","","","","","","","2029-06-27","?","2029-06-27","","","2027-03-19","2028-01-07","","","2029-10-01","Y","Y","2028-01-17","2028-01-14","2027-11-25","","","","","","","","2027-09-22","2027-09-21","Y","","","","2030-01-05","","","Y","2027-03-28","2028-01-17","2027-01-05","2030-01-05","2028-01-05","2026-10-13","2028-01-17","Y","2028-01-18","2028-01-18","2028-01-17"]],["OZHOGA, Andriy","Chief Engineer","o84344O",["","","","","2028-10-25","","","","","","","","","","","","2027-07-28","2027-02-15","","","2027-03-01","","Y","2027-12-22","","2027-12-07","","","","","","","","2027-11-30","2027-08-27","N","","","","2029-05-08","2028-02-25","2028-02-25","Y","2027-03-11","2027-12-07","2028-04-08","2029-05-08","2027-05-09","2029-07-18","2027-12-07","Y","2027-12-07","2028-01-16","2027-12-23"]],["PATWARDHAN, Anand","Chief Engineer","p84418P",["","","","","2029-12-01","","","","","","","","","","","","2027-12-10","2028-01-17","","","2028-01-01","","Y","2028-01-04","","2027-11-26","","","","","","","","2027-09-13","2027-09-19","N","","","","2029-05-08","2027-10-17","2027-10-17","Y","2027-12-01","2028-01-17","2028-03-09","2028-05-08","2027-05-08","2026-10-13","2028-01-17","Y","2027-11-26","2027-09-13","2028-01-04"]],["BUTLER, David Robert","First Engineer","b92561B",["","","","","","2029-05-09","","","","","","","","","","","2027-09-30","2027-02-22","","","2027-11-01","","Y","2027-12-23","","2027-12-05","","","","","","","","2027-08-28","2027-08-28","N","","","","2030-04-07","2026-11-05","2026-11-04","Y","2027-12-06","2028-03-01","2027-04-07","2030-04-07","2028-04-05","2029-07-19","2028-03-31","Y","2027-12-05","2027-04-07","2027-12-23"]],["ATHIHE, Savio","First Engineer","a84346A",["","","","","","2028-04-12","","","","","","","","","","","2028-07-21","2027-03-25","","","2030-04-01","","Y","2028-01-17","","2027-11-30","","","","","","","","2027-09-28","2027-09-28","N","","","","2029-05-10","2027-11-28","2027-11-28","Y","2027-04-09","2028-04-08","2028-04-23","2029-05-09","2029-05-09","2026-06-19","2028-04-08","Y","2027-12-02","2028-01-16","2028-01-18"]],["KEELEY, Finn","Assistant Engineer","k88211K",["","","","","","","2029-08-13","","","","","","","","","","2027-11-10","2027-12-10","","","2029-10-01","","Y","","","2027-12-23","","","","","","","","2027-09-05","2027-09-05","","","2029-09-17","2029-09-17","2029-08-27","","2028-04-16","Y","2027-03-07","2027-12-10","2026-08-27","2029-08-25","2027-08-25","2029-07-18","2027-12-10","Y","2027-12-10","2028-01-17","2027-12-23"]],["MILLER, Jamie","Assistant Engineer","m84414M",["","","","","","","2028-12-15","","","","","2026-11-23","","","","","2027-08-24","2029-02-20","2027-02-20","","2030-04-01","","Y","","","2027-12-09","","","","","","","","2027-12-10","2027-12-10","","","2029-05-30","","2029-05-12","","N","Y","2027-03-11","2028-04-12","2028-04-11","2030-05-10","2027-05-12","2029-08-01","2028-04-12","Y","2028-01-19","2028-01-19","2028-02-01"]],["TADIAMAN, Mark Jay","Assistant Engineer","t84295T",["","","","","","","","","2030-12-21","2029-05-08","","2029-05-07","","","","","2028-03-09","2027-04-08","","","2030-03-01","","Y","","","2027-12-06","","","","","","","","2027-09-08","2027-08-31","","","2031-03-05","","2029-05-09","","N","Y","2027-03-09","2028-01-01","2028-02-21","2029-05-09","2027-05-09","2029-07-18","2028-01-31","Y","2027-12-06","2028-01-19","2028-01-19"]],["MATA, Marlou","Assistant Engineer","m62159M",["","","","","","","","","2030-02-16","2027-08-07","","2027-08-07","","","","","2028-02-05","2028-08-28","","","2028-11-01","","Y","","","2027-11-28","","","","","","","","2027-09-21","2027-09-21","","","2029-06-27","2028-06-30","2029-04-23","","N","y","2027-12-02","2028-02-10","2028-02-11","2029-04-22","2027-04-23","2026-10-13","2028-02-10","y","2028-01-17","2028-01-17","2028-01-17"]],["BATERNA, Eric","Assistant Engineer","b93089B",["","","","","","","","","2030-12-14","","","2030-10-14","","","","","2027-09-30","2028-04-11","","","2028-01-01","","Y","","","2027-12-09","","","","","","","","2027-09-11","2027-09-11","","","2030-04-23","2030-04-23","2030-04-11","2028-03-22","2028-03-25","Y","2027-12-09","2027-04-06","2027-04-06","2030-04-10","2028-04-10","2029-08-02","2028-04-09","Y","2028-01-31","2028-01-01","2028-01-31"]],["CLEMONES, Leon","Assistant Engineer","c91093C",["","","","","","","2030-08-01","","","","","2030-12-17","","","","","2028-05-03","2028-07-15","","","2027-01-01","","Y","","","2027-11-28","","","","","","","","2027-10-05","2027-09-28","","","2031-04-18","2031-04-18","2030-01-12","2027-12-10","2028-07-29","Y","2028-01-17","2028-01-17","2027-01-12","2030-01-12","2028-01-12","2029-07-14","2028-01-17","Y","2027-11-26","2028-01-17","2028-01-17"]],["PEJIC, Anton","Assistant Engineer","p85920P",["","","","","","","2027-08-10","","","","","2029-05-30","","","","","2027-09-10","2028-01-11","","","2029-07-01","","Y","","","2027-11-26","","","","","","","","2027-09-13","2027-09-13","","","2028-03-07","2028-03-07","2029-06-16","","N","Y","2027-03-12","2028-06-18","2028-05-18","2029-06-15","2027-06-16","2026-10-13","2028-01-18","Y","2027-11-27","2027-09-13","2028-01-16"]],["WRIGHT, Andrew","Assistant Engineer","w90518W",["","","","","","","2030-09-18","","","","","2029-04-25","","","","","2026-10-31","2027-10-02","","","2028-02-01","","Y","","","2028-02-06","","","","","","","","2028-02-09","2029-04-25","","","2029-10-03","2029-10-03","2029-12-02","","N","Y","2028-02-06","2028-02-04","2026-12-01","2029-12-02","2029-02-04","2026-10-13","2028-02-04","Y","2028-02-06","2028-02-04","2028-02-06"]],["KEOGH, Cornelius James","Assistant Engineer","k97556K",["","","","","","2029-10-17","","","","","","","","","","","2028-04-15","2028-04-23","","","2027-08-01","","Y","","","2027-12-01","","","","","","","","2027-11-17","2027-11-17","","","2030-02-27","","2030-11-23","2027-05-29","2028-05-10","Y","2028-05-15","2027-11-17","2027-11-17","2030-11-23","2028-11-22","2026-10-13","2027-11-17","Y","2028-01-20","2027-11-17","2028-01-20"]],["MURUGESAN, Karthik","Assistant Engineer","m90534M",["","","","","","","","","2030-08-06","","","2030-01-30","","","","","2026-11-18","2027-11-19","","","2026-11-01","","Y","","","2027-11-26","","","","","","","","2027-11-26","2027-11-26","","","2031-06-02","","2029-12-10","","N","Y","2027-11-30","2028-01-16","2026-12-09","2029-12-10","2027-12-10","2026-10-13","2028-01-16","Y","2028-01-17","2028-01-16","2027-01-16"]],["MACDONALD, Justin","GPH","m99351M",["","","","2030-09-24","","","","","","2031-04-01","","2030-01-04","","","","2031-04-09","2027-12-08","2028-02-25","2026-12-05","N","2027-11-01","","Y","","","2028-02-13","","","","","","","","2028-02-11","2028-02-11","","","2031-01-12","2031-01-12","2031-02-10","","N","Y","2028-02-13","2028-02-09","2028-02-09","2031-02-10","2029-02-09","2029-07-15","2028-02-09","Y","2028-02-13","2028-02-10","2028-02-12"]],["MICHALZIC, Travis","GPH","m94475M",["","","","2031-05-13","","","","","2029-10-15","","","2027-07-22","2031-06-16","2027-06-14","","","2027-07-22","2029-07-01","","N","2028-05-01","","N","","","2027-12-11","","","","","","","","2027-12-11","2027-12-11","","","2029-11-21","","2030-06-27","","N","Y","2027-12-11","2027-06-26","2027-06-26","2030-06-29","2028-06-28","2026-10-13","2027-06-29","Y","2027-12-11","2027-06-26","2028-01-22"]],["EVANS, Dylan","GPH","e84287E",["","","","2030-07-29","","","","","2030-10-31","2030-09-03","","","","","","","2028-03-16","2029-04-30","2027-04-30","Y","2030-01-01","","Y","","","2027-12-06","","","","","","","","2027-09-06","2027-09-06","","","2029-03-25","2029-03-25","2029-05-08","","N","Y","2027-03-02","2027-05-07","2027-05-08","2029-05-08","2027-05-08","2029-07-16","2027-05-07","Y","2027-12-02","2027-06-25","2028-01-17"]],["HEARFIELD, Bradd","GPH","h84290H",["","","","","","","","2027-11-02","","","","2029-03-05","","","","","2028-03-18","2026-02-19","2025-02-19","Y","2030-04-01","","Y","","","2027-12-08","","","","","","","","2027-12-08","2027-12-08","","","2029-03-22","N","2029-05-08","","N","Y","2027-03-14","2028-02-23","2028-04-09","2029-05-08","2027-05-08","2029-07-17","2028-02-23","Y","2027-12-08","2028-01-31","2027-01-31"]],["ASANGE,Kyle","GPH","a84343A",["","","","","","","","2028-10-04","2028-12-03","2030-06-30","","","","","","2029-05-22","2028-06-25","2026-05-05","2026-02-13","Y","2030-05-01","","Y","","","2027-12-05","","","","","","","","2027-10-17","2027-10-17","","","2030-08-28","2030-08-28","2029-05-04","2028-04-10","2028-04-08","Y","2027-03-07","2028-01-30","2028-03-31","2029-05-04","2027-05-04","2029-07-23","2028-01-30","Y","2027-12-05","2027-10-18","2027-12-21"]],["MACKNAMARA, Luke","GPH","m84293M",["","","","","","","","2031-01-31","2028-12-12","2028-12-12","","2026-11-28","","","","2029-03-14","2028-03-10","2026-11-11","2026-02-13","Y","2029-10-01","","Y","","","2027-12-05","","","","","","","","2027-10-25","2027-10-20","","","2028-02-06","2028-02-06","2031-05-06","2028-04-28","N","Y","2027-03-13","2028-02-19","2028-02-29","2029-05-06","2027-05-06","2029-07-20","2028-02-19","Y","2027-12-05","2028-01-30","2027-12-05"]],["ENGLISH, Jake","GPH","e84431E",["","","","","","","","2029-05-20","","","","2030-02-26","","","","2029-08-18","2028-02-05","2027-09-17","2027-07-27","Y","2029-12-01","","Y","","","2027-11-24","","","","","","","","2027-09-14","2027-09-24","","","2030-01-21","2030-01-21","2029-05-08","2028-07-15","2028-07-14","2026-04-24","2027-03-29","2028-01-18","2028-01-18","2029-05-08","2029-05-08","2029-09-13","2028-01-18","Y","2027-11-22","2027-09-14","2028-01-17"]],["DWYER, Matthew","GPH","d84488D",["","","","","","","","2027-10-17","2027-10-17","2030-06-22","","2027-09-07","2031-03-08","2030-06-23","","2029-03-08","2028-04-02","2028-01-10","2026-01-10","Y","2028-06-01","","Y","","","2027-11-25","","","","","","","","2027-09-15","2027-09-15","","","2026-11-04","2026-11-04","2029-05-09","","N","2026-04-24","2027-03-29","2028-01-18","2028-01-19","2029-05-09","2027-05-10","2026-10-13","2028-01-18","Y","2027-11-23","2028-01-05","2028-01-17"]],["DOUGLAS, Michael","GPH","d84356D",["","","","","","","","2031-06-18","","2028-07-25","","","","","","2029-03-19","2027-12-09","2026-11-26","2026-03-07","Y","2029-07-01","","Y","","","2027-11-23","","","","","","","","2027-10-04","2027-10-04","","","2027-05-19","2027-05-19","2029-05-06","","N","2026-04-24","2027-03-29","2028-01-18","2028-01-18","2029-05-06","2027-05-06","2026-10-13","2028-01-18","Y","2027-11-23","2027-10-05","2028-01-04"]],["ENGLISH, Zane","GPH","e84357E",["","","","","","","","2028-01-10","","","","2030-07-09","","","","2029-08-13","2028-08-03","2028-03-06","2026-03-07","Y","2029-09-01","","Y","","","2027-11-23","","","","","","","","2027-09-16","2027-09-16","","","2030-11-25","2030-11-25","2029-05-07","","N","Y","2027-03-07","2028-01-18","2028-01-18","2029-05-06","2029-01-18","2026-10-13","2028-01-18","Y","2028-01-20","2027-07-23","2028-01-04"]],["SITTIYOS, Kachin","Cook","s84419S",["","","","","","","","","","","2031-02-17","2031-02-17","","","","","2026-11-19","2026-01-11","","","2029-06-01","","Y","","","","","","","","","","","","","","","","","2029-05-11","","","Y","2027-03-30","2028-01-17","2028-04-28","2029-05-10","2027-05-11","2026-08-29","2028-01-17","Y","2028-01-17","2028-01-17","2028-01-17"]],["OROSZ, Tamas","Cook","o97557O",["","","","","","","","","","","2029-03-25","2029-03-25","","","","","2028-01-27","2026-06-01","","","2026-12-01","","Y","","","","","","","","","","","","","","","","","2030-11-15","","","Y","2028-01-17","2027-11-14","2027-11-14","2030-11-15","2028-11-14","2029-07-29","2027-11-14","Y","2028-01-16","2027-11-15","2028-01-16"]]]};
+// The crew matrix the portal starts with: the vessel file's items and nobody on
+// them. cols: [code, title, group]   rows: [name, position, SAM #, [values...]]
+// A value is an expiry date (YYYY-MM-DD), "Y"/"N" for held/not held, "?" where
+// unknown, or blank if not required. The crew and their dates are never written
+// here: they are the shared document's, and a portal that has none starts empty.
+const QUALS = { cols: VESSEL.qualColumns, rows: [] };
 
 // The buckets a document can be filed under — the Safety Minutes libraries
 // and the five Documentation tabs. The portal starts with nothing in any of
 // them: a compliance portal shows what has been filed, never a sample of what
 // might be. The list is fixed here rather than read off the contents, so an
 // empty bucket is still a bucket that uploads can land in.
-const DOC_BUCKETS = ["vesselSafety", "partnershipSafety", "insurance", "travel", "templates", "agreements", "documentation"];
+const DOC_BUCKETS = VESSEL.docBuckets;
 const emptyDocs = () => Object.fromEntries(DOC_BUCKETS.map((k) => [k, []]));
 
 /* ==================================================================== */
@@ -1947,7 +1937,7 @@ function CorrespondenceComposer({ onPost, bucket }) {
   );
 }
 
-function Correspondence({ data, setData, currentUser, log, bucket, title = "Partnership Correspondence", logLabel = "Partnership Correspondence" }) {
+function Correspondence({ data, setData, currentUser, log, bucket, title = VESSEL.labels.correspondence, logLabel = VESSEL.labels.correspondence }) {
   const [q, setQ] = useState("");
   const [party, setParty] = useState("All");
 
@@ -2035,9 +2025,9 @@ function PartnershipHub({ data, setData, currentUser, log, docs, addDoc, removeD
 
   const SUBS = [
     { id: "correspondence", label: "Correspondence" },
-    { id: "vessel", label: "Vessel Safety Meeting Minutes" },
-    { id: "quarterly", label: "Partnership Quarterly Safety Minutes" },
-    { id: "portways", label: "PortWays Correspondence" },
+    { id: "vessel", label: VESSEL.labels.vesselSafetyPage },
+    { id: "quarterly", label: VESSEL.labels.partnershipSafetyPage },
+    { id: "portways", label: VESSEL.labels.pwCorrespondence },
   ];
 
   return (
@@ -2056,19 +2046,19 @@ function PartnershipHub({ data, setData, currentUser, log, docs, addDoc, removeD
 
       {sub === "correspondence" && <Correspondence data={data} setData={setData} currentUser={currentUser} log={log} bucket="correspondence" />}
       {sub === "vessel" && (
-        <DocLibrary title="Vessel Safety Meeting Minutes" docs={docs.vesselSafety} currentUser={currentUser} tagHint="Monthly" bucket="vesselSafety"
-          onAdd={(d) => addDoc("vesselSafety", d, "Vessel Safety Minutes")}
-          onRemove={(d) => removeDoc("vesselSafety", d, "Vessel Safety Minutes")}
+        <DocLibrary title={VESSEL.labels.vesselSafetyPage} docs={docs.vesselSafety} currentUser={currentUser} tagHint="Monthly" bucket="vesselSafety"
+          onAdd={(d) => addDoc("vesselSafety", d, VESSEL.labels.vesselSafety)}
+          onRemove={(d) => removeDoc("vesselSafety", d, VESSEL.labels.vesselSafety)}
           note="Monthly onboard safety meetings. All crew are entitled to raise an item." />
       )}
       {sub === "portways" && (
         <Correspondence data={pwData} setData={setPwData} currentUser={currentUser} log={log} bucket="pwCorrespondence"
-          title="PortWays Correspondence" logLabel="PortWays Correspondence" />
+          title={VESSEL.labels.pwCorrespondence} logLabel={VESSEL.labels.pwCorrespondence} />
       )}
       {sub === "quarterly" && (
-        <DocLibrary title="Partnership Quarterly Safety Minutes" docs={docs.partnershipSafety} currentUser={currentUser} tagHint="Quarterly" bucket="partnershipSafety"
-          onAdd={(d) => addDoc("partnershipSafety", d, "Partnership Quarterly Safety")}
-          onRemove={(d) => removeDoc("partnershipSafety", d, "Partnership Quarterly Safety")}
+        <DocLibrary title={VESSEL.labels.partnershipSafetyPage} docs={docs.partnershipSafety} currentUser={currentUser} tagHint="Quarterly" bucket="partnershipSafety"
+          onAdd={(d) => addDoc("partnershipSafety", d, VESSEL.labels.partnershipSafety)}
+          onRemove={(d) => removeDoc("partnershipSafety", d, VESSEL.labels.partnershipSafety)}
           note="Quarterly safety review across the partnership." />
       )}
     </div>
@@ -2259,22 +2249,11 @@ function Cell({ value, onOpen, missing }) {
    The grade is the size of job the ticket covers — 1 a rating, 6 unlimited
    command or chief engineer — so a ticket and a position can be compared. The
    stream is the department it belongs to: a deck ticket says nothing about
-   whether somebody can stand an engine room watch. */
-const TICKETS = {
-  "QL-01": { grade: 6, stream: "deck", short: "Master" },
-  "QL-02": { grade: 5, stream: "deck", short: "Chief Mate" },
-  "QL-03": { grade: 4, stream: "deck", short: "Master <100m NC" },
-  "QL-04": { grade: 3, stream: "deck", short: "Master <45m NC" },
-  "QL-08": { grade: 2, stream: "deck", short: "Master <24m NC" },
-  "QL-05": { grade: 6, stream: "engine", short: "Engineer Class 1" },
-  "QL-06": { grade: 5, stream: "engine", short: "Engineer Class 2" },
-  "QL-07": { grade: 3, stream: "engine", short: "Engineer Class 3 NC" },
-  "QL-09": { grade: 2, stream: "engine", short: "Marine Engine Driver 2" },
-  // A rating's ticket covers both sides of the vessel - Able Seafarer Deck and
-  // Able Seafarer Engineer are the one certificate - so it counts either way.
-  "QL-10": { grade: 1, stream: "both", short: "Integrated Rating" },
-  "QL-11": { grade: 1, stream: "catering", short: "Marine Cook" },
-};
+   whether somebody can stand an engine room watch.
+   The ladder is the vessel file's. A rating's ticket covers both sides of
+   the vessel - Able Seafarer Deck and Able Seafarer Engineer are the one
+   certificate - so its stream is "both" and it counts either way. */
+const TICKETS = VESSEL.tickets;
 
 /* What each position is normally held against: the department it sits in, the
    lowest ticket that covers the job, and the highest the job is ordinarily
@@ -3015,19 +2994,23 @@ const certLinkFor = (dates, certificates, person, code) => {
    AMSA medical says on its own face whether it runs one year or two, so no
    validity period is ever used to work its expiry out, and the validity column
    says to read the certificate rather than printing the sheet's general guide.
-   Mirrored in lib/analysis.ts as CERT_STATED_CODES for the server. */
-const CERT_STATED = { "QL-17": "1 or 2 years — as printed on the certificate" };
+   The list is the vessel file's; the server's comparison (lib/analysis.ts)
+   reads the same one. */
+const CERT_STATED = VESSEL.certStated;
 
-/* Notes shown at the bottom of the crew certificates page. Add the next note
-   as another line here. The first is also enforced in the checker: VS-04 is on
-   NO_EXPIRY_CODES in source/shared/names.js (the server's comparison reads it too),
-   so it reads as "Doesn't expire" everywhere rather than as a missing date. */
-const CERT_PAGE_NOTES = [
-  "VS-04 Helm CONNECT - Crew Basic + Jobs has no expiry date. The checker treats it as held once completed - it never lapses and is never counted as expired.",
-  "QL-18 Provide First Aid: crew already aboard as at 29 Jun 2026 keep their existing 5-year expiry; anyone joining after that date holds it on a 3-year expiry (skills matrix roll-out sheet).",
-  "QL-19 Advanced Resuscitation: existing crew keep their 2-year expiry; new starters after 29 Jun 2026 hold it on a 1-year expiry (skills matrix roll-out sheet).",
-  "PT-03 Work Safely at Heights: Assistant Engineers and GPHs must comply by 29 Dec 2026; new starters from commencement (skills matrix roll-out sheet).",
-];
+/* Matrix items that carry no expiry date at all, for every crew member. They
+   are sat once and never lapse, which is a fact about the item rather than
+   something to be read off a scan, so they read as "Doesn't expire" for the
+   whole crew whether or not a validity periods matrix is on file. The list is
+   the vessel file's; the matrix gate (crewRowsOnly) and the server's
+   comparison are handed the same one. */
+const NO_EXPIRY_CODES = VESSEL.noExpiryCodes;
+
+/* Notes shown at the bottom of the crew certificates page, from the vessel
+   file. The first is also enforced in the checker: VS-04 is on
+   NO_EXPIRY_CODES, so it reads as "Doesn't expire" everywhere rather than as
+   a missing date. */
+const CERT_PAGE_NOTES = VESSEL.certPageNotes;
 
 /* The Notes panel the certification pages share. Read plainly by default; Edit
    turns each note into a text box, with Add and Delete beside them. Saving
@@ -4693,11 +4676,11 @@ function canonicalName(raw) {
 
 /* The two swings the vessel runs to. The roster has always held A and B against
    each person and everything else in the portal reads that letter, so the letter
-   is still what is written down — Alpha and Bravo are what the office calls them
-   and what the crew see. */
+   is still what is written down — the names are what the office calls them
+   and what the crew see, from the vessel file. */
 const SWINGS = [
-  { letter: "A", name: "Swing Alpha", colour: T.accent },
-  { letter: "B", name: "Swing Bravo", colour: T.bYellow },
+  { letter: "A", name: VESSEL.swings.labels.A, colour: T.accent },
+  { letter: "B", name: VESSEL.swings.labels.B, colour: T.bYellow },
 ];
 
 const swingNamed = (letter) => (SWINGS.find((s) => s.letter === letter) || {}).name || `Swing ${letter}`;
@@ -4778,20 +4761,13 @@ const rankGroupAt = (position) => {
   return i < 0 ? RANK_GROUPS.length : i;
 };
 
-const RANK_GROUPS = [
-  ["Masters", /master/i],
-  ["Chief Officers", /chief (officer|mate)/i],
-  ["Second Officers", /second (officer|mate)/i],
-  ["Chief Engineer", /chief engineer/i],
-  ["First Engineer", /first engineer/i],
-  /* One berth, two names for it. The office's matrix says "Assistant
-     Engineer" and the vessel's own list of ranks says "JUNIOR ENGINEER", and
-     they are the same man — so they belong under one heading rather than the
-     junior engineers falling through to "Other", which is what they did. */
-  ["Junior Engineers", /junior engineer|assistant engineer/i],
-  ["GPH", /\bgph\b|general purpose/i],
-  ["Chefs", /cook|chef|steward/i],
-];
+/* The headings and what each one matches, from the vessel file: a heading and
+   the pattern a position must match to sit under it, made case-blind here.
+   One berth can have two names - the office's matrix says "Assistant
+   Engineer" and a vessel's own list of ranks may say "JUNIOR ENGINEER", and
+   they are the same man - so a heading's pattern names both, rather than the
+   junior engineers falling through to "Other", which is what they did. */
+const RANK_GROUPS = VESSEL.rankGroups.map(([heading, pattern]) => [heading, new RegExp(pattern, "i")]);
 
 function CrewRosters({ people, setPeople, board, setBoard, log, currentUser, viewSwing, overrides, onShowNow, readOnly, asAt }) {
   // Swing Compliance shows the board to read it against the certificates, not
@@ -5279,10 +5255,10 @@ function DocumentationHub({ docs, addDoc, removeDoc, currentUser, people, setPeo
 
   const SUBS = [
     { id: "insurance", label: "Insurance" },
-    { id: "travel", label: "Hotel and Flight Bookings" },
+    { id: "travel", label: VESSEL.labels.travel },
     { id: "templates", label: "Templates" },
-    { id: "agreements", label: "Partnership Agreements" },
-    { id: "documents", label: "Misc Documents" },
+    { id: "agreements", label: VESSEL.labels.agreements },
+    { id: "documents", label: VESSEL.labels.documentation },
   ];
 
   return (
@@ -5307,9 +5283,9 @@ function DocumentationHub({ docs, addDoc, removeDoc, currentUser, people, setPeo
           note="Certificates of entry, cover notes and claims procedures." />
       )}
       {sub === "travel" && (
-        <DocLibrary title="Hotel and Flight Bookings" docs={docs.travel} currentUser={currentUser} tagHint="Travel" bucket="travel"
-          onAdd={(d) => addDoc("travel", d, "Hotel and Flight Bookings")}
-          onRemove={(d) => removeDoc("travel", d, "Hotel and Flight Bookings")}
+        <DocLibrary title={VESSEL.labels.travel} docs={docs.travel} currentUser={currentUser} tagHint="Travel" bucket="travel"
+          onAdd={(d) => addDoc("travel", d, VESSEL.labels.travel)}
+          onRemove={(d) => removeDoc("travel", d, VESSEL.labels.travel)}
           note="Accommodation and flights for crew change - schedules, booking forms, standing rates, and who to call when travel goes wrong." />
       )}
       {sub === "templates" && (
@@ -5319,15 +5295,15 @@ function DocumentationHub({ docs, addDoc, removeDoc, currentUser, people, setPeo
           note="Blank forms and templates to fill in - handover notes, permits, minutes, reports." />
       )}
       {sub === "documents" && (
-        <DocLibrary title="Misc Documents" docs={docs.documentation} currentUser={currentUser} tagHint="Manual" bucket="documentation"
-          onAdd={(d) => addDoc("documentation", d, "Misc Documents")}
-          onRemove={(d) => removeDoc("documentation", d, "Misc Documents")}
+        <DocLibrary title={VESSEL.labels.documentation} docs={docs.documentation} currentUser={currentUser} tagHint="Manual" bucket="documentation"
+          onAdd={(d) => addDoc("documentation", d, VESSEL.labels.documentation)}
+          onRemove={(d) => removeDoc("documentation", d, VESSEL.labels.documentation)}
           note="Manuals, procedures, plans and anything that doesn't belong in the sections above." />
       )}
       {sub === "agreements" && (
-        <DocLibrary title="Partnership Agreements" docs={docs.agreements} currentUser={currentUser} tagHint="Agreement" bucket="agreements"
-          onAdd={(d) => addDoc("agreements", d, "Partnership Agreements")}
-          onRemove={(d) => removeDoc("agreements", d, "Partnership Agreements")}
+        <DocLibrary title={VESSEL.labels.agreements} docs={docs.agreements} currentUser={currentUser} tagHint="Agreement" bucket="agreements"
+          onAdd={(d) => addDoc("agreements", d, VESSEL.labels.agreements)}
+          onRemove={(d) => removeDoc("agreements", d, VESSEL.labels.agreements)}
           note="The agreements the operation runs under, and the annexures that go with them." />
       )}
     </div>
@@ -7462,7 +7438,8 @@ const AU_ISSUER = new RegExp([
   "tasmania", "western australia", "\\bwa\\b", "south australia", "northern territory",
   "worksafe", "safework", "st john", "surf life saving", "royal life saving",
   "maritime safety queensland", "australian maritime college", "\\bamc\\b",
-  "mineral resources", "\\bminres\\b", "\\bmrl\\b", "united marine", "helm connect",
+  // The customer's and the operator's own names, from the vessel file.
+  ...VESSEL.customerMarks.auIssuers,
   // How an Australian company writes its own name, and the numbers only an
   // Australian company has. "Link Resources Training Pty Ltd" named nothing
   // on the list above and was called foreign for it - and that is how most
@@ -9368,10 +9345,11 @@ function RemovedFiles() {
 // Items that are e-learnings whatever group the matrix files them under.
 // VS-04 Helm CONNECT sits in Vessel Specific but is sat at a computer and comes
 // back as a tick, so it belongs with the modules on E-Learning Status rather
-// than among the marine tickets here. The same goes for anything MRN, MRM or
-// MinRes issue — their modules are all online, so the name itself settles it.
-const ELEARNING_CODES = ["VS-04"];
-const ELEARNING_MARKS = /\b(MRN|MRM|MinRes)\b/i;
+// than among the marine tickets here. The same goes for anything of the
+// customer's issue — their modules are all online, so the name itself settles
+// it. The codes and the customer's marks are the vessel file's.
+const ELEARNING_CODES = VESSEL.elearningCodes;
+const ELEARNING_MARKS = new RegExp("\\b(" + VESSEL.customerMarks.elearning + ")\\b", "i");
 const isELearningItem = (code, title) =>
   ELEARNING_CODES.includes(String(code || "").trim().toUpperCase()) ||
   ELEARNING_MARKS.test(String(title || ""));
@@ -9379,7 +9357,7 @@ const isELearningItem = (code, title) =>
 
 
 
-const ELEARNING_GROUPS = ["Project Induction", "Vessel Induction", "Project Specific"];
+const ELEARNING_GROUPS = VESSEL.elearningGroups;
 
 // A module is done when it is marked held, or carries a date that has not passed.
 const moduleState = (x) => {
@@ -10546,7 +10524,7 @@ async function saveRosterWorkbook(buf, plan) {
    whoever is signed onto it. A swing with nobody on it yet still shows, so
    crew can be put onto it. */
 
-const ROSTER_RANKS = ["MASTER", "CHIEF OFFICER", "SECOND OFFICER", "CHIEF ENGINEER", "FIRST ENGINEER", "JUNIOR ENGINEER", "GPH", "COOK"];
+const ROSTER_RANKS = VESSEL.rosterRanks;
 const rosterRankAt = (rank) => {
   const up = String(rank || "").toUpperCase().trim();
   const i = ROSTER_RANKS.findIndex((r) => up === r || up.startsWith(r));
@@ -13477,11 +13455,14 @@ const SHIFT_STATUS = {
    A requirement the sheet gives as "both" — one number each shift must meet
    alike — is shown under each shift; one the sheet doesn't split at all falls
    to the whole-swing group underneath. */
-const SHIFT_GROUPS = [
-  { id: "day", title: "Day Shift", hours: "1200 – 2400", takes: (s) => s === "day" || s === "both" },
-  { id: "night", title: "Night Shift", hours: "2400 – 1200", takes: (s) => s === "night" || s === "both" },
-  { id: "swing", title: "Whole Swing", hours: null, takes: (s) => s !== "day" && s !== "night" && s !== "both" },
-];
+const SHIFT_GROUP_TAKES = {
+  day: (s) => s === "day" || s === "both",
+  night: (s) => s === "night" || s === "both",
+  swing: (s) => s !== "day" && s !== "night" && s !== "both",
+};
+// The titles and the hours are the vessel file's; which requirements each
+// group takes is the rule above, by the group's id.
+const SHIFT_GROUPS = VESSEL.shift.groups.map((g) => ({ ...g, takes: SHIFT_GROUP_TAKES[g.id] }));
 
 /* ==================================================================== */
 /*  The office's shift allocation matrix — the positions each shift      */
@@ -13500,7 +13481,7 @@ const SHIFT_GROUPS = [
    Every one of these positions is on the Swing Compliance page whether the
    swing carries anybody in it or not, so a berth nobody is standing reads as a
    berth nobody is standing rather than as a row that quietly isn't there. */
-const SHIFT_MATRIX_VESSEL = "ONS-MRN-TSV";
+const SHIFT_MATRIX_VESSEL = VESSEL.shift.vesselCode;
 
 /* Positions are pooled by title, because the roster and the training matrix
    write them their own way: the matrix carries "Chief Officer - Unlimited" and
@@ -13511,29 +13492,18 @@ const SHIFT_MATRIX_VESSEL = "ONS-MRN-TSV";
    Chief Engineer and the First Engineer whichever watch each stands. A title
    no pool claims is a position the office matrix doesn't carry,
    and it keeps a row of its own underneath rather than being forced into one. */
-const SHIFT_MATRIX_POOLS = [
-  { pool: "master", is: (t) => /\bmaster/.test(t) },
-  { pool: "chief-officer", is: (t) => /chief (officer|mate)/.test(t) },
-  { pool: "second-mate", is: (t) => /second (mate|officer)/.test(t) },
-  { pool: "primary-engineer", is: (t) => /chief engineer|(first|1st) engineer/.test(t) },
-  { pool: "assistant-engineer", is: (t) => /(assistant|junior|third|3rd) engineer/.test(t) },
-  { pool: "gph", is: (t) => /\bgph\b|general purpose hand/.test(t) },
-  { pool: "cook", is: (t) => /\b(cook|chef)/.test(t) },
-];
+// Each pool and the pattern a normalised title must match to fall in it, from
+// the vessel file. Titles reach here lower-cased (normTitle), so the patterns
+// are matched as written.
+const SHIFT_MATRIX_POOLS = VESSEL.shift.pools.map(({ pool, is }) => {
+  const re = new RegExp(is);
+  return { pool, is: (t) => re.test(t) };
+});
 
-/* The matrix itself, in the order the office writes it. "shifts" is which of
-   the two the position is allocated to — both, one, or neither for the Cook. */
-const SHIFT_MATRIX = [
-  { key: "master", label: "Master", pool: "master", shifts: ["day", "night"] },
-  { key: "chief-officer-a", label: "Chief Officer (A)", pool: "chief-officer", shifts: ["day"] },
-  { key: "chief-officer-b", label: "Chief Officer (B)", pool: "chief-officer", shifts: ["night"] },
-  { key: "second-mate", label: "Second Mate", pool: "second-mate", shifts: ["day", "night"] },
-  { key: "primary-engineer-a", label: "Shift Primary Engineer", pool: "primary-engineer", shifts: ["day"] },
-  { key: "primary-engineer-b", label: "Shift Primary Engineer", pool: "primary-engineer", shifts: ["night"] },
-  { key: "assistant-engineer", label: "Assistant Engineer", pool: "assistant-engineer", shifts: ["day", "night"] },
-  { key: "gph", label: "GPH", pool: "gph", shifts: ["day", "night"] },
-  { key: "cook", label: "Cook", pool: "cook", shifts: [] },
-];
+/* The matrix itself, in the order the office writes it (the vessel file's
+   establishment). "shifts" is which of the two the position is allocated to —
+   both, one, or neither for the Cook. */
+const SHIFT_MATRIX = VESSEL.shift.establishment;
 
 // Which pool a position title falls in, or null where the office matrix carries
 // no such position.
@@ -13546,7 +13516,7 @@ const shiftMatrixPool = (title) => {
 
 // The sheet's own words for a position's allocation, so the page reads as the
 // office matrix does: "Shift 1 / Shift 2", "Shift 1", or "N/A".
-const SHIFT_SHEET_WORD = { day: "Shift 1", night: "Shift 2" };
+const SHIFT_SHEET_WORD = VESSEL.shift.sheetWords;
 const shiftMatrixWords = (shifts) =>
   shifts.length === 0 ? "N/A" : shifts.map((s) => SHIFT_SHEET_WORD[s]).join(" / ");
 
@@ -14781,12 +14751,7 @@ function TodayScreen({ go }) {
 /* Crew Marine Certificates and Certificates Required, one tab. The same
    figures read two ways — by person, or by certificate — so they live behind
    one entry in the strip with the direction picked at the top of the page. */
-const RANK_TO_PORTWAYS = {
-  "Master": "Master", "Chief Mate": "Chief Officer", "2nd Mate": "Second Mate",
-  "Second Mate": "Second Mate", "Chief Engineer": "Chief Engineer",
-  "1st Engineer": "First Engineer", "Junior Engineer": "Assistant Engineer",
-  "GPH": "General Purpose Hand", "Cook": "Cook",
-};
+const RANK_TO_PORTWAYS = VESSEL.rankToPortways;
 
 
 /* Access grants — who may enter the portal and at what level.
@@ -15149,7 +15114,7 @@ const ADMIN_PAGES = [
   { id: "documents", label: "Documents" },
   { id: "elearning", label: "E-Learning Status" },
   { id: "opms", label: "OPMS Checker" },
-  { id: "portways-docs", label: "Portways Documentation" },
+  { id: "portways-docs", label: VESSEL.labels.portwaysDocs },
   { id: "ai-checker", label: "AI Checker" },
   { id: "access", label: "Access Grants" },
 ];
@@ -15839,7 +15804,7 @@ function Portal({ role, onSignOut }) {
      render: the gate hands back a new object whenever it has renamed anything,
      and forty-three rows of fifty-three items rebuilt on every keystroke is
      felt. */
-  const quals = useMemo(() => crewRowsOnly(store.quals || QUALS, store.people),
+  const quals = useMemo(() => crewRowsOnly(store.quals || QUALS, store.people, NO_EXPIRY_CODES),
     [store.quals, store.people]);
   const setQuals = put("quals");
   const docs = store.docs,                 setDocs = put("docs");
@@ -16569,8 +16534,8 @@ function Portal({ role, onSignOut }) {
   // A tab clears its dot when opened; History clears everything.
   const SECTIONS_FOR_TAB = {
     handover: ["Handover Notes"],
-    correspondence: ["Partnership Correspondence", "PortWays Correspondence", "Vessel Safety Minutes", "Partnership Quarterly Safety"],
-    documentation: ["Misc Documents", "Insurance", "Hotel and Flight Bookings", "Templates", "Partnership Agreements"],
+    correspondence: [VESSEL.labels.correspondence, VESSEL.labels.pwCorrespondence, VESSEL.labels.vesselSafety, VESSEL.labels.partnershipSafety],
+    documentation: [VESSEL.labels.documentation, "Insurance", VESSEL.labels.travel, "Templates", VESSEL.labels.agreements],
     suggestions: ["Crew Suggestions"],
     "app-suggestions": ["App / Portal Suggestions"],
   };
@@ -16591,7 +16556,7 @@ function Portal({ role, onSignOut }) {
       : (SECTIONS_FOR_TAB[id] || []).reduce((n, sec) => n + (unread[sec] || 0), 0);
 
   const ALL_TABS = [
-    { id: "correspondence", label: "Partnership Correspondence" },
+    { id: "correspondence", label: VESSEL.labels.correspondence },
     { id: "handover", label: "Handover Notes" },
     { id: "training", label: "Crew Matrix" },
     { id: "crew-roster", label: "Roster" },
