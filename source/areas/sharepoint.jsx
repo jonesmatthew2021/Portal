@@ -8,7 +8,7 @@
  */
 function SharePointPage() {
   // Whether the worker's hour holds the workbook: the import is held down while it does.
-  const { roundRunning } = usePortal();
+  const { roundRunning, offlineAt } = usePortal();
   const [path, setPath] = useState("");
   const [listing, setListing] = useState(null);
   const [err, setErr] = useState("");
@@ -122,7 +122,8 @@ function SharePointPage() {
           {hourlyLine() && <div style={{ color: hourlyLine().bad ? T.bRed : T.muted }}>{hourlyLine().text}</div>}
           {backupLine() && <div style={{ color: backupLine().bad ? T.bRed : T.muted }}>{backupLine().text}</div>}
         </span>
-        <Button variant="quiet" disabled={syncing || roundRunning} title={!syncing && roundRunning ? ROUND_BUSY : undefined}
+        <Button variant="quiet" writes disabled={syncing || controlsLocked(offlineAt, roundRunning)}
+          title={!syncing && controlsLocked(offlineAt, roundRunning) ? (offlineAt ? offlineLine(offlineAt) : ROUND_BUSY) : undefined}
           onClick={syncNow}>{syncing ? "Importing..." : "Import new files"}</Button>
       </div>
       {/* The sync window: the worker's own percentage while it runs, and a

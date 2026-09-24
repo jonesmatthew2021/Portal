@@ -946,8 +946,8 @@ function UploadCertificates() {
             }}
             type="file" multiple style={{ display: "none" }}
             onChange={(e) => { stage(pickedEntries(e.target.files)); if (folderRef.current) folderRef.current.value = ""; }} />
-          <Button variant="quiet" onClick={() => fileRef.current && fileRef.current.click()}>Choose files</Button>
-          <Button onClick={() => folderRef.current && folderRef.current.click()}>Choose folders</Button>
+          <Button variant="quiet" writes onClick={() => fileRef.current && fileRef.current.click()}>Choose files</Button>
+          <Button writes onClick={() => folderRef.current && folderRef.current.click()}>Choose folders</Button>
         </div>
       </div>
 
@@ -1123,7 +1123,7 @@ function UploadCertificates() {
           })}
 
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
-            <Button onClick={fileAll} disabled={busy || queue.length === 0}>
+            <Button writes onClick={fileAll} disabled={busy || queue.length === 0}>
               {/* Keyed on this batch's own step: while a file is going up the
                   count shows; once the batch is sent the round is reading it.
                   Not on a run being present - a round from elsewhere can be
@@ -2342,7 +2342,7 @@ function badgeShouldClear(err, errAt, last) {
 }
 
 function UpdateDocumentation() {
-  const { admin, lastDocUpdate, setLastDocUpdate, log, pending, roundRunning, setRoundRunning,
+  const { admin, lastDocUpdate, setLastDocUpdate, log, pending, roundRunning, setRoundRunning, offlineAt,
     quals: QUALS, setQuals, trainingMatrix,
     rosterPlan, setRosterPlan, crewRoster,
     skillsMatrix, skillsRequirements, setSkillsRequirements,
@@ -2577,7 +2577,9 @@ function UpdateDocumentation() {
     const due = (last, unanswered) => shouldTabRound({ lastDocUpdate, now: Date.now(), pending, online: navigator.onLine, last, unanswered });
     const tick = async () => {
       // The tab's own reasons not to, before the portal is asked anything.
-      const wants = due(null) && !going.current && !heldElsewhere();
+      // Offline is one: the round reads and writes, and a kept /api/sync/last
+      // would only say the hour has not run.
+      const wants = due(null) && !going.current && !heldElsewhere() && !offlineAt;
       // Asked all the same while the last answer said the hour was running,
       // so the buttons held down for it come back when it stops - and while
       // one of the account's lines is up, so it can come down once an hour
@@ -2601,14 +2603,14 @@ function UpdateDocumentation() {
     const t = setInterval(tick, 5 * 60000);
     const first = setTimeout(tick, 45000);
     return () => { clearInterval(t); clearTimeout(first); };
-  }, [admin, lastDocUpdate, pending, roundRunning, err]);
+  }, [admin, lastDocUpdate, pending, roundRunning, err, offlineAt]);
 
   if (!admin) return null;
 
   return (
     <>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
-        <Button variant="solid" disabled={!!step} onClick={() => go(true)}>
+        <Button variant="solid" writes disabled={!!step} onClick={() => go(true)}>
           {step ? "Updating…" : "Update portal"}
         </Button>
         <span style={{ fontFamily: T.mono, fontSize: 9.5, color: err ? T.bRed : T.muted,
@@ -2884,11 +2886,11 @@ function CrewCertificateUpload() {
 
       <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderRadius: 3, padding: "14px 16px", marginBottom: 14 }}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <Button onClick={() => camRef.current && camRef.current.click()}>
+          <Button writes onClick={() => camRef.current && camRef.current.click()}>
             {shots.length ? "Take the next page" : "Take a photo"}
           </Button>
           {shots.length > 0 && !shots.some((s) => s.blurry) && (
-            <Button variant="ghost" onClick={() => run(shots, true)}>
+            <Button variant="ghost" writes onClick={() => run(shots, true)}>
               Upload {shots.length} page{shots.length === 1 ? "" : "s"} as one certificate
             </Button>
           )}

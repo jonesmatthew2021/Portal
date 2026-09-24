@@ -1564,7 +1564,7 @@ function filedUnderSuffix(wanted, actual) {
  */
 function MatrixSpreadsheet({ variant = "quiet" }) {
   const { admin, role, quals: QUALS, certSheet, setCertSheet, setCertAnalysis, log,
-    roundRunning, roundHolder, setRoundRunning } = usePortal();
+    roundRunning, roundHolder, setRoundRunning, offlineAt } = usePortal();
   const [busy, setBusy] = useState("");     // "" | "download" | "file" | "wait"
   const [err, setErr] = useState("");
   const [notes, setNotes] = useState([]);   // workbookNotes, or the one line a rebuilt download gets
@@ -1638,8 +1638,8 @@ function MatrixSpreadsheet({ variant = "quiet" }) {
         {busy === "download" ? "Preparing…" : "Matrix spreadsheet"}
       </Button>
       {admin && (
-        <Button variant={variant} onClick={file} disabled={!!busy || roundRunning}
-          title={!busy && roundRunning ? roundBusyTitle(roundHolder) : undefined}>
+        <Button variant={variant} writes onClick={file} disabled={!!busy || controlsLocked(offlineAt, roundRunning)}
+          title={!busy && controlsLocked(offlineAt, roundRunning) ? (offlineAt ? offlineLine(offlineAt) : roundBusyTitle(roundHolder)) : undefined}>
           {busy === "wait" ? "Waiting for the workbook…" : busy === "file" ? "Filing…" : "File the matrix spreadsheet"}
         </Button>
       )}

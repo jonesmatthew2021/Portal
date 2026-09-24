@@ -69,23 +69,28 @@ for (const [name, pkg] of [["react.production.min.js", "react"], ["react-dom.pro
     throw new Error("source/vendor/" + name + " is not the " + pkg + " build in tools/node_modules - copy it over again.");
   }
 }
-const copyTree = (from, to) => {
+// Copies the tree and hands back the served path of every file in it.
+const copyTree = (from, to, served = "/vendor") => {
   mkdirSync(to, { recursive: true });
-  let n = 0;
-  for (const entry of readdirSync(from, { withFileTypes: true })) {
-    if (entry.isDirectory()) n += copyTree(join(from, entry.name), join(to, entry.name));
-    else { copyFileSync(join(from, entry.name), join(to, entry.name)); n++; }
+  const paths = [];
+  for (const entry of readdirSync(from, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    if (entry.isDirectory()) paths.push(...copyTree(join(from, entry.name), join(to, entry.name), served + "/" + entry.name));
+    else { copyFileSync(join(from, entry.name), join(to, entry.name)); paths.push(served + "/" + entry.name); }
   }
-  return n;
+  return paths;
 };
-const vendorFiles = copyTree(VENDOR, join(ASSETS, "vendor"));
+const vendorPaths = copyTree(VENDOR, join(ASSETS, "vendor"));
+const vendorFiles = vendorPaths.length;
 // The service worker, stamped with this build: a hash of the compiled page
 // and the vendor files it serves, so a deploy that changes any of them is a
-// new worker with a new cache, and one that changes nothing is not.
+// new worker with a new cache, and one that changes nothing is not. The
+// worker keeps the scripts and the fonts at install (the licences it has
+// no use for).
 const stamp = createHash("md5").update(out);
 for (const name of ["react.production.min.js", "react-dom.production.min.js"]) stamp.update(readFileSync(join(VENDOR, name)));
 const version = stamp.digest("hex");
-writeFileSync(join(ASSETS, "sw.js"), serviceWorkerSource(version));
+const kept = vendorPaths.filter((p) => /\.(js|woff2)$/.test(p));
+writeFileSync(join(ASSETS, "sw.js"), serviceWorkerSource(version, kept));
 // The fauna log — the phone app at /fauna/ — is its own folder, carried over
 // as it is: the page, its rules module, its manifest and icons, and the
 // workbook template the month export is written into. Plain files, nothing

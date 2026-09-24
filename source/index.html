@@ -279,13 +279,56 @@ function forgetOffline() {
   } catch (e) {}
 }
 
+/* Reading offline.
+
+   When the link is down the service worker answers /api/state with the
+   last good copy it kept, stamped with the time that copy was fetched
+   (isCachedAnswer, in the shared offline rules). The page then shows that
+   copy read-only: one line on the badge saying so and how old it is, the
+   controls that write held down under the same line, and nothing else on
+   screen. Nothing is saved from there because nothing can be changed. The
+   next live answer - the next poll, or the one the "online" event asks
+   for - ends it by itself. */
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** The badge's one line while offline: when the copy on screen was
+ *  fetched, in the vessel's own time, with the year only when that was
+ *  not today. `now` is the moment it is read, for the test's sake. */
+function offlineLine(stampISO, now = Date.now()) {
+  const at = new Date(stampISO);
+  if (isNaN(at.getTime())) return "Offline — showing the portal as last loaded";
+  const part = (d) => {
+    const parts = new Intl.DateTimeFormat("en-AU", { timeZone: VESSEL.timezone, year: "numeric", month: "numeric",
+      day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(d);
+    const of = (type) => (parts.find((p) => p.type === type) || {}).value || "";
+    return { year: of("year"), month: Number(of("month")), day: of("day"), hour: of("hour"), minute: of("minute") };
+  };
+  const p = part(at);
+  const today = part(new Date(now));
+  const sameDay = p.year === today.year && p.month === today.month && p.day === today.day;
+  const when = p.day + " " + (MONTHS[p.month - 1] || "") + (sameDay ? "" : " " + p.year) + ", " + p.hour + ":" + p.minute;
+  return "Offline — showing the portal as at " + when;
+}
+/** Whether nothing may be written right now: the portal is offline (read
+ *  only, nothing would reach the server) or the round is writing the
+ *  workbook. The buttons that write the workbook are held down under both;
+ *  every other control that writes is held down under the first. */
+const controlsLocked = (offlineAt, roundRunning) => !!offlineAt || !!roundRunning;
+/** Whether the honour-system name picker may stand in for the sign-in:
+ *  only under the preview's shim (which sets the flag), and only when
+ *  /api/me could not say who this is. On the live site the picker never
+ *  shows, whatever /api/me did: a link that is down is not a sign-in. */
+const showPicker = (shimFlag, meFailed) => !!shimFlag && !!meFailed;
+
 // Safari on iOS will happily answer a repeated GET out of its own cache, which
 // leaves a phone polling all day and reading the same stale copy every time.
 // no-store makes every poll a real one.
 async function loadState() {
   const r = await fetch(STATE_API, { cache: "no-store" });
   if (!r.ok) throw new Error(`Couldn't load the portal (${r.status})`);
-  return r.json();                              // { rev, data }
+  // A copy the service worker kept carries the time it was fetched; a
+  // live answer carries nothing, and fetchedAt is null.
+  const fetchedAt = isCachedAnswer(r.headers);
+  return { ...(await r.json()), fetchedAt };  // { rev, data, fetchedAt }
 }
 
 // Saves on top of the revision this change was built on. If someone else saved
@@ -1188,7 +1231,7 @@ function Comments({ itemId }) {
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <input className="um-in" style={{ flex: 1, minWidth: 140 }} value={name}
                 onChange={(e) => setName(e.target.value)} placeholder="Your name (optional)" />
-              <Button onClick={() => {
+              <Button writes onClick={() => {
                 if (!text.trim()) return;
                 addComment(itemId, text.trim(), name.trim());
                 setText(""); 
@@ -1239,7 +1282,14 @@ function SectionHead({ title, meta }) {
   );
 }
 
-function Button({ children, onClick, variant = "solid", disabled = false, title }) {
+/* `writes` marks a button that changes something - a save, a post, an
+   upload, a round. While the portal is offline (read only, see
+   offlineLine) such a button is held down under the badge's line; a
+   button that only reads, moves about or closes is left alone. */
+function Button({ children, onClick, variant = "solid", disabled = false, title, writes = false }) {
+  const portal = usePortal();
+  const offlineAt = writes && portal ? portal.offlineAt : null;
+  if (offlineAt) { disabled = true; title = offlineLine(offlineAt); }
   const skins = {
     solid: { background: T.accent, color: "#FFF", border: "1px solid transparent" },
     quiet: { background: "transparent", color: T.muted, border: `1px solid ${T.rule}` },
@@ -1508,7 +1558,7 @@ function RankDrawer({ rankId, notes, onBack, onUpload, onDelete }) {
             <input ref={fileRef} type="file" style={{ display: "none" }}
               onChange={(e) => { const f = e.target.files?.[0]; if (f) { setErr(""); setStaged({ name: f.name, size: humanSize(f.size), file: f }); } }} />
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-              <Button variant="ghost" onClick={() => fileRef.current?.click()}>Choose file</Button>
+              <Button variant="ghost" writes onClick={() => fileRef.current?.click()}>Choose file</Button>
               <span style={{ fontFamily: T.mono, fontSize: 13, color: staged ? T.text : T.muted }}>
                 {staged ? `${staged.name} · ${staged.size}` : "No file chosen — or drag one here"}
               </span>
@@ -1516,7 +1566,7 @@ function RankDrawer({ rankId, notes, onBack, onUpload, onDelete }) {
           </DropSpot>
 
           <div style={{ marginTop: 4 }}>
-            <Button onClick={async () => {
+            <Button writes onClick={async () => {
               if (!staged || busy) return;
               setBusy(true); setErr("");
               try {
@@ -1683,7 +1733,7 @@ function CorrespondenceComposer({ onPost, bucket }) {
             <input ref={fileRef} type="file" style={{ display: "none" }}
               onChange={(e) => { const file = e.target.files?.[0]; if (file) { setErr(""); setStaged({ name: file.name, size: humanSize(file.size), file }); } }} />
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-              <Button variant="ghost" onClick={() => fileRef.current?.click()}>Choose file</Button>
+              <Button variant="ghost" writes onClick={() => fileRef.current?.click()}>Choose file</Button>
               <span style={{ fontFamily: T.mono, fontSize: 13, color: staged ? T.text : T.muted }}>
                 {staged ? `${staged.name} · ${staged.size}` : "No file chosen — or drag one here"}
               </span>
@@ -1692,7 +1742,7 @@ function CorrespondenceComposer({ onPost, bucket }) {
         )}
 
         <div style={{ marginTop: 4 }}>
-          <Button onClick={post}>{busy ? "Uploading…" : "Post to correspondence"}</Button>
+          <Button writes onClick={post}>{busy ? "Uploading…" : "Post to correspondence"}</Button>
           {err && <div style={{ fontFamily: T.body, fontSize: 13, color: T.bRed, marginTop: 10, lineHeight: 1.6 }}>{err}</div>}
         </div>
       </div>
@@ -1861,12 +1911,12 @@ function DocLibrary({ title, docs, note, onAdd, onRemove, currentUser, tagHint, 
               <input ref={fileRef} type="file" style={{ display: "none" }}
                 onChange={(e) => { const x = e.target.files?.[0]; if (x) { setErr(""); setStaged({ name: x.name, file: x }); } }} />
               <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                <Button variant="ghost" onClick={() => fileRef.current?.click()}>Choose file</Button>
+                <Button variant="ghost" writes onClick={() => fileRef.current?.click()}>Choose file</Button>
                 <span style={{ fontFamily: T.mono, fontSize: 13, color: staged ? T.text : T.muted }}>{staged ? staged.name : "No file chosen — or drag one here"}</span>
               </div>
             </DropSpot>
             <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
-              <Button onClick={async () => {
+              <Button writes onClick={async () => {
                 if (busy || !f.title.trim()) return;
                 setBusy(true); setErr("");
                 try {
@@ -1894,7 +1944,7 @@ function DocLibrary({ title, docs, note, onAdd, onRemove, currentUser, tagHint, 
           </div>
         </div>
       ) : (
-        <div style={{ marginBottom: 22 }}><Button onClick={() => setAdding(true)}>Post a document</Button></div>
+        <div style={{ marginBottom: 22 }}><Button writes onClick={() => setAdding(true)}>Post a document</Button></div>
       ))}
 
       <div style={{ marginBottom: 15 }}>
@@ -2183,7 +2233,7 @@ function SingleDocumentUpload({
                 <input ref={fileRef} type="file" accept={accept}
                   style={{ display: "none" }} onChange={onPick} />
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <Button onClick={() => fileRef.current && fileRef.current.click()}>
+                  <Button writes onClick={() => fileRef.current && fileRef.current.click()}>
                     {busy ? "Uploading..." : current ? `Choose a newer ${noun}` : `Choose ${noun}`}
                   </Button>
                   <Button variant="quiet" onClick={close}>Cancel</Button>
@@ -2769,7 +2819,7 @@ function SuggestionBoard({ data, setData, log, currentUser, title, logLabel, blu
             <input className="um-in" value={by} onChange={(e) => setBy(e.target.value)} placeholder="Optional" />
           </Field>
           <div>
-            <Button onClick={() => {
+            <Button writes onClick={() => {
               if (!text.trim()) return;
               const sug = { id: "s" + Date.now(), text: text.trim(), by: by.trim() || "Anonymous",
                 date: todayISO(), status: "new", votes: 0, session: SESSION };
@@ -4898,6 +4948,12 @@ function Portal({ role, onSignOut }) {
   });
 
   const [sync, setSync] = useState({ state: "loading" });
+  /* When the copy on screen was fetched, while the portal is offline:
+     the stamp the service worker put on the kept /api/state it answered
+     the last poll with (isCachedAnswer). Null on a live answer. While set
+     the portal is read only - put() refuses every change, the badge says
+     so and the buttons that write are held down (see offlineLine). */
+  const [offlineAt, setOfflineAt] = useState(null);
   /* Whether anything typed is still on its way up.
    *
    * The badge used to read the connection and nothing else, so it said SAVED
@@ -4942,6 +4998,10 @@ function Portal({ role, onSignOut }) {
   // the same moment, only the parts each of them actually changed are carried
   // over, so a roster edit and a posted note can't wipe each other out.
   const put = (key) => (v) => {
+    // Offline the portal is read only: a change made now could not be
+    // saved and would sit in the tab as an unsaved edit of a copy that is
+    // already old, so it is not taken at all (see offlineLine).
+    if (offlineAt) return;
     dirty.current.add(key);
     gen.current.set(key, (gen.current.get(key) || 0) + 1);
     setPending(true);
@@ -5206,8 +5266,19 @@ function Portal({ role, onSignOut }) {
     };
     const pullOnce = async () => {
       try {
-        const { rev: serverRev, data } = await loadState();
+        const { rev: serverRev, data, fetchedAt } = await loadState();
         if (!alive) return;
+        // A kept copy puts the portal offline, as at the copy's stamp; a
+        // live answer brings it back. Nothing else decides this.
+        setOfflineAt((was) => (was === (fetchedAt || null) ? was : fetchedAt || null));
+        // A slice changed before the first load lands was changed on the
+        // page's own empty start: online it goes up and is merged over the
+        // server's copy within seconds, and the copy comes down with it.
+        // Offline nothing goes up, so a page that kept those changes would
+        // sit on its empty start for as long as the link was down. On a
+        // kept copy's first load they are let go and the copy is shown.
+        const emptyStart = !!fetchedAt && firstLoad.current && dirty.current.size > 0;
+        if (emptyStart) { dirty.current.clear(); setPending(false); }
 
         if (data && serverRev > rev.current && dirty.current.size === 0) {
           rev.current = serverRev;
@@ -5331,9 +5402,16 @@ function Portal({ role, onSignOut }) {
   // the timers inside it were stopped in the background.
   React.useEffect(() => {
     const flush = () => { if (dirty.current.size > 0) setRetry((n) => n + 1); };
-    window.addEventListener("online", flush);
+    // The link back: the next poll would end the offline reading by
+    // itself within a few seconds; asking now ends it at once.
+    const back = () => {
+      flush();
+      if (pullStateRef.current) pullStateRef.current();
+      if (pullFilesRef.current) pullFilesRef.current();
+    };
+    window.addEventListener("online", back);
     const stopWatching = onWake(flush);
-    return () => { window.removeEventListener("online", flush); stopWatching(); };
+    return () => { window.removeEventListener("online", back); stopWatching(); };
   }, []);
 
   // Unread counts per section, so tabs can show a dot and the app icon a number.
@@ -6189,7 +6267,7 @@ function Portal({ role, onSignOut }) {
     return { ok: true, gone };
   };
 
-  const ctx = { role, admin, session: SESSION, pending, roundRunning, roundHolder, setRoundRunning, removeCrew, renameCrew, setCrewRank, people, setPeople,
+  const ctx = { role, admin, session: SESSION, pending, offlineAt, roundRunning, roundHolder, setRoundRunning, removeCrew, renameCrew, setCrewRank, people, setPeople,
     notPeople, setNotPeople, certRoot, setCertRoot, writeCrewToWorkbooks, lastDocUpdate, setLastDocUpdate, folderNames, setFolderNames, filledFromCert, setFilledFromCert, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixRun, runMatrixRound, clearMatrixRun };
 
   return (
@@ -6217,14 +6295,21 @@ function Portal({ role, onSignOut }) {
                   once it has landed, and the time it landed on hovering — so
                   "is that saved?" has an answer on the screen. */}
               {(() => {
-                const state = sync.state === "error" ? "error" : pending ? "saving"
+                // Offline: the one line saying so and how old what is shown
+                // is, in place of Saved, Saving and Not saving. Anything
+                // still unsaved when the link went is held and goes up when
+                // it comes back, and the badge says so then.
+                const state = offlineAt ? "offline"
+                  : sync.state === "error" ? "error" : pending ? "saving"
                   : sync.state === "ok" ? "ok" : "loading";
-                const colour = state === "error" ? T.bRed : state === "saving" ? T.bOrange
+                const colour = state === "error" ? T.bRed : state === "saving" || state === "offline" ? T.bOrange
                   : state === "ok" ? T.teal : T.muted;
-                const said = state === "error" ? "Not saving" : state === "saving" ? "Saving…"
+                const said = state === "offline" ? offlineLine(offlineAt)
+                  : state === "error" ? "Not saving" : state === "saving" ? "Saving…"
                   : state === "ok" ? "Saved" : "…";
                 return (
-                  <span title={state === "error" ? sync.msg
+                  <span title={state === "offline" ? offlineLine(offlineAt)
+                    : state === "error" ? sync.msg
                     : state === "saving" ? "Your changes are on their way to the server"
                     : state === "ok" ? `Everything is saved — last written ${sync.at}` : "Connecting"}
                     style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: T.mono, fontSize: 10,
@@ -6361,20 +6446,24 @@ function App() {
   // per-tab remembering are superseded — the session cookie is the memory,
   // and it holds for ninety days per device. On the local preview, where no
   // server sign-in exists, /api/me answers 404/failed and the page falls
-  // back to the picker so the preview keeps working.
+  // back to the picker so the preview keeps working - and only there: the
+  // preview's shim sets a flag on the window, and without it a failed
+  // /api/me is a link that is down, never a sign-in (showPicker). Offline,
+  // the service worker answers /api/me with the last person it kept, and
+  // the page boots as them, read only (see offlineLine).
   const [me, setMe] = useState(null);
-  const [noServer, setNoServer] = useState(false);
+  const [meFailed, setMeFailed] = useState(null);
   React.useEffect(() => {
     (async () => {
       try {
         const r = await fetch("/api/me");
         if (r.status === 401) { window.location.href = "/login"; return; }
-        if (!r.ok) { setNoServer(true); return; }
+        if (!r.ok) { setMeFailed(`Couldn't reach the portal (${r.status})`); return; }
         const who = await r.json();
         SESSION_USER = { name: who.name, role: who.role, email: who.email || "", fitToSail: who.fitToSail || "" };
         setMe(who);
       } catch (e) {
-        setNoServer(true);
+        setMeFailed(e && e.message ? e.message : "Couldn't reach the portal");
       }
     })();
   }, []);
@@ -6383,7 +6472,16 @@ function App() {
   const [picked, setPicked] = useState(() => {
     try { return sessionStorage.getItem("um-signed-in") || null; } catch (e) { return null; }
   });
-  if (noServer) {
+  if (meFailed && !showPicker(window.__PORTAL_PREVIEW__, meFailed)) {
+    return (
+      <Boundary>
+        <div style={{ background: T.deep, minHeight: "100vh", padding: "40px 18px", fontFamily: T.body }}>
+          <NotLoadedYet error={meFailed} />
+        </div>
+      </Boundary>
+    );
+  }
+  if (meFailed) {
     if (picked) {
       // Restored from the tab's memory: keep the role map in step.
       SESSION_USER = { name: picked, role: picked === IT_SUPPORT_ACCOUNT_NAME ? "it" : ADMINS.includes(picked) ? "management" : "crew", email: "" };

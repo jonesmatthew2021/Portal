@@ -31,10 +31,10 @@ const VERSION = "__BUILD_VERSION__";
 
 const NAME = cacheName(VERSION);
 const ORIGIN = self.location.origin;
-const VENDOR = [
-  "/vendor/react.production.min.js",
-  "/vendor/react-dom.production.min.js",
-];
+/* React, React DOM and the fonts, as the build found them under
+   source/vendor: kept at install, so the first visit's fonts - fetched
+   before this worker stood in front of the page - are there offline too. */
+const VENDOR = __VENDOR_FILES__;
 
 /* A copy of an answer, stamped with the time it was fetched. The body is
    read whole so the stamp can be set on a fresh Response: an answer's own

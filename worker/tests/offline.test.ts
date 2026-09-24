@@ -91,6 +91,12 @@ test("the assets build wrote the service worker with its version, the rules fold
   assert.ok(/^function cacheable\(/m.test(sw), "…with the export taken off, as the page has them");
   assert.equal(/^\s*export\b/m.test(sw), false, "no export reaches the worker: it is a plain script");
   assert.ok(/^import /m.test(sw) === false);
+  const vendorList = /^const VENDOR = (\[.*\]);$/m.exec(sw);
+  assert.ok(vendorList, "the worker carries the list of vendor files it keeps at install");
+  const kept = JSON.parse(vendorList![1]) as string[];
+  assert.ok(kept.includes("/vendor/react.production.min.js") && kept.includes("/vendor/react-dom.production.min.js"));
+  assert.equal(kept.filter((p) => p.endsWith(".woff2")).length, 9, "…the nine fonts among them");
+  assert.equal(kept.some((p) => p.endsWith(".txt")), false, "…and not the licences");
   // The worker file parses as a script. Compiled, never run: it reads
   // self.location at the top, which only a browser has.
   assert.doesNotThrow(() => new Function(sw), "worker/assets/sw.js does not parse");

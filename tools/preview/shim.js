@@ -3,6 +3,10 @@
 /* Answers the portal's own API calls from the crew-data snapshot taken   */
 /* with the archive, so the portal runs and saves without a server.       */
 (() => {
+  // The page shows its honour-system name picker only under this shim
+  // (showPicker in source/index.html reads the flag): on the live site a
+  // failed /api/me is a link that is down, never a way in.
+  window.__PORTAL_PREVIEW__ = true;
   const SNAPSHOT = __SNAPSHOT__;
   const FILE_ROWS = __FILE_ROWS__;
   // The vessel file, written in by the build: the shim sits outside the

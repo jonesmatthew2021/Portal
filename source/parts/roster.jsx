@@ -666,7 +666,7 @@ function CrewRosters({ people, setPeople, board, setBoard, log, currentUser, vie
 
           {admin && (
             <div style={{ display: "flex", gap: 10, marginBottom: 18, flexWrap: "wrap", alignItems: "center" }}>
-              <Button onClick={() => setEditing({})}>Add crew member</Button>
+              <Button writes onClick={() => setEditing({})}>Add crew member</Button>
               <span style={{ fontFamily: T.body, fontSize: 13, color: T.muted }}>
                 {onDay} on days · {onNight} on nights
                 {noWatch ? ` · ${noWatch} without a watch` : ""}
@@ -760,7 +760,7 @@ function CrewRosters({ people, setPeople, board, setBoard, log, currentUser, vie
               <Button variant="quiet" onClick={() => setConfirmSwitch(false)}>Cancel</Button>
             </div>
           ) : (
-            <Button onClick={() => setConfirmSwitch(true)}
+            <Button writes onClick={() => setConfirmSwitch(true)}
               disabled={!goingAshore.length && !comingOn.length}>
               Switch the swings
             </Button>
@@ -3007,17 +3007,17 @@ function RosterListPage() {
             </span>
           )}
           {admin && rosterPlan && crewRoster && (
-            <Button disabled={savingRoster || !rosterPlan.edited} onClick={saveRoster}>
+            <Button writes disabled={savingRoster || !rosterPlan.edited} onClick={saveRoster}>
               {savingRoster ? "Saving…" : "Save roster"}
             </Button>
           )}
           {admin && rosterPlan && (
-            <Button onClick={() => setTableEdit(tableEdit && tableEdit.kind === "new" ? null : { kind: "new" })}>
+            <Button writes onClick={() => setTableEdit(tableEdit && tableEdit.kind === "new" ? null : { kind: "new" })}>
               Add crew member
             </Button>
           )}
           {admin && rosterPlan && (
-            <Button variant="quiet"
+            <Button variant="quiet" writes
               onClick={() => setTableEdit(tableEdit && tableEdit.kind === "pick" ? null : { kind: "pick" })}>
               Move or remove crew
             </Button>
@@ -3037,7 +3037,7 @@ function RosterListPage() {
               <Button variant="quiet" onClick={() => setConfirmLoad(false)}>Keep as is</Button>
             </>
           ) : (
-            <Button variant="quiet" disabled={busy}
+            <Button variant="quiet" writes disabled={busy}
               onClick={() => (rosterPlan && rosterPlan.edited ? setConfirmLoad(true) : load("pressed"))}>
               {busy ? "Reading…" : "Load from the spreadsheet"}
             </Button>
@@ -3321,7 +3321,7 @@ function GenerateAllocations({ people, log }) {
 
   return (
     <>
-      <Button disabled={!ready || !!work} onClick={() => setAsking(true)}>
+      <Button writes disabled={!ready || !!work} onClick={() => setAsking(true)}>
         {work && !work.done ? "Working…" : "Update swings from roster"}
       </Button>
 

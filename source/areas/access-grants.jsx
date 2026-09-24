@@ -165,7 +165,7 @@ function AccessGrantsPage() {
             <option key={l.id} value={l.id}>{l.label}</option>
           ))}
         </select>
-        <Button onClick={grant} disabled={!draft.name.trim() || !draft.email.trim()}>Grant access</Button>
+        <Button writes onClick={grant} disabled={!draft.name.trim() || !draft.email.trim()}>Grant access</Button>
       </div>
 
       {err && <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.bRed, marginBottom: 12 }}>{err}</div>}

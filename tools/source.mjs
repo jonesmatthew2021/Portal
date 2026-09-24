@@ -372,15 +372,23 @@ function foldedShared(n) {
 const SW_FILE = join(SOURCE, "app", "sw.js");
 const SW_VERSION_MARK = '"__BUILD_VERSION__"';
 const SW_RULES_MARK = "/* @offline-rules */";
-export function serviceWorkerSource(version) {
+const SW_VENDOR_MARK = "__VENDOR_FILES__";
+/** `vendor` is the list of served paths under /vendor/ the worker keeps at
+ *  install - React, React DOM and the fonts, as the asset build found them. */
+export function serviceWorkerSource(version, vendor = []) {
   if (!/^[A-Za-z0-9._-]{4,64}$/.test(String(version))) {
     throw new Error("the service worker's version must be a plain word (letters, digits, . _ -), not " + JSON.stringify(version));
   }
+  if (!Array.isArray(vendor) || vendor.some((p) => typeof p !== "string" || !p.startsWith("/vendor/"))) {
+    throw new Error("the service worker's vendor list must be served paths under /vendor/.");
+  }
   const sw = asLf(readFileSync(SW_FILE, "utf8"));
-  for (const mark of [SW_VERSION_MARK, SW_RULES_MARK]) {
+  for (const mark of [SW_VERSION_MARK, SW_RULES_MARK, SW_VENDOR_MARK]) {
     if (sw.split(mark).length !== 2) throw new Error("source/app/sw.js should carry " + mark + " exactly once.");
   }
-  return sw.replace(SW_VERSION_MARK, JSON.stringify(String(version))).replace(SW_RULES_MARK, foldedShared("offline-rules.js"));
+  return sw.replace(SW_VERSION_MARK, JSON.stringify(String(version)))
+    .replace(SW_VENDOR_MARK, JSON.stringify(vendor))
+    .replace(SW_RULES_MARK, foldedShared("offline-rules.js"));
 }
 
 /** Just the JSX, lifted out of the assembled page. */

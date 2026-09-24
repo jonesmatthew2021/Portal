@@ -546,7 +546,7 @@ function NotesPanel({ compact = false }) {
           ))}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
             <Button variant="quiet" onClick={() => setDraft([...draft, ""])}>Add a note</Button>
-            <Button onClick={save}>Save</Button>
+            <Button writes onClick={save}>Save</Button>
             <Button variant="quiet" onClick={() => setDraft(null)}>Cancel</Button>
           </div>
         </div>
@@ -699,12 +699,14 @@ function DateColsHead({ trail = 150, validity = false }) {
    only; held down while a round runs here or somebody else holds the
    lease, under their name (roundBusyTitle). */
 function UpdateMatrixButton({ variant = "quiet", label = "Update matrix" }) {
-  const { admin, matrixRun, runMatrixRound, roundRunning, roundHolder } = usePortal();
+  const { admin, matrixRun, runMatrixRound, roundRunning, roundHolder, offlineAt } = usePortal();
   if (!admin) return null;
   const running = !!matrixRun && matrixRun.phase !== "done" && matrixRun.phase !== "failed";
+  // Held down offline too (controlsLocked): the round writes the workbook.
+  const locked = controlsLocked(offlineAt, roundRunning);
   return (
-    <Button variant={variant} disabled={running || roundRunning}
-      title={!running && roundRunning ? roundBusyTitle(roundHolder) : undefined}
+    <Button variant={variant} writes disabled={running || locked}
+      title={!running && locked ? (offlineAt ? offlineLine(offlineAt) : roundBusyTitle(roundHolder)) : undefined}
       onClick={() => { if (!running) runMatrixRound({ origin: "button" }); }}>
       {running ? "Updating…" : label}
     </Button>
