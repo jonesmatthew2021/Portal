@@ -75,7 +75,7 @@ const VESSEL_SHAPE = [
   ["customerMarks.elearning", "string"], ["customerMarks.auIssuers", "string[]"],
   ["customerMarks.nameStopWords", "string[]"],
   ["elearningCodes", "string[]"], ["noExpiryCodes", "string[]"], ["elearningGroups", "string[]"],
-  ["certStated", "object"], ["certPageNotes", "string[]"], ["tickets", "object"],
+  ["certStated", "object"], ["covers", "array"], ["certPageNotes", "string[]"], ["tickets", "object"],
   ["docBuckets", "string[]"], ["labels", "object"], ["qualColumns", "array"], ["crewFolders", "object"],
 ];
 // The colours a theme must name: the ones the roundel gives the page.
@@ -152,6 +152,18 @@ export function checkVessel(vessel, from = "source/vessel.json") {
   });
   vessel.qualColumns.forEach((c, i) => {
     if (!Array.isArray(c) || c.length !== 3 || !word(c[0]) || !word(c[1]) || typeof c[2] !== "string") throw wrong("qualColumns[" + i + "]", "a code, a title and a group, all strings");
+  });
+  /* The covers table: which column a printed endorsement fills (read by
+   * source/shared/covers.js). A pattern that does not compile would cover
+   * nothing and say nothing about it, and a code that is not a column would
+   * fill a cell the matrix has not got - so both are said here, with the key. */
+  const columnCodes = new Set(vessel.qualColumns.map((c) => String(c[0]).trim().toUpperCase()));
+  vessel.covers.forEach((c, i) => {
+    if (!isObject(c) || !word(c.code) || !word(c.when)) throw wrong("covers[" + i + "]", "a code and a pattern, both strings");
+    if (!compiles(c.when)) throw wrong("covers[" + i + "].when", "a pattern that compiles");
+    if (!columnCodes.has(String(c.code).trim().toUpperCase())) throw wrong("covers[" + i + "].code", "one of the codes in qualColumns");
+    if (c.perpetual !== undefined && typeof c.perpetual !== "boolean") throw wrong("covers[" + i + "].perpetual", "true or false");
+    if (c.why !== undefined && !word(c.why)) throw wrong("covers[" + i + "].why", "the clause it comes from, as a string");
   });
   return vessel;
 }

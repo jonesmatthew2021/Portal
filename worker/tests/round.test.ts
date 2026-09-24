@@ -2464,6 +2464,66 @@ test("a reading asks for the document's number and the holder's date of birth, a
   assert.equal(READING_VERSION, "r1", "no reading made before is thrown away");
 });
 
+test("a reading asks what else the certificate covers, whether it is a recognition, the medical's own dates and any cover standing in for a certificate", async () => {
+  /* One question, every key, always present: a reading without a key is one
+     made before it was asked for, and that is the only thing the hour's
+     top-up has to go on. The lists are held to what a certificate can
+     honestly print, and a printed limitation to twenty words. */
+  const { portal } = await unreadPortal(2);
+  const model = modelAnswers((n) => ({ status: 200, body: readingStream(n === 1
+    ? { ...reading,
+      endorsements: [
+        { text: "  II/2 (incl. generic ECDIS)  ", until: null },
+        "VI/2 (2) s. A-VI/2 (5-8)",
+        { text: "VI/6 (1) s. A-VI/6 (4)", until: "26.05.2031" },
+        { text: "", until: "2031-05-26" },
+      ],
+      units: ["HLTAID011", " hltaid011 ", "SITXFSA005"],
+      isRecognition: false, recognises: { authority: "AMSA", country: "India" },
+      assessedOn: "2026-02-10", conditions: null, evidenceKind: "nonsense" }
+    : { ...reading, certificateTitle: "Certificate of Recognition of GMDSS",
+      endorsements: "not a list", units: null,
+      isRecognition: true, recognises: { authority: "Directorate General of Shipping", country: "India", number: "IND-12345", expiresOn: "2029-10-07" },
+      assessedOn: "not a date",
+      conditions: "fit for particular duties only and must wear corrective lenses at all times while on watch and keep a spare pair aboard the vessel at sea",
+      evidenceKind: "Issue-Letter" }) }));
+  try {
+    await extract([["QL-01", "Master"]], 4);
+  } finally {
+    model.restore();
+  }
+  const asked = model.calls[0];
+  for (const key of ["endorsements", "units", "isRecognition", "recognises", "assessedOn", "conditions", "evidenceKind"]) {
+    assert.ok(asked.includes(key), "the question asks for " + key);
+  }
+  const first = JSON.parse(portal.blobs.get("certificate-readings|r1/unread-1.json")!);
+  assert.deepEqual(first.endorsements, [
+    { text: "II/2 (incl. generic ECDIS)", until: null },
+    { text: "VI/2 (2) s. A-VI/2 (5-8)", until: null },
+    { text: "VI/6 (1) s. A-VI/6 (4)", until: null },
+  ], "trimmed as printed, a plain string still an endorsement, a date only as YYYY-MM-DD, and nothing for an empty line");
+  assert.deepEqual(first.units, ["HLTAID011", "SITXFSA005"], "the same unit code twice is one code");
+  assert.equal(first.recognises, null, "nothing said about a foreign certificate on a document that is not a recognition");
+  assert.equal(first.assessedOn, "2026-02-10");
+  assert.equal(first.evidenceKind, null, "a kind that is not one of the five is none");
+
+  const second = JSON.parse(portal.blobs.get("certificate-readings|r1/unread-2.json")!);
+  assert.deepEqual(second.endorsements, [], "an answer that is not a list is no endorsements");
+  assert.deepEqual(second.units, []);
+  assert.equal(second.isRecognition, true);
+  assert.deepEqual(second.recognises, { authority: "Directorate General of Shipping", country: "India", number: "IND-12345", expiresOn: "2029-10-07" },
+    "what the recognition prints about the certificate behind it");
+  assert.equal(second.assessedOn, null);
+  assert.equal(second.conditions!.split(" ").length, 20, "a printed limitation is kept to twenty words");
+  assert.equal(second.evidenceKind, "issue-letter", "however the model cased it");
+  for (const r of [first, second]) {
+    for (const key of ["endorsements", "units", "isRecognition", "recognises", "assessedOn", "conditions", "evidenceKind"]) {
+      assert.ok(key in r, key + " is on every reading made now");
+    }
+  }
+  assert.equal(READING_VERSION, "r1", "and no reading made before is thrown away for them");
+});
+
 test("a PDF the model turns away is stored as unreadable, with the plain reason, and stops nothing", async () => {
   const { portal } = await unreadPortal(1);
   const model = modelAnswers(() => ({ status: 400, body: BAD_PDF_BODY }));
@@ -2655,19 +2715,21 @@ test("the hour stops reading on the first credit answer, says so in red, and sti
 
   // Topped up: the next hour reads both with nothing reset, and the line is gone.
   // The new readings print his date of birth, so his older Master ticket is
-  // not read again for it: only the reading's own calls are counted here.
+  // not read again for that - but it was read before the endorsements were
+  // asked for, and it is a certificate of competency, so the back-fill looks
+  // at it once. Three calls: the two certificates, and his ticket.
   const answers = modelAnswers(() => ({ status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans", certificateTitle: "Master <500GT", expiresOn: "2032-01-01", holderBirthDate: "1980-03-10" }) }));
   try {
     await quiet(() => worker.scheduled({} as never, env as never));
   } finally {
     answers.restore();
   }
-  assert.equal(answers.calls.length, 2, "the two unread certificates were put to the model");
+  assert.equal(answers.calls.length, 3, "the two unread certificates were put to the model, and his ticket once for the keys it is missing");
   const next = JSON.parse(portal.blobs.get("sync|last-hourly")!);
   assert.equal(next.readError, null);
   assert.equal(next.readTried, true, "the hour says it read");
   assert.equal(next.read, 2);
-  assert.equal(readingWrites(portal.db).length, 2, "their readings are stored now");
+  assert.equal(readingWrites(portal.db).length, 3, "their readings are stored now, and his ticket's is written back with the keys it was missing");
 });
 
 test("a busy model stops the hour's reading as an aside, not an error, and the next hour reads as normal", async () => {
@@ -2688,19 +2750,20 @@ test("a busy model stops the hour's reading as an aside, not an error, and the n
   // Next hour the model answers: the certificate is read with no reset,
   // and the line is gone from the record.
   // The new reading prints his date of birth, so his older Master ticket is
-  // not read again for it: only the reading's own calls are counted here.
+  // not read again for that - only once, by the back-fill, for the keys it
+  // was read before the question asked for.
   const answers = modelAnswers(() => ({ status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans", certificateTitle: "Master <500GT", expiresOn: "2032-01-01", holderBirthDate: "1980-03-10" }) }));
   try {
     await quiet(() => worker.scheduled({} as never, env as never));
   } finally {
     answers.restore();
   }
-  assert.equal(answers.calls.length, 1, "the one unread certificate was put to the model");
+  assert.equal(answers.calls.length, 2, "the one unread certificate, and his ticket once for the keys it is missing");
   hourly = JSON.parse(portal.blobs.get("sync|last-hourly")!);
   assert.equal(hourly.readError, null);
   assert.equal(hourly.readStopped, null);
   assert.equal(hourly.read, 1);
-  assert.equal(readingWrites(portal.db).length, 1, "its reading is stored now");
+  assert.equal(readingWrites(portal.db).length, 2, "its reading is stored now, and his ticket's is written back with the keys it was missing");
 });
 
 const readOneNow = (id: string, discardUnreadable: boolean) => readOne(
@@ -3603,13 +3666,18 @@ test("the reminders ask the users table only for columns it has", () => {
  *  Brenton's folder, answering to `code`, with `reading` held for it (or
  *  none, where it has never been read). */
 type PCert = { id: string; checksum: string; code: string | null; person?: string; filedOn?: string; reading?: Record<string, unknown> | null };
-/** A reading made since the particulars were asked for: both keys there. */
-const newReading = (over: Record<string, unknown>) => ({ ...reading, holderName: "Brenton Evans", documentNumber: null, holderBirthDate: null, ...over });
-/** A reading made before: neither key. */
+/** A reading made as the question is asked now: every key there, empty
+ *  where the document printed nothing, so nothing about it is read again. */
+const newReading = (over: Record<string, unknown>) => ({
+  ...reading, holderName: "Brenton Evans", documentNumber: null, holderBirthDate: null,
+  endorsements: [], units: [], isRecognition: false, recognises: null,
+  assessedOn: null, conditions: null, evidenceKind: null, ...over,
+});
+/** A reading made before any of those keys was asked for: not one of them. */
 const oldReading = (over: Record<string, unknown>) => {
   const r: Record<string, unknown> = { ...reading, holderName: "Brenton Evans", ...over };
-  delete r.documentNumber;
-  delete r.holderBirthDate;
+  for (const key of ["documentNumber", "holderBirthDate", "endorsements", "units",
+    "isRecognition", "recognises", "assessedOn", "conditions", "evidenceKind"]) delete r[key];
   return r;
 };
 const EVANS_P = { id: "p1", name: "EVANS, Brenton", aliases: ["bRENTON"] };
@@ -3641,6 +3709,16 @@ const particularsPortal = async (o: {
 };
 const person = (portal: { doc: () => { people: Record<string, unknown>[] } }, id = "p1") => portal.doc().people.find((p) => p.id === id)!;
 const hourly = (portal: { blobs: Map<string, string> }) => JSON.parse(portal.blobs.get("sync|last-hourly")!);
+
+/** Which certificates a run put to the model, by filename - the refile has
+ *  renamed them by then. */
+const filesAsked = (model: { calls: string[] }) => model.calls.map((c) => /Filename: (.+?)\\n/.exec(c)?.[1]);
+/** Evans's own Master ticket, which every one of these portals carries with
+ *  a reading made before the endorsements were asked for - so the back-fill
+ *  looks at it once, whatever else the hour does. Left out where the test is
+ *  about the cards. */
+const MASTER_FILE = "EVANS, Brenton - QL-01 Master.pdf";
+const cardsAsked = (model: { calls: string[] }) => filesAsked(model).filter((f) => f !== MASTER_FILE);
 
 /** The model, answered by which certificate it was sent. */
 const modelByFile = (answer: (filename: string) => { status: number; body: string }) => {
@@ -3751,14 +3829,78 @@ test("the readings made before are read again once for the particulars, keep eve
   assert.equal(person(portal).msic, "MSIC 4444", "and the round filled the boxes the same hour");
   assert.equal(person(portal).dob, "1980-03-10");
 
+  /* The next hour his boxes are filled and the cards are spent, so nothing
+     is asked for them. His medical is asked once, and only once: it was read
+     before the question asked for the examination's own date and the
+     conditions printed on it (MO76 s 16(1), s 7(1)(b)), and it is the
+     document that prints them. */
+  const again = modelByFile(() => ({ status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans", assessedOn: "2026-02-10", conditions: "daylight only" }) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    again.restore();
+  }
+  // Named as the refile named it on the first hour.
+  assert.deepEqual(filesAsked(again), ["EVANS, Brenton - QL-17 Medical.pdf"], "the medical, for its own dates and conditions");
+  const medical = JSON.parse(portal.blobs.get("certificate-readings|r1/medical.json")!);
+  assert.deepEqual([medical.assessedOn, medical.conditions], ["2026-02-10", "daylight only"]);
+  assert.equal(medical.expiresOn, "2027-01-01", "and the date the matrix reads is still the first reading's");
+
+  const third = modelByFile(() => ({ status: 200, body: readingStream(reading) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    third.restore();
+  }
+  assert.equal(third.calls.length, 0, "the hour after that asks the model nothing at all");
+  assert.equal(hourly(portal).particularsRead, 0);
+});
+
+test("the back-fill looks once at the certificates that can answer for the keys that came after the particulars, and at nothing else", async () => {
+  /* Both boxes typed, so nothing is read for them: what is read is read for
+     the keys the readings are missing. A ticket and a training statement can
+     print endorsements and unit codes; a document titled a recognition can
+     print the certificate behind it; the medical and the near-coastal cards
+     print an assessment date and conditions. An induction certificate can
+     print none of those, and is not paid for - and no certificate is read
+     for the alternative evidence alone: that rides along. */
+  const { portal, env } = await particularsPortal({ model: true,
+    people: [{ ...EVANS_P, msic: "TYPED 1", dob: "1980-01-01" }],
+    certs: [
+      { id: "r1", checksum: "recognition", code: "QL-14", reading: oldReading({ qualCode: "QL-14", certificateTitle: "Certificate of Recognition of GMDSS" }) },
+      { id: "s1", checksum: "first-aid", code: "QL-18", reading: oldReading({ qualCode: "QL-18" }) },
+      { id: "n1", checksum: "nc-card", code: "QL-03", reading: oldReading({ qualCode: "QL-03" }) },
+      { id: "i1", checksum: "induction", code: "PI-01", reading: oldReading({ qualCode: "PI-01" }) },
+      { id: "v1", checksum: "card", code: "VS-01", reading: newReading({ qualCode: "VS-01" }) },
+    ] });
+  const model = modelByFile((file) => ({ status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans",
+    endorsements: [{ text: "II/2 (incl. generic ECDIS)", until: null }], units: ["HLTAID011", "HLTAID015"],
+    isRecognition: /recognition/i.test(file), assessedOn: "2026-02-10", conditions: "daylight only", evidenceKind: "extension" }) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    model.restore();
+  }
+  assert.deepEqual(filesAsked(model).sort(), ["EVANS, Brenton - QL-01 Master.pdf", "first-aid.pdf", "nc-card.pdf", "recognition.pdf"],
+    "his ticket, the near-coastal card, the recognition and the statement - not the induction, and not the card read since");
+  const stored = (checksum: string) => JSON.parse(portal.blobs.get(`certificate-readings|r1/${checksum}.json`)!);
+  assert.deepEqual(stored("first-aid").units, ["HLTAID011", "HLTAID015"], "the statement's unit codes");
+  assert.deepEqual(stored("first-aid").endorsements, [{ text: "II/2 (incl. generic ECDIS)", until: null }]);
+  assert.equal(stored("recognition").isRecognition, true);
+  assert.equal(stored("nc-card").conditions, "daylight only", "the near-coastal card's printed condition");
+  assert.equal(stored("nc-card").assessedOn, "2026-02-10");
+  assert.equal(stored("nc-card").evidenceKind, "extension", "and the evidence key rides along with it");
+  assert.equal("endorsements" in stored("induction"), false, "the induction was never asked");
+  assert.equal(hourly(portal).particularsRead, 4);
+
+  // And the next hour asks nothing: every key they were missing is there.
   const again = modelByFile(() => ({ status: 200, body: readingStream(reading) }));
   try {
     await quiet(() => worker.scheduled({} as never, env as never));
   } finally {
     again.restore();
   }
-  assert.equal(again.calls.length, 0, "the next hour asks the model nothing");
-  assert.equal(hourly(portal).particularsRead, 0);
+  assert.equal(again.calls.length, 0);
 });
 
 test("a box somebody typed is never paid for: its certificates are not read again", async () => {
@@ -3771,8 +3913,11 @@ test("a box somebody typed is never paid for: its certificates are not read agai
   } finally {
     model.restore();
   }
-  assert.equal(model.calls.length, 0);
-  assert.equal(hourly(portal).particularsRead, 0);
+  /* His card is not looked at: both boxes were typed. His Master ticket is,
+     once - not for the boxes, but because it is a certificate of competency
+     read before the endorsements printed on it were asked for. */
+  assert.equal(model.calls.filter((c) => c.includes("card.pdf")).length, 0, "nothing is paid for a typed box");
+  assert.deepEqual(model.calls.map((c) => /Filename: (.+?)\\n/.exec(c)?.[1]), ["EVANS, Brenton - QL-01 Master.pdf"]);
 });
 
 test("no more than twenty certificates are read again in an hour; the rest wait for the next", async () => {
@@ -3878,8 +4023,13 @@ test("his date of birth is looked for on three certificates at most, and not aga
   } finally {
     model.restore();
   }
-  assert.equal(model.calls.length, 3, "none printed a date: three asked, and no more");
-  assert.equal(hourly(portal).particularsRead, 3);
+  /* Three for his date of birth and no more - and the other two tickets read
+     once each all the same, because each was read before the endorsements
+     printed on it were asked for. Five reads, five certificates, one look
+     apiece: what the same one question says about his date of birth on those
+     two is written down without being paid for twice. */
+  assert.equal(model.calls.length, 5, "three asked for his date of birth, and the other two tickets once each for the keys they are missing");
+  assert.equal(hourly(portal).particularsRead, 5);
   const next = modelByFile(() => ({ status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans" }) }));
   try {
     await quiet(() => worker.scheduled({} as never, env as never));
@@ -3929,12 +4079,17 @@ test("the topping up starts nothing once the hour's time is up, and asks nothing
     certs: [{ id: "k1", checksum: "kcard", code: "VS-01", reading: oldReading({ qualCode: "VS-01", holderName: "Kachin Sittiyos" }) }] });
   const other = modelByFile(() => ({ status: 200, body: readingStream(reading) }));
   try {
+    // Only his own Master ticket, for the keys it is missing: nothing at all
+    // for the card, for either man.
     const out = await quiet(() => topUpParticulars(codes, { cap: 20, timeLeft: () => true }));
-    assert.equal(out.read, 0);
+    assert.equal(out.read, 1);
   } finally {
     other.restore();
   }
-  assert.equal(other.calls.length, 0, "filed under Evans, printed in Kachin's name: not worth paying to ask about for either");
+  assert.equal(other.calls.filter((c) => c.includes("kcard.pdf")).length, 0,
+    "filed under Evans, printed in Kachin's name: not worth paying to ask about for either");
+  // The pass is called here on its own, so nothing has renamed his ticket.
+  assert.deepEqual(filesAsked(other), ["master.pdf"]);
 });
 
 test("a reading read again that the store will not keep costs that certificate its turn, and the rest go on", async () => {
@@ -3966,9 +4121,10 @@ test("a reading read again that the store will not keep costs that certificate i
     model.restore();
     db.prepare = prepare;
   }
-  assert.equal(model.calls.length, 2);
+  // The two cards, and his Master ticket once for the keys it is missing.
+  assert.equal(model.calls.length, 3);
   const h = hourly(portal);
-  assert.equal(h.particularsRead, 1, "the one kept is counted");
+  assert.equal(h.particularsRead, 2, "the ones kept are counted - the card the store refused is not");
   assert.equal(h.readError, null, "a store fault is not the account's: the reading's line is not red");
   assert.equal(h.particularsError, null, "and the pass itself did not fail");
   assert.equal(person(portal, "p2").msic, "MSIC 2", "Kachin's box is filled");
@@ -4073,7 +4229,7 @@ test("the card looked at for his number is the one the rule reads from: a newer 
   } finally {
     m1.restore();
   }
-  assert.deepEqual(m1.calls.map((c) => /Filename: (.+?)\\n/.exec(c)?.[1]), ["new-nameless.pdf", "old-named.pdf"], "the newer card first, then the named one");
+  assert.deepEqual(cardsAsked(m1), ["new-nameless.pdf", "old-named.pdf"], "the newer card first, then the named one");
   assert.equal(person(other.portal).msic, "MSIC 1111");
   assert.equal(person(other.portal, "p2").msic, undefined);
   const b = JSON.parse(other.portal.blobs.get("certificate-readings|r1/new-nameless.json")!);
@@ -4087,7 +4243,7 @@ test("the card looked at for his number is the one the rule reads from: a newer 
   } finally {
     m2.restore();
   }
-  assert.equal(m2.calls.length, 1, "his newest card, named now, has the number: the older card is not needed");
+  assert.deepEqual(cardsAsked(m2), ["new-nameless.pdf"], "his newest card, named now, has the number: the older card is not needed");
   assert.equal(person(his.portal).msic, "MSIC 2222");
 
   // The nameless card was looked at once already (another man's, or unreadable): only the named card is read.
@@ -4098,6 +4254,47 @@ test("the card looked at for his number is the one the rule reads from: a newer 
   } finally {
     m3.restore();
   }
-  assert.deepEqual(m3.calls.map((c) => /Filename: (.+?)\\n/.exec(c)?.[1]), ["old-named.pdf"]);
+  assert.deepEqual(cardsAsked(m3), ["old-named.pdf"]);
   assert.equal(person(looked.portal).msic, "MSIC 1111");
+});
+
+test("an older card in his name is not read again once a newer card already carries the number the rule reads", async () => {
+  /* The rule takes the number off the newest card printed in his name
+     (particularsFor). The newer card carries it already, so the older card
+     was read again for a number that could never be used: the box is filled
+     from the newer card either way. His date of birth is typed, so the cards
+     are all this hour has to look at - and his Master ticket, once, for the
+     endorsements printed on it. */
+  const two = [{ ...EVANS_P, msic: "MSIC 2222", dob: "1980-01-01" }];
+  const older = (over: Record<string, unknown> = {}): PCert[] => [
+    { id: "a", checksum: "old-named", code: "VS-01", filedOn: "2024-01-01",
+      reading: oldReading({ qualCode: "VS-01", expiresOn: "2027-01-01", ...over }) },
+    { id: "b", checksum: "new-numbered", code: "VS-01", filedOn: "2026-06-01",
+      reading: newReading({ qualCode: "VS-01", documentNumber: "MSIC 2222", expiresOn: "2030-01-01" }) },
+  ];
+  const answered = await particularsPortal({ model: true, people: two, fromCert: { p1: { msic: "MSIC 2222" } }, certs: older() });
+  const m1 = modelByFile(() => ({ status: 200, body: readingStream({ ...reading, qualCode: "VS-01", holderName: "Brenton Evans", documentNumber: "MSIC 1111" }) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, answered.env as never));
+  } finally {
+    m1.restore();
+  }
+  assert.deepEqual(cardsAsked(m1), [], "no card is read: the newer card is already the rule's answer");
+  assert.equal(person(answered.portal).msic, "MSIC 2222");
+
+  /* The other way round - the card without the number is the newer one - and
+     it is read, because that is the card the rule reads from. */
+  const wanted = await particularsPortal({ model: true, people: two, fromCert: { p1: { msic: "MSIC 2222" } }, certs: [
+    { id: "a", checksum: "new-named", code: "VS-01", filedOn: "2026-06-01", reading: oldReading({ qualCode: "VS-01", expiresOn: "2031-01-01" }) },
+    { id: "b", checksum: "old-numbered", code: "VS-01", filedOn: "2024-01-01",
+      reading: newReading({ qualCode: "VS-01", documentNumber: "MSIC 2222", expiresOn: "2027-01-01" }) },
+  ] });
+  const m2 = modelByFile(() => ({ status: 200, body: readingStream({ ...reading, qualCode: "VS-01", holderName: "Brenton Evans", documentNumber: "MSIC 3333" }) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, wanted.env as never));
+  } finally {
+    m2.restore();
+  }
+  assert.deepEqual(cardsAsked(m2), ["new-named.pdf"], "the newer card is read for its number");
+  assert.equal(person(wanted.portal).msic, "MSIC 3333", "and the box takes the card he holds now");
 });

@@ -115,6 +115,49 @@ export type Matrix = {
   rows: [string, string, string, string[]][];
 };
 
+/**
+ * The five documents that stand in for a certificate, as the reading names
+ * them. Each is evidence that a person is covered while the certificate
+ * itself is expired or not yet in their hand, and each runs for its own
+ * time (the ceilings and which column each may cover are the vessel
+ * file's, `evidenceKinds`):
+ *   extension            an AMSA letter extending a certificate — up to 6
+ *                        months, and never a certificate of safety training
+ *                        nor a recognition (MO70 s 15(3)-(4))
+ *   lodged-renewal       a receipt or acknowledgement that a near-coastal
+ *                        renewal was lodged — 90 days past the printed
+ *                        expiry (MO505 s 7(3))
+ *   crewing-permit       a temporary crewing permit — up to 3 months
+ *                        (MO504 s 16(2))
+ *   assessor-declaration a final assessor's declaration — 60 days, and only
+ *                        the lower near-coastal grades (MO505 ss 22-24)
+ *   issue-letter         a letter saying the certificate has been issued —
+ *                        it is the certificate until the card arrives
+ *                        (MO505 s 12(2))
+ */
+export const EVIDENCE_KINDS = ["extension", "lodged-renewal", "crewing-permit", "assessor-declaration", "issue-letter"] as const;
+export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
+
+/**
+ * The keys every reading made now carries — null, false or empty where the
+ * document prints nothing — grouped by what a certificate has to be for the
+ * hour to pay to look at it again for them (`topUpParticulars` in
+ * routes/analyse.ts). A reading without a group's keys is one made before
+ * they were asked for, which is the only memory that pass has.
+ */
+export const READING_ASKS = {
+  /** The MSIC number and the holder's date of birth. */
+  particulars: ["documentNumber", "holderBirthDate"],
+  /** What the certificate covers besides its own column. */
+  covers: ["endorsements", "units"],
+  /** An AMSA certificate of recognition and the foreign certificate behind it. */
+  recognition: ["isRecognition", "recognises"],
+  /** The examination's own date and any limitation printed on the document. */
+  conditions: ["assessedOn", "conditions"],
+  /** A document standing in for a certificate. */
+  evidence: ["evidenceKind"],
+} as const;
+
 /** What the model is asked to come back with for one certificate. */
 export type Reading = {
   version: string;
@@ -142,6 +185,34 @@ export type Reading = {
    *  (topUpParticulars): the count of these is how many of a man's
    *  certificates his date of birth has been looked for on. */
   particularsAsked?: boolean;
+  /** Every endorsement printed as part of what the certificate certifies,
+   *  as printed, with its own end date where the document prints one
+   *  against it; [] where none is printed. Which column each one fills is
+   *  the vessel file's `covers` table, never the model's guess
+   *  (source/shared/covers.js). */
+  endorsements?: { text: string; until: string | null }[];
+  /** The training unit codes printed on the document ("HLTAID011"). A unit
+   *  code in a column's title fills that column. */
+  units?: string[];
+  /** The document is an AMSA certificate of recognition: its title says so.
+   *  A foreign certificate counts on this vessel only through one
+   *  (MO505 s 4, s 7(2)). */
+  isRecognition?: boolean;
+  /** What a recognition prints about the foreign certificate behind it, as
+   *  printed; null where the document is not a recognition. */
+  recognises?: { authority: string | null; country: string | null; number: string | null; expiresOn: string | null } | null;
+  /** The date of the examination or assessment, where the document prints
+   *  one apart from the issue date. The medical's one or two years run from
+   *  it (MO76 s 16(1)). */
+  assessedOn?: string | null;
+  /** Any limitation printed on the document, at most 20 words, as printed -
+   *  "fit for particular duties only" (MO76 s 7(1)(b)), "daylight only" on
+   *  a colour-vision-deficient deck holder's near-coastal card
+   *  (MO505 s 13(d)-(e)). Null where the document prints none. */
+  conditions?: string | null;
+  /** Where the document is not an ordinary certificate but evidence
+   *  standing in for one; null where it is an ordinary certificate. */
+  evidenceKind?: EvidenceKind | null;
 };
 
 export function readingStore() {

@@ -72,6 +72,11 @@ export type Vessel = {
   noExpiryCodes: string[];
   elearningGroups: string[];
   certStated: Record<string, string>;
+  /** Which column a printed endorsement fills, and the clause it comes from
+   *  (source/shared/covers.js reads this table; the model only lists what
+   *  the certificate prints). `perpetual` is an endorsement that never
+   *  expires, whose column takes the certificate's own date. */
+  covers: { code: string; when: string; perpetual?: boolean; why?: string }[];
   certPageNotes: string[];
   tickets: Record<string, { grade: number; stream: string; short: string }>;
   docBuckets: string[];
@@ -105,7 +110,7 @@ const SHAPE: [string, Kind][] = [
   ["customerMarks.elearning", "string"], ["customerMarks.auIssuers", "string[]"],
   ["customerMarks.nameStopWords", "string[]"],
   ["elearningCodes", "string[]"], ["noExpiryCodes", "string[]"], ["elearningGroups", "string[]"],
-  ["certStated", "object"], ["certPageNotes", "string[]"], ["tickets", "object"],
+  ["certStated", "object"], ["covers", "array"], ["certPageNotes", "string[]"], ["tickets", "object"],
   ["docBuckets", "string[]"], ["labels", "object"], ["qualColumns", "array"], ["crewFolders", "object"],
 ];
 const THEME_COLOURS = ["deep", "panel", "raised", "rule", "text", "muted", "accent", "accentSoft", "teal", "blue"];
@@ -182,6 +187,17 @@ export function checkVessel(value: unknown, from = "source/vessel.json"): Vessel
   });
   v.qualColumns.forEach((c, i) => {
     if (!Array.isArray(c) || c.length !== 3 || !word(c[0]) || !word(c[1]) || typeof c[2] !== "string") throw wrong(`qualColumns[${i}]`, "a code, a title and a group, all strings");
+  });
+  /* The covers table - the same check as tools/source.mjs. A pattern that
+   * does not compile would cover nothing and say nothing about it, and a
+   * code that is not a column would fill a cell the matrix has not got. */
+  const columnCodes = new Set(v.qualColumns.map((c) => String(c[0]).trim().toUpperCase()));
+  v.covers.forEach((c, i) => {
+    if (!isObject(c) || !word(c.code) || !word(c.when)) throw wrong(`covers[${i}]`, "a code and a pattern, both strings");
+    if (!compiles(c.when)) throw wrong(`covers[${i}].when`, "a pattern that compiles");
+    if (!columnCodes.has(String(c.code).trim().toUpperCase())) throw wrong(`covers[${i}].code`, "one of the codes in qualColumns");
+    if (c.perpetual !== undefined && typeof c.perpetual !== "boolean") throw wrong(`covers[${i}].perpetual`, "true or false");
+    if (c.why !== undefined && !word(c.why)) throw wrong(`covers[${i}].why`, "the clause it comes from, as a string");
   });
   return v;
 }
