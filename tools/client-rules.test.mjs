@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, recognisedUntil, recognitionFills, foreignExpiryOn, isRecognitionReading, certCoverFor, coverLine, bandWithCover, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, paperKind, EVIDENCE_KINDS, EVIDENCE_LABELS, marineOrderLines };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, recognisedUntil, recognitionFills, foreignExpiryOn, isRecognitionReading, certCoverFor, coverLine, bandWithCover, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, paperKind, EVIDENCE_KINDS, EVIDENCE_LABELS, marineOrderLines, filedCodeIn, filedAsLine };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -2837,6 +2837,28 @@ const is = (got, want, what) => {
   is(lines(on(-10), [], covered), ["EVANS, Brenton — QL-02: " + lib.coverLine({ kind: "extension", until: on(45) })],
     "a red cell a paper carries: the cover line");
   is(lines(on(900), [], covered), [], "a green cell with a spent letter on file: nothing");
+
+  /* The filed column against the reading: where the office filed a paper
+     under a column and the model read it as something else, Needs attention
+     says so in one line - always, whatever the seat needs, because a wrong
+     filing is a wrong filing. The list is the server's (certificateStanding),
+     keyed under the register's name in capitals as the dates are. */
+  const filed = { map: {}, filedAs: [
+    { person: "EVANS, BRENTON", code: "QL-02", title: "Chief Mate", readsAs: "Crew Intermediate course", url: null },
+    { person: "SITTIYOS, KACHIN", code: "QL-02", title: "Chief Mate", readsAs: null, url: null },
+  ] };
+  const filedLines = (cell, needs) => marineOrderLines(row(cell), cols, filed, new Set(needs), null, today, rules).map((l) => l.text).filter((t) => /filed as/.test(t));
+  is(filedLines(on(900), []), ["EVANS, Brenton — QL-02: filed as Chief Mate, reads as Crew Intermediate course"], "his line, on a green cell the seat does not need");
+  is(filedLines("", ["QL-02"]), ["EVANS, Brenton — QL-02: filed as Chief Mate, reads as Crew Intermediate course"], "the same line on a blank required cell: it is about the filing, not the band");
+  is(filedLines(on(900), []).some((t) => /SITTIYOS/.test(t)), false, "another man's filing is not on his row");
+  const shared = await import(pathToFileURL(join(ROOT, "source", "shared", "filed-as.js")).href);
+  is(lib.filedAsLine("SITTIYOS, Kachin", "QL-02", "Chief Mate", null), "SITTIYOS, Kachin — QL-02: filed as Chief Mate, reads as nothing on the matrix", "the page's copy of the line");
+  is(shared.filedAsLine("SITTIYOS, Kachin", "QL-02", "Chief Mate", null), lib.filedAsLine("SITTIYOS, Kachin", "QL-02", "Chief Mate", null), "the worker's module says it the same");
+  // The code in a filename is a filing only as a whole token and only for a live column.
+  is(lib.filedCodeIn("SMITH, Alan - VS-04 Helm CONNECT.pdf", [["VS-04", "Helm CONNECT", "Vessel"]]), "VS-04");
+  is(lib.filedCodeIn("PI-02 MinRes - Corporate Safety Induction.pdf", [["VS-04", "Helm CONNECT", "Vessel"]]), null, "not a column of the live matrix");
+  is(lib.filedCodeIn("ROGERS - QL-04Master.pdf", [["QL-04", "Master <45m NC", "Qualification"]]), null, "not a whole token");
+  is(shared.filedCodeIn("SMITH, Alan - VS-04 Helm CONNECT.pdf", [["VS-04", "Helm CONNECT", "Vessel"]]), "VS-04", "the worker's module reads the name the same");
 }
 
 if (failed) {

@@ -12,6 +12,7 @@ import { asKnownPerson, crewRegister, nameIsSomebodyElse } from "../../../source
 import { isMsicCard, msicAsWritten, msicCodeIn, newestCard, openToCertificates, particularsFor, particularsKeyOf, ticketCodesIn } from "../../../source/shared/particulars.js";
 import { coveredCells, unitColumnsIn } from "../../../source/shared/covers.js";
 import { paperKind } from "../../../source/shared/evidence.js";
+import { filedAsLine } from "../../../source/shared/filed-as.js";
 import { isRecognitionReading, recognisedUntil, recognitionFills } from "../../../source/shared/recognition.js";
 import { vessel } from "../vessel.js";
 import { getEnv } from "../env.js";
@@ -24,6 +25,7 @@ import {
   equivalences,
   certificateStanding,
   codeFor,
+  filedAsFor,
   contentFor,
   date,
   EVIDENCE_KINDS,
@@ -596,11 +598,15 @@ export async function refile(names: string[], limit = Infinity) {
   const eqTable = await equivalences();
 
   // The matrix's own titles, for the one filing name a read certificate gets:
-  // "PERSON - CODE Title.pdf".
+  // "PERSON - CODE Title.pdf" - and its columns, so a document already named
+  // for one of them keeps that column (codeFor reads the filename).
   const titles: Record<string, string> = {};
+  let cols: unknown[] = [];
   try {
     const state = await getEnv().DB.prepare("SELECT data FROM portal_state LIMIT 1").first<{ data: string }>();
-    for (const c of JSON.parse(state?.data || "{}")?.quals?.cols || []) {
+    const listed = JSON.parse(state?.data || "{}")?.quals?.cols || [];
+    cols = Array.isArray(listed) ? listed : [];
+    for (const c of cols as unknown[][]) {
       titles[String(c[0]).trim().toUpperCase()] = String(c[1] || "").trim();
     }
   } catch (e) {
@@ -666,7 +672,7 @@ export async function refile(names: string[], limit = Infinity) {
     const person = named.get(row.id);
     if (!reading || !person) continue;
 
-    const code = String(codeFor(row, reading, eqTable) || "").trim().toUpperCase();
+    const code = String(codeFor(row, reading, eqTable, cols) || "").trim().toUpperCase();
     const title = code ? titles[code] : "";
     if (!code || !title || !/^[a-z0-9-]+$/.test(row.folder || "")) continue;
     const personName = names.includes(row.person || "") ? row.person : person;
@@ -946,9 +952,26 @@ export async function compareMatrix(
     }
 
     // The uploader's own tagging comes first — a person choosing the item off a
-    // list beats a model inferring it from a scan. The model's code is only used
-    // where nobody said, and only when it was sure.
-    const code = codeFor(row, reading, eqTable);
+    // list beats a model inferring it from a scan - then the column the
+    // filename files it under, which is a column of THIS matrix or nothing
+    // (source/shared/filed-as.js). The model's code is only used where
+    // neither said, and only when it was sure.
+    const code = codeFor(row, reading, eqTable, cols);
+    /* Where the filed column and the reading disagree the filed column still
+       takes the date, and the disagreement is said - once here for the
+       round's report, and on Needs attention by the page's cells
+       (certificateStanding), in the one sentence. Said before the checks
+       below so a filing that fails them (the wrong man's name on it) is
+       still seen; a paper is not a certificate and is not said. */
+    const disagreed = paperKind(row, reading) ? null : filedAsFor(row, reading, eqTable, cols);
+    if (disagreed) {
+      notes.push({
+        kind: "filed-as",
+        person: row.person,
+        detail: filedAsLine(as(row.person || ""), disagreed.code, disagreed.title, disagreed.readsAs),
+        certificate: link,
+      });
+    }
 
     // The model's own guess, remembered where the equivalence page overruled
     // it - the cell that guess once filled may still be sitting on the matrix.
@@ -1643,7 +1666,7 @@ export async function compareMatrix(
       validitySheet: validity ? validity.filename : null,
       derived,
     },
-    ...(opts.withParticulars ? { particulars: particularsInput(certs, held, eqTable) } : {}),
+    ...(opts.withParticulars ? { particulars: particularsInput(certs, held, eqTable, cols) } : {}),
   };
 }
 
@@ -1655,10 +1678,10 @@ export type ParticularsInput = {
   readings: Map<string, Reading>;
 };
 
-function particularsInput(certs: Row[], held: Map<string, Reading>, eqTable: Awaited<ReturnType<typeof equivalences>>): ParticularsInput {
+function particularsInput(certs: Row[], held: Map<string, Reading>, eqTable: Awaited<ReturnType<typeof equivalences>>, cols: unknown): ParticularsInput {
   const rows = certs.map((row) => {
     const key = readingKey(row);
-    return { person: row.person, code: codeFor(row, held.get(key) || null, eqTable), key, filedOn: row.filedOn ? String(row.filedOn) : null };
+    return { person: row.person, code: codeFor(row, held.get(key) || null, eqTable, cols), key, filedOn: row.filedOn ? String(row.filedOn) : null };
   });
   return { rows, readings: held };
 }
@@ -1789,6 +1812,10 @@ export async function topUpParticulars(
   if (!people.length || opts.cap <= 0) return out;
   const fromCert = (cur!.doc.particularsFromCert || {}) as Record<string, { msic?: string; dob?: string }>;
   const register = crewRegister(people);
+  // The live matrix's columns: a document is placed here as the round
+  // places it, the filename's column included (codeFor).
+  const liveCols = (cur!.doc.quals as { cols?: unknown } | null | undefined)?.cols;
+  const cols = Array.isArray(liveCols) ? liveCols : [];
   const msic = msicCodeIn(vessel.qualColumns);
   const medical = new Set(Object.keys(vessel.certStated).map((c) => c.trim().toUpperCase()));
   const ticketCodes = new Set(ticketCodesIn(vessel.qualColumns));
@@ -1847,7 +1874,7 @@ export async function topUpParticulars(
   // brought up to date as this pass tops readings up, so the same question
   // asked after each read says whether the read gave the rule its answer.
   const today = todayThere();
-  const ruleRows = particularsInput(certs, held, eqTable).rows;
+  const ruleRows = particularsInput(certs, held, eqTable, cols).rows;
   const found = (me: string, field: "msic" | "dob") => particularsFor(me, ruleRows, held, register, today, msic)[field];
   // Newest first, as the rule ranks cards.
   const cardsInOrder = (list: Cert[]) => {
@@ -1881,7 +1908,7 @@ export async function topUpParticulars(
       const reading = held.get(readingKey(row));
       if (!reading || reading.readable === false) return;
       if (reading.holderName && register.nameOf(reading.holderName) !== me) return;
-      mine.push({ row, reading, code: String(codeFor(row, reading, eqTable) || "").trim().toUpperCase(), at });
+      mine.push({ row, reading, code: String(codeFor(row, reading, eqTable, cols) || "").trim().toUpperCase(), at });
     });
     const fresh = (list: Cert[]) => list.filter((c) => !asked.has(readingKey(c.row)));
     if (msic && openToCertificates(p, "msic", fromCert)) {
@@ -1942,7 +1969,7 @@ export async function topUpParticulars(
     if (!reading || reading.readable === false) continue;
     const me = reading.holderName ? register.nameOf(reading.holderName) : null;
     if (!me) continue;
-    const cert: Cert = { row, reading, code: String(codeFor(row, reading, eqTable) || "").trim().toUpperCase(), at };
+    const cert: Cert = { row, reading, code: String(codeFor(row, reading, eqTable, cols) || "").trim().toUpperCase(), at };
     if (wantsMore(cert)) missing.push({ me, cert });
   }
   // One look per certificate, whatever it is missing: the question asks for

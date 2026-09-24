@@ -11,7 +11,8 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { equivalentCode, codeFor, ModelRefusal, plainLine, errorLine, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM } from "../src/lib/analysis.js";
+import { equivalentCode, codeFor, filedAsFor, ModelRefusal, plainLine, errorLine, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM } from "../src/lib/analysis.js";
+import { filedCodeIn, filedAsLine } from "../../source/shared/filed-as.js";
 import { AI_BUSY, checkerRefusalLine } from "../src/lib/checker.js";
 import { crewFolderIn, looseIn, whoseFolder } from "../src/routes/sync.js";
 import { asKey } from "../src/db/cert-home.js";
@@ -117,6 +118,63 @@ test("a guess the model is unsure of is not used at all", () => {
 
 test("an empty sheet places nothing", () => {
   assert.equal(equivalentCode("Master <500GT", []), null);
+});
+
+/* ------------------------------------------------------------------------ *
+ * The column a certificate is filed under is the office's word
+ * (source/shared/filed-as.js). A file named "<PERSON> - <CODE> <Title>" was
+ * put under that column by whoever filed it, and only a hand tag ranks
+ * above it: hand tag > filed column > Equivalence sheet > the model.
+ * ------------------------------------------------------------------------ */
+const FILED_COLS = [["VS-04", "Helm CONNECT", "Vessel"], ["QL-04", "Master <45m NC", "Qualification"],
+  ["QL-13", "ECDIS", "Qualification"], ["QL-01", "Master", "Qualification"], ["MS-07", "Port of Ashburton pilotage exemption", "Marine"]];
+
+test("filed as: the code in a filename is a filing only as a whole token and only for a live column", () => {
+  assert.equal(filedCodeIn("SMITH, Alan - VS-04 Helm CONNECT.pdf", FILED_COLS), "VS-04");
+  assert.equal(filedCodeIn("smith, alan - vs-04 helm connect.PDF", FILED_COLS), "VS-04", "however it was cased");
+  assert.equal(filedCodeIn("PI-02 MinRes - Corporate Safety Induction.pdf", FILED_COLS), null, "a code that is no column of the live matrix is not a filing");
+  assert.equal(filedCodeIn("ROGERS, Michael - QL-04Master.pdf", FILED_COLS), null, "not a whole token");
+  assert.equal(filedCodeIn("QL-041 something.pdf", FILED_COLS), null, "QL-041 is not QL-04");
+  assert.equal(filedCodeIn("Scan_0043.pdf", FILED_COLS), null, "no code at all");
+  assert.equal(filedCodeIn("", FILED_COLS), null);
+  assert.equal(filedCodeIn("SMITH - VS-04.pdf", null), null, "no columns, no filing");
+  assert.equal(filedCodeIn("SMITH - QL-04 QL-13.pdf", FILED_COLS), "QL-04", "the first code named is the filing");
+});
+
+test("filed as: hand tag, then the filename's column, then the sheet, then the model", () => {
+  const helm = reading({ certificateTitle: "Crew Intermediate", qualCode: null });
+  assert.equal(codeFor({ filename: "SMITH, Alan - VS-04 Helm CONNECT.pdf" }, helm, SHEET, FILED_COLS), "VS-04",
+    "the model gave nothing: the filed column stands");
+  const ecdis = reading({ certificateTitle: "ECDIS generic", qualCode: "QL-13" });
+  assert.equal(codeFor({ filename: "ROGERS, Michael - QL-04 Master <45m NC.pdf" }, ecdis, SHEET, FILED_COLS), "QL-04",
+    "the model read another item: the filed column still wins");
+  assert.equal(codeFor({ qualCode: "QL-01", filename: "X - QL-13 ECDIS.pdf" }, ecdis, SHEET, FILED_COLS), "QL-01", "a hand tag beats the filename");
+  assert.equal(codeFor({ filename: "X - PI-02 Induction.pdf" }, ecdis, SHEET, FILED_COLS), "QL-13", "a code that is no column: the model's word as before");
+  assert.equal(codeFor({ filename: "X - VS-04 Helm.pdf" }, helm, SHEET), null, "with no columns handed in nothing is read off the name");
+  const sheeted = reading({ certificateTitle: "Watchkeeper Deck", qualCode: "QL-13" });
+  assert.equal(codeFor({ filename: "ROGERS - QL-04 Master <45m NC.pdf" }, sheeted, SHEET, FILED_COLS), "QL-04", "the filed column beats the sheet too");
+  assert.equal(codeFor({ filename: "ROGERS - watchkeeper.pdf" }, sheeted, SHEET, FILED_COLS), "QL-04", "and the sheet still beats the model where nothing was filed");
+});
+
+test("filed as: where the filed column and the reading disagree, the disagreement is said - and only then", () => {
+  const helm = reading({ certificateTitle: "Crew Intermediate", qualCode: null });
+  assert.deepEqual(filedAsFor({ filename: "SMITH, Alan - VS-04 Helm CONNECT.pdf" }, helm, SHEET, FILED_COLS),
+    { code: "VS-04", title: "Helm CONNECT", readsAs: "Crew Intermediate" }, "the model read it as nothing on the matrix");
+  const ecdis = reading({ certificateTitle: "ECDIS generic", qualCode: "QL-13" });
+  assert.deepEqual(filedAsFor({ filename: "ROGERS - QL-04 Master <45m NC.pdf" }, ecdis, SHEET, FILED_COLS),
+    { code: "QL-04", title: "Master <45m NC", readsAs: "ECDIS generic" }, "the model read another item");
+  const same = reading({ certificateTitle: "Helm CONNECT Crew Basic", qualCode: "VS-04" });
+  assert.equal(filedAsFor({ filename: "SMITH - VS-04 Helm CONNECT.pdf" }, same, SHEET, FILED_COLS), null, "the model gave the same column: nothing to say");
+  assert.equal(filedAsFor({ qualCode: "QL-01", filename: "X - QL-13 ECDIS.pdf" }, ecdis, SHEET, FILED_COLS), null, "a hand tag is the person's word, not a filing to question");
+  assert.equal(filedAsFor({ filename: "X - PI-02 Induction.pdf" }, helm, SHEET, FILED_COLS), null, "no live column in the name: no filing");
+  assert.equal(filedAsFor({ filename: "SMITH - VS-04 Helm.pdf" }, reading({ readable: false }), SHEET, FILED_COLS), null, "an unreadable document fills nothing and says nothing");
+  const untitled = reading({ certificateTitle: null, qualCode: "QL-13" });
+  assert.deepEqual(filedAsFor({ filename: "ROGERS - QL-04 x.pdf" }, untitled, SHEET, FILED_COLS),
+    { code: "QL-04", title: "Master <45m NC", readsAs: "ECDIS" }, "no printed title: the column the model named");
+  assert.equal(filedAsLine("ROGERS, Michael", "QL-04", "Master <45m NC", "STCW Watchkeeper Deck"),
+    "ROGERS, Michael — QL-04: filed as Master <45m NC, reads as STCW Watchkeeper Deck", "the one line, as Needs attention says it");
+  assert.equal(filedAsLine("SMITH, Alan", "VS-04", "Helm CONNECT", null),
+    "SMITH, Alan — VS-04: filed as Helm CONNECT, reads as nothing on the matrix");
 });
 
 /* ------------------------------------------------------------------------ *

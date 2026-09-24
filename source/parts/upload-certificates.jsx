@@ -273,12 +273,11 @@ function UploadCertificates() {
   const certHomeOf = useCertHome();
   // A scan filed before codes were recorded still names its code in the file
   // name — "DWYER_ Matthew - QL-18 Provide First Aid" — so where the record
-  // carries none, the name is held against the matrix's own codes.
+  // carries none, the name is read for a column of the matrix the one way
+  // the round reads it (filedCodeIn, source/shared/filed-as.js).
   const codeOf = (c) => {
     if (c.qualCode) return c.qualCode;
-    const up = ` ${String(c.filename || "").toUpperCase()} `;
-    const hit = QUALS.cols.find(([code]) => up.includes(` ${String(code).toUpperCase()} `));
-    return hit ? hit[0] : "";
+    return filedCodeIn(c.filename, QUALS.cols) || "";
   };
   const readOf = (c) => {
     if (c.readIssued || c.readExpires) return { issued: c.readIssued || null, expires: c.readExpires || null };

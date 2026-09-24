@@ -87,7 +87,7 @@ export default async (req: Request): Promise<Response> => {
   if (holder && (current.person || "") !== holder) {
     current = await refileCertificate(current, holder, "");
   }
-  const code = String(codeFor(current, reading, await equivalences()) || "").trim().toUpperCase();
+  const code = String(codeFor(current, reading, await equivalences(), quals.cols || []) || "").trim().toUpperCase();
   const title = code ? titles[code] || "" : "";
   const personName = names.includes(current.person || "") ? current.person : holder;
   if (code && title && personName) {

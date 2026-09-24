@@ -438,15 +438,16 @@ const zipPart = (name: string, text: string) => {
   const body = enc.encode(text);
   return { name, method: 0, flag: 0, time: 0, date: 0, crc: 0, csize: body.length, usize: body.length, body };
 };
-/* A workbook with one crew row: Evans, QL-01 blank, QL-17 = 47500 (2030-01-17). */
-const smallWorkbook = () => writeZip([
+/* A workbook with one crew row: Evans, QL-01 blank, QL-17 = 47500 (2030-01-17),
+   and any further column codes named after them, blank. */
+const smallWorkbook = (more: string[] = []) => writeZip([
   zipPart("[Content_Types].xml", `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/></Types>`),
   zipPart("xl/workbook.xml", `<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="CREW EXPIRY" sheetId="1" r:id="rId1"/></sheets></workbook>`),
   zipPart("xl/_rels/workbook.xml.rels", `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`),
   zipPart("xl/sharedStrings.xml", `<?xml version="1.0"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="0" uniqueCount="0"></sst>`),
   zipPart("xl/worksheets/sheet1.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:F3"/><sheetData>
-<row r="1"><c r="B1" t="inlineStr"><is><t>CREW</t></is></c><c r="E1" t="inlineStr"><is><t>QL-01</t></is></c><c r="F1" t="inlineStr"><is><t>QL-17</t></is></c></row>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:${String.fromCharCode(70 + more.length)}3"/><sheetData>
+<row r="1"><c r="B1" t="inlineStr"><is><t>CREW</t></is></c><c r="E1" t="inlineStr"><is><t>QL-01</t></is></c><c r="F1" t="inlineStr"><is><t>QL-17</t></is></c>${more.map((code, i) => `<c r="${String.fromCharCode(71 + i)}1" t="inlineStr"><is><t>${code}</t></is></c>`).join("")}</row>
 <row r="2"><c r="B2" t="inlineStr"><is><t>Name</t></is></c></row>
 <row r="3"><c r="B3" t="inlineStr"><is><t>bRENTON</t></is></c><c r="C3" t="inlineStr"><is><t>Master</t></is></c><c r="F3" t="n"><v>47500</v></c></row>
 </sheetData></worksheet>`),
@@ -481,17 +482,26 @@ const oneManPortal = async (over: {
   skills?: boolean;
   /** The ticket's code as the office typed it (null: left to the reading). */
   qualCode?: string | null;
+  /** The filed-as cases: two more columns on the matrix and in the workbook
+   *  - VS-04 Helm CONNECT, which never lapses on this vessel, and QL-04
+   *  Master <45m NC, which is dated - and the one certificate untagged,
+   *  named for the column given here, and read by the model as a course
+   *  the matrix has no column for. */
+  filedAs?: "VS-04" | "QL-04";
 } = {}) => {
   const tmKey = over.theirs ? "opms/CREW QUALIFICATION EXPIRY.xlsx" : "opms/20260901 - CREW QUALIFICATION EXPIRY.xlsx";
-  const bucket = fakeBucket({ "opms/Brenton - OPMS/master.pdf": "a scan" }, ["opms", "removed", "opms/Brenton - OPMS", "opms/skills"]);
-  await bucket.put(tmKey, await smallWorkbook().arrayBuffer());
+  const filedCols: [string, string, string][] = [["VS-04", "Helm CONNECT", "Vessel"], ["QL-04", "Master <45m NC", "Qualifications"]];
+  const filedTitle = over.filedAs ? filedCols.find((c) => c[0] === over.filedAs)![1] : "";
+  const scanKey = over.filedAs ? `opms/Brenton - OPMS/EVANS, Brenton - ${over.filedAs} ${filedTitle}.pdf` : "opms/Brenton - OPMS/master.pdf";
+  const bucket = fakeBucket({ [scanKey]: "a scan" }, ["opms", "removed", "opms/Brenton - OPMS", "opms/skills"]);
+  await bucket.put(tmKey, await smallWorkbook(over.filedAs ? filedCols.map((c) => c[0]) : []).arrayBuffer());
   if (over.skills) await bucket.put(skillsKey, await skillsWorkbook().arrayBuffer());
   bucket.made.length = 0;
   const portal = portalDb(
     {
       quals: {
-        cols: [["QL-01", "Master", "Qualifications"], ["QL-17", "Medical", "Medical"]],
-        rows: [["EVANS, Brenton", "Master", "", ["", "2030-01-17"]]],
+        cols: [["QL-01", "Master", "Qualifications"], ["QL-17", "Medical", "Medical"], ...(over.filedAs ? filedCols : [])],
+        rows: [["EVANS, Brenton", "Master", "", ["", "2030-01-17", ...(over.filedAs ? ["", ""] : [])]]],
       },
       people: [{ name: "EVANS, Brenton", aliases: ["bRENTON"] }],
       filledFromCert: over.filledFromCert || {},
@@ -499,12 +509,13 @@ const oneManPortal = async (over: {
       history: [],
     },
     [
-      { ...billysTicket, id: "c2", person: "bRENTON", checksum: "evans-master", blobKey: "opms/Brenton - OPMS/master.pdf", sizeBytes: 6,
-        qualCode: over.qualCode === undefined ? billysTicket.qualCode : over.qualCode },
+      { ...billysTicket, id: "c2", person: "bRENTON", checksum: "evans-master", blobKey: scanKey, filename: scanKey.split("/").pop(), sizeBytes: 6,
+        qualCode: over.filedAs ? null : over.qualCode === undefined ? billysTicket.qualCode : over.qualCode },
       { ...liveRow("tm1", tmKey, over.theirs ? 1 : 0), sizeBytes: 5000 },
       ...(over.skills ? [{ ...liveRow("sk1", skillsKey, 1), category: "skills-matrix", sizeBytes: 4000 }] : []),
     ],
-    { "r1/evans-master.json": { ...reading, holderName: "Brenton Evans", expiresOn: "2031-05-26" } },
+    { "r1/evans-master.json": { ...reading, holderName: "Brenton Evans", expiresOn: "2031-05-26",
+      ...(over.filedAs ? { certificateTitle: "Crew Intermediate course", qualCode: null } : {}) } },
   );
   setEnv({ DB: portal.db, FILES: bucket, FILE_STORE: "r2" } as never);
   return { portal, bucket, tmKey };
@@ -564,6 +575,78 @@ test("the round puts a certificate's date on the matrix and writes the office's 
   assert.deepEqual(again.changes, [], "nothing moved");
   assert.equal(again.workbookId, null);
   assert.equal(portal.state.rev, 3, "an idle hour bumps no revision");
+});
+
+test("filed as: the column in the filename fills the cell where the model gave none, and says so", async () => {
+  /* Five "VS-04 Helm CONNECT" files on the live portal are the Crew
+     Intermediate course, which the column's title does not name, so the
+     model gave no code and the cell stayed empty although the office filed
+     the paper for exactly that cell. The filed column is the office's word. */
+  const { portal } = await oneManPortal({ filedAs: "VS-04" });
+  const doc = portal.doc();
+  const nameOf = asKnownPerson(doc.people);
+  const out = await compareMatrix(doc.quals, null, nameOf);
+  // VS-04 never lapses on this vessel (the vessel file's noExpiryCodes), so
+  // a certificate on file is held: "Y", and the date is only a note.
+  assert.ok(vessel.noExpiryCodes.includes("VS-04"), "the fixture's premise");
+  assert.deepEqual(out.settled, [{ person: "EVANS, Brenton", code: "VS-04", value: "Y" }], "VS-04 is filled from the filed column");
+  assert.deepEqual(out.claimed, ["EVANS, BRENTON::VS-04"]);
+  assert.deepEqual(out.notes.filter((n) => n.kind === "filed-as").map((n) => n.detail),
+    ["EVANS, Brenton — VS-04: filed as Helm CONNECT, reads as Crew Intermediate course"], "the disagreement is said, for management");
+
+  // The page's cells: the same cell, and the same line to say.
+  const page = await certificateStanding();
+  assert.deepEqual(page.dates.map((d) => [d.person, d.code, d.expires, d.issued]), [["EVANS, BRENTON", "VS-04", null, "2026-02-17"]]);
+  assert.deepEqual(page.filedAs, [{ person: "EVANS, BRENTON", code: "VS-04", title: "Helm CONNECT", readsAs: "Crew Intermediate course", fileId: "c2" }]);
+
+  // A dated column, and the model reading it as another item: the filed
+  // column still takes the certificate's date, and the line names what it read.
+  const dated = await oneManPortal({ filedAs: "QL-04" });
+  dated.portal.blobs.set("certificate-readings|r1/evans-master.json", JSON.stringify({ ...reading, holderName: "Brenton Evans", expiresOn: "2031-05-26", certificateTitle: "ECDIS generic", qualCode: "QL-13" }));
+  const other = await compareMatrix(dated.portal.doc().quals, null, nameOf);
+  assert.deepEqual(other.settled, [{ person: "EVANS, Brenton", code: "QL-04", value: "2031-05-26" }], "QL-04 takes the certificate's date, over the model's QL-13");
+  assert.deepEqual(other.notes.filter((n) => n.kind === "filed-as").map((n) => n.detail),
+    ["EVANS, Brenton — QL-04: filed as Master <45m NC, reads as ECDIS generic"]);
+  assert.deepEqual((await certificateStanding()).dates.map((d) => [d.code, d.expires]), [["QL-04", "2031-05-26"]], "and the page's cells agree");
+  setEnv({ DB: portal.db, FILE_STORE: "r2" } as never);
+
+  // The model agrees: no line.
+  portal.blobs.set("certificate-readings|r1/evans-master.json", JSON.stringify({ ...reading, holderName: "Brenton Evans", expiresOn: "2031-05-26", certificateTitle: "Helm CONNECT", qualCode: "VS-04" }));
+  const agreed = await compareMatrix(doc.quals, null, nameOf);
+  assert.deepEqual(agreed.settled, [{ person: "EVANS, Brenton", code: "VS-04", value: "Y" }]);
+  assert.deepEqual(agreed.notes.filter((n) => n.kind === "filed-as"), [], "no disagreement, no line");
+  assert.deepEqual((await certificateStanding()).filedAs, []);
+
+  // Unreadable: a filename is not evidence that a paper exists.
+  portal.blobs.set("certificate-readings|r1/evans-master.json", JSON.stringify({ version: "r1", at: "", model: null, readable: false, reason: "too poor to read" }));
+  const blind = await compareMatrix(doc.quals, null, nameOf);
+  assert.deepEqual(blind.settled, [], "nothing filled from the name");
+  assert.deepEqual(blind.notes.map((n) => n.kind), ["unreadable"], "the unreadable note as before, and no filed-as line");
+  assert.deepEqual((await certificateStanding()).dates, []);
+});
+
+test("filed as: the hour puts the filed column on the matrix and in the office's workbook, and an unchanged hour saves nothing", async () => {
+  const { portal, bucket } = await oneManPortal({ filedAs: "QL-04" });
+  const env = { DB: portal.db, FILES: bucket, FILE_STORE: "r2" };
+  await worker.scheduled({} as never, env as never);
+  const hourly = JSON.parse(portal.blobs.get("sync|last-hourly")!);
+  assert.equal(hourly.roundError, null);
+  assert.equal(hourly.applied, 1, "one date applied");
+  assert.equal(hourly.written, 1, "one cell written into the workbook");
+  const doc = portal.doc();
+  assert.deepEqual(doc.quals.rows[0][3], ["", "2030-01-17", "", "2031-05-26"], "QL-04 carries the certificate's date; nothing else moved");
+  assert.deepEqual(doc.filledFromCert, { "EVANS, BRENTON::QL-04": true });
+  const named = datedWorkbookName("20260901 - CREW QUALIFICATION EXPIRY.xlsx", todayThere());
+  const written = await (await bucket.get("opms/" + named))!.arrayBuffer();
+  const back = await partText(partOf(readZip(written), "xl/worksheets/sheet1.xml"));
+  assert.ok(/<c r="H3"[^>]*><is><t[^>]*>2031-05-26<\/t>/.test(back), "the QL-04 column of the office's row got the date");
+  assert.ok(/<c r="F3" t="n"><v>47500<\/v>/.test(back), "the medical the office typed is left as typed");
+  const rev = portal.state.rev;
+
+  // Nothing changes: the next hour saves nothing at all.
+  await worker.scheduled({} as never, env as never);
+  assert.equal(JSON.parse(portal.blobs.get("sync|last-hourly")!).applied, 0);
+  assert.equal(portal.state.rev, rev, "no save on an unchanged hour");
 });
 
 test("a workbook too big to rewrite on the server is a problem with the workbook, not a skipped round", async () => {

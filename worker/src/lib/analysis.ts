@@ -24,6 +24,7 @@ import { OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM } from "../../../source
 import { coveredCells } from "../../../source/shared/covers.js";
 import { isRecognitionReading, recognisedUntil, recognitionFills } from "../../../source/shared/recognition.js";
 import { coveredBy, paperKind } from "../../../source/shared/evidence.js";
+import { filedCodeIn } from "../../../source/shared/filed-as.js";
 import { crewRegister, nameIsSomebodyElse } from "../../../source/shared/names.js";
 import { readDocument } from "./shared-state.js";
 
@@ -820,15 +821,29 @@ export function equivalentCode(title: string | null | undefined, table: Equivale
 }
 
 /** The one answer to "which column does this certificate speak to": the
- * uploader's own tagging first, then the equivalence page's say over the
- * model's guess — that guess is exactly what the page corrects. */
+ * uploader's own tagging first, then the column the filename files it under
+ * (source/shared/filed-as.js - the office's word, where the caller hands in
+ * the live matrix's columns), then the equivalence page's say over the
+ * model's guess — that guess is exactly what the page corrects. Every caller
+ * that can hand the columns in does, so the round and the page's cells
+ * place a document the same way. */
 export function codeFor(
-  row: { qualCode?: string | null },
+  row: { qualCode?: string | null; filename?: string | null },
   reading: Reading | null,
   table: Equivalence[],
+  columns?: unknown,
 ): string | null {
   if (row.qualCode) return row.qualCode;
+  const filed = columns ? filedCodeIn(row.filename, columns) : null;
+  if (filed) return filed;
   if (!reading) return null;
+  return readingSays(reading, table);
+}
+
+/** What the reading alone makes of a document: the equivalence page's say,
+ *  then the model's confident guess. The two steps of codeFor that are the
+ *  document's own words rather than anybody's filing of it. */
+function readingSays(reading: Reading, table: Equivalence[]): string | null {
   return (
     equivalentCode(reading.certificateTitle, table) ||
     // Some tickets print a bare "Certificate of Competency" and put the
@@ -842,6 +857,41 @@ export function codeFor(
     ) ||
     (reading.codeConfidence !== "low" ? reading.qualCode || null : null)
   );
+}
+
+/**
+ * Where the filed column and the reading disagree: the column the filename
+ * files the document under, that column's title, and what the reading called
+ * the document - or null where there is nothing to say.
+ *
+ * Nothing to say where somebody tagged the row by hand (the person's word,
+ * not a filing to question), where the name carries no live column, where
+ * the document could not be read (a filename is not evidence that a paper
+ * exists, and the unreadable is listed on its own), or where the reading
+ * gave the same column. `readsAs` is the title printed on the document, or
+ * the title of the column the reading named where it printed none.
+ *
+ * Said once here so the round's note and the page's line (Needs attention)
+ * are the one sentence, through filedAsLine in source/shared/filed-as.js.
+ */
+export function filedAsFor(
+  row: { qualCode?: string | null; filename?: string | null },
+  reading: Reading | null,
+  table: Equivalence[],
+  columns: unknown,
+): { code: string; title: string; readsAs: string | null } | null {
+  if (row.qualCode || !reading || reading.readable === false) return null;
+  const filed = filedCodeIn(row.filename, columns);
+  if (!filed) return null;
+  const said = String(readingSays(reading, table) || "").trim().toUpperCase();
+  if (said === filed) return null;
+  const cols = (Array.isArray(columns) ? columns : []) as unknown[][];
+  const titleOf = (code: string) => {
+    const col = cols.find((c) => Array.isArray(c) && String(c[0] || "").trim().toUpperCase() === code);
+    return col ? String(col[1] || "").trim() : "";
+  };
+  const printed = String(reading.certificateTitle || "").trim();
+  return { code: filed, title: titleOf(filed), readsAs: printed || (said ? titleOf(said) || said : null) };
 }
 
 export async function certificateStanding() {
@@ -859,6 +909,11 @@ export async function certificateStanding() {
   const cur = await readDocument();
   const people = (Array.isArray(cur?.doc.people) ? cur!.doc.people : []) as { name?: string }[];
   const register = crewRegister(people);
+  /* The live matrix's columns: the column a filename files a document under
+     counts only where it is one of these (source/shared/filed-as.js), and
+     the round reads the same columns (compareMatrix is handed the matrix). */
+  const liveCols = (cur?.doc.quals as { cols?: unknown } | null | undefined)?.cols;
+  const cols = Array.isArray(liveCols) ? liveCols : [];
 
   const readings = await Promise.all(
     certs.map(async (row) => ({
@@ -866,6 +921,11 @@ export async function certificateStanding() {
       reading: (await store.get(readingKey(row), { type: "json" })) as Reading | null,
     })),
   );
+
+  /* Where the office filed a document under one column and the model read
+     it as something else: the filed column takes the date all the same, and
+     Needs attention says so, one line each (filedAsFor says when). */
+  const filedAs: { person: string; code: string; title: string; readsAs: string | null; fileId: string }[] = [];
 
   const claim = new Map<
     string,
@@ -906,7 +966,7 @@ export async function certificateStanding() {
        person picked, else a hand tag making it the certificate, else the
        reading's word (compareMatrix says why). */
     if (paperKind(row, reading)) continue;
-    const named = codeFor(row, reading, eqTable);
+    const named = codeFor(row, reading, eqTable, cols);
     // A date typed against the certificate on the portal beats the model's
     // reading of the scan, same as in the comparison.
     const typed = isDate(row.expiresOn) ? row.expiresOn!.trim().slice(0, 10) : null;
@@ -930,6 +990,8 @@ export async function certificateStanding() {
     // round refuses the same document (the rule is in source/shared/names.js).
     if (nameIsSomebodyElse(reading.holderName, row.person, person)) continue;
     if (!code) { coverOnly.push({ row, reading: asDated, person: person.trim().toUpperCase() }); continue; }
+    const disagreed = filedAsFor(row, reading, eqTable, cols);
+    if (disagreed) filedAs.push({ person: person.trim().toUpperCase(), ...disagreed, fileId: row.id });
 
     // An item recorded as carrying no expiry has none to show either way.
     const expires = neverLapses(code) ? null : typed || reading.expiresOn || null;
@@ -1051,7 +1113,10 @@ export async function certificateStanding() {
        ceilings are the vessel file's. The cell shows amber and says what
        carries him; nothing is ever green on a cover, because the certificate
        itself has gone. */
-    covers: await evidenceCovers(certs, readings, eqTable, register),
+    covers: await evidenceCovers(certs, readings, eqTable, register, cols),
+    /* The filings the reading disagrees with, one line each on Needs
+       attention: whose, which column, and what the model read it as. */
+    filedAs,
     // `fileId` names the scan each line's dates were read from, so the
     // certification screens can put a link to the certificate itself on the line.
     dates: [...claim.entries()].map(([key, v]) => {
@@ -1103,6 +1168,8 @@ async function evidenceCovers(
   readings: { row: Row; reading: Reading | null }[],
   eqTable: Awaited<ReturnType<typeof equivalences>>,
   register: ReturnType<typeof crewRegister>,
+  /** The live matrix's columns, for the column a filename files a paper under. */
+  cols: unknown,
 ) {
   const kinds = vessel.evidenceKinds as Record<string, { covers?: string[] }>;
   const columns = [...new Set(Object.values(kinds).flatMap((k) => (k.covers || []).map((c) => String(c).trim().toUpperCase())))];
@@ -1115,7 +1182,7 @@ async function evidenceCovers(
     // `tagged` is the hand tag and `kind` the paper the person said it was;
     // together they say what the row is (paperKind), as the cells above
     // read it.
-    return { id: row.id, key, person: row.person, code: codeFor(row, reading, eqTable), tagged: !!row.qualCode,
+    return { id: row.id, key, person: row.person, code: codeFor(row, reading, eqTable, cols), tagged: !!row.qualCode,
       kind: row.evidenceKind ?? null, filedOn: row.filedOn ? String(row.filedOn) : null };
   });
   // Nothing on the books is one of the five papers: no cover to work out.

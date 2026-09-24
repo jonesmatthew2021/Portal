@@ -5349,7 +5349,17 @@ function Portal({ role, onSignOut }) {
           url: c.fileId ? `/api/files/${c.fileId}` : null,
         };
       });
-      setCertDates({ at: r.at || new Date().toISOString(), map, covers });
+      /* The filings the reading disagrees with: a document the office
+         filed under one column that the model read as something else. The
+         filed column takes the date all the same; Needs attention says so,
+         one line each (source/shared/filed-as.js). Under the register's
+         name in capitals, as the dates are keyed. */
+      const filedAs = (r.filedAs || []).map((f) => ({
+        person: known(f.person).toUpperCase(), code: String(f.code || "").toUpperCase(),
+        title: f.title || "", readsAs: f.readsAs || null,
+        url: f.fileId ? `/api/files/${f.fileId}` : null,
+      }));
+      setCertDates({ at: r.at || new Date().toISOString(), map, covers, filedAs });
       if (v) {
         setValidityPeriods({
           at: new Date().toISOString(),

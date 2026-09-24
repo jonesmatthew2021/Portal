@@ -26,6 +26,11 @@
        orders allow still carries (MO70 s 15(3), MO504 s 16(2),
        MO505 s 7(3), ss 22-24, s 12(2)).
 
+   And one thing the office decides: a document filed under a column that
+   the model read as something else. The filed column is the office's word
+   and takes the date; the line says the two disagree
+   (source/shared/filed-as.js).
+
    A blank answer from any of them is nothing on the screen. Pure, so the
    rule tests can hold it to its answers: `row` is the matrix row, `cols`
    the columns, `dates` the round's certDates, `needs` the columns this
@@ -79,6 +84,16 @@ function marineOrderLines(row, cols, dates, needs, person, todayISO, rules) {
       ...b.missing.map((n) => `${n} is not held`),
     ];
     out.push({ code: b.code, text: `${row[0]} — ${b.code} cannot be renewed: ${parts.join(", ")}` });
+  });
+
+  /* A document the office filed under one column that the model read as
+     something else (source/shared/filed-as.js): the filed column took the
+     date, and the filing is said whatever the band, because a wrong filing
+     is a wrong filing whether or not the seat needs the column. */
+  const me = String(row[0] || "").trim().toUpperCase();
+  ((dates && dates.filedAs) || []).forEach((f) => {
+    if (String(f.person || "").trim().toUpperCase() !== me) return;
+    out.push({ code: f.code, text: filedAsLine(row[0], f.code, f.title, f.readsAs) });
   });
 
   return out;
