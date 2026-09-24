@@ -560,17 +560,23 @@ const is = (got, want, what) => {
      the collision, an edit that put a cell back to what it was showed no
      change and was dropped: the cell sprang back to the first save's
      value, and a key the tab had crossed off its note came back on. */
-  const preConflict = { quals: { cols: quals.cols, rows: [["EVANS, Brenton", "Master", "", ["2032-01-01"]]] },
+  // carried is the copy the first save went up with, the tab's own edits already in it (the date
+  // moved on to 2032-01-01, D added to the note); what it had loaded before was EVANS 2031-05-26
+  // and a note of A alone, which is what putBack puts each cell back to.
+  const carried = { quals: { cols: quals.cols, rows: [["EVANS, Brenton", "Master", "", ["2032-01-01"]]] },
     filledFromCert: { A: true, D: true } };
   const landedNote = { ...landed, filledFromCert: { A: true, C: true, D: true } };
   const putBack = { quals: { cols: quals.cols, rows: [["EVANS, Brenton", "Master", "", ["2031-05-26"]]] },
     filledFromCert: { A: true } };
-  const after = lib.afterMergedSave(putBack, landedNote, preConflict, ["quals", "filledFromCert"]);
+  const after = lib.afterMergedSave(putBack, landedNote, carried, ["quals", "filledFromCert"]);
   is(after.quals.rows[0][3], ["2031-05-26", "2029-03-03"],
     "a cell put back, while the merged copy was in the air, to what it was before the collision stays put back; the date the hour filled in stays");
   is(Object.keys(after.filledFromCert).sort(), ["A", "C"],
     "a key the tab had added before the first save and crossed off in the meantime stays off; the hour's stays on");
-  is(lib.afterMergedSave(putBack, landedNote, preConflict, []), landedNote,
+  const loadedBefore = { quals: base.quals, filledFromCert: { A: true } };
+  is(lib.afterMergedSave(putBack, landedNote, loadedBefore, ["quals", "filledFromCert"]).quals.rows[0][3][0], "2032-01-01",
+    "…measured against the copy loaded before the collision instead, the put-back date shows no change and springs back: the carried copy is the one to hand over");
+  is(lib.afterMergedSave(putBack, landedNote, carried, []), landedNote,
     "nothing edited in the meantime: the tab holds the merged copy as it landed");
   is(lib.mergeFilled(base.filled, mine.filledFromCert, theirs.filledFromCert),
     rules.mergeFilled(base.filled, mine.filledFromCert, theirs.filledFromCert), "mergeFilled in the page answers as the module does");
