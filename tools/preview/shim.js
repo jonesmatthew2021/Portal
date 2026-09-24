@@ -61,6 +61,22 @@
 
   const todayISO = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Australia/Perth" }).format(new Date());
 
+  /* Flags on the preview's address put it in a state the live portal
+     would only reach on a bad day, so the lines for that day can be looked
+     at: ?reading=credit (the reading stops for credit), ?hourly=credit
+     (the last hour stopped for credit), ?backup=missing (the backup folder
+     is not in the library). The out-of-credit sentence is the one in
+     source/shared/reading-lines.js, written here again because this shim
+     runs outside the page's own script; a check holds the two the same. */
+  const flag = (name) => { try { return new URLSearchParams(location.search).get(name); } catch (e) { return null; } };
+  const OUT_OF_CREDIT = "Out of credit — top it up at console.anthropic.com";
+  const fakeHourly = () => ({
+    at: Date.now() - 20 * 60000, durationMs: 41000, read: 0, refiled: 0, syncError: null,
+    readError: flag("hourly") === "credit" ? OUT_OF_CREDIT : null, readStopped: null,
+    applied: 0, cleared: 0, written: 0, workbook: null, leftAsTyped: 0, held: null,
+    roundError: null, roundSkipped: null, workbookProblem: null, validityProblem: null, equivalenceProblem: null,
+  });
+
   const field = (form, name) => {
     const v = form.get(name);
     return typeof v === "string" && v.trim() !== "" ? v.trim() : null;
@@ -246,7 +262,11 @@
         return json({ registered: [], mirrored: 0, followed: 0, moved: [], removed: [] });
       /* The hourly round's last outcome: the preview has no cron, so nothing
          has run and the page says so. */
-      if (p === "/api/sync/last") return json({ sync: null, hourly: null, running: false, holder: null });
+      if (p === "/api/sync/last") return json({ sync: null, hourly: flag("hourly") ? fakeHourly() : null, running: false, holder: null });
+      /* The SharePoint page's listing: no library behind the preview, so
+         an empty folder, and the hour's line only under its flag. */
+      if (p === "/api/sharepoint")
+        return json({ path: url.searchParams.get("path") || "", entries: [], lastSync: null, lastHourly: flag("hourly") ? fakeHourly() : null });
       /* The round from the page: nothing has run, there are no rules to
          keep, and the round itself writes the office's workbook, which is
          a live-portal job. */
@@ -278,7 +298,12 @@
         const action = body && body.action;
         if (action === "extract") {
           const total = mem.rows.filter((r) => r.category === "certificate" && !r.removedAt).length;
-          return json({ read: total, total, remaining: 0, extracted: 0, failures: [] });
+          // Under ?reading=credit the first batch is the account saying no,
+          // so the round's window and the badge show that line.
+          if (flag("reading") === "credit")
+            return json({ read: 0, total, remaining: total, attempted: Math.min(3, total), extracted: 0, failures: [],
+              stopped: { kind: "credit", line: OUT_OF_CREDIT } });
+          return json({ read: total, total, remaining: 0, extracted: 0, failures: [], stopped: null });
         }
         if (action === "refile") return json({ moved: [], remaining: 0 });
       }

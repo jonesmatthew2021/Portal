@@ -11,6 +11,7 @@
  * cases that went wrong, on the code that ships, before anything deploys.
  */
 import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 const NL = String.fromCharCode(10);
@@ -56,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -859,6 +860,35 @@ const is = (got, want, what) => {
   is(lib.doneEyebrow({ noItems: true }), "Nothing on the matrix yet", "no items on the matrix: nothing to read against");
   is(lib.doneWindowLines({ noItems: true }), [], "…and no lines under it");
   is(lib.doneWindowLines(null), [], "no outcome, no lines");
+}
+
+/* ---- the red line under Update portal comes down by itself ---- */
+{
+  const up = 1_000_000;
+  const clean = { hourly: { at: up + 60_000, readError: null, roundSkipped: null } };
+  is(lib.badgeShouldClear("Out of credit", up, clean), true, "a later hour with no reading error takes the line down");
+  is(lib.badgeShouldClear("", up, clean), false, "no line, nothing to take down");
+  is(lib.badgeShouldClear("Out of credit", up, { hourly: { at: up - 1, readError: null } }), false, "an hour that began before the line went up says nothing about it");
+  is(lib.badgeShouldClear("Out of credit", up, { hourly: { at: up + 60_000, readError: "Out of credit" } }), false, "an hour still out of credit leaves it up");
+  is(lib.badgeShouldClear("Out of credit", up, { hourly: { at: up + 60_000, readError: null, roundSkipped: "round not yet run" } }), false, "the hour's early record, written before its reading, does not count");
+  is(lib.badgeShouldClear("Out of credit", up, { hourly: { at: up + 60_000, readError: null, readStopped: "Reading unavailable" } }), true, "a busy model is an aside, not a reason to keep the line up");
+  is(lib.badgeShouldClear("Out of credit", up, null), false, "no answer, no change");
+  is(lib.badgeShouldClear("Out of credit", up, { hourly: null }), false, "no hour yet, no change");
+}
+
+/* ---- the crew phone after an upload the model could not read ---- */
+{
+  for (const kind of ["credit", "key", "rate", "busy"]) {
+    is(lib.crewUploadNote(kind, lib.OUT_OF_CREDIT), { phase: "Uploaded — will be read on the hour", note: "" }, kind + ": the file is on the books and the hour reads it; nothing for the crew to act on");
+  }
+  is(lib.crewUploadNote("document", "The PDF specified was not valid."), { phase: "Uploaded — not renamed", note: "The PDF specified was not valid." }, "a document the model turned away is said as it came");
+  is(lib.crewUploadNote(undefined, "Reading failed (500)"), { phase: "Uploaded — not renamed", note: "Reading failed (500)" }, "no kind at all: today's note");
+  // The three sentences reach the page whole, and fit the badge.
+  for (const line of [lib.OUT_OF_CREDIT, lib.READING_UNAVAILABLE, lib.KEY_PROBLEM]) is(line.length <= 60, true, "fits the badge: " + line);
+  // The preview's shim cannot read the page's copy (it runs outside the
+  // page's script), so it carries the sentence itself; it must be the same.
+  const shim = readFileSync(join(ROOT, "tools", "preview", "shim.js"), "utf8");
+  is(shim.includes(JSON.stringify(lib.OUT_OF_CREDIT)), true, "the preview shim's out-of-credit line is the shared one");
 }
 
 /* ---- the copy spliced into the page answers exactly as the module does ---- */

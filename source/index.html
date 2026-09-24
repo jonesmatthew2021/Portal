@@ -8275,6 +8275,10 @@ async function readCertificates({ quals, fresh, onPhase = () => {} }) {
     const r = await analyse({ action: "extract", cols: quals.cols, limit: 3 });
     progress.read = r.read; progress.total = r.total; progress.remaining = r.remaining;
     onPhase({ phase: "reading", read: r.read, total: r.total });
+    // The batch says when the reading cannot go on - the account out of
+    // credit, the key refused, the model busy - in one short sentence,
+    // which is what the window and the badge show.
+    if (r.stopped) throw new Error(r.stopped.line);
     // A batch that got through none of what it tried is not slow progress, it is
     // a wall - the model is unreachable or over its limit. Stop and say so
     // rather than sit in the loop for ten minutes.
@@ -11938,6 +11942,25 @@ function missesInARow(before, wants, last) {
   return last || !wants ? 0 : (before || 0) + 1;
 }
 
+/* Whether the red line under Update portal can come down by itself.
+   The line says why the last round from this tab stopped - out of credit,
+   most often. It used to stay until somebody pressed the button again,
+   long after the account was topped up and the hour had read everything.
+   It comes down once an hour that began after the line went up has
+   finished with no reading error on its record. `errAt` is when the line
+   went up (ms); `last` is the portal's answer to /api/sync/last. An hour
+   writes its record twice, once before its reading with the round "not
+   yet run", so only the finished record counts. */
+function badgeShouldClear(err, errAt, last) {
+  if (!err) return false;
+  const h = last && last.hourly;
+  if (!h || h.at == null) return false;
+  const at = typeof h.at === "number" ? h.at : Date.parse(h.at);
+  if (isNaN(at) || !(at > (errAt || 0))) return false;
+  if (h.roundSkipped === "round not yet run") return false;
+  return h.readError == null;
+}
+
 function UpdateDocumentation() {
   const { admin, lastDocUpdate, setLastDocUpdate, log, pending, roundRunning, setRoundRunning,
     quals: QUALS, setQuals, trainingMatrix,
@@ -11950,6 +11973,9 @@ function UpdateDocumentation() {
   // Workbooks the library no longer holds, put to whoever is there.
   const [orphaned, setOrphaned] = useState(null);
   const [err, setErr] = useState("");
+  // When the red line went up, so the tick can take it down again once a
+  // later hour has read without trouble (badgeShouldClear).
+  const errAt = useRef(0);
   const going = useRef(false);
   // The document's stamp as this tab holds it now, readable from inside a
   // round that started a while ago: the polls carry on underneath a round,
@@ -11974,6 +12000,10 @@ function UpdateDocumentation() {
     setErr(""); setFound(null);
     // Where the document stood when this round began.
     const pulled = docStamp.current || "";
+    // Why the round stopped, where it did: the round's window says it at
+    // the time, and the badge under the button keeps saying it after the
+    // window is closed, until an hour reads clean (badgeShouldClear).
+    let roundStopped = null;
     try {
       // The worker's hour holds the lease this takes; wait for it rather
       // than be refused, and if refused all the same, wait once more.
@@ -12014,7 +12044,8 @@ function UpdateDocumentation() {
         // the name this press was made in - so the hour's own fallback and a
         // person's press are told apart on the lease and in the log.
         setStep("Reading the certificates and updating the matrix");
-        await runMatrixRound({ origin: "portal", by: asked ? "Update portal" : "the round on the hour" });
+        const run = await runMatrixRound({ origin: "portal", by: asked ? "Update portal" : "the round on the hour" });
+        if (run && run.phase === "failed" && run.message) roundStopped = run.message;
       } else {
         setStep("");
       }
@@ -12116,9 +12147,11 @@ function UpdateDocumentation() {
             gone.length ? gone.join(" and ") + " — the workbook has gone, asked what to do" : null,
           ].filter(Boolean).join(" · "));
       }
+      if (roundStopped) { setErr(roundStopped); errAt.current = Date.now(); }
       setStep("");
     } catch (e) {
       setErr(e.message || String(e));
+      errAt.current = Date.now();
       setStep("");
     }
     going.current = false;
@@ -12164,8 +12197,9 @@ function UpdateDocumentation() {
       // The tab's own reasons not to, before the portal is asked anything.
       const wants = due(null) && !going.current && !heldElsewhere();
       // Asked all the same while the last answer said the hour was running,
-      // so the buttons held down for it come back when it stops.
-      if (!wants && !roundRunning) { unanswered.current = 0; return; }
+      // so the buttons held down for it come back when it stops - and while
+      // the red line is up, so it can come down once an hour reads clean.
+      if (!wants && !roundRunning && !err) { unanswered.current = 0; return; }
       let last = null;
       try {
         const r = await fetch("/api/sync/last", { cache: "no-store" });
@@ -12173,6 +12207,7 @@ function UpdateDocumentation() {
       } catch (e) { last = null; }
       // A portal that cannot say holds nothing: the buttons come back.
       setRoundRunning(!!(last && last.running), last && last.holder);
+      if (badgeShouldClear(err, errAt.current, last)) setErr("");
       unanswered.current = missesInARow(unanswered.current, wants, last);
       if (!wants || !due(last, unanswered.current) || going.current || heldElsewhere()) return;
       take();
@@ -12182,7 +12217,7 @@ function UpdateDocumentation() {
     const t = setInterval(tick, 5 * 60000);
     const first = setTimeout(tick, 45000);
     return () => { clearInterval(t); clearTimeout(first); };
-  }, [admin, lastDocUpdate, pending, roundRunning]);
+  }, [admin, lastDocUpdate, pending, roundRunning, err]);
 
   if (!admin) return null;
 
@@ -14771,6 +14806,19 @@ const ACCESS_LEVELS = [
    Team's real folders and files exactly as Teams holds them, one folder per
    request through the worker's Graph connection. */
 
+/* What the phone's panel says when the reading after an upload failed.
+   The file is on the books either way. A failure about the model's
+   account - no credit, the rate, a busy model, the key - is nothing the
+   crew member can act on and nothing wrong with the photo: the hour reads
+   it once the account is in order, and that is all the panel says. Any
+   other failure is said as it came. `kind` is read-one's word for it. */
+function crewUploadNote(kind, message) {
+  if (kind === "credit" || kind === "key" || kind === "rate" || kind === "busy") {
+    return { phase: "Uploaded — will be read on the hour", note: "" };
+  }
+  return { phase: "Uploaded — not renamed", note: message || "" };
+}
+
 /* Upload Crew Certificates — the crew's own door. A name and a drop, and the
    file is filed into the company SharePoint under them, read, converted to
    PDF and named the way OPMS wants it; the window then hands the finished
@@ -14903,7 +14951,12 @@ function CrewCertificateUpload() {
         const r = await fetch("/api/certificates/read-one", { method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ id: rec.id, discardUnreadable: !!fromCamera }) });
         const out = await r.json();
-        if (!r.ok) throw new Error(out.error || `Reading failed (${r.status})`);
+        if (!r.ok) {
+          clearInterval(timer);
+          patchJob(key, { pct: 100, done: true, filename: rec.filename, url: rec.url,
+            ...crewUploadNote(out.kind, out.error || `Reading failed (${r.status})`) });
+          continue;
+        }
         clearInterval(timer);
         if (out.discarded) {
           patchJob(key, { pct: 100, phase: "Not clear — take the photo again", done: true, failed: true, note: out.reason || "" });
