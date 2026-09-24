@@ -111,6 +111,10 @@ modules. Edit that code there and only there.
   `opmsCertPrefix(token)`, which works a name out and so makes new folders.
 - **No explainer text.** The UI carries what Matthew asked for and nothing else.
   Don't add helpful notes to the screen.
+- **One round.** Every Update matrix button starts the server's round
+  (`POST /api/round`, `runMatrixRound` in `source/index.html`); the page
+  reads new certificates and refiles first, and never applies dates itself
+  — it re-pulls the document.
 - **The round on the hour is the worker's.** `worker/src/lib/round.ts` puts
   the certificates' dates on the crew matrix and writes the office's CREW
   QUALIFICATION EXPIRY workbook by itself, every hour, with no browser open
