@@ -113,8 +113,14 @@ writer (`workbook.js`), the matrix rules (`matrix-rules.js`), the names
 register (`names.js`), the offline rules (`offline-rules.js`), the three
 sentences said when the model's account stops a reading
 (`reading-lines.js`), the red and amber bands' day counts (`bands.js`), the
-weekly expiry reminders' rules (`reminders.js`) and a man's MSIC number and
-date of birth off his certificates (`particulars.js`). The build splices
+weekly expiry reminders' rules (`reminders.js`), a man's MSIC number and
+date of birth off his certificates (`particulars.js`), and the five Marine
+Orders rules — the columns one certificate covers (`covers.js`), a
+certificate of recognition against the certificate behind it
+(`recognition.js`), the medical (`medical.js`), what must be in hand before a
+renewal (`renewals.js`) and the papers that stand in for a certificate that
+has run out (`evidence.js`); the expiry day itself is in `bands.js`
+(`hasExpired`). The build splices
 them into the page at `/* @shared */` with the `export` taken off each
 declaration, and the worker imports them as modules. A shared file cannot
 import another: what one leans on from another is handed in by the caller.
@@ -131,7 +137,15 @@ the preview asks for the same files as `source/vendor/` beside `preview.html`.
 
 `source/vessel.json` — everything that is this vessel's (name, brand, timezone,
 domain, ranks, swings, customer marks, crew folders); a new vessel is a new
-file, never an edit to the page. The build declares it on the page as `VESSEL`
+file, never an edit to the page. It also carries the four tables the Marine
+Orders rules read, each entry with the clause it comes from written beside it,
+so the law's mapping is data anybody can check against the order rather than a
+number in the code: `covers` (which printed endorsement fills which column),
+`renewalNeeds` (what must be in hand before a renewal), `evidenceKinds` (the
+five papers that stand in for a certificate, their ceilings and their columns)
+and `neverRecognised` (the columns a recognition can never fill). Both
+`checkVessel`s refuse a file whose tables name a column this matrix has not
+got. The build declares it on the page as `VESSEL`
 at `/* @vessel */` and writes the page's head and the manifest from it; the
 worker reads it through `worker/src/vessel.ts`. The eleventh check assembles
 the page for a made-up vessel (`tools/fixtures/example-vessel.json`) and fails
@@ -394,6 +408,90 @@ on any line that still names this one.
   failure: `last-run.heldBack` carries the count, `error` stays null, and the
   SharePoint page's last-import line says it on its missing clause. Tests:
   `worker/tests/sync.test.ts`.
+
+- **The Marine Orders are held against the matrix, and the law's mapping is
+  data.** Eight orders were read in full from the Federal Register on 25 Sep
+  2026 and six rules came out of them, each a pure shared file with its clause
+  written beside every line:
+  - **One certificate fills every column it covers** (`source/shared/covers.js`). A
+    new-style AMSA ticket prints its endorsements on its face and a training
+    statement prints its unit codes, so one document answers for more than one
+    column. Which endorsement fills which column is the vessel file's `covers`
+    table and never the model's guess: ECDIS to QL-13, dated as the
+    certificate is dated because the endorsement never expires (MO70 s 37(3)
+    item 8 - the office's "5 years" is wrong by law); fast rescue boats to
+    QL-16, taking the endorsement's own printed end where AMSA printed one
+    (s 37(3) item 2, s 37(5)). A unit code in a column's title fills that
+    column with the document's own date. **GMDSS is never read off a
+    certificate of competency** - it is a class of its own with its own term
+    (s 7(1)(ca), s 21B), so "IV/2" printed on a ticket fills nothing. **QL-12
+    is only ever filled by its own certificate**: the certificate of safety
+    training cannot be endorsed onto another document (s 34(1)) and cannot be
+    recognised from a foreign one (s 7(2)(b)). Matthew, 25 Sep 2026: "COST is
+    only for small state certification. International certificates are
+    certificates of competency."
+  - **A recognition never outlives the certificate it recognises**
+    (`source/shared/recognition.js`). A foreign ticket counts here only through
+    AMSA's certificate of recognition (MO505 s 4, s 7(2)), so the recognition
+    holds the cell and the cell opens it - but it is revalidated only after
+    that one is (MO70 s 33(2)), endorsed only after it is (s 36(3)), its
+    endorsement runs for the remainder of that one's (s 37(4)) and its term can
+    never be extended (s 30 note). The cell takes the **earlier** of the two
+    dates, and so does a column it covers. The vessel file's
+    `neverRecognised` names the columns it can never fill at all (QL-11,
+    QL-12: s 7(2)(b)).
+  - **The medical issued last governs** (`source/shared/medical.js`). A medical
+    expires the moment a further one is issued (MO76 s 16(3)), so of two on
+    file the one issued last is in force even where the older prints the later
+    expiry. Needs attention says where a printed expiry is longer than
+    MO76 s 16(1) allows for the holder's age on the day of the examination -
+    the bands are **18 or younger** and **55 or older**, so exactly 18 and
+    exactly 55 are in the one-year band, and with no date of birth on Crew
+    Details nothing is flagged. The limitation printed on a certificate shows
+    on `CertViewer` and nowhere else.
+  - **A red ticket that cannot be renewed says so** (`source/shared/renewals.js`).
+    The pairs are the vessel file's `renewalNeeds`, each with its clause: the cook
+    certificate on a certificate of safety training and a medical (MO70 s 25),
+    a deck certificate on a medical and a GMDSS (MO71 Sch 4 4.2), an
+    engineer's and a rating's on a medical (MO72 Sch 4 4.2; MO73 Sch 4,
+    MO70 Sch 2 Table 2.4 item 3(b)), the near-coastal masters and Engineer
+    Class 3 on a current medical (MO505 s 9(3)(b)). Master <24 m NC and MED
+    Grade 2 NC are left out on purpose: s 9(3)(c) renews them on a
+    declaration, which is not a document the portal holds, and neither is the
+    120 days' sea service.
+  - **Five papers lawfully carry a man while a certificate is out**
+    (`source/shared/evidence.js`), each with its ceiling and its columns in the
+    vessel file's `evidenceKinds`: an AMSA extension letter, up to six months and
+    never a certificate of safety training nor a recognition (MO70 s 15(3)-(4),
+    s 30 note); a near-coastal renewal lodged before expiry, 90 days past the
+    printed expiry (MO505 s 7(3)); a temporary crewing permit, three months
+    (MO504 s 16(2)); a final assessor's declaration, 60 days and only the lower
+    near-coastal grades (MO505 ss 22-24); an issue letter, which IS the
+    certificate until the card arrives and which the law gives no end
+    (s 12(2)). Where the paper prints its own end that date governs; the
+    ceiling only catches a longer one. The cell goes **amber**, never green:
+    green would say the certificate is in date, and it has gone.
+  - **The expiry day itself is the day a certificate stops counting**
+    (`hasExpired` in `source/shared/bands.js`, MO70 s 5(a)(iii)). `daysUntil` is a
+    plain day count and answers 0 on that day; everything that decides whether
+    somebody holds something reads the rule, not the count.
+
+  A green cell means "not expired" and nothing more: suspension and
+  cancellation are invisible on a document and only AMSA can confirm them
+  (MO70 s 5(a), s 45; MO505 s 17). Never word anything as "valid".
+
+  **The office's own spreadsheet is wrong by law in five places** (Part 7 of
+  the report): QL-13 ECDIS is not "5 years" but perpetual; a plain Chief Mate
+  meets Master <24 m NC only, not QL-03 or QL-04; the list has an engineer
+  certificate meeting Master <24 m NC and a Master meeting MED Grade 2 NC,
+  which no order allows; the QL-17 age bands read "under 18/over 55" and the
+  law's are "18 and under / 55 and over"; and a GPH working under general
+  supervision must hold General Purpose Hand NC or an STCW rating certificate,
+  which the sheet does not ask. Those are **Matthew's to raise with the
+  office** - the portal never corrects the office's sheet quietly. Tests:
+  `worker/tests/rules.test.ts`, `worker/tests/round.test.ts`,
+  `tools/client-rules.test.mjs`. Preview flags: `?recognition=1`,
+  `?medical=long`, `?blocked=1`, `?covered=1`.
 
 ## Working in parallel
 
