@@ -28,7 +28,7 @@ export type Vessel = {
   shortName: string;
   title: string;
   strapline: string;
-  brand: { logo: string; icon: string; roundelText: string[] };
+  brand: { logo: string; icon: string; icon512: string; appleTouch: string; roundelText: string[] };
   theme: {
     themeColor: string;
     bodyBackground: string;
@@ -86,7 +86,8 @@ type Kind = "string" | "number" | "string[]" | "array" | "object" | "colours";
 const SHAPE: [string, Kind][] = [
   ["slug", "string"], ["operator", "string"], ["name", "string"], ["nameAccent", "string"],
   ["shortName", "string"], ["title", "string"], ["strapline", "string"],
-  ["brand.logo", "string"], ["brand.icon", "string"], ["brand.roundelText", "string[]"],
+  ["brand.logo", "string"], ["brand.icon", "string"], ["brand.icon512", "string"], ["brand.appleTouch", "string"],
+  ["brand.roundelText", "string[]"],
   ["theme.themeColor", "string"], ["theme.bodyBackground", "string"],
   ["theme.signIn.ink", "string"], ["theme.signIn.button", "string"],
   ["theme.light", "colours"], ["theme.dark", "colours"],
@@ -108,29 +109,61 @@ const SHAPE: [string, Kind][] = [
   ["docBuckets", "string[]"], ["labels", "object"], ["qualColumns", "array"], ["crewFolders", "object"],
 ];
 const THEME_COLOURS = ["deep", "panel", "raised", "rule", "text", "muted", "accent", "accentSoft", "teal", "blue"];
+/* What each entry of the lists must carry - the same list as ENTRY_SHAPE in
+ * tools/source.mjs. A list can be a list and still be wrong inside: a rank
+ * group without its pattern would compile to a pattern that matches every
+ * position, and a pool without its "is" would do the same on the shift matrix. */
+const ENTRY_SHAPE: [string, string[]][] = [
+  ["previewAccounts", ["name"]],
+  ["swings.legacyNotes", ["id", "label"]],
+  ["ranks", ["id", "label", "dept"]],
+  ["shift.pools", ["pool", "is"]],
+  ["shift.establishment", ["key", "label", "pool"]],
+  ["shift.groups", ["id", "title"]],
+];
+const compiles = (pattern: string) => { try { new RegExp(pattern); return true; } catch { return false; } };
 
 /** Checks a vessel file's shape; throws naming the first key that is wrong. */
 export function checkVessel(value: unknown, from = "source/vessel.json"): Vessel {
   const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+  const word = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
   const at = (path: string) =>
     path.split(".").reduce<unknown>((o, k) => (isObject(o) ? o[k] : undefined), value);
+  const wrong = (path: string, want: string) => new Error(`${from} has no usable "${path}" - it must be ${want}.`);
   for (const [path, kind] of SHAPE) {
     const v = at(path);
     const ok =
-      kind === "string" ? typeof v === "string" && v.trim() !== "" :
+      kind === "string" ? word(v) :
       kind === "number" ? typeof v === "number" && Number.isFinite(v) :
       kind === "string[]" ? Array.isArray(v) && v.every((x) => typeof x === "string") :
       kind === "array" ? Array.isArray(v) :
       kind === "object" ? isObject(v) :
-      isObject(v) && THEME_COLOURS.every((c) => typeof v[c] === "string" && v[c]);
+      isObject(v) && THEME_COLOURS.every((c) => word(v[c]));
     if (!ok) {
-      const want =
+      throw wrong(path,
         kind === "colours" ? "an object naming " + THEME_COLOURS.join(", ") :
-        kind === "string[]" ? "a list of strings" : kind === "array" ? "a list" : kind === "object" ? "an object" : "a " + kind;
-      throw new Error(`${from} has no usable "${path}" - it must be ${want}.`);
+        kind === "string[]" ? "a list of strings" : kind === "array" ? "a list" : kind === "object" ? "an object" : "a " + kind);
     }
   }
-  return value as Vessel;
+  for (const [path, fields] of ENTRY_SHAPE) {
+    (at(path) as unknown[]).forEach((entry, i) => {
+      for (const f of fields) if (!isObject(entry) || !word(entry[f])) throw wrong(`${path}[${i}].${f}`, "a string");
+    });
+  }
+  const v = value as Vessel;
+  v.shift.pools.forEach((p, i) => { if (!compiles(p.is)) throw wrong(`shift.pools[${i}].is`, "a pattern that compiles"); });
+  v.shift.establishment.forEach((e, i) => {
+    if (!Array.isArray(e.shifts) || !e.shifts.every((s) => typeof s === "string")) throw wrong(`shift.establishment[${i}].shifts`, "a list of strings");
+  });
+  v.shift.groups.forEach((g, i) => { if (g.hours !== null && !word(g.hours)) throw wrong(`shift.groups[${i}].hours`, "a string or null"); });
+  v.rankGroups.forEach((g, i) => {
+    if (!Array.isArray(g) || g.length !== 2 || !word(g[0]) || !word(g[1])) throw wrong(`rankGroups[${i}]`, "a heading and a pattern, both strings");
+    if (!compiles(g[1])) throw wrong(`rankGroups[${i}][1]`, "a pattern that compiles");
+  });
+  v.qualColumns.forEach((c, i) => {
+    if (!Array.isArray(c) || c.length !== 3 || !word(c[0]) || !word(c[1]) || typeof c[2] !== "string") throw wrong(`qualColumns[${i}]`, "a code, a title and a group, all strings");
+  });
+  return v;
 }
 
 /** This vessel. */

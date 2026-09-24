@@ -357,4 +357,29 @@ test("the vessel file has every key the portal reads, and a missing one is named
   const { timezone: _dropped, ...without } = vessel;
   assert.throws(() => checkVessel(without, "a vessel file"), /a vessel file has no usable "timezone"/);
   assert.throws(() => checkVessel({ ...vessel, theme: { ...vessel.theme, light: { deep: "#fff" } } }), /"theme.light"/);
+  assert.throws(() => checkVessel({ ...vessel, brand: { ...vessel.brand, icon512: "" } }, "a vessel file"), /"brand.icon512"/,
+    "the home-screen icons are the vessel's and each is named");
+});
+
+test("the vessel file's lists are checked inside, so a rank group or a pool that would match everything is refused", () => {
+  /* A rank group without its pattern would compile to a pattern that matches
+     every position and file the whole crew under one heading; a pool without
+     its "is" would do the same on the shift matrix. Each is named, with its
+     place in the list. */
+  const rankGroups = vessel.rankGroups.map((g) => [...g]);
+  rankGroups[1] = [rankGroups[1][0]] as unknown as [string, string];
+  assert.throws(() => checkVessel({ ...vessel, rankGroups }, "a vessel file"), /a vessel file has no usable "rankGroups\[1\]"/);
+  const broken = vessel.rankGroups.map((g) => [...g] as [string, string]);
+  broken[2] = [broken[2][0], "chief (officer"];
+  assert.throws(() => checkVessel({ ...vessel, rankGroups: broken }, "a vessel file"), /"rankGroups\[2\]\[1\]" - it must be a pattern that compiles/);
+  const pools = vessel.shift.pools.map((p) => ({ ...p }));
+  delete (pools[0] as { is?: string }).is;
+  assert.throws(() => checkVessel({ ...vessel, shift: { ...vessel.shift, pools } }, "a vessel file"), /"shift.pools\[0\].is"/);
+  const ranks = vessel.ranks.map((r) => ({ ...r }));
+  ranks[3] = { ...ranks[3], dept: "" };
+  assert.throws(() => checkVessel({ ...vessel, ranks }, "a vessel file"), /"ranks\[3\].dept"/);
+  const qualColumns = vessel.qualColumns.map((c) => [...c]);
+  qualColumns[0] = ["QL-01"];
+  assert.throws(() => checkVessel({ ...vessel, qualColumns }, "a vessel file"), /"qualColumns\[0\]"/);
+  assert.equal(checkVessel(vessel), vessel, "the file as it is passes every one of these");
 });

@@ -935,6 +935,45 @@ const is = (got, want, what) => {
   is(lib.settleRound(round), rules.settleRound(round), "settleRound in the page answers as the module does");
 }
 
+/* ---- the vessel file, as the build reads it ---- */
+{
+  /* The build's loader is the one a new vessel's file meets first. A brand
+     file that is not there is said with the key and not as a read error from
+     inside the build; a list entry missing what its code needs is refused by
+     its place in the list; and the manifest written for a vessel is that
+     vessel's, name and all. */
+  const { checkVessel, readVessel, manifestFor } = await import("file:///" + ROOT.replaceAll(" ", "%20") + "/tools/source.mjs");
+  const { writeFileSync, mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const example = readVessel(join(ROOT, "tools", "fixtures", "example-vessel.json"));
+  const said = (f) => { try { f(); return "nothing"; } catch (e) { return e.message; } };
+
+  const dir = mkdtempSync(join(tmpdir(), "vessel-"));
+  const noLogo = join(dir, "vessel.json");
+  writeFileSync(noLogo, JSON.stringify({ ...example, brand: { ...example.brand, logo: "brand/nothing-here.png" } }));
+  is(said(() => readVessel(noLogo)), noLogo + ' has no usable "brand.logo": brand/nothing-here.png is not a file under source/.',
+    "a brand file that is not on disk is named by its key");
+
+  const rankGroups = example.rankGroups.map((g) => [...g]);
+  rankGroups[1] = [rankGroups[1][0]];
+  is(said(() => checkVessel({ ...example, rankGroups }, "a vessel file")),
+    'a vessel file has no usable "rankGroups[1]" - it must be a heading and a pattern, both strings.',
+    "a rank group without its pattern is refused, not compiled into match-everything");
+  const pools = example.shift.pools.map((p) => ({ ...p }));
+  delete pools[0].is;
+  is(said(() => checkVessel({ ...example, shift: { ...example.shift, pools } }, "a vessel file")),
+    'a vessel file has no usable "shift.pools[0].is" - it must be a string.', "a pool without its \"is\" is refused");
+  is(said(() => checkVessel({ ...example, brand: { ...example.brand, appleTouch: "" } }, "a vessel file")),
+    'a vessel file has no usable "brand.appleTouch" - it must be a string.', "the home-screen icons are the vessel's");
+  is(said(() => checkVessel(example, "a vessel file")), "nothing", "the example vessel passes as it is");
+
+  const manifest = JSON.parse(manifestFor(example));
+  is([manifest.name, manifest.short_name, manifest.theme_color],
+    [example.name + " " + example.nameAccent + " Crew Portal", example.shortName, example.theme.themeColor],
+    "the manifest written for a vessel carries that vessel's name, short name and colour");
+  is(manifest.icons.map((i) => i.src), ["/icon-192.png", "/icon-512.png"], "…and asks for the icons under the fixed served names");
+}
+
 if (failed) {
   console.error(failed + " rule(s) gave the wrong answer");
   process.exit(1);

@@ -6,7 +6,7 @@
   "shortName": "Example",
   "title": "MV Example - Crew Portal",
   "strapline": "Port of Example · Example Ore",
-  "brand": { "logo": "brand/logo.png", "icon": "app/icon-192.png", "roundelText": ["EXAMPLE", "MARINE", "SAIL WELL"] },
+  "brand": { "logo": "brand/logo.png", "icon": "app/icon-192.png", "icon512": "app/icon-512.png", "appleTouch": "app/apple-touch-icon.png", "roundelText": ["EXAMPLE", "MARINE", "SAIL WELL"] },
   "theme": {
     "themeColor": "#1C5C8C",
     "bodyBackground": "#F4F8FA",

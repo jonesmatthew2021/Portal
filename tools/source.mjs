@@ -22,7 +22,7 @@
  * themselves are function declarations, which JavaScript hoists, so nothing
  * cares where in the file they end up.
  */
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -51,7 +51,8 @@ const VESSEL_FILE = join(SOURCE, "vessel.json");
 const VESSEL_SHAPE = [
   ["slug", "string"], ["operator", "string"], ["name", "string"], ["nameAccent", "string"],
   ["shortName", "string"], ["title", "string"], ["strapline", "string"],
-  ["brand.logo", "string"], ["brand.icon", "string"], ["brand.roundelText", "string[]"],
+  ["brand.logo", "string"], ["brand.icon", "string"], ["brand.icon512", "string"], ["brand.appleTouch", "string"],
+  ["brand.roundelText", "string[]"],
   ["theme.themeColor", "string"], ["theme.bodyBackground", "string"],
   ["theme.signIn.ink", "string"], ["theme.signIn.button", "string"],
   ["theme.light", "colours"], ["theme.dark", "colours"],
@@ -74,30 +75,65 @@ const VESSEL_SHAPE = [
 ];
 // The colours a theme must name: the ones the roundel gives the page.
 const THEME_COLOURS = ["deep", "panel", "raised", "rule", "text", "muted", "accent", "accentSoft", "teal", "blue"];
+/* What each entry of the lists must carry. A list can be a list and still be
+ * wrong inside: a rank group without its pattern would compile to a pattern
+ * that matches every position and file the whole crew under the first
+ * heading, and a pool without its "is" would do the same on the shift matrix.
+ * So each entry is looked at, and each pattern is compiled once here. */
+const ENTRY_SHAPE = [
+  ["previewAccounts", ["name"]],
+  ["swings.legacyNotes", ["id", "label"]],
+  ["ranks", ["id", "label", "dept"]],
+  ["shift.pools", ["pool", "is"]],
+  ["shift.establishment", ["key", "label", "pool"]],
+  ["shift.groups", ["id", "title"]],
+];
+const compiles = (pattern) => { try { new RegExp(pattern); return true; } catch (e) { return false; } };
 
 /** Checks the vessel file's shape; throws naming the first key that is wrong. */
 export function checkVessel(vessel, from = "source/vessel.json") {
   const at = (path) => path.split(".").reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), vessel);
   const isObject = (v) => v && typeof v === "object" && !Array.isArray(v);
+  const word = (v) => typeof v === "string" && v.trim() !== "";
+  const wrong = (path, want) => new Error(from + " has no usable \"" + path + "\" - it must be " + want + ".");
   for (const [path, kind] of VESSEL_SHAPE) {
     const v = at(path);
     const ok =
-      kind === "string" ? typeof v === "string" && v.trim() !== "" :
+      kind === "string" ? word(v) :
       kind === "number" ? typeof v === "number" && Number.isFinite(v) :
       kind === "string[]" ? Array.isArray(v) && v.every((x) => typeof x === "string") :
       kind === "array" ? Array.isArray(v) :
       kind === "object" ? isObject(v) :
-      kind === "colours" ? isObject(v) && THEME_COLOURS.every((c) => typeof v[c] === "string" && v[c]) :
+      kind === "colours" ? isObject(v) && THEME_COLOURS.every((c) => word(v[c])) :
       false;
     if (!ok) {
-      throw new Error(
-        from + " has no usable \"" + path + "\" - it must be " +
-        (kind === "colours" ? "an object naming " + THEME_COLOURS.join(", ") : kind === "string[]" ? "a list of strings" : kind === "array" ? "a list" : kind === "object" ? "an object" : "a " + kind) + ".",
-      );
+      throw wrong(path, kind === "colours" ? "an object naming " + THEME_COLOURS.join(", ") : kind === "string[]" ? "a list of strings" : kind === "array" ? "a list" : kind === "object" ? "an object" : "a " + kind);
     }
   }
+  for (const [path, fields] of ENTRY_SHAPE) {
+    at(path).forEach((entry, i) => {
+      for (const f of fields) if (!isObject(entry) || !word(entry[f])) throw wrong(path + "[" + i + "]." + f, "a string");
+    });
+  }
+  vessel.shift.pools.forEach((p, i) => { if (!compiles(p.is)) throw wrong("shift.pools[" + i + "].is", "a pattern that compiles"); });
+  vessel.shift.establishment.forEach((e, i) => {
+    if (!Array.isArray(e.shifts) || !e.shifts.every((s) => typeof s === "string")) throw wrong("shift.establishment[" + i + "].shifts", "a list of strings");
+  });
+  vessel.shift.groups.forEach((g, i) => { if (g.hours !== null && !word(g.hours)) throw wrong("shift.groups[" + i + "].hours", "a string or null"); });
+  vessel.rankGroups.forEach((g, i) => {
+    if (!Array.isArray(g) || g.length !== 2 || !word(g[0]) || !word(g[1])) throw wrong("rankGroups[" + i + "]", "a heading and a pattern, both strings");
+    if (!compiles(g[1])) throw wrong("rankGroups[" + i + "][1]", "a pattern that compiles");
+  });
+  vessel.qualColumns.forEach((c, i) => {
+    if (!Array.isArray(c) || c.length !== 3 || !word(c[0]) || !word(c[1]) || typeof c[2] !== "string") throw wrong("qualColumns[" + i + "]", "a code, a title and a group, all strings");
+  });
   return vessel;
 }
+
+/* The brand's four image files, and the name each is served under. The page
+ * inlines the logo and the icon; the asset build copies all four so a phone
+ * that installs the portal fetches this vessel's roundel and not another's. */
+export const BRAND_FILES = [["logo", null], ["icon", "icon-192.png"], ["icon512", "icon-512.png"], ["appleTouch", "apple-touch-icon.png"]];
 
 /** The vessel file, read and checked. Another file can be given (the checks
  *  assemble the page for a made-up vessel to prove nothing else names this one). */
@@ -108,7 +144,27 @@ export function readVessel(file = VESSEL_FILE) {
   } catch (e) {
     throw new Error(file + " could not be read as JSON: " + e.message);
   }
-  return checkVessel(parsed, file);
+  const vessel = checkVessel(parsed, file);
+  // The brand's files are read off disk by the build, so a path that names
+  // nothing is said here, with the key, and not as a read error from inside.
+  for (const [key] of BRAND_FILES) {
+    const rel = vessel.brand[key];
+    if (!(existsSync(join(SOURCE, rel)) && statSync(join(SOURCE, rel)).isFile())) {
+      throw new Error(file + " has no usable \"brand." + key + "\": " + rel + " is not a file under source/.");
+    }
+  }
+  return vessel;
+}
+
+/** The home-screen manifest for a vessel: source/app/manifest.webmanifest
+ *  with the vessel's name, short name and colour written in. The source
+ *  manifest is the template and is never edited for a vessel. */
+export function manifestFor(vessel) {
+  const manifest = JSON.parse(readFileSync(join(SOURCE, "app", "manifest.webmanifest"), "utf8"));
+  manifest.name = vessel.name + " " + vessel.nameAccent + " Crew Portal";
+  manifest.short_name = vessel.shortName;
+  manifest.theme_color = vessel.theme.themeColor;
+  return JSON.stringify(manifest, null, 2) + "\n";
 }
 
 /** A PNG under source/, as a data: address the page can carry inline. */

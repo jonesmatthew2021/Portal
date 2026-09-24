@@ -9,6 +9,8 @@
   "brand": {
     "logo": "brand/logo.png",
     "icon": "app/icon-192.png",
+    "icon512": "app/icon-512.png",
+    "appleTouch": "app/apple-touch-icon.png",
     "roundelText": ["UNITED", "MARINE", "EXCEL TOGETHER"]
   },
   "theme": {

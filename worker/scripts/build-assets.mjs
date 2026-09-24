@@ -12,7 +12,7 @@
 import { copyFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { portalSource } from "../../tools/source.mjs";
+import { BRAND_FILES, manifestFor, portalSource, readVessel } from "../../tools/source.mjs";
 import { createRequire } from "node:module";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -42,10 +42,16 @@ out = out.replace(/[ \t]*<script[^>]*babel\.min\.js[^>]*><\/script>\r?\n/, "");
 
 writeFileSync(join(ASSETS, "index.html"), out);
 copyFileSync(join(REPO, "source", "crew-list-form.html"), join(ASSETS, "crew-list-form.html"));
-// The home-screen app's icon (the United Marine roundel) and manifest, served
-// as real files so phones can fetch them when the portal is installed.
-for (const f of ["manifest.webmanifest", "icon-192.png", "icon-512.png", "apple-touch-icon.png"]) {
-  copyFileSync(join(REPO, "source", "app", f), join(ASSETS, f));
+// The home-screen app: its manifest written from the vessel file (the name,
+// the short name and the colour are the vessel's, never typed into the source
+// manifest), and the vessel's own roundel served under the fixed names the
+// manifest and the page ask for, so a phone that installs the portal gets
+// this vessel's icon. Done here, where the assets are made, so every way of
+// making them - the build, npm run assets on its own - gives the same files.
+const vessel = readVessel();
+writeFileSync(join(ASSETS, "manifest.webmanifest"), manifestFor(vessel));
+for (const [key, served] of BRAND_FILES) {
+  if (served) copyFileSync(join(REPO, "source", vessel.brand[key]), join(ASSETS, served));
 }
 // The fauna log — the phone app at /fauna/ — is its own folder, carried over
 // as it is: the page, its rules module, its manifest and icons, and the
