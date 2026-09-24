@@ -68,6 +68,21 @@
   ul.list li.pending .s { color:var(--warn); }
   ul.list li.empty { color:var(--mute); justify-content:center; font-size:14px; }
   .link { background:transparent; border:0; color:var(--sea); font:inherit; font-size:13px; text-decoration:underline; padding:2px 4px; }
+  section.sheet { margin:18px 0 0; }
+  section.sheet h2 { font-size:12px; letter-spacing:.8px; text-transform:uppercase; color:var(--mute); margin:0 0 8px; }
+  .sheetwrap { overflow-x:auto; -webkit-overflow-scrolling:touch; background:var(--card); border:1px solid var(--line); border-radius:10px; }
+  table#sheet { border-collapse:collapse; font-size:11px; white-space:nowrap; }
+  table#sheet th { background:var(--sea); color:#fff; font-weight:600; text-align:left; padding:6px 8px; border-right:1px solid rgba(255,255,255,.25); vertical-align:bottom; max-width:120px; white-space:normal; font-size:10px; line-height:1.2; }
+  table#sheet td { padding:5px 8px; border-top:1px solid var(--line); border-right:1px solid var(--line); color:var(--ink); }
+  table#sheet tr:nth-child(even) td { background:#F3F7FB; }
+  table#sheet td.empty { color:var(--mute); text-align:center; }
+  .pdf { display:flex; align-items:center; gap:12px; margin:10px 0 0; }
+  .pdf button { font:inherit; font-size:15px; font-weight:600; padding:12px 18px; border:0; border-radius:10px; background:var(--navy); color:#fff; }
+  .pdf button[disabled] { background:#7F97AA; }
+  .pdfstate { font-size:13px; color:var(--mute); }
+  .pdfout { display:flex; gap:10px; margin:10px 0 0; }
+  .pdfout a, .pdfout button { flex:1; text-align:center; font:inherit; font-size:15px; font-weight:600; padding:12px; border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--sea); text-decoration:none; }
+  .pdfout button { background:var(--good); color:#fff; border-color:var(--good); }
   .toast { position:fixed; left:50%; bottom:calc(84px + env(safe-area-inset-bottom)); transform:translateX(-50%); background:var(--ink); color:#fff; padding:10px 16px; border-radius:10px; font-size:14px; opacity:0; transition:opacity .2s; pointer-events:none; max-width:90vw; text-align:center; z-index:9; }
   .toast.show { opacity:1; }
   #fatal { display:none; color:#fff; background:var(--bad); font-family:ui-monospace,monospace; font-size:13px; line-height:1.6; padding:14px 16px; white-space:pre-wrap; word-break:break-word; }
@@ -95,6 +110,20 @@
   </div>
   <div class="logline" id="logline" style="display:none"></div>
   <ul class="list" id="list"></ul>
+
+  <section class="sheet">
+    <h2 id="sheetTitle">Spreadsheet</h2>
+    <div class="sheetwrap"><table id="sheet"></table></div>
+    <div class="pdf">
+      <button type="button" id="pdfGo">Generate PDF</button>
+      <span class="pdfstate" id="pdfState"></span>
+    </div>
+    <div class="pdfout" id="pdfOut" style="display:none">
+      <a id="pdfOpen" target="_blank" rel="noopener">Open</a>
+      <button type="button" id="pdfSend">Send</button>
+      <a id="pdfSave" download>Save</a>
+    </div>
+  </section>
 </main>
 <div class="actions"><div class="inner">
   <button class="discard" id="discard" type="button">Clear</button>
@@ -496,7 +525,65 @@ async function loadMonth() {
   saved.sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`));
   renderList();
 }
+/* ----------------------------------------------------- the spreadsheet -- */
+// The month's sheet, as it goes into the workbook: the office's column
+// headings across the top, an entry a row, in time order.
+function renderSheet() {
+  $("sheetTitle").textContent = `Spreadsheet — ${monthName(month)} ${month.slice(0, 4)}`;
+  const table = $("sheet"); table.innerHTML = "";
+  const head = document.createElement("tr");
+  for (const f of FIELDS) { const th = document.createElement("th"); th.textContent = f.sheetLabel || f.label; head.append(th); }
+  table.append(head);
+  const rows = [...saved].filter((s) => !s.pending || true).sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`));
+  if (!rows.length) {
+    const tr = document.createElement("tr"); const td = document.createElement("td"); td.colSpan = FIELDS.length; td.className = "empty"; td.textContent = "Nothing logged this month yet."; tr.append(td); table.append(tr);
+    return;
+  }
+  for (const s of rows) {
+    const tr = document.createElement("tr");
+    for (const f of FIELDS) {
+      const td = document.createElement("td");
+      const v = s[f.key];
+      td.textContent = isBlank(v) ? "" : f.key === "date" ? String(v).split("-").reverse().join("/") : String(v);
+      tr.append(td);
+    }
+    table.append(tr);
+  }
+}
+
+/* --------------------------------------------------------------- the PDF -- */
+let pdfUrl = null, pdfFile = null;
+$("pdfGo").onclick = async () => {
+  const btn = $("pdfGo"), state = $("pdfState");
+  btn.disabled = true; state.textContent = "Filling the sheet..."; $("pdfOut").style.display = "none";
+  try {
+    const res = await fetch(`/api/fauna/pdf?month=${month}`, { cache: "no-store" });
+    if (res.status === 401) { location.href = "/login?next=" + encodeURIComponent("/fauna/"); return; }
+    if (!res.ok) { const out = await res.json().catch(() => ({})); throw new Error(out.error || res.status); }
+    const blob = await res.blob();
+    const name = `${month.slice(5, 7)}.${month.slice(0, 4)} - Marine Fauna Observation Log.pdf`;
+    if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+    pdfFile = new File([blob], name, { type: "application/pdf" });
+    pdfUrl = URL.createObjectURL(pdfFile);
+    $("pdfOpen").href = pdfUrl;
+    $("pdfSave").href = pdfUrl; $("pdfSave").download = name;
+    $("pdfSend").style.display = navigator.canShare && navigator.canShare({ files: [pdfFile] }) ? "" : "none";
+    state.textContent = `${name} (${Math.max(1, Math.round(blob.size / 1024))} KB)`;
+    $("pdfOut").style.display = "";
+  } catch (e) {
+    state.textContent = "The PDF could not be made: " + (e.message || e);
+  } finally {
+    btn.disabled = false;
+  }
+};
+$("pdfSend").onclick = async () => {
+  if (!pdfFile) return;
+  try { await navigator.share({ files: [pdfFile], title: pdfFile.name }); }
+  catch (e) { if (e && e.name !== "AbortError") toast("Could not open the share sheet: " + (e.message || e)); }
+};
+
 function renderList() {
+  renderSheet();
   const ul = $("list"); ul.innerHTML = "";
   if (!saved.length) { const li = document.createElement("li"); li.className = "empty"; li.textContent = "Nothing logged this month yet."; ul.append(li); return; }
   for (const s of [...saved].reverse()) {

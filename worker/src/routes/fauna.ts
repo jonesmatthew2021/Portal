@@ -5,6 +5,7 @@ import { getStore } from "../compat/blobs.js";
 import {
   openLog, ensureMonthTab, writeRows, saveLog, newMonthWorkbook, monthFileName, isMonthFile, type LogRow, type LogWorkbook,
 } from "../lib/fauna-log.js";
+import { monthPdf } from "../lib/fauna-pdf.js";
 import { settle } from "../../../source/fauna/fields.js";
 
 /**
@@ -14,6 +15,7 @@ import { settle } from "../../../source/fauna/fields.js";
  *   PUT  /api/fauna/sightings        save one (new or changed)
  *   DELETE /api/fauna/sightings/:id  take one off
  *   GET  /api/fauna/export?month=    the month as the office's own workbook
+ *   GET  /api/fauna/pdf?month=       the month as a PDF of that sheet, to send on
  *   GET  /api/fauna/log?month=       the month's workbook in SharePoint, and what is owed
  *   POST /api/fauna/log              write everything owed now
  *
@@ -382,6 +384,25 @@ export default async (req: Request, user: PortalUser, path: string): Promise<Res
       });
     } catch (e) {
       return json({ error: `The log could not be written: ${e instanceof Error ? e.message : String(e)}` }, 500);
+    }
+  }
+
+  // The month's sheet as a PDF: the same entries, laid out as the log is,
+  // for sending on.
+  if (path === "/api/fauna/pdf" && req.method === "GET") {
+    const month = url.searchParams.get("month") || thisMonth;
+    if (!isMonth(month)) return json({ error: "The month is YYYY-MM." }, 400);
+    try {
+      const bytes = await monthPdf(await templateBytes(url.origin), month, await listMonth(month));
+      return new Response(bytes, {
+        headers: {
+          ...NO_STORE,
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `inline; filename="${monthFileName(month).replace(/\.xlsx$/i, ".pdf")}"`,
+        },
+      });
+    } catch (e) {
+      return json({ error: `The PDF could not be made: ${e instanceof Error ? e.message : String(e)}` }, 500);
     }
   }
 
