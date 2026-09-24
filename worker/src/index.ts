@@ -28,6 +28,7 @@ import fauna, { ensureTable as ensureFaunaTable, settleLog as settleFaunaLog } f
 import { runMatrixRound, roundRunning, leaseHolder, takeLease, dropLease, keepEquivalences, SETTLE_MS, type Lease } from "./lib/round.js";
 import { readDocument } from "./lib/shared-state.js";
 import { nightlyBackup } from "./lib/backup.js";
+import { weeklyReminders } from "./lib/reminders.js";
 import { withAssetHeaders } from "./lib/offline.js";
 import { crewRowsOnly } from "../../source/shared/names.js";
 import { vessel } from "./vessel.js";
@@ -246,6 +247,16 @@ export default {
           await nightlyBackup(t0);
         } catch (e) {
           console.error("the nightly backup failed outside its own catch:", e);
+        }
+        // The weekly certificate-expiry emails, beside the backup and on the
+        // same terms: before the lease, taking none, asking nothing of the
+        // library, and unable to stop anything after them. On the set
+        // weekday the tick at ten past the set hour sends them; every other
+        // tick is a look at the setting and the record (lib/reminders.ts).
+        try {
+          await weeklyReminders(t0);
+        } catch (e) {
+          console.error("the weekly reminders failed outside their own catch:", e);
         }
         lease = await takeLease("the round on the hour");
         for (let tries = 0; !lease && tries < LEASE_RETRIES; tries++) {

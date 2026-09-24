@@ -2,6 +2,7 @@ import type { PortalUser } from "../auth.js";
 import { sharepointBrowse } from "../files/store.js";
 import { lastSync, lastHourly } from "./sync.js";
 import { lastBackup } from "../lib/backup.js";
+import { lastReminder } from "../lib/reminders.js";
 
 /**
  * The SharePoint page's window into the company library —
@@ -28,6 +29,8 @@ export default async (req: Request, actor: PortalUser): Promise<Response> => {
         // The nightly backup's own record: it outlives the hour's line,
         // which a round from the page rewrites.
         lastBackup: await lastBackup().catch(() => null),
+        // The weekly reminder emails' own record, kept the same way.
+        lastReminder: await lastReminder().catch(() => null),
       },
       { headers: { "Cache-Control": "no-store" } },
     );

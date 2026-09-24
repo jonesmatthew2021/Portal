@@ -8,7 +8,7 @@
  */
 function SharePointPage() {
   // Whether the worker's hour holds the workbook: the import is held down while it does.
-  const { roundRunning, offlineAt } = usePortal();
+  const { roundRunning, offlineAt, reminders } = usePortal();
   const [path, setPath] = useState("");
   const [listing, setListing] = useState(null);
   const [err, setErr] = useState("");
@@ -105,6 +105,19 @@ function SharePointPage() {
     if (b.error) return { bad: true, text: "Backup " + when + " failed: " + b.error + (landed ? " (last one landed " + landed + ")" : "") };
     return { bad: false, text: "Last backup " + when + ", " + fmtBytes(b.bytes) };
   };
+  // The weekly reminder emails' own line: off, or what the last week's did -
+  // in red where a send failed or none could go.
+  const reminderLine = () => {
+    if (!reminders.on) return { bad: false, text: "Reminders are off" };
+    const r = listing && listing.lastReminder;
+    if (!r) return null;
+    const when = new Date(r.at).toLocaleString("en-AU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+    if (r.error) return { bad: true, text: "Reminders " + when + " failed: " + r.error };
+    if (r.skipped) return { bad: false, text: "Reminders " + when + " — " + r.skipped };
+    const sent = r.own + " crew, " + r.summary + " summar" + (r.summary === 1 ? "y" : "ies");
+    const failed = (r.failed || []).length ? "; failed: " + r.failed.join(", ") : "";
+    return { bad: !!failed, text: "Reminders " + when + " — " + sent + failed };
+  };
   const fmtWhen = (s) => !s ? "" :
     new Date(s).toLocaleDateString("en-AU", { day: "2-digit", month: "short", year: "numeric" });
 
@@ -121,6 +134,7 @@ function SharePointPage() {
           <div>{syncLine()}</div>
           {hourlyLine() && <div style={{ color: hourlyLine().bad ? T.bRed : T.muted }}>{hourlyLine().text}</div>}
           {backupLine() && <div style={{ color: backupLine().bad ? T.bRed : T.muted }}>{backupLine().text}</div>}
+          {reminderLine() && <div style={{ color: reminderLine().bad ? T.bRed : T.muted }}>{reminderLine().text}</div>}
         </span>
         <Button variant="quiet" writes disabled={syncing || controlsLocked(offlineAt, roundRunning)}
           title={!syncing && controlsLocked(offlineAt, roundRunning) ? (offlineAt ? offlineLine(offlineAt) : ROUND_BUSY) : undefined}

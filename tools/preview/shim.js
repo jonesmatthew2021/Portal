@@ -77,6 +77,19 @@
      source/shared/reading-lines.js, written here again because this shim
      runs outside the page's own script; a check holds the two the same. */
   const flag = (name) => { try { return new URLSearchParams(location.search).get(name); } catch (e) { return null; } };
+  /* ?reminders=sent (or =failed): the weekly reminder emails switched on
+     and their last week's record, sent this Monday at 07:10 - or with one
+     address refused - so the SharePoint page's reminder line can be looked
+     at. Without the flag the setting is the document's, off by default. */
+  if ((flag("reminders") === "sent" || flag("reminders") === "failed") && mem.data) {
+    mem.data = { ...mem.data, reminders: { on: true, days: 90, weekday: 1, hour: 7 } };
+  }
+  const fakeReminder = () => {
+    if (flag("reminders") !== "sent" && flag("reminders") !== "failed") return null;
+    const at = new Date(); at.setDate(at.getDate() - ((at.getDay() + 6) % 7)); at.setHours(7, 10, 0, 0);
+    return { day: todayISO(), at: at.getTime(), window: 90, own: 6, summary: 3,
+      failed: flag("reminders") === "failed" ? ["someone@example.com"] : [], skipped: null, error: null };
+  };
   const OUT_OF_CREDIT = "Out of credit — top it up at console.anthropic.com";
   /* ?offline=1: the four answers the service worker keeps come back the
      way it hands them back when the link is down - stamped with the time
@@ -311,7 +324,7 @@
           lastSync: flag("sync") === "held"
             ? { at: Date.now() - 20 * 60000, by: "hourly schedule", registered: 2, adopted: 0, missing: 26, leftAlone: 0, heldBack: 26, error: null }
             : null,
-          lastHourly: flag("hourly") ? fakeHourly() : null, lastBackup: fakeBackup() });
+          lastHourly: flag("hourly") ? fakeHourly() : null, lastBackup: fakeBackup(), lastReminder: fakeReminder() });
       /* The round from the page: nothing has run, there are no rules to
          keep, and the round itself writes the office's workbook, which is
          a live-portal job. */

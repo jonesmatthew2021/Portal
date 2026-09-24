@@ -35,6 +35,7 @@ import { graphBudget } from "../src/files/store.js";
 import { writeZip, readZip, partOf, partText, datedWorkbookName } from "../../source/shared/workbook.js";
 import { asKnownPerson, crewRegister } from "../../source/shared/names.js";
 import { backupDue, backupName, namesToDrop, folderAllowed, nightlyBackup } from "../src/lib/backup.js";
+import { REMINDER_USERS_SQL, NO_EMAIL, UNFINISHED } from "../src/lib/reminders.js";
 import { vessel, vesselNow } from "../src/vessel.js";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -1028,7 +1029,14 @@ test("the hour runs the sync and the round under one lease, taken once and run o
   }
   assert.deepEqual(waited, Array(20).fill(15000), "twenty waits of fifteen seconds before giving up");
   assert.equal(JSON.parse(portal.blobs.get("sync|last-hourly")!).roundSkipped, "another round is still running");
-  assert.ok(!portal.db.asked.slice(before).some((a) => /portal_state|FROM documents/.test(a.sql)), "nothing was read or written past the lease");
+  // The weekly reminders look at their setting in the document once,
+  // before the lease is tried (they take none): that one read, and
+  // nothing else of the books, before or after the hour stood down.
+  const books = portal.db.asked.slice(before).filter((a) => /portal_state|FROM documents/.test(a.sql));
+  // The lease held, no take is ever written: its first look is the try.
+  const firstTake = portal.db.asked.slice(before).findIndex((a) => /^SELECT value, etag FROM blobs/.test(a.sql) && a.args[1] === "round-lease");
+  assert.deepEqual(books.map((a) => a.sql), ["SELECT data, rev FROM portal_state WHERE id = ?1"], "nothing was read or written past the lease");
+  assert.ok(portal.db.asked.slice(before).indexOf(books[0]) < firstTake, "the reminders' look came before the lease was tried");
   assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).by, "Update portal", "the page's lease is untouched");
 });
 
@@ -3177,4 +3185,223 @@ test("neither dated: the later modified time wins, and with none known nothing d
   assert.equal(outranks(older, newer), false, "'Z' after 'A' counts for nothing");
   assert.equal(outranks({ key: "opms/A.xlsx" }, { key: "opms/B.xlsx" }), false, "unknown times: no swap");
   assert.equal(outranks(newer, newer), false, "a sheet never outranks itself");
+});
+
+/* ------------------------------------------------------------------------ *
+ * The weekly certificate-expiry emails on the hour: each crew member's own
+ * list and the summary to management and IT, sent from the tick at ten
+ * past the set hour on the set weekday, before the lease, once a day, and
+ * never at all while the switch is off. Sending to the wrong person, or
+ * twice, is what these hold against.
+ * ------------------------------------------------------------------------ */
+/** Monday 28 Sep 2026 where the vessel is, at ten past seven and ten past six;
+ *  and Tuesday at ten past seven. */
+const MONDAY_0710 = Date.parse("2026-09-27T23:10:00Z");
+const MONDAY_0610 = Date.parse("2026-09-27T22:10:00Z");
+const TUESDAY_0710 = Date.parse("2026-09-28T23:10:00Z");
+const REMINDERS_ON = { on: true, days: 90, weekday: 1, hour: 7 };
+const REMINDER_USERS = [
+  { id: "u1", email: "brenton@example.com", name: "Brenton Evans", role: "crew", disabled: 0 },
+  { id: "u2", email: "kachin@example.com", name: "Kachin Sittiyos", role: "crew", disabled: 0 },
+  { id: "u3", email: "boss@example.com", name: "Matthew Jones", role: "management", disabled: 0 },
+  { id: "u4", email: "help@example.com", name: "IT Help", role: "it", disabled: 0 },
+  { id: "u5", email: "gone@example.com", name: "Sam Sample", role: "crew", disabled: 1 },
+  { id: "u6", email: "nobody@example.com", name: "Alan Stranger", role: "crew", disabled: 0 },
+];
+
+/** The users table as the reminders ask it: only the one statement, laid
+ *  out by the columns it names - so a statement that names another column,
+ *  or asks another way, is refused rather than answered. */
+function withUsersTable(db: { prepare(sql: string): unknown; asked: { sql: string; args: unknown[] }[] }, users: Record<string, unknown>[]) {
+  return {
+    ...db,
+    prepare(sql: string) {
+      if (!/\bFROM users\b/.test(sql) || /created_at/.test(sql)) return db.prepare(sql);
+      if (sql !== REMINDER_USERS_SQL) throw new Error("the reminders asked the users table something unexpected: " + sql);
+      const cols = /^SELECT (.+) FROM users WHERE disabled = 0$/.exec(sql)![1].split(", ");
+      const results = users.filter((u) => u.disabled === 0).map((u) => Object.fromEntries(cols.map((c) => [c, u[c]])));
+      const stmt = {
+        bind: () => stmt,
+        all: async () => { db.asked.push({ sql, args: [] }); return { results, meta: { changes: 0 } }; },
+        first: async () => results[0] ?? null,
+      };
+      return stmt;
+    },
+  };
+}
+
+/** A fake of Cloudflare's email binding: every send written down, and any
+ *  address in `refuses` refused. */
+function fakeEmail(refuses: string[] = []) {
+  const sent: { to: string; from: string; subject: string; text: string; html: string }[] = [];
+  return {
+    sent,
+    async send(m: { to: string; from: string; subject: string; text: string; html: string }) {
+      if (refuses.includes(m.to)) throw new Error("the service refused " + m.to);
+      sent.push(m);
+    },
+  };
+}
+
+/** Evans's portal with Kachin on the matrix too, the reminders set as
+ *  `reminders` (left off the document entirely where "missing"), and the
+ *  grants above. */
+const reminderPortal = async (reminders: unknown = REMINDERS_ON, quals17 = ["2026-10-12", "2026-09-25"]) => {
+  const bucket = fakeBucket({ "opms/Brenton - OPMS/master.pdf": "a scan" }, ["opms", "removed", "opms/Brenton - OPMS"]);
+  const tmKey = "opms/20260901 - CREW QUALIFICATION EXPIRY.xlsx";
+  await bucket.put(tmKey, await smallWorkbook().arrayBuffer());
+  bucket.made.length = 0;
+  const doc: Record<string, unknown> = {
+    quals: {
+      cols: [["QL-01", "Master", "Qualifications"], ["QL-17", "AMSA Medical", "Medical"], ["VS-04", "Induction", "E-Learning"]],
+      rows: [
+        ["EVANS, Brenton", "Master", "", ["", quals17[0], "2026-09-30"]],
+        ["SITTIYOS, Kachin", "Cook", "", ["", quals17[1], ""]],
+      ],
+    },
+    people: [{ name: "EVANS, Brenton", aliases: ["bRENTON"] }, { name: "SITTIYOS, Kachin", aliases: [] }],
+    filledFromCert: {}, orphanSeen: {}, history: [],
+  };
+  if (reminders !== "missing") doc.reminders = reminders;
+  const portal = portalDb(
+    doc,
+    [
+      { ...billysTicket, id: "c2", person: "bRENTON", checksum: "evans-master", blobKey: "opms/Brenton - OPMS/master.pdf", sizeBytes: 6 },
+      { ...liveRow("tm1", tmKey), sizeBytes: 5000 },
+    ],
+    { "r1/evans-master.json": { ...reading, holderName: "Brenton Evans", expiresOn: "2031-05-26" } },
+    REMINDER_USERS,
+  );
+  return { portal, bucket, db: withUsersTable(portal.db, REMINDER_USERS) };
+};
+const reminderEnv = (r: { portal: { db: unknown }; bucket: unknown; db: unknown }, email: unknown) =>
+  ({ ...getEnvFor(r.portal, r.bucket), BACKUP_FOLDER: "", DB: r.db, ...(email ? { EMAIL: email } : {}) });
+const reminderRecord = (portal: { blobs: Map<string, string> }) => JSON.parse(portal.blobs.get("sync|last-reminder") || "null");
+const hourAt = (at: number, env: unknown) => withClock(at, () => worker.scheduled({} as never, env as never));
+
+test("at ten past seven on Monday each crew member is sent their own list and management and IT the summary, before the lease", async () => {
+  const r = await reminderPortal();
+  const email = fakeEmail();
+  await hourAt(MONDAY_0710, reminderEnv(r, email));
+  const ship = `${vessel.name} ${vessel.nameAccent}`;
+  assert.deepEqual(email.sent.map((m) => [m.to, m.subject]), [
+    ["brenton@example.com", `Your certificates expiring within 90 days - ${ship}`],
+    ["kachin@example.com", `Your certificates expiring within 90 days - ${ship}`],
+    ["boss@example.com", `Crew certificates expiring within 90 days - ${ship}`],
+    ["help@example.com", `Crew certificates expiring within 90 days - ${ship}`],
+  ], "Brenton and Kachin their own; management and IT the summary; the disabled grant and the stranger nothing");
+  assert.ok(email.sent.every((m) => m.from === vessel.mailFrom), "from the vessel file's address");
+  assert.equal(email.sent[0].text,
+    `Your certificates on the ${ship} crew matrix (EVANS, Brenton) that have expired or expire within 90 days, as at 28 Sep 2026:\n\n` +
+    "QL-17 AMSA Medical — expires 12 Oct 2026 (14 days)\n\n" +
+    `https://${vessel.domain}\n`, "Brenton's list is Brenton's alone, and VS-04 is never on it");
+  assert.ok(!email.sent[0].text.includes("SITTIYOS") && !email.sent[1].text.includes("EVANS"), "nobody sees the other's list");
+  assert.match(email.sent[1].text, /QL-17 AMSA Medical — expired 3 days ago \(25 Sep 2026\)/);
+  assert.equal(email.sent[2].text, email.sent[3].text, "one summary, sent to each");
+  assert.match(email.sent[2].text, /2 items, 2 people:\n\nEVANS, Brenton\n {2}QL-17 AMSA Medical — expires 12 Oct 2026 \(14 days\)\n\nSITTIYOS, Kachin\n {2}QL-17 AMSA Medical — expired 3 days ago/);
+  assert.ok(email.sent.every((m) => m.html.includes(`https://${vessel.domain}`)));
+
+  assert.deepEqual(reminderRecord(r.portal), {
+    day: "2026-09-28", at: MONDAY_0710, window: 90, own: 2, summary: 2, failed: [], skipped: null, error: null,
+  });
+  // Asked before the lease, and the hour's own work ran after.
+  const asked = r.portal.db.asked;
+  const usersAt = asked.findIndex((a) => a.sql === REMINDER_USERS_SQL);
+  const leaseAt = asked.findIndex((a) => isLeaseTake(a.sql, a.args));
+  assert.ok(usersAt >= 0 && leaseAt > usersAt, "the reminders went before the lease was taken");
+  const hourly = JSON.parse(r.portal.blobs.get("sync|last-hourly")!);
+  assert.equal(hourly.syncError, null, "the sync ran");
+  assert.equal(hourly.applied, 1, "and the round");
+  assert.deepEqual(r.bucket.made, [], "no folder was made");
+
+  // The same Monday again, an hour on: nothing more.
+  await hourAt(MONDAY_0710 + 3_600_000, reminderEnv(r, email));
+  assert.equal(email.sent.length, 4, "not sent twice");
+  assert.equal(reminderRecord(r.portal).at, MONDAY_0710, "the record is the first send's");
+});
+
+test("before the hour, on another day, or with the switch off, nothing is sent", async () => {
+  const early = await reminderPortal();
+  const email = fakeEmail();
+  await hourAt(MONDAY_0610, reminderEnv(early, email));
+  assert.equal(email.sent.length, 0, "not at ten past six");
+  assert.equal(reminderRecord(early.portal), null);
+
+  const tuesday = await reminderPortal();
+  await hourAt(TUESDAY_0710, reminderEnv(tuesday, email));
+  assert.equal(email.sent.length, 0, "not on Tuesday");
+  assert.equal(reminderRecord(tuesday.portal), null);
+
+  for (const setting of ["missing", { ...REMINDERS_ON, on: false }, { ...REMINDERS_ON, on: "true" }]) {
+    const off = await reminderPortal(setting);
+    await hourAt(MONDAY_0710, reminderEnv(off, email));
+    assert.equal(email.sent.length, 0, "off sends nothing: " + JSON.stringify(setting));
+    assert.equal(reminderRecord(off.portal), null, "and writes no record");
+    assert.ok(!off.portal.db.asked.some((a) => a.sql === REMINDER_USERS_SQL), "nor asks who could be sent anything");
+    assert.equal(JSON.parse(off.portal.blobs.get("sync|last-hourly")!).applied, 1, "the hour ran");
+  }
+
+  // Another weekday and hour are honoured the same way.
+  const wednesday = await reminderPortal({ on: true, days: 30, weekday: 3, hour: 9 });
+  await hourAt(MONDAY_0710, reminderEnv(wednesday, email));
+  assert.equal(email.sent.length, 0, "set for Wednesday: nothing on Monday");
+  await hourAt(Date.parse("2026-09-30T01:10:00Z"), reminderEnv(wednesday, email));
+  assert.deepEqual(email.sent.map((m) => m.to), ["brenton@example.com", "kachin@example.com", "boss@example.com", "help@example.com"], "09:10 Wednesday");
+  assert.match(email.sent[0].subject, /within 30 days/);
+  assert.equal(reminderRecord(wednesday.portal).window, 30);
+});
+
+test("a send the service refuses is counted, and everybody else's still go", async () => {
+  const r = await reminderPortal();
+  const email = fakeEmail(["kachin@example.com"]);
+  await quiet(() => hourAt(MONDAY_0710, reminderEnv(r, email)));
+  assert.deepEqual(email.sent.map((m) => m.to), ["brenton@example.com", "boss@example.com", "help@example.com"]);
+  const rec = reminderRecord(r.portal);
+  assert.deepEqual(rec.failed, ["kachin@example.com"]);
+  assert.equal(rec.own, 1);
+  assert.equal(rec.summary, 2);
+  assert.equal(rec.day, "2026-09-28", "the day stands: the others are not sent again");
+  await quiet(() => hourAt(MONDAY_0710 + 3_600_000, reminderEnv(r, fakeEmail())));
+  assert.equal(reminderRecord(r.portal).at, MONDAY_0710, "nothing sent again that day");
+});
+
+test("with no email binding the record says so, nothing throws, and the hour runs", async () => {
+  const r = await reminderPortal();
+  await quiet(() => hourAt(MONDAY_0710, reminderEnv(r, null)));
+  const rec = reminderRecord(r.portal);
+  assert.equal(rec.error, NO_EMAIL);
+  assert.equal(rec.day, null, "nothing went, so the next hour tries again");
+  assert.equal(rec.own + rec.summary, 0);
+  assert.equal(JSON.parse(r.portal.blobs.get("sync|last-hourly")!).applied, 1, "the hour ran");
+  // The binding back, the next hour sends.
+  const email = fakeEmail();
+  await hourAt(MONDAY_0710 + 3_600_000, reminderEnv(r, email));
+  assert.equal(email.sent.length, 4);
+  assert.equal(reminderRecord(r.portal).day, "2026-09-28");
+});
+
+test("an all-clear week sends nothing and says so; a day already claimed sends nothing", async () => {
+  const clear = await reminderPortal(REMINDERS_ON, ["2027-06-01", "2027-07-01"]);
+  const email = fakeEmail();
+  await hourAt(MONDAY_0710, reminderEnv(clear, email));
+  assert.equal(email.sent.length, 0);
+  assert.deepEqual(reminderRecord(clear.portal), {
+    day: "2026-09-28", at: MONDAY_0710, window: 90, own: 0, summary: 0, failed: [], skipped: "nothing expiring", error: null,
+  });
+
+  // A run cut off mid-send leaves its claim: the rest of the day sends nothing.
+  const cut = await reminderPortal();
+  cut.portal.blobs.set("sync|last-reminder", JSON.stringify({ day: "2026-09-28", at: MONDAY_0710, window: 90, own: 0, summary: 0, failed: [], skipped: null, error: UNFINISHED }));
+  await hourAt(MONDAY_0710 + 3_600_000, reminderEnv(cut, email));
+  assert.equal(email.sent.length, 0, "a claimed day is never sent again");
+  assert.equal(reminderRecord(cut.portal).error, UNFINISHED);
+});
+
+test("the reminders ask the users table only for columns it has", () => {
+  const schema = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "schema.sql"), "utf8");
+  const table = /CREATE TABLE IF NOT EXISTS users \(([\s\S]*?)\n\);/.exec(schema)![1];
+  const has = table.split("\n").map((l) => /^\s+([a-z_]+)\s+[A-Z]/.exec(l)?.[1]).filter(Boolean);
+  assert.deepEqual(has, ["id", "email", "name", "role", "disabled", "created_at", "created_by", "last_login", "phone"]);
+  const m = /^SELECT (.+) FROM users WHERE (\w+) = 0$/.exec(REMINDER_USERS_SQL)!;
+  for (const c of [...m[1].split(", "), m[2]]) assert.ok(has.includes(c), c + " is a column of users");
 });
