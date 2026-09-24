@@ -614,7 +614,7 @@ export async function canonicaliseCertificate(
  * It used to move - into a folder worked out from the new person's name. Where
  * the library had never used that name the move made the folder, so a
  * certificate found in "Sam - OPMS" and read as Sam Sample's ended up
- * alone in a new "SITTIYOS, Kachin" folder, and the library filled with empty
+ * alone in a new "SAMPLE, Sam" folder, and the library filled with empty
  * halves of people. The office keeps its own folders; the portal keeps its own
  * books, and the books are what the matrix reads.
  */

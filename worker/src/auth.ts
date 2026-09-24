@@ -239,7 +239,7 @@ const CODE_FORM = (email: string, msg?: string, next = "/") =>
   <p class="note">Nothing arrived after a minute? Check junk mail, then <a href="/login">start again</a>.</p>
 </form>`);
 
-// The vessel's name as the sign-in page's heading: "TSV COOLIBAH".
+// The vessel's name, upper-cased, as the sign-in page's heading.
 const VESSEL_HEADING = `${vessel.name} ${vessel.nameAccent}`.toUpperCase();
 
 const html = (body: string, status = 200) =>

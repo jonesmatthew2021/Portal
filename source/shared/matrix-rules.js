@@ -153,7 +153,7 @@ export function readExpiryRules(rows) {
  * the matrix already has.
  *
  * `nameOf` is how a name is read before it is compared: the crew register's
- * nameOf, where there is one, so a settled date for "SITTIYOS, Kachin" lands
+ * nameOf, where there is one, so a settled date for "SAMPLE, Sam" lands
  * on the row the spreadsheet still calls "sAM". The row keeps its name as
  * written. A spelling the register does not know (its nameOf answers null)
  * is compared as it is, so a stranger's row stays his own and never falls
@@ -263,8 +263,8 @@ export function applySettled(quals, settled, nameOf = (n) => n) {
  * page's button does today.
  *
  * Names are read through `nameOf` before anything is compared, the register's
- * where the caller has one: a note kept under "BILLY::QL-01" and a claim
- * made under "SITTIYOS, KACHIN::QL-01" are the same cell. And a value this
+ * where the caller has one: a note kept under "SAM::QL-01" and a claim
+ * made under "SAMPLE, SAM::QL-01" are the same cell. And a value this
  * round settles for a cell beats any clearing of it, whichever spelling
  * either arrived under - the clears go first in the list that comes back
  * and the values after, so a value always has the last word.

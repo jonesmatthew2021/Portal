@@ -209,9 +209,9 @@ export async function nightlyBackup(now: number): Promise<BackupRecord | null> {
   const env = getEnv();
   const store = getStore("sync");
   const record = (await store.get(RECORD, { type: "json" }).catch(() => null)) as BackupRecord | null;
-  const perth = vesselNow(now);
+  const there = vesselNow(now);
   const hour = Number(env.BACKUP_HOUR);
-  if (!backupDue(record, perth, Number.isFinite(hour) ? hour : 2)) return null;
+  if (!backupDue(record, there, Number.isFinite(hour) ? hour : 2)) return null;
   const folder = trimSlashes(env.BACKUP_FOLDER || "");
   if (!folder) return null;
 
@@ -237,13 +237,13 @@ export async function nightlyBackup(now: number): Promise<BackupRecord | null> {
     const where = await files.hasFolder("library/" + folder);
     if (!where) return await failed(`the folder ${folder} is not in the library`);
 
-    const { text, rev, counts } = await backupBody(now, perth.day);
+    const { text, rev, counts } = await backupBody(now, there.day);
     const bytes = new TextEncoder().encode(text);
-    const name = backupName(perth.day);
+    const name = backupName(there.day);
     // Into the folder by the id the look just gave: the one write that
     // cannot make a folder, whatever the library does with a path.
     await files.set(`library/${folder}/${name}`, bytes.buffer as ArrayBuffer, { intoFolderId: where.id });
-    for (const old of namesToDrop(perth.day)) {
+    for (const old of namesToDrop(there.day)) {
       // Each on its own: a drop that fails costs one old file, not the backup.
       try {
         await files.delete(`library/${folder}/${old}`);
@@ -251,7 +251,7 @@ export async function nightlyBackup(now: number): Promise<BackupRecord | null> {
         console.error(`the old backup ${old} was not dropped:`, e);
       }
     }
-    const next: BackupRecord = { day: perth.day, at: now, name, bytes: bytes.length, rev, counts, error: null };
+    const next: BackupRecord = { day: there.day, at: now, name, bytes: bytes.length, rev, counts, error: null };
     await store.setJSON(RECORD, next);
     return next;
   } catch (e) {

@@ -717,7 +717,7 @@ async function compare(matrix: Matrix, sheet: Sheet) {
  * The comparison itself. `nameOf` is how a certificate's person is read
  * before it is looked for on the matrix: the crew register's, where the
  * round passes one, so a certificate filed under "sAM" claims the row the
- * matrix calls "SITTIYOS, Kachin". A spelling the register does not know
+ * matrix calls "SAMPLE, Sam". A spelling the register does not know
  * stays itself, the same fallback applySettled uses. The route passes
  * nothing and compares names as they are, as it always has.
  */

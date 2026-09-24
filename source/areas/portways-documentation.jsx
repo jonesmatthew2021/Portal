@@ -26,8 +26,8 @@ function CrewListFormPage({ people }) {
     return out;
   }, [swingLists]);
 
-  // First name + surname, lowercased — how a portal name ("Cornelius Keogh")
-  // finds its form entry ("Cornelius James KEOGH") whatever the middle names.
+  // First name + surname, lowercased — how a portal name ("Alan Smith")
+  // finds its form entry ("Alan James SMITH") whatever the middle names.
   const keyOf = (n) => {
     const w = String(n || "").toLowerCase().replace(/[^a-z\s'-]/g, " ").trim().split(/\s+/);
     return w.length ? w[0] + " " + w[w.length - 1] : "";

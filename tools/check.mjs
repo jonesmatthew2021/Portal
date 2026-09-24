@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { buildPreview } from "./build-preview.mjs";
-import { portalJsx, portalSource, areaFiles, sharedFiles, readVessel } from "./source.mjs";
+import { portalJsx, portalSource, areaFiles, sharedFiles, readVessel, manifestFor } from "./source.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(join(ROOT, "tools", "package.json"));
@@ -267,18 +267,37 @@ run("The vessel's name lives only in the vessel file", () => {
      and the worker's own sources are read the same way; the fauna log's files
      are another job's and are left out. A hit is a name that would follow the
      code onto the next vessel's portal. The real build is not touched. */
+  /* Whole words, whatever their case: the slug is written "coolibah" in a
+     row id or a storage key and "COOLIBAH" in a heading, and each is the
+     vessel's name as much as "Coolibah" is. Whole words so that a name the
+     backup file's own format keeps ("perthDay") is not the city. */
   const WORDS = ["Coolibah", "United Marine", "MinRes", "Perth", "Ashburton",
-    "coolibah-portal", "unitedmarine", "Preetham", "Matthew Jones", "ONS-MRN"];
+    "coolibah-portal", "unitedmarine", "Preetham", "Matthew Jones", "ONS-MRN", "portways.opms.com.au"];
+  const RES = WORDS.map((w) => new RegExp("\\b" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "i"));
+  const hitsIn = (line) => WORDS.filter((w, k) => RES[k].test(line));
+  // The check proves its own eyes first: lines that have slipped past it
+  // before, each written as it would be in the code, and one it must leave.
+  const mustSee = ["WHERE id = 'coolibah'", 'PORTAL_ROW_ID = "coolibah"', '"coolibah-tab"', '"TSV COOLIBAH"',
+    "https://portways.opms.com.au/", "united marine", "MINRES", "Australia/Perth"];
+  const mustLeave = ["file.perthDay", "const perthDay = "];
+  for (const l of mustSee) if (!hitsIn(l).length) throw new Error("the check cannot see " + l + " - it would let the vessel's name back into the code");
+  for (const l of mustLeave) if (hitsIn(l).length) throw new Error("the check mistakes " + l + " for the vessel's name");
   const hits = [];
   const look = (where, text) => text.split("\n").forEach((line, i) => {
-    for (const w of WORDS) if (line.includes(w)) hits.push(where + ":" + (i + 1) + "  \"" + w + "\"  " + line.trim().slice(0, 90));
+    for (const w of hitsIn(line)) hits.push(where + ":" + (i + 1) + "  \"" + w + "\"  " + line.trim().slice(0, 90));
   });
   const example = readVessel(join(ROOT, "tools", "fixtures", "example-vessel.json"));
   look("the page assembled for " + example.name + " " + example.nameAccent, portalSource({ vessel: example }));
+  look("the manifest written for " + example.name + " " + example.nameAccent, manifestFor(example));
   const sources = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((d) =>
     d.isDirectory() ? sources(join(dir, d.name))
       : d.name.endsWith(".ts") && !d.name.includes("fauna") ? [join(dir, d.name)] : []);
-  const files = sources(join(ROOT, "worker", "src"));
+  // The worker, and everything that assembles or ships the page: the preview's
+  // shim is spliced into preview.html and the build scripts write the assets,
+  // so a name put back in any of them would ship as surely as one in the page.
+  const files = [...sources(join(ROOT, "worker", "src")),
+    join(ROOT, "worker", "scripts", "build-assets.mjs"), join(ROOT, "tools", "preview", "shim.js"),
+    join(ROOT, "tools", "source.mjs"), join(ROOT, "tools", "build.mjs"), join(ROOT, "tools", "build-preview.mjs")];
   for (const f of files) look(relative(ROOT, f).replace(/\\/g, "/"), readFileSync(f, "utf8"));
   if (hits.length) {
     throw new Error(
@@ -286,7 +305,7 @@ run("The vessel's name lives only in the vessel file", () => {
       hits.slice(0, 12).join("\n      ") + (hits.length > 12 ? "\n      ..." : ""),
     );
   }
-  return "the page for a made-up vessel and " + files.length + " worker files name nothing of this one";
+  return "the page and the manifest for a made-up vessel and " + files.length + " worker and build files name nothing of this one";
 });
 
 /* ---------------------------------------------------------------------- */

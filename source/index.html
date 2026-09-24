@@ -5758,7 +5758,7 @@ const OTHER = "— someone not on the matrix —";
 const JUNK = /^(\.|~\$)|^(thumbs\.db|desktop\.ini|\.ds_store|picasa\.ini)$/i;
 
 // The words in a name, punctuation and case set aside, so "ASANGE,Kyle" and
-// "KEOGH, Cornelius James" both come back as plain words to compare.
+// "SMITH, Alan James" both come back as plain words to compare.
 const nameWords = (s) =>
   (s || "").normalize("NFKD").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 

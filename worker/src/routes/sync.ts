@@ -57,7 +57,7 @@ const typeFor = (name: string) =>
   EXT_TYPES[(name.split(".").pop() || "").toLowerCase()] || "application/octet-stream";
 
 // The one form the portal writes a name in, worked out from the token:
-// "patwardhan-anand" reads back as "PATWARDHAN, Anand", which is how the crew
+// "smith-alan" reads back as "SMITH, Alan", which is how the crew
 // matrix writes it, so the two lists can be held against each other without a
 // lookup table standing between them.
 const personFrom = (folder: string) => opmsFolderName(folder);
