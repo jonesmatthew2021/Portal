@@ -89,6 +89,26 @@ export async function roundRunning(): Promise<boolean> {
   return !!lease && lease.until > Date.now();
 }
 
+/** Whose lease stands right now, or null: the hour's ("the round on the
+ *  hour"), a person's round, an upload, a sync. Every route that answers
+ *  409 says who to wait for by this, and the progress answer carries it so
+ *  a page can tell its own round's lease from one the hour took after that
+ *  round died. */
+export async function leaseHolder(): Promise<string | null> {
+  // Read the way takeLease reads it, so wherever the lease can be taken
+  // its holder can be named.
+  const held = await getStore("sync").getWithMetadata(LEASE_KEY, { type: "json" });
+  const lease = held ? (held.data as Lease | null) : null;
+  return lease && lease.until > Date.now() ? lease.by : null;
+}
+
+/** The one sentence every writer of the workbook answers 409 with while
+ *  the lease is held. The page shows it as it is, so it is a sentence, and
+ *  it promises no time: the hour holds the lease for up to nine minutes
+ *  plus its write, a page's round for four. */
+export const writingTheWorkbook = (holder: string | null) =>
+  `${holder ? holder[0].toUpperCase() + holder.slice(1) : "Another round"} is writing the workbook; try again when it has finished.`;
+
 /** The lease taken, or null where somebody holds it or took it first.
  *  `ms` is how long it stands if the holder never gives it back: the
  *  hour's fifteen minutes unless the taker knows its work is shorter. */

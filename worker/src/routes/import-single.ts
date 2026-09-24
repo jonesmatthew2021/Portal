@@ -4,7 +4,7 @@ import { documents } from "../db/schema.js";
 import { SINGLE_FILE_CATEGORIES, fileStore, safeName, relocateToRemovedBlob } from "../db/documents.js";
 import { certHome } from "../db/cert-home.js";
 import { todayThere } from "../lib/analysis.js";
-import { takeLease, dropLease } from "../lib/round.js";
+import { takeLease, dropLease, leaseHolder, writingTheWorkbook } from "../lib/round.js";
 import { looseIn } from "./sync.js";
 import { toRecord } from "./files.js";
 
@@ -96,7 +96,9 @@ export default async (req: Request, by: string) => {
   // turn, and stands aside while somebody holds it.
   const lease = await takeLease(by);
   if (!lease) {
-    return Response.json({ error: "The hourly round is writing the workbook; try again in a minute." }, { status: 409 });
+    // Names the holder - the hour or a person's round - and promises no
+    // time: the same sentence every writer of the workbook answers with.
+    return Response.json({ error: writingTheWorkbook(await leaseHolder()) }, { status: 409 });
   }
   try {
     // The rows are read only now, under the lease. Read before it, the

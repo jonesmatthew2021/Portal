@@ -8,7 +8,7 @@ import {
 import { isPendingName } from "../db/single-file.js";
 import { certHome, type CertHome } from "../db/cert-home.js";
 import { todayThere } from "../lib/analysis.js";
-import { takeLease, dropLease } from "../lib/round.js";
+import { takeLease, dropLease, leaseHolder, writingTheWorkbook } from "../lib/round.js";
 import { getStore } from "../compat/blobs.js";
 
 /**
@@ -458,7 +458,9 @@ export default async (req: Request, by = "Import new files") => {
     // and the upload take, for its own turn - never two writers at once.
     const lease = await takeLease(who);
     if (!lease) {
-      return Response.json({ error: "The hourly round is writing the workbook; try again in a minute." }, { status: 409 });
+      // Names the holder - the hour or a person's round - and promises no
+      // time: the same sentence every writer of the workbook answers with.
+      return Response.json({ error: writingTheWorkbook(await leaseHolder()) }, { status: 409 });
     }
     try {
       return Response.json(await runSync(who));

@@ -1053,8 +1053,15 @@ test("Update portal takes the lease for its turn and gives it back; while somebo
   portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "the round on the hour", token: "x" }));
   const held = await sync(post());
   assert.equal(held.status, 409);
-  assert.match(((await held.json()) as { error: string }).error, /try again in a minute/);
+  assert.equal(((await held.json()) as { error: string }).error, "The round on the hour is writing the workbook; try again when it has finished.", "names the holder, promises no time");
   assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).by, "the round on the hour", "the hour's lease is untouched");
+
+  // The holder may be a person's round from the page, not the hour: the
+  // sentence names them, never the hour.
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "matthew", token: "x" }));
+  const theirs = await sync(post());
+  assert.equal(theirs.status, 409);
+  assert.equal(((await theirs.json()) as { error: string }).error, "Matthew is writing the workbook; try again when it has finished.");
 });
 
 test("the workbook upload takes the lease too, and is refused while somebody holds it", async () => {
@@ -1070,6 +1077,7 @@ test("the workbook upload takes the lease too, and is refused while somebody hol
   portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "the round on the hour", token: "x" }));
   const held = await files(upload());
   assert.equal(held.status, 409);
+  assert.equal(((await held.json()) as { error: string }).error, "The round on the hour is writing the workbook; try again when it has finished.", "the same sentence as every other writer: the holder named, no time promised");
   assert.equal(bucket.text("opms/20260930 - CREW QUALIFICATION EXPIRY.xlsx"), null, "nothing was written");
 
   portal.blobs.set("sync|round-lease", JSON.stringify({ until: 0, by: "the round on the hour", token: "x" }));
@@ -1632,17 +1640,58 @@ test("with no name sent and nobody signed in, the round is the page's", async ()
   assert.equal(JSON.parse(portal.blobs.get("sync|last-hourly")!).by, "the page");
 });
 
-test("GET /api/round/progress answers the last word and whether the lease is held", async () => {
+test("GET /api/round/progress answers the last word, whether the lease is held, and by whom", async () => {
   const { portal } = await oneManPortal();
-  assert.deepEqual(await progressAnswer(), { pct: 0, word: "No round has run yet", done: true, running: false });
+  assert.deepEqual(await progressAnswer(), { pct: 0, word: "No round has run yet", done: true, running: false, holder: null });
+
+  // Asked mid-round - as the 60 word lands - the answer says the lease is
+  // held under the record's own `by`. That, not `running` alone, is how a
+  // page tells its round's lease from one the hour took after it died.
+  const plain = portal.db.prepare;
+  const seen = { midRound: null as Record<string, unknown> | null };
+  portal.db.prepare = (sql: string) => {
+    const s = plain(sql);
+    if (!/^(INSERT INTO|UPDATE) blobs/.test(sql)) return s;
+    const bind = s.bind;
+    s.bind = (...a: unknown[]) => {
+      const b = bind(...a);
+      if (a[1] !== "round-progress" || (JSON.parse(String(a[2])) as { pct: number }).pct !== 60) return b;
+      const run = b.run.bind(b);
+      b.run = async () => {
+        const out = await run();
+        portal.db.prepare = plain;
+        seen.midRound = await progressAnswer();
+        return out;
+      };
+      return b;
+    };
+    return s;
+  };
   await postRound({ by: "Matthew" });
+  portal.db.prepare = plain;
+  const midRound = seen.midRound;
+  assert.ok(midRound, "the 60 word was said");
+  assert.equal(midRound.running, true);
+  assert.equal(midRound.holder, "Matthew", "the lease is held under the record's by");
+  assert.equal(midRound.by, "Matthew");
+  assert.equal(midRound.done, false);
+
   const after = await progressAnswer();
   assert.equal(after.pct, 100);
   assert.equal(after.done, true);
   assert.equal(after.by, "Matthew");
   assert.equal(after.running, false);
+  assert.equal(after.holder, null, "the round dropped its lease: nobody holds it");
   assert.equal(typeof after.runId, "string", "a runId of the server's own when the page sent none");
   assert.equal(portal.blobs.has("sync|round-progress"), true);
+
+  // The hour taking the lease after a page's round died: running is true,
+  // but the holder is not the record's by - the page's rule calls it dead.
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "the round on the hour", token: "x" }));
+  const hours = await progressAnswer();
+  assert.equal(hours.running, true);
+  assert.equal(hours.holder, "the round on the hour");
+  assert.equal(hours.by, "Matthew", "the record is still the page's round's");
 });
 
 test("a workbook the server cannot write is on the record as a skipped round, so the open tab writes it", async () => {
@@ -1794,7 +1843,7 @@ test("the office's own file is never renamed, and nothing is renamed while the h
   setEnv({ DB: heldDb, FILES: bucket, FILE_STORE: "r2" } as never);
   const held = await renameTo("tm1", "20260924 - CREW QUALIFICATION EXPIRY.xlsx");
   assert.equal(held.status, 409);
-  assert.match(((await held.json()) as { error: string }).error, /try again in a minute/);
+  assert.equal(((await held.json()) as { error: string }).error, "The round on the hour is writing the workbook; try again when it has finished.", "names the holder, promises no time");
   assert.deepEqual(bucket.keys(), [theirs], "nothing moved either time");
   assert.deepEqual(writes(heldDb), [], "nothing on the books changed");
   assert.deepEqual(leaseWrites(heldDb), [], "and the hour's lease was not touched");
@@ -1948,7 +1997,9 @@ test("Import from SharePoint over the portal's own dated copy parks it flat, and
   await bucket.put(loose, bytesOf("dropped in by hand"));
   portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "the round on the hour", token: "x" }));
   const before = portal.db.asked.length;
-  assert.equal((await importFrom(loose)).status, 409, "refused while the lease stands");
+  const refused = await importFrom(loose);
+  assert.equal(refused.status, 409, "refused while the lease stands");
+  assert.equal(((await refused.json()) as { error: string }).error, "The round on the hour is writing the workbook; try again when it has finished.", "names the holder, promises no time");
   assert.equal(portal.rows.find((r) => r.id === "tm1")!.removedAt, null, "nothing stepped down");
   assert.ok(!portal.db.asked.slice(before).some((a) => /^(UPDATE|INSERT)/.test(a.sql)), "nothing written at all");
   assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).by, "the round on the hour", "the hour's lease is untouched");

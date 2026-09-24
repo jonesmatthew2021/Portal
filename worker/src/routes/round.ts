@@ -1,7 +1,8 @@
 import type { PortalUser } from "../auth.js";
 import { getStore } from "../compat/blobs.js";
 import {
-  dropLease, keepEquivalences, keepValidityRules, roundRunning, runMatrixRound, takeLease, validityRulesHeld, type Lease,
+  dropLease, keepEquivalences, keepValidityRules, leaseHolder, roundRunning, runMatrixRound, takeLease, validityRulesHeld,
+  writingTheWorkbook,
 } from "../lib/round.js";
 import { recordHourly } from "./sync.js";
 
@@ -39,9 +40,13 @@ import { recordHourly } from "./sync.js";
  *     wait for it runs out;
  *   - the progress record carries the page's own runId and stays done:false
  *     until the round says otherwise. A page treats a record that is not
- *     done while `running` is false as dead (the lease lapses at
- *     LEASE_FOR_MS) - never by the age of `at`, because the workbook step
- *     between 85 and 100 can take longer than any word is fresh for.
+ *     done as dead once the lease is no longer held under the record's
+ *     `by` (`running` false, or `holder` another name - the hour can take
+ *     a lapsed lease within fifteen seconds and hold it for twelve
+ *     minutes); the lease lapses at LEASE_FOR_MS. Never by the age of
+ *     `at`, because the workbook step between 75 and 100 (the rewrite,
+ *     then the replace in the library) can take longer than any word is
+ *     fresh for.
  */
 const PROGRESS_KEY = "round-progress";
 export const BUDGET_MS = 2 * 60 * 1000;
@@ -66,21 +71,17 @@ async function sayRound(pct: number, word: string, extra: Record<string, unknown
 export const roundProgress = () => getStore("sync").get(PROGRESS_KEY, { type: "json" });
 
 /** What GET /api/round/progress answers: the last progress record, or the
- *  word that none has run, and whether anybody holds the lease right now.
+ *  word that none has run, whether anybody holds the lease right now, and
+ *  who. `holder` is what tells a page its own round's lease from one the
+ *  hour took after that round died: `running` alone is true for either.
  *  The record is never called dead here; the page matches its runId. */
 export async function progressAnswer(): Promise<Record<string, unknown>> {
   const rec = (await roundProgress().catch(() => null)) as Record<string, unknown> | null;
   return {
     ...(rec ?? { pct: 0, word: "No round has run yet", done: true }),
     running: await roundRunning().catch(() => false),
+    holder: await leaseHolder().catch(() => null),
   };
-}
-
-/** Whose lease stands, for a 409 that says who to wait for. */
-async function leaseHolder(): Promise<string | null> {
-  const held = await getStore("sync").getWithMetadata("round-lease", { type: "json" }).catch(() => null);
-  const lease = held ? (held.data as Lease | null) : null;
-  return lease && lease.until > Date.now() ? lease.by : null;
 }
 
 /** The rules kept, without the lease: nothing here writes the workbook. */
@@ -125,14 +126,11 @@ export default async function round(
 
   const lease = await takeLease(who, undefined, LEASE_FOR_MS);
   if (!lease) {
-    // The page shows this string as it is: a sentence, and no promise of
-    // a minute - the hour holds the lease for up to nine plus its write.
+    // The same sentence every writer of the workbook answers with, naming
+    // the holder (writingTheWorkbook in lib/round.ts); `who` above is the
+    // caller, `holder` is who they wait for.
     const holder = await leaseHolder();
-    const who = holder ? holder[0].toUpperCase() + holder.slice(1) : "Another round";
-    return Response.json(
-      { error: `${who} is writing the workbook; try again when it has finished.`, by: holder, runId },
-      { status: 409 },
-    );
+    return Response.json({ error: writingTheWorkbook(holder), by: holder, runId }, { status: 409 });
   }
   const work = (async () => {
     const t0 = Date.now();

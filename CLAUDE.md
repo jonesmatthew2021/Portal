@@ -130,9 +130,13 @@ modules. Edit that code there and only there.
   the request cancelled, so that round takes the lease for four minutes,
   not fifteen (two of them for a workbook write in flight past the
   budget), and the page matches its progress by the `runId` it sent. A
-  page treats a record that is not done while `running` is false as dead
-  (the lease lapses at `LEASE_FOR_MS`) - never by the age of the last
-  word, because the workbook step can outlast any of them.
+  page treats a record that is not done as dead once the lease is no
+  longer held under the record's `by` (`running` false, or `holder`
+  another name - the hour can take a lapsed lease and hold it for twelve
+  minutes); the lease lapses at `LEASE_FOR_MS`. Never by the age of the
+  last word, because the workbook step can outlast any of them. Every
+  writer of the workbook refused for the lease answers 409 with the one
+  sentence (`writingTheWorkbook`), naming the holder (`leaseHolder`).
   The hour's own work stops starting things nine minutes after its lease
   or twelve after the tick, whichever is first (`hourDeadline`). The
   Equivalence sheet is never kept as an empty table, and is read again

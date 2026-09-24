@@ -17,7 +17,7 @@ import {
   withSuffix,
 } from "../db/documents.js";
 import { replaceSingleFile } from "../db/single-file.js";
-import { takeLease, dropLease } from "../lib/round.js";
+import { takeLease, dropLease, leaseHolder, writingTheWorkbook } from "../lib/round.js";
 
 // A function request body is capped at 6 MB once multipart overhead is counted,
 // so files are held a little under that. The portal enforces the same number.
@@ -406,10 +406,9 @@ async function uploadSingleFile(form: FormData, file: File, category: string) {
   // that is held.
   const lease = await takeLease(field(form, "uploadedBy") || "an upload");
   if (!lease) {
-    return Response.json(
-      { error: "The hourly round is writing the workbook; try again in a minute." },
-      { status: 409 },
-    );
+    // Names the holder - the hour or a person's round - and promises no
+    // time: the same sentence every writer of the workbook answers with.
+    return Response.json({ error: writingTheWorkbook(await leaseHolder()) }, { status: 409 });
   }
 
   try {

@@ -1,7 +1,7 @@
 import type { PortalUser } from "../auth.js";
 import { getEnv } from "../env.js";
 import { fileStore } from "../files/store.js";
-import { takeLease, dropLease } from "../lib/round.js";
+import { takeLease, dropLease, leaseHolder, writingTheWorkbook } from "../lib/round.js";
 
 /**
  * POST /api/rename-file { id, to } — a filed document given a new name.
@@ -68,7 +68,9 @@ export default async (req: Request, actor: PortalUser): Promise<Response> => {
   // turn, and stands aside while somebody holds it.
   const lease = await takeLease(actor.name || actor.email || "a rename");
   if (!lease) {
-    return Response.json({ error: "The hourly round is writing the workbook; try again in a minute." }, { status: 409 });
+    // Names the holder - the hour or a person's round - and promises no
+    // time: the same sentence every writer of the workbook answers with.
+    return Response.json({ error: writingTheWorkbook(await leaseHolder()) }, { status: 409 });
   }
   const changed = () => Response.json({ error: "That document has changed; reload and try again." }, { status: 409 });
   try {
