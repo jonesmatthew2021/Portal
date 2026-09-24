@@ -926,7 +926,7 @@ async function toolAnalysisAnswers(input: Record<string, unknown>): Promise<Tool
       text: capped(
         `The certificate standing — what is in force for each person and matrix item, worked out just now from the readings the portal holds. ${worked.dates.length} ${
           worked.dates.length === 1 ? "line" : "lines"
-        }. Where two certificates claim the same item, the one that runs the longer is the one shown. Today at the vessel is ${todayThere()}.\n\n${lines.join("\n")}`,
+        }. Where two certificates claim the same item, the one that runs the longer is the one shown - except a medical, where the one issued last governs whatever it prints (MO76 s 16(3)), and a certificate of recognition, which holds the item and takes the earlier of its own date and the foreign certificate's (MO70 s 33(2), s 37(4)). A line can also come from a column a certificate covers rather than one of its own. Today at the vessel is ${todayThere()}.\n\n${lines.join("\n")}`,
       ),
     };
   }
