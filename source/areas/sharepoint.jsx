@@ -100,7 +100,9 @@ function SharePointPage() {
     const b = listing && listing.lastBackup;
     if (!b) return null;
     const when = new Date(b.at).toLocaleString("en-AU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
-    if (b.error) return { bad: true, text: "Backup " + when + " failed: " + b.error + (b.day ? " (last one landed " + b.day + ")" : "") };
+    // The day it last landed, said the way the rest of the line says days.
+    const landed = b.day ? new Date(b.day + "T00:00:00").toLocaleDateString("en-AU", { day: "2-digit", month: "short" }) : "";
+    if (b.error) return { bad: true, text: "Backup " + when + " failed: " + b.error + (landed ? " (last one landed " + landed + ")" : "") };
     return { bad: false, text: "Last backup " + when + ", " + fmtBytes(b.bytes) };
   };
   const fmtWhen = (s) => !s ? "" :

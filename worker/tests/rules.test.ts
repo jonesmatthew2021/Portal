@@ -12,6 +12,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { equivalentCode, codeFor, ModelRefusal, plainLine, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM } from "../src/lib/analysis.js";
+import { AI_BUSY, checkerRefusalLine } from "../src/lib/checker.js";
 import { crewFolderIn, looseIn, whoseFolder } from "../src/routes/sync.js";
 import { asKey } from "../src/db/cert-home.js";
 import { setEnv } from "../src/env.js";
@@ -275,6 +276,40 @@ test("an answer the portal cannot read is other, and other is never stored", () 
   assert.equal(e.kind, "other");
   assert.equal(plainLine(e), e.message);
   assert.equal(new ModelRefusal(400, api("not_found_error", "model: no such model")).kind, "other");
+});
+
+test("a 400 about the portal's own request, or the account, is never about the document", () => {
+  // The day the API stops taking a parameter the portal sends, the answer
+  // is a 400 invalid_request_error naming that field - and stored as the
+  // document's fault it would be written against every certificate in
+  // the batch, needing a paid re-read to undo.
+  const other = (message: string) => assert.equal(new ModelRefusal(400, api("invalid_request_error", message)).kind, "other", message);
+  other("thinking.type: adaptive is not supported");
+  other("model: claude-x is not a valid model");
+  other("output_config.effort: unknown value");
+  other("max_tokens: must be at least 1");
+  other("Your organization has been disabled.");
+  // While the document's own troubles are, field or no field.
+  const doc = (message: string) => assert.equal(new ModelRefusal(400, api("invalid_request_error", message)).kind, "document", message);
+  doc("messages.0.content.0.pdf.source.base64.data: The PDF specified was not valid.");
+  doc("messages.0.content.0.image.source.base64: image exceeds 5 MB maximum");
+  doc("prompt is too long: 250000 tokens > 200000 maximum");
+  doc("Could not process image");
+});
+
+test("the account's other words for no credit are credit too", () => {
+  for (const message of ["You have exceeded your usage limit.", "Insufficient funds on this account.", "Your organization's quota has been reached.", "Payment required."]) {
+    assert.equal(new ModelRefusal(400, api("invalid_request_error", message)).kind, "credit", message);
+  }
+});
+
+test("the AI Checker says what is true on its screen: nothing asks its question again by itself", () => {
+  assert.equal(checkerRefusalLine(new ModelRefusal(529, api("overloaded_error", "Overloaded"))), AI_BUSY);
+  assert.equal(checkerRefusalLine(new ModelRefusal(429, api("rate_limit_error", "This request would exceed the rate limit of 50 requests per minute."))), AI_BUSY);
+  assert.equal(checkerRefusalLine(new ModelRefusal(400, api("invalid_request_error", "Your credit balance is too low to access the Anthropic API."))), OUT_OF_CREDIT);
+  assert.equal(checkerRefusalLine(new ModelRefusal(401, api("authentication_error", "invalid x-api-key"))), KEY_PROBLEM);
+  assert.equal(checkerRefusalLine(new ModelRefusal(400, api("invalid_request_error", "messages.0.content.1.document: the file is too large"))), "The AI turned the question away (400). the file is too large");
+  assert.ok(AI_BUSY.length <= 60);
 });
 
 test("every shared sentence fits the badge whole", () => {

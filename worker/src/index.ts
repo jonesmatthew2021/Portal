@@ -186,7 +186,7 @@ export default {
     // Whatever happens below is written down: the counts on a good hour,
     // the error on a bad one. A round that fails in silence is how the
     // matrix once sat empty for three hours with nobody told.
-    const outcome = { read: 0, refiled: 0, syncError: null as string | null, readError: null as string | null, readStopped: null as string | null };
+    const outcome = { read: 0, refiled: 0, syncError: null as string | null, readError: null as string | null, readStopped: null as string | null, readTried: false };
     const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
     const written = async (round: Record<string, unknown>) => {
       try {
@@ -279,7 +279,7 @@ export const hourDeadline = (tick: number, leaseAt: number) =>
  */
 async function theHour(
   env: PortalEnv, lease: Lease, deadline: number,
-  outcome: { read: number; refiled: number; syncError: string | null; readError: string | null; readStopped: string | null },
+  outcome: { read: number; refiled: number; syncError: string | null; readError: string | null; readStopped: string | null; readTried: boolean },
   written: (round: Record<string, unknown>) => Promise<void>,
 ): Promise<Record<string, unknown>> {
   const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -355,6 +355,11 @@ async function theHour(
         let stalled = 0;
         let batches = 0;
         while (loopsLeft() && batches++ < MAX_EXTRACT_BATCHES) {
+          // The hour put certificates to the model: only such an hour,
+          // finishing with no reading error, says the account is in order
+          // again (the page takes its red line down on it). An hour that
+          // stood down for a lease, or had nothing to read, says nothing.
+          outcome.readTried = true;
           const out = (await (await extract(codes, 4)).json()) as {
             remaining: number; attempted: number; extracted: number;
             stopped: { kind: string; line: string } | null;

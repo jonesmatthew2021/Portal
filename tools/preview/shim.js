@@ -76,13 +76,13 @@
     const at = new Date(); at.setHours(2, 10, 0, 0);
     return flag("backup") === "missing"
       ? { day: null, at: at.getTime(), name: null, bytes: 0, rev: null, counts: {},
-        error: "the folder United Operations Team/Backups is not in the library; make it in Teams" }
+        error: "the folder United Operations Team/Backups is not in the library" }
       : { day: todayISO(), at: at.getTime(), name: "Crew Portal backup " + todayISO() + ".json", bytes: 3251200,
         rev: mem.rev, counts: { documents: mem.rows.length, users: 12, readings: 900, fauna: 3 }, error: null };
   };
   const fakeHourly = () => ({
     at: Date.now() - 20 * 60000, durationMs: 41000, read: 0, refiled: 0, syncError: null,
-    readError: flag("hourly") === "credit" ? OUT_OF_CREDIT : null, readStopped: null,
+    readError: flag("hourly") === "credit" ? OUT_OF_CREDIT : null, readStopped: null, readTried: true,
     applied: 0, cleared: 0, written: 0, workbook: null, leftAsTyped: 0, held: null,
     roundError: null, roundSkipped: null, workbookProblem: null, validityProblem: null, equivalenceProblem: null,
   });

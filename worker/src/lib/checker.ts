@@ -692,6 +692,21 @@ function markCache(messages: Wire[]) {
  * and bill for it; a failure that is written down is one the browser can show
  * and whoever asked can act on.
  */
+/** The model was busy or over its rate. Nothing asks the checker's
+ *  question again by itself - the hour re-reads certificates, not this -
+ *  so the shared "tried again next hour" line would not be true here. */
+export const AI_BUSY = "The AI is busy — ask again in a minute";
+
+/** The one line the checker says for a refusal: no credit and a refused
+ *  key in the same sentence as everywhere else (plainLine), a busy model
+ *  in this screen's own, and a question the model turned away as it was. */
+export function checkerRefusalLine(refusal: ModelRefusal): string {
+  if (refusal.kind === "credit" || refusal.kind === "key") return plainLine(refusal);
+  if (refusal.kind === "rate" || refusal.kind === "busy") return AI_BUSY;
+  const said = refusalSays(refusal);
+  return `The AI turned the question away (${refusal.status}).${said ? ` ${said}` : ""}`;
+}
+
 export async function runCheckerJob(id: string) {
   const store = jobStore();
 
@@ -947,7 +962,6 @@ export async function runCheckerJob(id: string) {
       if (!upstream.ok || !upstream.body) {
         const detail = await upstream.text().catch(() => "");
         const refusal = new ModelRefusal(upstream.status, detail);
-        const refused = refusalSays(refusal);
         console.error(`ai-checker job ${id}: the AI turned the question away on round ${round} (${upstream.status}).`);
         if (text.trim()) {
           await finish({
@@ -956,16 +970,7 @@ export async function runCheckerJob(id: string) {
           });
           return;
         }
-        // The account's own troubles - no credit, the rate, the model busy,
-        // the key refused - are said in the same short sentence everywhere
-        // (plainLine); a question the model turned away is said as it was.
-        const aboutTheAccount = refusal.kind === "credit" || refusal.kind === "rate" || refusal.kind === "busy" || refusal.kind === "key";
-        await finish({
-          state: "error",
-          error: aboutTheAccount
-            ? plainLine(refusal)
-            : `The AI turned the question away (${upstream.status}).${refused ? ` ${refused}` : ""}`,
-        });
+        await finish({ state: "error", error: checkerRefusalLine(refusal) });
         return;
       }
 

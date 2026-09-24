@@ -389,6 +389,11 @@ export type HourlyRecord = {
    *  model busy or over its rate - and will try again next hour. An aside,
    *  not an error. */
   readStopped?: string | null;
+  /** Whether the hour put certificates to the model at all. An hour that
+   *  did, and ends with no readError, is the account in order; one that
+   *  stood down for a held lease or had nothing to read says nothing
+   *  about the account, and the page's red line stays up on it. */
+  readTried?: boolean;
   // The round's own outcome (lib/round.ts), spread in when it ran.
   applied?: number;
   cleared?: number;

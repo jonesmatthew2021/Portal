@@ -11950,7 +11950,11 @@ function missesInARow(before, wants, last) {
    finished with no reading error on its record. `errAt` is when the line
    went up (ms); `last` is the portal's answer to /api/sync/last. An hour
    writes its record twice, once before its reading with the round "not
-   yet run", so only the finished record counts. */
+   yet run", so only the finished record counts - and only an hour that
+   put certificates to the model (readTried): one that stood down for a
+   held lease, could not start, or had nothing to read says nothing about
+   the account, and would otherwise take the line down while it is still
+   out of credit. */
 function badgeShouldClear(err, errAt, last) {
   if (!err) return false;
   const h = last && last.hourly;
@@ -11958,6 +11962,7 @@ function badgeShouldClear(err, errAt, last) {
   const at = typeof h.at === "number" ? h.at : Date.parse(h.at);
   if (isNaN(at) || !(at > (errAt || 0))) return false;
   if (h.roundSkipped === "round not yet run") return false;
+  if (h.readTried !== true) return false;
   return h.readError == null;
 }
 
@@ -12045,7 +12050,9 @@ function UpdateDocumentation() {
         // person's press are told apart on the lease and in the log.
         setStep("Reading the certificates and updating the matrix");
         const run = await runMatrixRound({ origin: "portal", by: asked ? "Update portal" : "the round on the hour" });
-        if (run && run.phase === "failed" && run.message) roundStopped = run.message;
+        // Only the account's three lines stay up under the button; any
+        // other failure was said in the round's window and ends with it.
+        if (run && run.phase === "failed" && [OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM].includes(run.message)) roundStopped = run.message;
       } else {
         setStep("");
       }

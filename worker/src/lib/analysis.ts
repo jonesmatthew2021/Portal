@@ -371,14 +371,13 @@ async function readStream(res: Response) {
           stop = event.delta.stop_reason;
         } else if (event.type === "error") {
           // The model can turn the call away partway, on the stream itself:
-          // overloaded, a rate limit, its own fault. Those are the same
-          // answers a status would have given, so they go the same way -
-          // a refusal, sorted in one place - rather than a plain error that
-          // reads as unreadable.
-          const kind = event.error?.type;
-          refused = kind === "overloaded_error" || kind === "api_error" || kind === "rate_limit_error"
-            ? new ModelRefusal(kind === "rate_limit_error" ? 429 : 529, JSON.stringify(event))
-            : new Error(event.error?.message || "The model stopped partway through its answer.");
+          // overloaded, a rate limit, the account, the key, its own fault.
+          // Those are the same answers a status would have given, so every
+          // one goes the same way - a refusal, sorted in one place by the
+          // status its type stands for - rather than a plain error that
+          // reads as unreadable, or one the hour cannot see is about the
+          // account.
+          refused = new ModelRefusal(STREAM_ERROR_STATUS[event.error?.type || ""] ?? 529, JSON.stringify(event));
           break reading;
         }
       }
@@ -390,9 +389,22 @@ async function readStream(res: Response) {
     broke = true;
   }
 
+  // A refusal from the model is the end of the reading whatever had come
+  // down the wire before it: a reading cut by the model's own no is not a
+  // reading, and stored as one it would stand as the truth about the
+  // certificate. The connection going, or the time running out, is
+  // different - what had arrived by then is kept.
+  if (refused instanceof ModelRefusal) throw refused;
   if (!text && refused) throw refused;
   return { text, stop, broke: broke || !!refused };
 }
+
+/** The status each of the API's error types would have worn as an
+ *  answer, for an error that arrives on the stream instead. */
+const STREAM_ERROR_STATUS: Record<string, number> = {
+  invalid_request_error: 400, authentication_error: 401, billing_error: 402, permission_error: 403,
+  not_found_error: 404, rate_limit_error: 429, api_error: 500, overloaded_error: 529,
+};
 
 /**
  * What a refusal is about, sorted once, here, for everything that reads.
@@ -422,12 +434,31 @@ export function refusalKind(status: number, detail: string): RefusalKind {
   }
   const type = typeof parsed?.error?.type === "string" ? parsed.error.type : "";
   const message = typeof parsed?.error?.message === "string" ? parsed.error.message : "";
-  if (type === "billing_error" || /credit balance|spend limit|purchase credits|billing/i.test(message)) return "credit";
+  if (type === "billing_error" || /credit balance|spend limit|purchase credits|billing|quota|payment|insufficient funds|usage limit/i.test(message)) return "credit";
   if (status === 429) return "rate";
   if (status === 529 || status >= 500) return "busy";
   if (status === 401 || status === 403) return "key";
-  if (status === 400 && parsed && type === "invalid_request_error") return "document";
+  if (status === 400 && parsed && type === "invalid_request_error" && aboutTheDocument(message)) return "document";
   return "other";
+}
+
+/**
+ * Whether a 400 is about the document that was sent, as against the
+ * request around it. invalid_request_error is the API's word for anything
+ * wrong with a request, and "document" is the only kind ever stored
+ * against a certificate for good, so the message has to say so. One that
+ * leads with the field it is about - "messages.0.content.0.pdf.source.
+ * base64.data: The PDF specified was not valid." - is about the document
+ * only when the field is in the messages; "thinking.type: ..." or
+ * "model: ..." is the portal's own request, the day the API changes under
+ * it, and would otherwise be written down against every certificate in
+ * the batch. One with no field is about the document only when it names
+ * it - a PDF, an image, too long.
+ */
+function aboutTheDocument(message: string): boolean {
+  const field = /^([\w.[\]-]+):\s/.exec(message)?.[1] || "";
+  if (field) return field.startsWith("messages.");
+  return /\b(pdf|image|document|media|base64|too long|exceeds|could not (be )?process)/i.test(message);
 }
 
 /**
@@ -546,7 +577,11 @@ export async function askJson(opts: {
     let res = await send();
     // One retry, and only for the two answers that mean "ask me again": the
     // account's tokens-per-minute ceiling, and the provider having a moment.
+    // Sorted before it is asked again, though: a spend limit wears a 429
+    // too, and a call after the account has said no is a call for nothing.
     if (res.status === 429 || res.status >= 500) {
+      const detail = await res.text().catch(() => "");
+      if (refusalKind(res.status, detail) === "credit") throw new ModelRefusal(res.status, detail);
       await new Promise((r) => setTimeout(r, 1500));
       res = await send();
     }
