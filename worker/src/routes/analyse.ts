@@ -232,8 +232,12 @@ be wrong. Report what the document itself says.`;
 const MAX_LISTED = 20;
 const MAX_ENDORSEMENT_CHARS = 90;
 const MAX_UNIT_CHARS = 24;
-/** The words a printed condition is kept to (the question asks for 20). */
+/** The words a printed condition is kept to (the question asks for 20), and
+ *  the characters, for an answer that came back as one unspaced block: the
+ *  words are the whole page and the word count would not catch it, and this
+ *  is the one place the batch puts a model's words on the screen. */
 const MAX_CONDITION_WORDS = 20;
+const MAX_CONDITION_CHARS = 200;
 
 /** The endorsements printed on a certificate, each as printed, with its own
  *  end date where the document prints one against it. A model answering with
@@ -286,11 +290,12 @@ function recognisesFrom(v: unknown, isRecognition: boolean) {
 /** A printed limitation, held to its first `MAX_CONDITION_WORDS` words: it
  *  is shown on the certificate viewer as printed, and a model that answered
  *  with the whole page must not fill the screen with it. */
-function conditionsFrom(v: unknown) {
+export function conditionsFrom(v: unknown) {
   const said = str(v);
   if (!said) return null;
   const words = said.split(/\s+/).filter(Boolean);
-  return words.length > MAX_CONDITION_WORDS ? words.slice(0, MAX_CONDITION_WORDS).join(" ") : said;
+  const kept = words.length > MAX_CONDITION_WORDS ? words.slice(0, MAX_CONDITION_WORDS).join(" ") : said;
+  return kept.slice(0, MAX_CONDITION_CHARS);
 }
 
 /** One of the five documents that stand in for a certificate, or null. */

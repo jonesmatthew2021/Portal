@@ -47,7 +47,7 @@ function bandFor(v) {
 }
 
 function Cell({ value, onOpen, missing, cover }) {
-  const b = bandWithCover(bandFor(value), cover);
+  const b = bandWithCover(bandFor(value), cover, missing);
   if (!b && missing) return (
     <div title="Required for this position — nothing on file" style={{
       background: T.bRedBg, color: T.bRed, border: `1px solid ${T.bRed}`, borderRadius: 2,
@@ -77,11 +77,14 @@ function Cell({ value, onOpen, missing, cover }) {
       </div>
     );
   }
+  /* With no date to show - a blank cell an issue letter carries, or an "N" -
+     the cell carries one word and the sentence is on the title: a 56-pixel
+     matrix cell is no place for "covered by issue-letter". */
   return (
     <div onClick={openable ? onOpen : undefined} title={b.key === "covered" ? b.text : undefined}
       style={{ background: b.bg, color: b.fg, borderRadius: 2, padding: "3px", minWidth: 56,
         fontFamily: T.mono, fontSize: 9.5, lineHeight: 1.25,
-        cursor: openable ? "pointer" : undefined }}>{b.text}</div>
+        cursor: openable ? "pointer" : undefined }}>{b.key === "covered" ? "Covered" : b.text}</div>
   );
 }
 
@@ -481,9 +484,15 @@ const coverLine = (cover) =>
 
 /* A cover never shows green: green would say the certificate is in date, and
    it is not. A red or missing cell that a paper carries takes the amber band
-   and says what carries it; anything already amber or green is left alone. */
-const bandWithCover = (band, cover) => {
+   and says what carries it; anything already amber or green is left alone.
+   A column the position does not have to hold is left hatched whatever paper
+   is on file: a cover on a cell nobody must hold is nothing to put on the
+   grid. `missing` is the cell the grid marks Missing - required for this
+   position with nothing on file - which is exactly the cell an issue letter
+   carries (MO505 s 12(2): no card yet). */
+const bandWithCover = (band, cover, missing) => {
   if (!cover) return band;
+  if (!band && !missing) return band;
   if (band && band.key !== "red" && band.key !== "not" && band.key !== "unknown") return band;
   return { key: "covered", fg: T.bOrange, bg: T.bOrangeBg, date: band && band.date, days: band && band.days,
     text: coverLine(cover), cover };

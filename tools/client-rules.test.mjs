@@ -2756,6 +2756,13 @@ const is = (got, want, what) => {
   is(green.key, "green");
   is(bandWithCover(green, cover), green, "a certificate still in date is left exactly as it was");
   is(bandWithCover(red, null), red, "and no paper, no change");
+  /* A column this position does not have to hold stays hatched whatever is on
+     file: a cover on a cell nobody must hold is nothing to put on the grid.
+     A required cell with nothing in it - the issue-letter case, MO505 s
+     12(2), where the card has not arrived - does take the cover. */
+  is(bandWithCover(null, cover, false), null, "not required for this position: left hatched");
+  is(bandWithCover(null, cover, true).key, "covered", "required with nothing on file: the paper carries it");
+  is(bandWithCover(null, cover, true).date, null, "and with no date to show, the sentence stays on the title");
 }
 
 if (failed) {

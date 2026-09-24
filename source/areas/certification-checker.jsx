@@ -10,7 +10,7 @@
  * holds what is only this section's. See tools/source.mjs.
  */
 function CertChecker({ query }) {
-  const { quals: QUALS, certDates, certificates, renewalMarks, people } = usePortal();
+  const { quals: QUALS, certDates, certificates, renewalMarks, people, skillsRequirements } = usePortal();
   const validityFor = useValidityLookup();
   const [own, setOwn] = useState("");
   const q = query != null ? query : own;
@@ -28,7 +28,7 @@ function CertChecker({ query }) {
   // nothing has been done about yet.
   const [onlyUntouched, setOnlyUntouched] = useState(false);
 
-  // A gap is anything held but not valid: expired, marked N, or unknown.
+  // A gap is a cell that has expired, is marked N, or nobody has answered.
   const gapsFor = (row) =>
     QUALS.cols.map((c, i) => ({ code: c[0], title: c[1], group: c[2], value: row[3][i], band: bandFor(row[3][i]) }))
       .filter((x) => x.band && (
@@ -109,13 +109,25 @@ function CertChecker({ query }) {
     const held = {};
     QUALS.cols.forEach((c, i) => { held[c[0]] = row[3][i]; });
 
+    /* Which columns this position has to hold, for the cover lines below: a
+       paper carrying a column nobody in this seat must hold is nothing to put
+       on the management list. With no skills matrix read there is nothing to
+       ask, so a blank cell says nothing either way - the same as the grid,
+       which marks no cell Missing without it. */
+    const needs = requiredCodesFor(row[1], skillsRequirements);
+
     QUALS.cols.forEach((c) => {
       const d = certDateFor(certDates, row[0], c[0]);
       if (d && d.recognition && d.foreignUnknown) {
         out.push({ code: c[0], text: `${row[0]} — ${c[0]}: the certificate the recognition is for is not on the portal` });
       }
       const cover = certCoverFor(certDates, row[0], c[0]);
-      if (cover) out.push({ code: c[0], text: `${row[0]} — ${c[0]}: ${coverLine(cover)}` });
+      /* And only where there is something for it to carry: the same test the
+         cell itself uses (bandWithCover). A man whose certificate is current
+         with a spent letter still on file is nobody's work to do. */
+      const b = bandFor(held[c[0]]);
+      const carrying = b ? b.key === "red" || b.key === "not" || b.key === "unknown" : needs.has(c[0]);
+      if (cover && carrying) out.push({ code: c[0], text: `${row[0]} — ${c[0]}: ${coverLine(cover)}` });
     });
 
     medicalCodes.forEach((code) => {
@@ -189,7 +201,7 @@ function CertChecker({ query }) {
       + (inMotion ? ` · ${inMotion} in motion` : "")
       + (q ? ` · matching "${q}"` : ""),
     filename: `certification-gaps-${TODAY}.pdf`,
-    empty: "No gaps - everything on the matrix is valid.",
+    empty: "No gaps - nothing on the matrix is expired, missing or unconfirmed.",
     groups: printed.map(({ row, gaps }) => ({
       heading: row[0],
       meta: `${row[1]} · ${gaps.length} ${gaps.length === 1 ? "item" : "items"}`,
@@ -256,7 +268,7 @@ function CertChecker({ query }) {
 
       <div id="cert-gap-detail">
         {all.length === 0 ? (
-          <Empty>No gaps - everything on the matrix is valid.</Empty>
+          <Empty>No gaps - nothing on the matrix is expired, missing or unconfirmed.</Empty>
         ) : SECTIONS.map((s) => {
           const rows = listFor(s.key);
           return (

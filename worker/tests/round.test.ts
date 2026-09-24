@@ -14,7 +14,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setEnv } from "../src/env.js";
-import analyse, { compareMatrix, extract, refile, topUpParticulars } from "../src/routes/analyse.js";
+import analyse, { compareMatrix, conditionsFrom, extract, refile, topUpParticulars } from "../src/routes/analyse.js";
 import readOne from "../src/routes/read-one.js";
 import restoreFile from "../src/routes/restore-file.js";
 import { MAX_BYTES } from "../src/lib/shared-state.js";
@@ -2515,6 +2515,10 @@ test("a reading asks what else the certificate covers, whether it is a recogniti
     "what the recognition prints about the certificate behind it");
   assert.equal(second.assessedOn, null);
   assert.equal(second.conditions!.split(" ").length, 20, "a printed limitation is kept to twenty words");
+  // And to 200 characters, for an answer that came back as one unspaced
+  // block: one word, and the whole page would go on the viewer.
+  const third = { ...reading, conditions: "x".repeat(4000) };
+  assert.equal(conditionsFrom(third.conditions)!.length, 200, "and to two hundred characters, however few words it is");
   assert.equal(second.evidenceKind, "issue-letter", "however the model cased it");
   for (const r of [first, second]) {
     for (const key of ["endorsements", "units", "isRecognition", "recognises", "assessedOn", "conditions", "evidenceKind"]) {

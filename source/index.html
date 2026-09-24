@@ -4144,9 +4144,13 @@ const isELearningItem = (code, title) =>
 
 const ELEARNING_GROUPS = VESSEL.elearningGroups;
 
-// A module is done when it is marked held, or carries a date that has not passed.
+/* A module is done when it is marked held, or carries a date that has not
+   been reached. The day printed on it is the day it stops counting
+   (MO70 s 5(a)(iii)) - read through the one rule every list reads it
+   through, so E-Learning Status and the gaps list cannot call the same cell
+   different things on the day it runs out. */
 const moduleState = (x) => {
-  if (x.band.date) return daysTo(x.band.date) < 0 ? "overdue" : "done";
+  if (x.band.date) return hasExpired(x.band.date, TODAY) ? "overdue" : "done";
   if (x.band.key === "held") return "done";
   if (x.band.key === "not") return "outstanding";
   return "unconfirmed";
