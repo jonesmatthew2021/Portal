@@ -649,6 +649,40 @@ test("filed as: the hour puts the filed column on the matrix and in the office's
   assert.equal(portal.state.rev, rev, "no save on an unchanged hour");
 });
 
+test("on file, not on the matrix: a readable document with no column anywhere is listed, and nothing else is", async () => {
+  /* 214 documents on the live portal name no column at all - MRN contractor
+     inductions, psychosocial hazards, MHE quizzes - and the matrix has no
+     column for them. Whether any becomes a column is the office's call;
+     the list is so the call can be made. */
+  const { portal } = await oneManPortal({ filedAs: "QL-04" });
+  const scan = (id: string, filename: string, checksum: string) => ({
+    ...billysTicket, id, person: "bRENTON", filename, checksum, qualCode: null, blobKey: `opms/Brenton - OPMS/${filename}`,
+  });
+  portal.rows.push(
+    scan("hs", "MRN Marine Contractor HS.pdf", "hs"),
+    scan("hrw", "licence.pdf", "hrw"),
+    scan("blur", "blurry.pdf", "blur"),
+    scan("quiz", "MHE quiz.pdf", "quiz"),
+  );
+  const read = (over: Record<string, unknown>) => JSON.stringify({ ...reading, holderName: "Brenton Evans", qualCode: null, endorsements: [], units: [], capacities: [], ...over });
+  portal.blobs.set("certificate-readings|r1/hs.json", read({ certificateTitle: "MRN Marine Contractor H&S", expiresOn: "2027-01-01" }));
+  // A licence that covers a column of this matrix is on the matrix.
+  portal.blobs.set("certificate-readings|r1/hrw.json", read({ certificateTitle: "Licence to Perform High Risk Work", expiresOn: "2030-04-01", units: ["DG"] }));
+  portal.blobs.set("certificate-readings|r1/blur.json", JSON.stringify({ version: "r1", at: "", model: null, readable: false, reason: "too poor to read" }));
+  // Unread: nothing to say yet.
+  const doc = portal.doc();
+  doc.quals.cols.push(["HR-01", "Dogging (DG)", "High risk work"]);
+  doc.quals.rows[0][3].push("");
+  portal.state.data = JSON.stringify(doc);
+  const page = await certificateStanding();
+  assert.deepEqual(page.notOnMatrix, [{ person: "EVANS, Brenton", title: "MRN Marine Contractor H&S", filename: "MRN Marine Contractor HS.pdf", fileId: "hs" }],
+    "the induction alone: the filed QL-04 ticket, the covering licence, the unreadable scan and the unread quiz are not on the list");
+  assert.deepEqual(page.dates.map((d) => d.code).sort(), ["HR-01", "QL-04"]);
+  // A reading with no printed title lists the file by its name.
+  portal.blobs.set("certificate-readings|r1/hs.json", read({ certificateTitle: null, expiresOn: "2027-01-01" }));
+  assert.deepEqual((await certificateStanding()).notOnMatrix.map((x) => x.title), ["MRN Marine Contractor HS.pdf"]);
+});
+
 test("a workbook too big to rewrite on the server is a problem with the workbook, not a skipped round", async () => {
   /* The matrix still takes the date; the workbook is owed it, and the
      reason is said where the page can tell it from an hour that merely

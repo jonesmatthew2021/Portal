@@ -5359,7 +5359,15 @@ function Portal({ role, onSignOut }) {
         title: f.title || "", readsAs: f.readsAs || null,
         url: f.fileId ? `/api/files/${f.fileId}` : null,
       }));
-      setCertDates({ at: r.at || new Date().toISOString(), map, covers, filedAs });
+      /* The documents on file that no column places - no hand tag, no code
+         in the name, nothing the sheet or the model could put a column to,
+         and covering none. The matrix has no column for them; the list is so
+         the office can decide whether any should have one. */
+      const notOnMatrix = (r.notOnMatrix || []).map((f) => ({
+        person: known(f.person), title: f.title || f.filename || "",
+        url: f.fileId ? `/api/files/${f.fileId}` : null,
+      }));
+      setCertDates({ at: r.at || new Date().toISOString(), map, covers, filedAs, notOnMatrix });
       if (v) {
         setValidityPeriods({
           at: new Date().toISOString(),

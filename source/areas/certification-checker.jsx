@@ -99,6 +99,18 @@ function marineOrderLines(row, cols, dates, needs, person, todayISO, rules) {
   return out;
 }
 
+/* On file, not on the matrix: the documents the server found no column for
+   anywhere (certificateStanding's notOnMatrix), one line each - the person
+   and the certificate's title, or its filename where the reading printed
+   none - by person and then title. Pure, so the rule tests can hold it. */
+function notOnMatrixLines(dates) {
+  const listed = dates && Array.isArray(dates.notOnMatrix) ? dates.notOnMatrix : [];
+  return listed
+    .map((f) => ({ person: String(f.person || ""), title: String(f.title || ""), url: f.url || null }))
+    .sort((a, b) => a.person.localeCompare(b.person) || a.title.localeCompare(b.title))
+    .map((f) => ({ person: f.person, text: `${f.person} — ${f.title}`, url: f.url }));
+}
+
 function CertChecker({ query }) {
   const { quals: QUALS, certDates, certificates, renewalMarks, people, skillsRequirements } = usePortal();
   const validityFor = useValidityLookup();
@@ -198,6 +210,9 @@ function CertChecker({ query }) {
   );
   const orders = ordersAll.filter((x) => hits(x.row[0] + " " + x.row[1]));
   const ordersCount = orders.reduce((n, x) => n + x.lines.length, 0);
+
+  // The documents no column places, narrowed by the same box.
+  const onFile = useMemo(() => notOnMatrixLines(certDates), [certDates]).filter((l) => hits(l.person));
 
   // Every item whose certificate was issued by an authority that doesn't read
   // as Australian — valid or not, because the flag is about who issued it,
@@ -303,6 +318,24 @@ function CertChecker({ query }) {
                     person={row[0]} code={l.code} title={l.code} />
                 </div>
               ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* The documents on file that no column places: the heading and the
+          lines, and nothing else. Whether any becomes a column is the
+          office's decision. */}
+      {onFile.length > 0 && (
+        <div id="on-file-not-on-matrix" style={{ marginBottom: 26 }}>
+          <div style={{ borderTop: `2px solid ${T.accent}`, paddingTop: 9, marginBottom: 11 }}>
+            <Eyebrow color={T.text}>On file, not on the matrix — {onFile.length}</Eyebrow>
+          </div>
+          {onFile.map((l, i) => (
+            <div key={(l.url || "") + i} style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap",
+              padding: "4px 0 4px 4px", borderBottom: `1px solid ${T.rule}` }}>
+              <span style={{ fontFamily: T.body, fontSize: 13, color: T.text, flex: 1, minWidth: 240 }}>{l.text}</span>
+              {l.url && <OpenLink url={l.url} />}
             </div>
           ))}
         </div>

@@ -926,6 +926,12 @@ export async function certificateStanding() {
      it as something else: the filed column takes the date all the same, and
      Needs attention says so, one line each (filedAsFor says when). */
   const filedAs: { person: string; code: string; title: string; readsAs: string | null; fileId: string }[] = [];
+  /* The documents on file that no column places: read, readable, and with
+     no column from a hand tag, the filename, the sheet or the model, and
+     covering none either. The matrix has no column for them; whether any
+     becomes one is the office's call, and the list is so the call can be
+     made (Needs attention: "On file, not on the matrix"). */
+  const notOnMatrix: { person: string; title: string; filename: string; fileId: string }[] = [];
 
   const claim = new Map<
     string,
@@ -965,7 +971,6 @@ export async function certificateStanding() {
        it is, if any, is the one question paperKind answers: the kind the
        person picked, else a hand tag making it the certificate, else the
        reading's word (compareMatrix says why). */
-    if (paperKind(row, reading)) continue;
     const named = codeFor(row, reading, eqTable, cols);
     // A date typed against the certificate on the portal beats the model's
     // reading of the scan, same as in the comparison.
@@ -979,7 +984,16 @@ export async function certificateStanding() {
        typedOver). */
     const code = named && named.trim() ? named : null;
     const asDated = typed ? { ...reading, expiresOn: typed } : reading;
-    if (!code && !coveredCells(asDated, vessel.covers, vessel.qualColumns, null).some((c) => !!c.until)) continue;
+    if (!code && !coveredCells(asDated, vessel.covers, vessel.qualColumns, null).some((c) => !!c.until)) {
+      // Nothing places it and it covers nothing: on file, not on the matrix.
+      notOnMatrix.push({
+        person: register.nameOf(row.person) || row.person,
+        title: (reading.certificateTitle || "").trim() || row.filename,
+        filename: row.filename, fileId: row.id,
+      });
+      continue;
+    }
+    if (paperKind(row, reading)) continue;
     // AMSA recognises only the classes MO70 s 7(2)(b) lists, which leave out
     // the certificate of safety training and the marine cook certificate.
     if (code && isRecognitionReading(reading) && !recognitionFills(code, vessel.neverRecognised.codes)) continue;
@@ -1117,6 +1131,8 @@ export async function certificateStanding() {
     /* The filings the reading disagrees with, one line each on Needs
        attention: whose, which column, and what the model read it as. */
     filedAs,
+    /* The documents no column places, for the office to decide about. */
+    notOnMatrix,
     // `fileId` names the scan each line's dates were read from, so the
     // certification screens can put a link to the certificate itself on the line.
     dates: [...claim.entries()].map(([key, v]) => {

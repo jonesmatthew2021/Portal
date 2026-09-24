@@ -126,6 +126,11 @@
     medical: flag("medical") === "long",
     blocked: flag("blocked") === "1",
     covered: flag("covered") === "1",
+    /* ?filedas=1: a document the office filed under one column that the
+       model read as something else (the filed column takes the date, and
+       Needs attention says the two disagree), and two documents on file that
+       no column places at all. */
+    filedAs: flag("filedas") === "1",
   };
   const anyOrdersFlag = Object.values(ordersFlag).some(Boolean);
   const dayOff = (days) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
@@ -206,7 +211,22 @@
       dates.push(entry("QL-01", { expires: dayOff(-15), issued: dayOff(-1800) }));
       covers.push({ person, code: "QL-01", kind: "extension", until: dayOff(45), fileId: null });
     }
-    return { at: new Date().toISOString(), dates, covers };
+    /* ?filedas=1: his Chief Mate cell filled from a file the office named
+       for QL-02 that the model read as a course, and two of the scans on
+       file - his and the next man's - as documents no column places. */
+    const filedAs = [];
+    const notOnMatrix = [];
+    if (ordersFlag.filedAs) {
+      const scans = mem.rows.filter((r) => r.category === "certificate" && !r.removedAt);
+      dates.push(entry("QL-02", { expires: dayOff(700), issued: dayOff(-1100), fileId: scans[0] ? scans[0].id : null }));
+      filedAs.push({ person, code: "QL-02", title: "Chief Mate", readsAs: "Crew Intermediate course", fileId: scans[0] ? scans[0].id : null });
+      const other = (mem.data.people || []).find((p) => p && p.name && p !== ordersMan.person);
+      notOnMatrix.push(
+        { person, title: "MRN Marine Contractor H&S", filename: "contractor-hs.pdf", fileId: scans[1] ? scans[1].id : null },
+        { person: other ? other.name : person, title: "Psychosocial Hazards awareness", filename: "psychosocial.pdf", fileId: scans[2] ? scans[2].id : null },
+      );
+    }
+    return { at: new Date().toISOString(), dates, covers, filedAs, notOnMatrix };
   };
   const OUT_OF_CREDIT = "Out of credit — top it up at console.anthropic.com";
   /* ?offline=1: the four answers the service worker keeps come back the
