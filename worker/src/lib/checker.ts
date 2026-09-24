@@ -51,7 +51,7 @@
 
 import { getStore } from "../compat/blobs.js";
 import { getEnv } from "../env.js";
-import { MODEL, ModelRefusal, refusalSays } from "./analysis.js";
+import { MODEL, ModelRefusal, plainLine, refusalSays } from "./analysis.js";
 import { newReach, PORTAL_TOOLS, portalOverview, runPortalTool, stepFor } from "./portal.js";
 
 // Enough for a long answer without letting one question sit on the account's
@@ -946,7 +946,8 @@ export async function runCheckerJob(id: string) {
 
       if (!upstream.ok || !upstream.body) {
         const detail = await upstream.text().catch(() => "");
-        const refused = refusalSays(new ModelRefusal(upstream.status, detail));
+        const refusal = new ModelRefusal(upstream.status, detail);
+        const refused = refusalSays(refusal);
         console.error(`ai-checker job ${id}: the AI turned the question away on round ${round} (${upstream.status}).`);
         if (text.trim()) {
           await finish({
@@ -955,12 +956,15 @@ export async function runCheckerJob(id: string) {
           });
           return;
         }
+        // The account's own troubles - no credit, the rate, the model busy,
+        // the key refused - are said in the same short sentence everywhere
+        // (plainLine); a question the model turned away is said as it was.
+        const aboutTheAccount = refusal.kind === "credit" || refusal.kind === "rate" || refusal.kind === "busy" || refusal.kind === "key";
         await finish({
           state: "error",
-          error:
-            upstream.status === 429
-              ? "The AI has answered as much as it is allowed to for the moment. Wait a minute and ask again."
-              : `The AI turned the question away (${upstream.status}).${refused ? ` ${refused}` : ""}`,
+          error: aboutTheAccount
+            ? plainLine(refusal)
+            : `The AI turned the question away (${upstream.status}).${refused ? ` ${refused}` : ""}`,
         });
         return;
       }

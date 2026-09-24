@@ -20,6 +20,7 @@ import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
 import { fileStore } from "../db/documents.js";
 import { NO_EXPIRY_CODES as NO_EXPIRY_LIST } from "../../../source/shared/names.js";
+import { OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM } from "../../../source/shared/reading-lines.js";
 
 // Certificates are read with a vision model — most of them are scans rather than
 // text PDFs, and a scan of a 1998 certificate of competency is not something a
@@ -355,7 +356,7 @@ async function readStream(res: Response) {
         let event: {
           type?: string;
           delta?: { type?: string; text?: string; stop_reason?: string };
-          error?: { message?: string };
+          error?: { type?: string; message?: string };
         };
         try {
           event = JSON.parse(payload);
@@ -369,7 +370,15 @@ async function readStream(res: Response) {
         } else if (event.type === "message_delta" && event.delta?.stop_reason) {
           stop = event.delta.stop_reason;
         } else if (event.type === "error") {
-          refused = new Error(event.error?.message || "The model stopped partway through its answer.");
+          // The model can turn the call away partway, on the stream itself:
+          // overloaded, a rate limit, its own fault. Those are the same
+          // answers a status would have given, so they go the same way -
+          // a refusal, sorted in one place - rather than a plain error that
+          // reads as unreadable.
+          const kind = event.error?.type;
+          refused = kind === "overloaded_error" || kind === "api_error" || kind === "rate_limit_error"
+            ? new ModelRefusal(kind === "rate_limit_error" ? 429 : 529, JSON.stringify(event))
+            : new Error(event.error?.message || "The model stopped partway through its answer.");
           break reading;
         }
       }
@@ -386,21 +395,77 @@ async function readStream(res: Response) {
 }
 
 /**
- * The model's API saying no to the request itself, as opposed to being busy or
- * unreachable. It carries the status so a caller can tell the two apart: a 400
- * is about what was sent — an invalid document, most often — and the same
- * request gets the same answer every time it is made, so it is never worth
- * asking again.
+ * What a refusal is about, sorted once, here, for everything that reads.
+ *
+ *   credit    the account has no credit, or is over its spend limit
+ *   rate      too many calls a minute; the next hour is fine
+ *   busy      the model is overloaded or failing on its own side
+ *   key       the key was refused
+ *   document  the document itself was turned away - an invalid PDF, most
+ *             often - and the same file gets the same answer every time
+ *   other     nothing the portal recognises; nothing is ever stored for it
+ *
+ * The message is read before the status. "Your credit balance is too low"
+ * came back as a 400, the same status as a corrupted file, and once as a
+ * 429 - and read by status alone it was written down against 791
+ * certificates as a fact about the scans.
+ */
+export type RefusalKind = "credit" | "rate" | "busy" | "key" | "document" | "other";
+
+export function refusalKind(status: number, detail: string): RefusalKind {
+  let parsed: { error?: { type?: unknown; message?: unknown } } | null = null;
+  try {
+    const p = JSON.parse(detail) as unknown;
+    parsed = p && typeof p === "object" ? (p as { error?: { type?: unknown; message?: unknown } }) : null;
+  } catch {
+    parsed = null;
+  }
+  const type = typeof parsed?.error?.type === "string" ? parsed.error.type : "";
+  const message = typeof parsed?.error?.message === "string" ? parsed.error.message : "";
+  if (type === "billing_error" || /credit balance|spend limit|purchase credits|billing/i.test(message)) return "credit";
+  if (status === 429) return "rate";
+  if (status === 529 || status >= 500) return "busy";
+  if (status === 401 || status === 403) return "key";
+  if (status === 400 && parsed && type === "invalid_request_error") return "document";
+  return "other";
+}
+
+/**
+ * The model's API saying no to the request, as opposed to being unreachable.
+ * It carries the status and what the refusal is about (refusalKind), so a
+ * caller can tell a document that will never read from an account that
+ * will read it fine once it is in order.
  */
 export class ModelRefusal extends Error {
   status: number;
   detail: string;
+  kind: RefusalKind;
   constructor(status: number, detail: string) {
     super(`The model couldn't be reached (${status}). ${detail.slice(0, 200)}`.trim());
     this.status = status;
     this.detail = detail;
+    this.kind = refusalKind(status, detail);
   }
 }
+
+/**
+ * The one short sentence a refusal is shown as: the shared line for the
+ * account's kinds (source/shared/reading-lines.js, where the page reads
+ * them too), the API's own reason for a document it turned away, and the
+ * error as it stands for anything else.
+ */
+export function plainLine(e: ModelRefusal): string {
+  switch (e.kind) {
+    case "credit": return OUT_OF_CREDIT;
+    case "rate":
+    case "busy": return READING_UNAVAILABLE;
+    case "key": return KEY_PROBLEM;
+    case "document": return refusalSays(e) || e.message;
+    default: return e.message;
+  }
+}
+
+export { OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM };
 
 /**
  * What the API's refusal actually says, out of the JSON it arrives wrapped in.

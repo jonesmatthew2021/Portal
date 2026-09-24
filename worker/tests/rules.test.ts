@@ -11,7 +11,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { equivalentCode, codeFor } from "../src/lib/analysis.js";
+import { equivalentCode, codeFor, ModelRefusal, plainLine, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM } from "../src/lib/analysis.js";
 import { crewFolderIn, looseIn, whoseFolder } from "../src/routes/sync.js";
 import { asKey } from "../src/db/cert-home.js";
 import { setEnv } from "../src/env.js";
@@ -232,4 +232,52 @@ test("a folder inside the portal's own is a plain key, as it always was", () => 
 
 test("nothing picked is nothing set, and the portal keeps its own default", () => {
   assert.equal(asKey(""), "");
+});
+
+/* ------------------------------------------------------------------------ *
+ * What a refusal from the model is about, sorted once - the message read
+ * before the status. "Your credit balance is too low" came back as a 400,
+ * the same status as a corrupted file, and 791 certificates were written
+ * down as unreadable over a billing message. Nothing about the account is
+ * ever a fact about a scan.
+ * ------------------------------------------------------------------------ */
+const api = (type: string, message: string) => JSON.stringify({ type: "error", error: { type, message } });
+
+test("a credit-balance refusal is about credit whatever status it wears", () => {
+  const low = api("invalid_request_error", "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.");
+  const e = new ModelRefusal(400, low);
+  assert.equal(e.kind, "credit");
+  assert.equal(plainLine(e), OUT_OF_CREDIT);
+  assert.equal(new ModelRefusal(402, api("billing_error", "Payment required.")).kind, "credit");
+  assert.equal(new ModelRefusal(429, api("rate_limit_error", "You have reached your monthly spend limit.")).kind, "credit", "a spend limit is credit, not the rate");
+});
+
+test("the rate, a busy model and a refused key each have their sentence", () => {
+  const rate = new ModelRefusal(429, api("rate_limit_error", "This request would exceed the rate limit of 50 requests per minute."));
+  assert.equal(rate.kind, "rate");
+  assert.equal(plainLine(rate), READING_UNAVAILABLE);
+  assert.equal(new ModelRefusal(529, api("overloaded_error", "Overloaded")).kind, "busy");
+  assert.equal(new ModelRefusal(500, api("api_error", "An unexpected error has occurred internal to Anthropic's systems.")).kind, "busy");
+  assert.equal(plainLine(new ModelRefusal(529, api("overloaded_error", "Overloaded"))), READING_UNAVAILABLE);
+  assert.equal(new ModelRefusal(401, api("authentication_error", "invalid x-api-key")).kind, "key");
+  assert.equal(new ModelRefusal(403, api("permission_error", "Your API key does not have permission to use the specified resource.")).kind, "key");
+  assert.equal(plainLine(new ModelRefusal(401, api("authentication_error", "invalid x-api-key"))), KEY_PROBLEM);
+});
+
+test("a document the model turned away is about the document, said plainly", () => {
+  const e = new ModelRefusal(400, api("invalid_request_error", "messages.0.content.0.pdf.source.base64.data: The PDF specified was not valid."));
+  assert.equal(e.kind, "document");
+  assert.equal(plainLine(e), "The PDF specified was not valid.", "the field prefix is taken off");
+});
+
+test("an answer the portal cannot read is other, and other is never stored", () => {
+  const e = new ModelRefusal(400, "<html><body>Bad Request</body></html>");
+  assert.equal(e.kind, "other");
+  assert.equal(plainLine(e), e.message);
+  assert.equal(new ModelRefusal(400, api("not_found_error", "model: no such model")).kind, "other");
+});
+
+test("every shared sentence fits the badge whole", () => {
+  // The badge under Update portal shows the first 60 characters of an error.
+  for (const line of [OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM]) assert.ok(line.length <= 60, line);
 });
