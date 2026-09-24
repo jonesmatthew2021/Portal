@@ -300,8 +300,12 @@ function sharepointStore(): FileStore {
     },
     async hasFolder(key) {
       // One look at the item itself. Only an item that is a folder counts:
-      // a file of that name is not somewhere to write into.
-      const res = await graph(`/drives/${await driveId()}/root:/${encodePath(toReal(key))}`);
+      // a file of that name is not somewhere to write into. Translated as
+      // a folder, the way list does - the map is a map of folders, and
+      // "opms" without its slash matches none of them and lands inside
+      // the portal's own folder, where there is nothing.
+      const folder = toReal(key.replace(/\/+$/, "") + "/").replace(/\/+$/, "");
+      const res = await graph(`/drives/${await driveId()}/root:/${encodePath(folder)}`);
       if (res.status === 404) return null;
       if (!res.ok) throw new Error(`SharePoint check failed (${res.status}) for ${key}`);
       const item = (await res.json()) as { id?: unknown; folder?: unknown };

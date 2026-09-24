@@ -6,6 +6,7 @@ import {
   tokenForOpmsFolder, personForOpmsFolder, opmsFolderName,
 } from "../db/documents.js";
 import { isPendingName } from "../db/single-file.js";
+import { toReal } from "../files/store.js";
 import { certHome, type CertHome } from "../db/cert-home.js";
 import { todayThere } from "../lib/analysis.js";
 import { takeLease, dropLease, leaseHolder, writingTheWorkbook } from "../lib/round.js";
@@ -184,6 +185,17 @@ export async function survey(tick: (pct: number, word: string) => Promise<void> 
   const crewFolderOf = crewFolderIn(where.home);
   const outside = where.assigned.filter((a) => !crewFolderOf(a.key + "/x"));
   await tick(20, `Walking the crew folders in ${where.home}`);
+  /* The home itself is looked for before it is walked. A folder the
+     library answers 404 to lists as empty, which is right for a man's
+     folder that has not been made yet and catastrophically wrong for the
+     home: an empty home is every certificate missing at once, and a home
+     renamed in the library is exactly how the sync could come to write
+     the crew's certificates off in one pass. So a home that is not there
+     stops the survey here, with the folder named and nothing marked. The
+     R2 driver has no folders and always answers yes. */
+  if (!(await store.hasFolder(where.home))) {
+    throw new Error(`the folder ${toReal(where.home + "/").replace(/\/+$/, "")} is not in the library`);
+  }
   const opmsListing = await store.list({ prefix: where.home + "/" });
   /* The files in an assigned folder of its own. Everything directly inside it
      is his — the folder was named as his, so nothing in it has to be read for

@@ -47,8 +47,8 @@ const booksOf = (rows: Record<string, unknown>[], readings: Record<string, unkno
 
 /** The library answered by hand, laid out as wrangler.toml lays it out,
  *  and the worker's env pointed at it and at these books. */
-const libraryOf = (portal: ReturnType<typeof portalDb>, files: FakeFile[], pageSize?: number) => {
-  const graph = graphLibrary(new Set(["United Operations Team", OPMS]), { files, pageSize });
+const libraryOf = (portal: ReturnType<typeof portalDb>, files: FakeFile[], opts: { pageSize?: number; folders?: string[] } = {}) => {
+  const graph = graphLibrary(new Set(opts.folders || ["United Operations Team", OPMS]), { files, pageSize: opts.pageSize });
   setEnv({ DB: portal.db, ...sharepointEnv(wranglerVars()) } as never);
   return graph;
 };
@@ -73,7 +73,7 @@ const lastRun = (portal: ReturnType<typeof portalDb>) => JSON.parse(portal.blobs
 test("Graph: a 429 on page two of a crew folder is asked again after the wait Graph named, and every file is seen", async () => {
   const portal = booksOf([]);
   const files: FakeFile[] = [1, 2, 3, 4, 5].map((n) => ({ path: `${BRENTON}/ticket ${n}.pdf`, size: 10 + n }));
-  const graph = libraryOf(portal, files, 2);
+  const graph = libraryOf(portal, files, { pageSize: 2 });
   const waits = recordedWaits();
   try {
     // The second page of Brenton's folder, once: throttled, come back in three.
@@ -118,6 +118,34 @@ test("Graph: four 503s in a row fail the survey - 502, the error on last-run wit
     assert.equal(portal.rows.length, 1, "and nothing was registered");
   } finally {
     waits.restore();
+    graph.restore();
+  }
+});
+
+/* ------------------------------------------------------------------------ *
+ * The home itself: a certificate location the library no longer has is a
+ * fault, never an empty folder.
+ * ------------------------------------------------------------------------ */
+test("Graph: the certificate home renamed in the library fails the survey by name, and nothing is marked missing", async () => {
+  const portal = booksOf(
+    [certRow("c1", "opms/Brenton - OPMS/master.pdf")],
+    { "r1/sum-c1.json": { version: "r1", readable: true, expiresOn: "2031-02-17" } },
+  );
+  // The office renamed OPMS Documents; Brenton's file is under the new name.
+  const graph = libraryOf(portal, [{ path: `United Operations Team/OPMS Docs/Brenton - OPMS/master.pdf`, size: 6 }],
+    { folders: ["United Operations Team"] });
+  try {
+    const res = await post("Update portal");
+    assert.equal(res.status, 502);
+    const said = (await res.json()) as { error: string };
+    assert.equal(said.error, "the folder United Operations Team/OPMS Documents is not in the library");
+    const record = lastRun(portal);
+    assert.equal(record.error, said.error, "the same sentence on the record");
+    assert.equal(record.by, "Update portal");
+    assert.deepEqual(graph.listings, [], "the walk never began");
+    assert.equal(portal.rows[0].removedAt, null, "the row is still live");
+    assert.ok(portal.blobs.has("certificate-readings|r1/sum-c1.json"), "and its reading is still there");
+  } finally {
     graph.restore();
   }
 });
