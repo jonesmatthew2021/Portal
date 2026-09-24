@@ -1865,6 +1865,60 @@ const is = (got, want, what) => {
     is([...cache.store.keys()].sort(), ["/api/me", "/vendor/react.production.min.js"], "…beside nothing of A's");
   }
   {
+    /* The sign-in that did not pass through this worker: A's copies are
+       kept, and a live /api/me comes back as B with no /login/verify
+       before it (the cookie changed elsewhere). The keep clears A's
+       copies itself - and must still keep the very answer that told it,
+       or B reads nothing offline until their next online opening. */
+    const fetchEvent = (request) => ({
+      request, answer: null, done: Promise.resolve(),
+      respondWith(p) { this.answer = p; },
+      waitUntil(p) { this.done = this.done.then(() => p); },
+    });
+    const w = world();
+    const cache = w.cacheOf(w.NAME);
+    cache.store.set("/api/me", await w.stamped(json({ email: "a@example.com" })));
+    cache.store.set("/api/state", await w.stamped(json({ rev: 8 })));
+    cache.store.set("/", new Response("<html>", { status: 200, headers: { "X-Portal-Page": "portal" } }));
+    w.setFetch(async () => json({ email: "b@example.com" }));
+    const me = fetchEvent(new Request(ORIGIN + "/api/me"));
+    w.listeners.fetch(me);
+    is((await (await me.answer).json()).email, "b@example.com", "a live /api/me as B, with no sign-in through this worker, is the live answer");
+    await me.done;
+    is([...cache.store.keys()], ["/api/me"], "…A's copies are cleared and B's /api/me is the one thing kept");
+    is((await (await cache.match("/api/me")).json()).email, "b@example.com", "…and it reads as B");
+  }
+  {
+    /* The same, with the page's own forget (a sign-out's word) landing
+       while that answer's body is still being read: the forget wins, and
+       nothing is kept - not B's /api/me either. */
+    const fetchEvent = (request) => ({
+      request, answer: null, done: Promise.resolve(),
+      respondWith(p) { this.answer = p; },
+      waitUntil(p) { this.done = this.done.then(() => p); },
+    });
+    const w = world();
+    const cache = w.cacheOf(w.NAME);
+    cache.store.set("/api/me", await w.stamped(json({ email: "a@example.com" })));
+    cache.store.set("/api/state", await w.stamped(json({ rev: 8 })));
+    cache.store.set("/", new Response("<html>", { status: 200, headers: { "X-Portal-Page": "portal" } }));
+    let bodyStart;
+    w.setFetch(() => Promise.resolve(new Response(new ReadableStream({
+      start(c) { bodyStart = () => { c.enqueue(new TextEncoder().encode('{"email":"b@example.com"}')); c.close(); }; },
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+    const me = fetchEvent(new Request(ORIGIN + "/api/me"));
+    w.listeners.fetch(me);
+    is((await me.answer).status, 200, "the live /api/me is answered on its headers, body still to come");
+    await settle();
+    const told = { data: { type: offline.FORGET_MESSAGE }, waitUntil(p) { this.done = p; } };
+    w.listeners.message(told);
+    await told.done;
+    is(await w.caches.keys(), [], "the page's forget lands while the body is being read: everything kept goes");
+    bodyStart();
+    await me.done;
+    is(await w.caches.keys(), [], "…and the answer that lived through it is not kept: B's /api/me is dropped too");
+  }
+  {
     // A first-ever install, no earlier cache: only the build's own files
     // - React, React DOM and the fonts - are fetched for the head start.
     // Neither who is signed in nor the page: the install cannot know

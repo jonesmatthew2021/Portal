@@ -73,20 +73,27 @@ const forgetKept = async (cache) => {
 
    `began` is the era the fetch went out in (undefined for the install's
    own fetches, which are the build's files): an answer that has lived
-   through a forget is dropped, checked before any of this starts and
-   again just before the put - the body is read in between, and a 400 KB
-   document on a slow link takes a while to come. */
+   through a forget is dropped, checked before any of this starts, once
+   the body is in, and again just before the put - a 400 KB document on
+   a slow link takes a while to come. */
 async function keep(cache, kind, key, answer, began) {
   const outOfDate = () => began !== undefined && began !== era;
   if (outOfDate()) return;
   if (forgetsOn(kind, answer.status, answer.headers)) { await forgetKept(cache); return; }
   if (!keepable(kind, answer.status, answer.headers)) return;
   const copy = await stamped(answer);
+  // The body has been read now: a forget that landed meanwhile makes
+  // this the last person's answer, whoever it names.
+  if (outOfDate()) return;
   if (key === "/api/me") {
     const before = await cache.match(key);
     const kept = before ? await before.clone().json().catch(() => null) : null;
     const live = await copy.clone().json().catch(() => null);
-    if (anotherPerson(kept, live)) await forgetKept(cache);
+    // The forget this keep issues itself is its own era: this answer is
+    // the new person's and is the one thing that must survive it.
+    // forgetKept bumps the era first, so began meets it; a forget from
+    // anywhere else during its deletes still bumps past and drops it.
+    if (anotherPerson(kept, live)) { began = era + 1; await forgetKept(cache); }
   }
   if (outOfDate()) return;
   await cache.put(key, copy);
