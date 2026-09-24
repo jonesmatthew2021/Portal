@@ -70,6 +70,13 @@ export function networkWait(kind, key) {
  *  kept - on sign-out, so a signed-out device holds nothing. */
 export const FORGET_MESSAGE = "forget";
 
+/** The word the service worker sends every open portal tab once a sign-in
+ *  submitted on this device has been answered: the cookie is now somebody's
+ *  - maybe somebody else's - and a tab still open as the last person asks
+ *  the server who this is (proveIdentity) rather than polling and saving
+ *  under the new cookie in the last person's name. */
+export const SIGNED_IN_MESSAGE = "signedIn";
+
 /**
  * Whether a request ends this device's reading of one person's portal
  * before it is sent, so everything kept goes first: the sign-out address,

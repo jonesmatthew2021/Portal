@@ -267,14 +267,21 @@ on any line that still names this one.
   person; a live `/api/me` for somebody else clears them too; a
   new build carries the kept answers across only from an earlier
   `portal-*` cache and only for the same person (`earlierPortalCache`),
-  and never re-fetches who is signed in at install when an earlier cache
-  exists (`earlierBuildKept`: the browser finds a deploy on the sign-in
-  POST itself, and an install asking then was told the last person and
-  kept them where nothing forgot them); a kept identity is trusted only
+  and the install never asks who is signed in - it fetches only the page
+  and the vendor files (the browser finds a deploy on the sign-in POST and
+  on the sign-out, and an install asking then was told the last person,
+  on a cookie not yet replaced or revoked, and kept them where nothing
+  forgot them); the first worker's kept `/api/me` is the page's to give
+  (`keepIdentityAfterControl`: a page booted live with no worker in front
+  of it asks `/api/me` again once the worker takes control, and that
+  answer is kept the ordinary way); a kept identity is trusted only
   while the document is kept (`identityUnproven`: the first live
   `/api/state` under a stamped `/api/me` has the page ask `/api/me?live=1`
   once - `proveIdentity` - and reload as whoever the server says, or go to
-  the sign-in page on a 401); a cache the phone will not give at install
+  the sign-in page on a 401), and a sign-in answered by the worker is told
+  to every open portal tab (`SIGNED_IN_MESSAGE`), each of which asks the
+  same way, so a tab left open as the last person never polls or saves
+  under the new cookie in their name; a cache the phone will not give at install
   or on taking over fails neither (`openCache` null, the activate's work in
   a try, `clients.claim()` regardless);
   and nothing else is ever cached - file bytes, the CDN scripts, the fauna

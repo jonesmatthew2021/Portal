@@ -97,6 +97,11 @@ test("the assets build wrote the service worker with its version, the rules fold
   assert.ok(/^function cacheable\(/m.test(sw), "…with the export taken off, as the page has them");
   assert.equal(/^\s*export\b/m.test(sw), false, "no export reaches the worker: it is a plain script");
   assert.ok(/^import /m.test(sw) === false);
+  // The install fetches the page and the vendor files and never asks who
+  // is signed in: it runs on whatever cookie the device holds at that
+  // instant, mid sign-out included. The page gives the first kept /api/me.
+  assert.equal(sw.includes('fetchAndKeep(cache, "api"'), false, "the shipped worker's install never fetches an API answer");
+  assert.ok(sw.includes("SIGNED_IN_MESSAGE"), "…and tells the open tabs when a sign-in is answered");
   const vendorList = /^const VENDOR = (\[.*\]);$/m.exec(sw);
   assert.ok(vendorList, "the worker carries the list of vendor files it keeps at install");
   const kept = JSON.parse(vendorList![1]) as string[];

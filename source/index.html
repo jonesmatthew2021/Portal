@@ -352,6 +352,19 @@ const signInOverAfterPull = (answered, fetchedAt, status) => !!answered && !fetc
  *  /api/me could not say who this is. On the live site the picker never
  *  shows, whatever /api/me did: a link that is down is not a sign-in. */
 const showPicker = (shimFlag, meFailed) => !!shimFlag && !!meFailed;
+/** Whether this page gives the service worker its first kept /api/me: the
+ *  boot's /api/me was the server's own word (no stamp) and no worker
+ *  controlled the page when it booted - a first-ever install, whose
+ *  install never asks who is signed in (an install runs on whatever
+ *  cookie the device holds at that instant, mid sign-in or mid sign-out
+ *  included). Then, once the worker takes control, the page asks /api/me
+ *  again and the worker keeps it the ordinary way, from a boot the
+ *  server has already answered as the cookie's person. A page controlled
+ *  from the start needs nothing - its boot's /api/me was kept as it came
+ *  through - and a kept boot has nothing live to give.
+ *  @param {string|null} meFetchedAt  the stamp on the boot's /api/me, null if live
+ *  @param {boolean} controlled  whether a worker controlled the page at boot */
+const keepIdentityAfterControl = (meFetchedAt, controlled) => !meFetchedAt && !controlled;
 /** Whether the person the page booted as is still only a kept copy's word
  *  while the document is live: /api/me came stamped (the link said nothing
  *  for NETWORK_WAIT_MS at boot, or the worker's copy stood in) and the poll
@@ -386,6 +399,20 @@ async function proveIdentity() {
   if (anotherPerson(SESSION_USER, who)) { window.location.reload(); return; }
   SESSION_ME_FETCHED_AT = null;
 }
+
+/* A sign-in completed on this device, in any tab, is the service worker's
+   word (SIGNED_IN_MESSAGE): the cookie is now the new person's, and this
+   tab - open as whoever booted it - asks the server who that is and, if
+   somebody else, reloads as them. Without this a tab left open as A
+   polled and saved under B's cookie in A's name for as long as it stayed
+   open. Not on the preview, which has no worker to hear. */
+try {
+  if (navigator.serviceWorker) {
+    navigator.serviceWorker.addEventListener("message", (e) => {
+      if (e.data && e.data.type === SIGNED_IN_MESSAGE) proveIdentity();
+    });
+  }
+} catch (e) {}
 
 // Safari on iOS will happily answer a repeated GET out of its own cache, which
 // leaves a phone polling all day and reading the same stale copy every time.
@@ -6591,6 +6618,17 @@ function App() {
         // A kept copy's word is trusted only until the document comes
         // live (identityUnproven, proveIdentity).
         SESSION_ME_FETCHED_AT = isCachedAnswer(r.headers);
+        // The first worker's kept /api/me comes from this page, not its
+        // install (keepIdentityAfterControl): asked again once the worker
+        // controls the page, the answer goes through it and is kept.
+        try {
+          const sw = navigator.serviceWorker;
+          if (sw && keepIdentityAfterControl(SESSION_ME_FETCHED_AT, !!sw.controller)) {
+            sw.ready.then(() => sw.addEventListener("controllerchange", () => {
+              fetch("/api/me", { cache: "no-store" }).catch(() => {});
+            }, { once: true })).catch(() => {});
+          }
+        } catch (e) {}
         setMe(who);
       } catch (e) {
         setMeFailed(e && e.message ? e.message : "Couldn't reach the portal");

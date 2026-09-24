@@ -80,40 +80,31 @@ async function fetchAndKeep(cache, kind, key) {
   } catch (e) {}
 }
 
-/* Whether an earlier build of this portal has a cache on this device. Then
-   who is signed in is never asked at install: the person's kept /api/me
-   comes across from that cache on taking over (carry), or stays gone if a
-   sign-in forgot it. Asked at install, it was answered with whatever
-   cookie the device held at that instant - and a deploy is found by the
-   browser on a navigation the worker handles, the sign-in POST included,
-   so the new build could install while the old worker was forgetting the
-   last person's copies and sending the code on: the answer was the last
-   person, kept in the new cache, which nothing ever forgot, and the new
-   person's page on a slow link booted as them. Only a first-ever install,
-   with nobody's copy to carry, fetches it for the head start. If the
-   caches cannot even be listed, nothing is asked either. */
-async function earlierBuildKept() {
-  try {
-    return (await caches.keys()).some((name) => earlierPortalCache(name, NAME));
-  } catch (e) {
-    return true;
-  }
-}
-
 /* What is kept at install is a head start, not a condition of installing:
    a cache the phone will not give (openCache null) means the worker
    installs with nothing kept and the page reads from the network, plain.
    Before this the install failed on the cache, the worker went redundant,
    and the browser registered it again - and failed again - on every page
-   load, so that phone never read offline. */
+   load, so that phone never read offline.
+
+   Who is signed in is never asked here. An install runs on whatever
+   cookie the device holds at that instant, and the browser finds a deploy
+   on a navigation this worker handles - the sign-in POST and the sign-out
+   included - so the new build installed while the old worker was still
+   sending the code or the sign-out on: asked then, /api/me answered the
+   last person, whose cookie the 303 had not yet replaced or revoked, and
+   they were kept in the new cache, which nothing ever forgot. The first
+   build's head start on /api/me is the page's to give: once this worker
+   takes control the page asks /api/me again, from a boot the server has
+   already answered as the cookie's person, and that answer is kept the
+   ordinary way. On a deploy the person's copy comes across from the
+   earlier build's cache on taking over (carry). */
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
     const cache = await openCache();
     if (cache) {
-      const earlier = await earlierBuildKept();
       await Promise.all([
         fetchAndKeep(cache, "page", "/"),
-        ...(earlier ? [] : [fetchAndKeep(cache, "api", "/api/me")]),
         ...VENDOR.map((key) => fetchAndKeep(cache, "vendor", key)),
       ]);
     }
@@ -172,13 +163,28 @@ const forget = () => caches.delete(NAME);
    copy still kept then was the last person's. The sign-out takes the
    whole cache, as its word from the page does; a sign-in takes the crew's
    answers and leaves the build's own files, which the new person's page
-   needs too. The cache failing never fails the request (openCache). */
+   needs too. The cache failing never fails the request (openCache).
+
+   A sign-in answered is also told to every open portal tab (SIGNED_IN_
+   MESSAGE): a tab already open as the last person would otherwise poll
+   and save under the new cookie while still calling itself the last
+   person, for as long as it stayed open. Told, it asks the server who
+   this is (proveIdentity) and reloads as them. Told after the answer is
+   in, so the cookie is already the new one when the tab asks; a tab that
+   cannot be told is no worse off than before. */
 async function forgetThen(what, request) {
   try {
     if (what === "signOut") await forget();
     else { const cache = await openCache(); if (cache) await forgetKept(cache); }
   } catch (e) {}
-  return fetch(request);
+  const answer = await fetch(request);
+  if (what === "signIn") {
+    try {
+      (await self.clients.matchAll({ type: "window", includeUncontrolled: true }))
+        .forEach((tab) => tab.postMessage({ type: SIGNED_IN_MESSAGE }));
+    } catch (e) {}
+  }
+  return answer;
 }
 
 self.addEventListener("message", (event) => {
