@@ -111,6 +111,103 @@
     });
     mem.data = { ...mem.data, people, particularsFromCert: fromCert };
   }
+  /* ?recognition=1, ?medical=long, ?blocked=1, ?covered=1: the four things
+     the Marine Orders decide about a cell that nothing on the grid could say
+     for itself - a recognition whose foreign certificate nobody holds, a
+     medical printed longer than MO76 s 16(1) allows for the holder's age, a
+     red ticket that cannot be renewed until something else is put right, and
+     a certificate that has gone but which one of the five papers the orders
+     allow still carries. Each is put on the first man on the crew matrix the
+     register knows, so the lines can be looked at. The preview holds no
+     readings, so this is the answer the live server's /api/analyse "dates"
+     would give for such a man. */
+  const ordersFlag = {
+    recognition: flag("recognition") === "1",
+    medical: flag("medical") === "long",
+    blocked: flag("blocked") === "1",
+    covered: flag("covered") === "1",
+  };
+  const anyOrdersFlag = Object.values(ordersFlag).some(Boolean);
+  const dayOff = (days) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+  /* The first crew row the register knows, and the person it belongs to: the
+     medical's age check reads the date of birth off Crew Details, so the two
+     have to be the same man. */
+  const ordersMan = (() => {
+    if (!anyOrdersFlag || !mem.data || !Array.isArray(mem.data.people)) return null;
+    const rows = (mem.data.quals && mem.data.quals.rows) || [];
+    /* The register names people "FARMER, Evan" and the matrix "Evan Farmer",
+       so the two are matched on their words rather than letter for letter -
+       the register's own rule (canonicalName in source/shared/names.js) is
+       the page's, and this shim runs outside the page's script. */
+    const words = (n) => String(n || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).sort().join(" ");
+    const same = (a, b) => !!words(a) && words(a) === words(b);
+    for (const row of rows) {
+      const person = mem.data.people.find(
+        (p) => p && (same(p.name, row[0]) || (p.aliases || []).some((a) => same(a, row[0]))),
+      );
+      if (person) return { row, person };
+    }
+    return null;
+  })();
+  const ordersCodeAt = (code) => {
+    const cols = (mem.data && mem.data.quals && mem.data.quals.cols) || [];
+    return cols.findIndex((c) => String(c[0]).trim().toUpperCase() === code);
+  };
+  if (ordersMan) {
+    /* The cells these flags turn on, written onto the matrix the preview
+       loads: a ticket that has gone (for the cover), and a cook certificate
+       in the red band whose certificate of safety training lapsed last month
+       (for the blocker, MO70 s 25). */
+    const cells = [];
+    if (ordersFlag.covered) cells.push(["QL-01", dayOff(-15)]);
+    if (ordersFlag.blocked) cells.push(["QL-11", dayOff(20)], ["QL-12", dayOff(-30)], ["QL-17", dayOff(200)]);
+    if (cells.length) {
+      const rows = mem.data.quals.rows.map((r) => (r === ordersMan.row ? [r[0], r[1], r[2], (r[3] || []).slice()] : r));
+      const mine = rows.find((r) => r[0] === ordersMan.row[0]);
+      cells.forEach(([code, value]) => {
+        const at = ordersCodeAt(code);
+        if (at >= 0 && mine) mine[3][at] = value;
+      });
+      mem.data = { ...mem.data, quals: { ...mem.data.quals, rows } };
+    }
+    if (ordersFlag.medical) {
+      // Born 1990: in the two-year band, so a medical printed 800 days after
+      // the examination is longer than MO76 s 16(1) allows.
+      const people = mem.data.people.map((p) => (p === ordersMan.person ? { ...p, dob: "1990-01-01" } : p));
+      mem.data = { ...mem.data, people };
+    }
+  }
+  const fakeDates = () => {
+    if (!ordersMan) return null;
+    /* The register's name for him, not the spreadsheet's: the page reads its
+       cells under the register's name (crewRowsOnly renames every row as the
+       matrix loads), so the dates have to arrive under it too. */
+    const person = ordersMan.person.name;
+    const dates = [];
+    const covers = [];
+    const entry = (code, over) => ({
+      person, code, issued: null, expires: null, issuer: "AMSA", fileId: null,
+      covered: false, recognition: false, foreignUnknown: false, assessedOn: null, conditions: null, ...over,
+    });
+    if (ordersFlag.recognition) {
+      // QL-02, so all four flags can be on at once without two of them
+      // answering for the same cell.
+      dates.push(entry("QL-02", { expires: dayOff(900), issued: dayOff(-200), recognition: true, foreignUnknown: true }));
+    }
+    if (ordersFlag.medical) {
+      /* Pointed at a scan on file, whichever, so Open works and the
+         limitation printed on the certificate can be read where it is shown -
+         on the viewer beside the scan and nowhere else. */
+      const scan = mem.rows.find((r) => r.category === "certificate" && !r.removedAt);
+      dates.push(entry("QL-17", { issued: dayOff(-400), assessedOn: dayOff(-400), expires: dayOff(400),
+        conditions: "Fit for particular duties only", fileId: scan ? scan.id : null }));
+    }
+    if (ordersFlag.covered) {
+      dates.push(entry("QL-01", { expires: dayOff(-15), issued: dayOff(-1800) }));
+      covers.push({ person, code: "QL-01", kind: "extension", until: dayOff(45), fileId: null });
+    }
+    return { at: new Date().toISOString(), dates, covers };
+  };
   const OUT_OF_CREDIT = "Out of credit — top it up at console.anthropic.com";
   /* ?offline=1: the four answers the service worker keeps come back the
      way it hands them back when the link is down - stamped with the time
@@ -385,6 +482,13 @@
           return json({ read: total, total, remaining: 0, extracted: 0, failures: [], stopped: null });
         }
         if (action === "refile") return json({ moved: [], remaining: 0 });
+        // The dates the certification screens draw their cells from. Only
+        // under the four Marine Orders flags: without them the preview has
+        // no readings, and the 503 below is the honest answer.
+        if (action === "dates") {
+          const made = fakeDates();
+          if (made) return json(made);
+        }
       }
       if (p === "/api/analyse" || p === "/api/ai-checker" || p === "/api/archive")
         return json(

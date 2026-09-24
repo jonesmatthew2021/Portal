@@ -10,7 +10,7 @@
  * holds what is only this section's. See tools/source.mjs.
  */
 function CertChecker({ query }) {
-  const { quals: QUALS, certDates, certificates, renewalMarks } = usePortal();
+  const { quals: QUALS, certDates, certificates, renewalMarks, people } = usePortal();
   const validityFor = useValidityLookup();
   const [own, setOwn] = useState("");
   const q = query != null ? query : own;
@@ -78,6 +78,71 @@ function CertChecker({ query }) {
   // Every section is written out in full below the tiles, so the PDF simply
   // carries the whole list.
   const printed = listWith(() => true);
+
+  /* ---- what the Marine Orders say about these cells ---------------------
+     Four things the eight orders decide that nothing on the grid could say
+     for itself. Each is a pure rule in source/shared/, run here over the
+     matrix as it stands and the certificates the portal has read:
+
+       - a recognition whose foreign certificate nobody holds and which does
+         not print its expiry: the date in the cell is a date the portal
+         cannot check (MO70 s 33(2), s 37(4));
+       - a medical whose printed expiry is longer than MO76 s 16(1) allows
+         for the holder's age on the day of the examination;
+       - a certificate in the red band that cannot be renewed at all,
+         because something the order wants in hand went first (MO70 s 25,
+         MO71 Sch 4 4.2, MO72 Sch 4 4.2, MO73 Sch 4, MO505 s 9(3)(b));
+       - a certificate that has gone but which one of the five papers the
+         orders allow still carries (MO70 s 15(3), MO504 s 16(2),
+         MO505 s 7(3), ss 22-24, s 12(2)).
+
+     A blank answer from any of them is nothing on the screen. */
+  const knownName = asKnownPerson(people);
+  const personBy = new Map((people || []).map((p) => [String(p.name || "").trim().toUpperCase(), p]));
+  const medicalCodes = medicalCodesIn(VESSEL.certStated);
+  const renewalRules = { needs: VESSEL.renewalNeeds, daysUntil, redDays: RED_DAYS };
+
+  const ordersFor = (row) => {
+    const out = [];
+    const held = {};
+    QUALS.cols.forEach((c, i) => { held[c[0]] = row[3][i]; });
+
+    QUALS.cols.forEach((c) => {
+      const d = certDateFor(certDates, row[0], c[0]);
+      if (d && d.recognition && d.foreignUnknown) {
+        out.push({ code: c[0], text: `${row[0]} — ${c[0]}: the certificate the recognition is for is not on the portal` });
+      }
+      const cover = certCoverFor(certDates, row[0], c[0]);
+      if (cover) out.push({ code: c[0], text: `${row[0]} — ${c[0]}: ${coverLine(cover)}` });
+    });
+
+    medicalCodes.forEach((code) => {
+      const d = certDateFor(certDates, row[0], code);
+      if (!d) return;
+      const person = personBy.get(String(knownName(row[0]) || row[0]).trim().toUpperCase());
+      const said = medicalTooLong(
+        { rowId: "", issuedOn: d.issued, assessedOn: d.assessedOn, expiresOn: d.expires, conditions: d.conditions },
+        person && person.dob, TODAY,
+      );
+      if (said) out.push({ code, text: `${row[0]} — medical expires ${fmtDate(d.expires)}, longer than the law allows for their age` });
+    });
+
+    renewalBlockers(row[0], held, TODAY, renewalRules).forEach((b) => {
+      const parts = [
+        ...b.expired.map((n) => `${n} is expired`),
+        ...b.missing.map((n) => `${n} is not held`),
+      ];
+      out.push({ code: b.code, text: `${row[0]} — ${b.code} cannot be renewed: ${parts.join(", ")}` });
+    });
+
+    return out;
+  };
+
+  const orders = QUALS.rows
+    .map((row) => ({ row, lines: ordersFor(row) }))
+    .filter((x) => x.lines.length)
+    .filter((x) => hits(x.row[0] + " " + x.row[1]));
+  const ordersCount = orders.reduce((n, x) => n + x.lines.length, 0);
 
   // Every item whose certificate was issued by an authority that doesn't read
   // as Australian — valid or not, because the flag is about who issued it,
@@ -163,6 +228,29 @@ function CertChecker({ query }) {
       {/* The notes used to sit here as well. They are kept on Required
           Documents For Upload now, which is the one place they are written —
           the same notes either way, because both read certNotes. */}
+
+      {/* What the orders say about these cells, one line each. The wording is
+          the law's own: nothing here is explained, only stated. */}
+      {ordersCount > 0 && (
+        <div id="marine-orders-flags" style={{ marginBottom: 26 }}>
+          <div style={{ borderTop: `2px solid ${T.accent}`, paddingTop: 9, marginBottom: 11 }}>
+            <Eyebrow color={T.text}>Marine Orders · {ordersCount}</Eyebrow>
+          </div>
+          {orders.map(({ row, lines }) => (
+            <div key={"mo-" + row[0] + row[2]} style={{ marginBottom: 10, breakInside: "avoid" }}>
+              {lines.map((l, i) => (
+                <div key={l.code + i} style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap",
+                  padding: "4px 0 4px 4px", borderBottom: `1px solid ${T.rule}` }}>
+                  <span style={{ fontFamily: T.mono, fontSize: 10, color: T.accent, minWidth: 46 }}>{l.code}</span>
+                  <span style={{ fontFamily: T.body, fontSize: 13, color: T.text, flex: 1, minWidth: 240 }}>{l.text}</span>
+                  <CertCell url={certLinkFor(certDates, certificates, row[0], l.code)}
+                    person={row[0]} code={l.code} title={l.code} />
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div id="cert-gap-detail">
         {all.length === 0 ? (

@@ -1094,6 +1094,7 @@ function TrainingMatrix() {
                     <td key={i} style={{ padding: "2px", borderBottom: `1px solid ${T.rule}`, textAlign: "center",
                       background: isPicked ? T.raised : "transparent" }}>
                       <Cell value={r[3][i]}
+                        cover={certCoverFor(certDates, r[0], QUALS.cols[i][0])}
                         missing={!String(r[3][i] || "").trim()
                           && (needByPosition.get(r[1] || "") || new Set()).has(QUALS.cols[i][0])
                           && !standsIn(r, String(QUALS.cols[i][0]).trim().toUpperCase())}

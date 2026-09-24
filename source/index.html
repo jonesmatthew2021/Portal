@@ -5322,9 +5322,30 @@ function Portal({ role, onSignOut }) {
           expires: d.expires || null,
           issuer: d.issuer || null,
           url: d.fileId ? `/api/files/${d.fileId}` : null,
+          /* What the Marine Orders rules need of the document behind the
+             cell: whether it is a column this certificate covers rather than
+             one of its own, whether it is an AMSA certificate of recognition
+             and whether anything at all is known about the foreign
+             certificate behind it, the examination's own date, and any
+             limitation printed on it. */
+          covered: !!d.covered,
+          recognition: !!d.recognition,
+          foreignUnknown: !!d.foreignUnknown,
+          assessedOn: d.assessedOn || null,
+          conditions: d.conditions || null,
         };
       });
-      setCertDates({ at: r.at || new Date().toISOString(), map });
+      /* The papers that lawfully carry a man while a certificate is out, by
+         person and column: the kind, the day the cover stops counting and the
+         paper to open. */
+      const covers = {};
+      (r.covers || []).forEach((c) => {
+        covers[`${known(c.person).toUpperCase()}::${String(c.code || "").toUpperCase()}`] = {
+          kind: c.kind, until: c.until || null,
+          url: c.fileId ? `/api/files/${c.fileId}` : null,
+        };
+      });
+      setCertDates({ at: r.at || new Date().toISOString(), map, covers });
       if (v) {
         setValidityPeriods({
           at: new Date().toISOString(),

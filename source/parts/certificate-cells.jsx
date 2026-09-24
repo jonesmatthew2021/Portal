@@ -46,8 +46,8 @@ function bandFor(v) {
   return { key: "green", fg: T.bGreen, bg: T.bGreenBg, days: d, date: v };
 }
 
-function Cell({ value, onOpen, missing }) {
-  const b = bandFor(value);
+function Cell({ value, onOpen, missing, cover }) {
+  const b = bandWithCover(bandFor(value), cover);
   if (!b && missing) return (
     <div title="Required for this position — nothing on file" style={{
       background: T.bRedBg, color: T.bRed, border: `1px solid ${T.bRed}`, borderRadius: 2,
@@ -65,7 +65,9 @@ function Cell({ value, onOpen, missing }) {
   const openable = !!onOpen;
   if (b.date) {
     return (
-      <div title={`${b.date} - ${b.days < 0 ? Math.abs(b.days) + " days ago" : "in " + b.days + " days"}${openable ? " · open the certificate" : ""}`}
+      <div title={b.key === "covered"
+        ? b.text
+        : `${b.date} - ${b.days < 0 ? Math.abs(b.days) + " days ago" : "in " + b.days + " days"}${openable ? " · open the certificate" : ""}`}
         onClick={openable ? onOpen : undefined}
         style={{ background: b.bg, color: b.fg, borderRadius: 2, padding: "2px 3px", minWidth: 56,
           fontFamily: T.mono, fontSize: 9.5, fontWeight: 600, lineHeight: 1.25,
@@ -76,7 +78,7 @@ function Cell({ value, onOpen, missing }) {
     );
   }
   return (
-    <div onClick={openable ? onOpen : undefined}
+    <div onClick={openable ? onOpen : undefined} title={b.key === "covered" ? b.text : undefined}
       style={{ background: b.bg, color: b.fg, borderRadius: 2, padding: "3px", minWidth: 56,
         fontFamily: T.mono, fontSize: 9.5, lineHeight: 1.25,
         cursor: openable ? "pointer" : undefined }}>{b.text}</div>
@@ -420,6 +422,8 @@ function itemsFor(row, QUALS) {
 
 // How a band reads as a short status - on screen and on the printed page.
 function bandLabel(band) {
+  // A covered cell says what carries it, not how long ago the certificate went.
+  if (band.key === "covered") return band.text;
   if (!band.date) return band.text;
   const d = daysTo(band.date);
   return d < 0 ? `Expired ${Math.abs(d)} days ago` : `${d} days`;
@@ -456,6 +460,32 @@ const certDateFor = (dates, person, code) => {
 // last Update matrix run settled the dates from; where that run predates the
 // link being kept (or hasn't run yet), the scan filed under that person with
 // that code picked at upload answers instead.
+/* The paper that lawfully carries one person's column while the certificate
+   itself is out - an AMSA extension letter, a near-coastal renewal lodged
+   before expiry, a temporary crewing permit, a final assessor's declaration,
+   an issue letter. The rule and the clauses are source/shared/evidence.js;
+   the server runs it over the readings and hands the answers down with the
+   dates. */
+const certCoverFor = (dates, person, code) =>
+  (dates && dates.covers
+    && dates.covers[`${String(person || "").trim().toUpperCase()}::${String(code || "").trim().toUpperCase()}`]) || null;
+
+/* The words a covered cell carries, and nothing more: what carries him and
+   the day the cover stops counting. An issue letter is the one paper the law
+   gives no end (MO505 s 12(2)), so it says none. */
+const coverLine = (cover) =>
+  cover ? `covered by ${cover.kind}${cover.until ? ` until ${fmtDate(cover.until)}` : ""}` : "";
+
+/* A cover never shows green: green would say the certificate is in date, and
+   it is not. A red or missing cell that a paper carries takes the amber band
+   and says what carries it; anything already amber or green is left alone. */
+const bandWithCover = (band, cover) => {
+  if (!cover) return band;
+  if (band && band.key !== "red" && band.key !== "not" && band.key !== "unknown") return band;
+  return { key: "covered", fg: T.bOrange, bg: T.bOrangeBg, date: band && band.date, days: band && band.days,
+    text: coverLine(cover), cover };
+};
+
 const certLinkFor = (dates, certificates, person, code) => {
   const d = certDateFor(dates, person, code);
   if (d && d.url) return d.url;
@@ -592,6 +622,15 @@ function useValidityLookup() {
 // certificate right here, over the page, rather than sending it for download —
 // the scan itself, with a way out to a full tab where it is wanted bigger.
 function CertViewer({ url, filename, person, code, title, onClose }) {
+  const { certDates } = usePortal();
+  /* Any limitation printed on the certificate, as printed - "fit for
+     particular duties only" (MO76 s 7(1)(b)), "must wear corrective lenses"
+     (s 9(1)), "daylight only" on a colour-vision deck holder's near-coastal
+     card (MO505 s 13(d)-(e)). It is shown here beside the scan and nowhere
+     else: a line on the grid for every conditioned certificate would bury
+     the grid, and the words matter enough not to be summarised. */
+  const printed = person && code ? certDateFor(certDates, person, code) : null;
+  const conditions = (printed && printed.conditions) || null;
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 90, background: "rgba(18,41,61,0.55)",
       display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
@@ -610,6 +649,11 @@ function CertViewer({ url, filename, person, code, title, onClose }) {
             <div style={{ fontFamily: T.mono, fontSize: 11, color: T.muted, marginTop: 2, wordBreak: "break-word" }}>
               {[person, filename].filter(Boolean).join(" · ")}
             </div>
+            {conditions && (
+              <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.bOrange, marginTop: 4, wordBreak: "break-word" }}>
+                {conditions}
+              </div>
+            )}
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <a href={url} target="_blank" rel="noopener noreferrer"
