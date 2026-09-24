@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, EVIDENCE_KINDS };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -2633,6 +2633,35 @@ const is = (got, want, what) => {
     "an expired deck certificate with no GMDSS on file");
   is(renewalBlockers("EVANS, Brenton", { "QL-01": on(RED_DAYS + 1), "QL-14": "" }, today, rules), [],
     "a certificate past the red band is not being renewed yet");
+}
+
+/* ---- alternative evidence: the papers that lawfully carry a man while a
+        certificate is out (MO70 s 15(3), MO505 s 7(3), ss 22-24, s 12(2)) ---- */
+{
+  const shared = await import(pathToFileURL(join(ROOT, "source", "shared", "evidence.js")).href);
+  const { coveredBy, evidenceKindsProblem, EVIDENCE_KINDS, VESSEL, crewRegister } = lib;
+  const codes = VESSEL.qualColumns.map((c) => c[0]);
+  is(EVIDENCE_KINDS, ["extension", "lodged-renewal", "crewing-permit", "assessor-declaration", "issue-letter"], "the five kinds");
+  is(evidenceKindsProblem(VESSEL.evidenceKinds, codes), null, "the vessel file's kinds all name its own columns");
+  is(shared.evidenceKindsProblem(VESSEL.evidenceKinds, codes), null, "the module says so too");
+  const today = "2026-09-25";
+  const rules = { kinds: VESSEL.evidenceKinds, register: crewRegister([{ name: "EVANS, Brenton", aliases: [] }, { name: "SITTIYOS, Kachin", aliases: [] }]) };
+  const rows = [
+    { id: "ext", key: "ext", person: "EVANS, Brenton", code: "QL-01", filedOn: "2026-08-02" },
+    { id: "coc", key: "coc", person: "EVANS, Brenton", code: "QL-01", filedOn: "2021-02-01" },
+  ];
+  const readings = {
+    ext: { readable: true, holderName: "Brenton Evans", evidenceKind: "extension", issuedOn: "2026-07-20", expiresOn: "2026-11-25" },
+    coc: { readable: true, holderName: "Brenton Evans", evidenceKind: null, isRecognition: false, expiresOn: "2026-08-01" },
+  };
+  const cover = coveredBy("QL-01", "EVANS, Brenton", rows, readings, today, rules);
+  is(cover, { kind: "extension", until: "2026-11-25", rowId: "ext" }, "AMSA's letter carries his expired Master to 25 Nov");
+  is(shared.coveredBy("QL-01", "EVANS, Brenton", rows, readings, today, rules), cover, "the worker's module answers the same");
+  is(coveredBy("QL-12", "EVANS, Brenton", rows, readings, today, rules), null, "no extension of a certificate of safety training, ever");
+  const recognised = { ...readings, coc: { ...readings.coc, isRecognition: true } };
+  is(coveredBy("QL-01", "EVANS, Brenton", rows, recognised, today, rules), null, "and none of a certificate of recognition");
+  const spent = { ...readings, ext: { ...readings.ext, expiresOn: "2026-09-01" } };
+  is(coveredBy("QL-01", "EVANS, Brenton", rows, spent, today, rules), null, "a cover that has run out is no cover");
 }
 
 if (failed) {
