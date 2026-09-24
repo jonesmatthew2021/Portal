@@ -115,12 +115,44 @@ async function graphToken(): Promise<string> {
   return tokenCache.token;
 }
 
+/** The waits between tries of a call Graph turned away. The tests swap it
+ *  for one that only writes the wait down. */
+export const graphWaits = {
+  sleep: (ms: number) => new Promise<void>((done) => setTimeout(done, ms)),
+};
+/** How many more tries a turned-away call gets, and the waits before
+ *  each where Graph names none. */
+const GRAPH_RETRIES = 3;
+const GRAPH_BACKOFF_MS = [1000, 2000, 4000];
+/** The longest a Retry-After is honoured for: a request has minutes, not
+ *  the hour Graph can ask for. */
+const RETRY_AFTER_CAP_S = 60;
+
+/* One call to Graph, tried again where Graph itself says to.
+ *
+ * A 429 is Graph throttling the app, a 5xx is Graph having a bad moment;
+ * neither says anything about the library. Before this, one such answer
+ * on one page of a listing failed the whole survey - or worse, on the
+ * hour it read as a folder with nothing in it. So the call is made again,
+ * after the wait Graph names (Retry-After, in seconds) or a short one of
+ * its own, up to three more times. A call still refused after that throws
+ * with the status in the sentence, so the survey fails out loud (502, the
+ * error on last-run) and nothing is taken off the books over it. */
 async function graph(path: string, init: RequestInit = {}): Promise<Response> {
   const token = await graphToken();
-  return fetch(`https://graph.microsoft.com/v1.0${path}`, {
-    ...init,
-    headers: { Authorization: `Bearer ${token}`, ...(init.headers || {}) },
-  });
+  for (let tries = 1; ; tries++) {
+    const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
+      ...init,
+      headers: { Authorization: `Bearer ${token}`, ...(init.headers || {}) },
+    });
+    if (res.status !== 429 && res.status < 500) return res;
+    if (tries > GRAPH_RETRIES) {
+      throw new Error(`SharePoint answered ${res.status} ${tries} times for ${(init.method || "GET").toUpperCase()} ${decodeURIComponent(path)}`);
+    }
+    const asked = Number(res.headers.get("Retry-After"));
+    const wait = asked > 0 ? Math.min(asked, RETRY_AFTER_CAP_S) * 1000 : GRAPH_BACKOFF_MS[tries - 1];
+    await graphWaits.sleep(wait);
+  }
 }
 
 /** The document library's drive id, found once from the site and library name. */
