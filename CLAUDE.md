@@ -127,8 +127,12 @@ modules. Edit that code there and only there.
   `GET /api/round/progress`): the page reads and refiles first, and
   `POST /api/round/prepare` has the server keep the Equivalence sheet and
   the expiry rules before it does. A browser that goes mid-round can have
-  the request cancelled, so that round takes the lease for three minutes,
-  not fifteen, and the page matches its progress by the `runId` it sent.
+  the request cancelled, so that round takes the lease for four minutes,
+  not fifteen (two of them for a workbook write in flight past the
+  budget), and the page matches its progress by the `runId` it sent. A
+  page treats a record that is not done while `running` is false as dead
+  (the lease lapses at `LEASE_FOR_MS`) - never by the age of the last
+  word, because the workbook step can outlast any of them.
   The hour's own work stops starting things nine minutes after its lease
   or twelve after the tick, whichever is first (`hourDeadline`). The
   Equivalence sheet is never kept as an empty table, and is read again

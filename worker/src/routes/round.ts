@@ -34,17 +34,23 @@ import { recordHourly } from "./sync.js";
  *     fixed so the old copy is never lost;
  *   - a cell that reaches the matrix but not the workbook is written on the
  *     document (workbookPending) and paid by the next round, whoever runs it;
- *   - the lease is taken for the budget plus a minute, not the hour's
+ *   - the lease is taken for the budget plus two minutes, not the hour's
  *     fifteen, so a round cut off frees it before the hour's five-minute
  *     wait for it runs out;
  *   - the progress record carries the page's own runId and stays done:false
- *     until the round says otherwise; a page treats one whose `at` is more
- *     than sixty seconds old and not done as dead.
+ *     until the round says otherwise. A page treats a record that is not
+ *     done while `running` is false as dead (the lease lapses at
+ *     LEASE_FOR_MS) - never by the age of `at`, because the workbook step
+ *     between 85 and 100 can take longer than any word is fresh for.
  */
 const PROGRESS_KEY = "round-progress";
 export const BUDGET_MS = 2 * 60 * 1000;
-/** How long the lease stands should the drop never land. */
-export const LEASE_FOR_MS = BUDGET_MS + 60 * 1000;
+/** How long the lease stands should the drop never land. The budget only
+ *  decides whether the workbook step may start; the rewrite and the
+ *  replace in the library run on past it, so two minutes are kept in hand
+ *  for the write in flight - and the hour's last try for the lease is at
+ *  five, so a lapsed round still frees it in time. */
+export const LEASE_FOR_MS = BUDGET_MS + 2 * 60 * 1000;
 
 const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -119,9 +125,12 @@ export default async function round(
 
   const lease = await takeLease(who, undefined, LEASE_FOR_MS);
   if (!lease) {
+    // The page shows this string as it is: a sentence, and no promise of
+    // a minute - the hour holds the lease for up to nine plus its write.
     const holder = await leaseHolder();
+    const who = holder ? holder[0].toUpperCase() + holder.slice(1) : "Another round";
     return Response.json(
-      { error: `${holder || "Another round"} is writing the workbook; try again in a minute.`, by: holder, runId },
+      { error: `${who} is writing the workbook; try again when it has finished.`, by: holder, runId },
       { status: 409 },
     );
   }

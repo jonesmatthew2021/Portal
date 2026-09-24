@@ -217,8 +217,14 @@ export async function validityRulesHeld(): Promise<boolean> {
 type EquivalencesHeld = { rows?: unknown[]; skillsId?: string; colsKey?: string };
 /** A read that wrote nothing, remembered: the columns it was read against
  *  and what it said. `whileNothingHeld` marks a problem that stops being
- *  one once the page has stored rows of its own. */
+ *  one once the page has stored rows of its own - rows with no stamp. A
+ *  table the server stamped against columns that have since changed is
+ *  not the page's answer: it maps certificates to columns that may be off
+ *  the matrix now, so the problem is still said over it. */
 type EquivalencesTried = { colsKey: string; problem: string | null; whileNothingHeld?: boolean };
+/** Whether what is held answers for a sheet that gives nothing: only the
+ *  page's own rows, which carry no stamp, do. */
+const heldAnswers = (held: EquivalencesHeld | null, heldRows: unknown[]) => heldRows.length > 0 && !held?.colsKey;
 export async function keepEquivalences(): Promise<{ rows: number; written: boolean; problem: string | null }> {
   try {
     const [skills] = await liveRowsOf("skills-matrix");
@@ -241,13 +247,13 @@ export async function keepEquivalences(): Promise<{ rows: number; written: boole
     const triedKey = matrixReadingKey("equivalences-tried", skills.id);
     const tried = (await matrixStore().get(triedKey, { type: "json" })) as EquivalencesTried | null;
     if (tried && tried.colsKey === colsKey) {
-      return { rows: heldRows.length, written: false, problem: tried.whileNothingHeld && heldRows.length ? null : tried.problem };
+      return { rows: heldRows.length, written: false, problem: tried.whileNothingHeld && heldAnswers(held, heldRows) ? null : tried.problem };
     }
     // Nothing written this time, and no need to read again for the same
     // skills matrix against the same columns.
     const nothing = async (problem: string | null, whileNothingHeld = false) => {
       await matrixStore().setJSON(triedKey, { colsKey, problem, whileNothingHeld } satisfies EquivalencesTried);
-      return { rows: heldRows.length, written: false, problem: whileNothingHeld && heldRows.length ? null : problem };
+      return { rows: heldRows.length, written: false, problem: whileNothingHeld && heldAnswers(held, heldRows) ? null : problem };
     };
 
     if (!/\.(xlsx|xlsm)$/i.test(skills.filename)) {
@@ -450,7 +456,7 @@ export async function runMatrixRound(opts: {
     try {
       if (!opts.timeLeft()) return skip("out of time before the workbook; the next hour writes it");
       await say(75, "Writing the training matrix workbook");
-      landed = await writeWorkbook(opts, out, owed);
+      landed = await writeWorkbook({ by: opts.by, say }, out, owed);
       return out;
     } finally {
       try {
@@ -510,9 +516,13 @@ async function rememberOwed(by: string, owed: Set<string>) {
  * Answers whether the workbook now carries every cell it was owed: yes
  * when it was written, and yes when there was nothing to write because it
  * already had them; no when the write was skipped.
+ *
+ * `say` is the round's progress word: the rewrite and the replace in the
+ * library are the longest stretch of the round, so a word goes down
+ * between them and a page watching is not left on 75 for the whole of it.
  */
 async function writeWorkbook(
-  opts: { by: string }, out: RoundOutcome, changedKeys: Set<string>,
+  opts: { by: string; say: (pct: number, word: string) => Promise<void> }, out: RoundOutcome, changedKeys: Set<string>,
 ): Promise<boolean> {
   const [tm] = await liveRowsOf("training-matrix");
   if (!tm) { out.roundSkipped = "no training matrix on file"; return false; }
@@ -555,6 +565,7 @@ async function writeWorkbook(
   // Nothing to write: the workbook already carries every cell it was owed.
   if (!blob) { out.written = 0; return true; }
 
+  await opts.say(85, "Filing the workbook in the library");
   const { row } = await replaceSingleFile({
     category: "training-matrix",
     bytes: await blob.arrayBuffer(),

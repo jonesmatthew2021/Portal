@@ -757,7 +757,7 @@ test("the round puts a certificate's date on the matrix and writes the office's 
   const named = datedWorkbookName("20260901 - CREW QUALIFICATION EXPIRY.xlsx", todayThere());
   assert.equal(out.workbook, named, "filed under today's date");
   assert.equal(out.leftAsTyped, 0);
-  assert.deepEqual(said, [20, 30, 60, 75], "the round says where it has got to, in order");
+  assert.deepEqual(said, [20, 30, 60, 75, 85], "the round says where it has got to, in order - a word between the rewrite and the filing too");
   assert.ok(/^\d{4}-\d{2}-\d{2}T/.test(out.at), "it says when it began");
   assert.deepEqual(out.changes, [{ person: "EVANS, Brenton", code: "QL-01", title: "Master", from: "", to: "2031-05-26" }], "the cell it moved");
   assert.equal(out.summary?.certificates, 1);
@@ -1436,6 +1436,28 @@ test("a sheet that gives nothing against the matrix's columns writes nothing ove
   assert.equal(gets(), 2);
 });
 
+test("a table the server stamped against columns since changed does not quiet a sheet that now gives nothing", async () => {
+  /* The hour read the sheet against QL-01 and stamped what it kept. The
+     crew matrix's columns then change to QL-50, and the sheet gives nothing
+     against them. The old table stays (never an empty one over it), but it
+     maps certificates to a column that is off the matrix now, so the
+     problem is said - every hour, from the remembered read - rather than
+     the stamped table passing for the page's own answer. */
+  const { portal, bucket } = await oneManPortal({ skills: true });
+  portal.blobs.set("matrix-readings|equivalences.json", JSON.stringify({
+    rows: [{ held: "Master <500GT", code: "QL-01" }], at: "2026-09-01T00:00:00Z", skillsId: "sk1", colsKey: "QL-01",
+  }));
+  const doc = portal.doc(); doc.quals.cols = [["QL-50", "Not on the sheet", "Qualifications"]]; portal.state.data = JSON.stringify(doc);
+  const gets = countingGets(bucket, skillsKey);
+  const out = await keepEquivalences();
+  assert.equal(out.rows, 1, "the stamped table stands");
+  assert.equal(out.written, false);
+  assert.match(out.problem || "", /no usable rows/, "…but the problem is said over it");
+  assert.equal(JSON.parse(portal.blobs.get("matrix-readings|equivalences.json")!).colsKey, "QL-01", "no empty table written, no restamp");
+  assert.match((await keepEquivalences()).problem || "", /no usable rows/, "said again from the remembered read");
+  assert.equal(gets(), 1, "…without reading the workbook again");
+});
+
 test("a skills matrix with no bytes on file is looked at again next hour, not remembered", async () => {
   const { portal, bucket } = await oneManPortal({ skills: true });
   await bucket.delete(skillsKey);
@@ -1568,7 +1590,8 @@ test("POST /api/round runs the round in the caller's name and answers with every
   assert.equal(progress.word, "Done");
   assert.equal(progress.done, true);
   assert.equal(progress.by, "Matthew");
-  assert.deepEqual(progressWrites(portal.db).map((p) => p.pct), [1, 20, 30, 60, 75, 100], "said in order, under its own key");
+  assert.deepEqual(progressWrites(portal.db).map((p) => p.pct), [1, 20, 30, 60, 75, 85, 100], "said in order, under its own key");
+  assert.equal(progressWrites(portal.db).find((p) => p.pct === 85)?.word, "Filing the workbook in the library", "the word before the replace in the library");
   assert.equal(portal.blobs.has("sync|progress"), false, "the sync's key is untouched");
 });
 
@@ -1590,8 +1613,9 @@ test("the round from the page holds a short lease, is kept alive past the browse
   assert.equal(kept.length, 1, "the work was registered with the platform");
   assert.equal(await kept[0], res, "…and it is the very answer");
   const take = JSON.parse(String(leaseWrites(portal.db)[0].args[2])) as { until: number };
-  assert.ok(take.until <= before + LEASE_FOR_MS + 1000, "the lease stands for the budget plus a minute, not the hour's fifteen");
+  assert.ok(take.until <= before + LEASE_FOR_MS + 1000, "the lease stands for the budget plus two minutes, not the hour's fifteen");
   assert.ok(take.until > before + BUDGET_MS, "…but outlives the budget");
+  assert.ok(LEASE_FOR_MS - BUDGET_MS >= 2 * 60 * 1000, "two minutes for the write in flight: the budget only decides whether the workbook step may start");
   assert.ok(LEASE_FOR_MS < 5 * 60 * 1000, "shorter than the hour's wait for it");
   const words = progressWrites(portal.db) as unknown as { runId: string }[];
   assert.ok(words.length >= 2 && words.every((w) => w.runId === "run-7"), "every word carries the runId");
@@ -1649,7 +1673,8 @@ test("POST /api/round while the hour holds the lease is refused, and says who ho
   const res = await postRound({ by: "Matthew", runId: "run-9" });
   assert.equal(res.status, 409);
   const out = (await res.json()) as { error: string; by: string; runId: string };
-  assert.match(out.error, /^the round on the hour is writing the workbook; try again in a minute/);
+  assert.match(out.error, /^The round on the hour is writing the workbook/, "a sentence the page can show as it is");
+  assert.ok(!/in a minute/.test(out.error), "no promise of a minute: the hour holds the lease far longer");
   assert.equal(out.by, "the round on the hour");
   assert.equal(out.runId, "run-9");
   assert.equal(portal.blobs.has("sync|round-progress"), false, "no progress record written");
