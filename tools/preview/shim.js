@@ -267,6 +267,21 @@
         return json({ error: "Putting a version back only runs on the live portal." }, 503);
       if (p === "/api/rename-file" || p === "/api/rename")
         return json({ error: "Renaming moves the file in SharePoint, so it only runs on the live portal." }, 503);
+      /* The round from the page reads the new certificates and refiles them
+         through /api/analyse before it starts the server's round. The preview
+         holds no readings and moves no files, so both are answered as already
+         done - every certificate read, nothing to refile - and the round
+         itself is the 503 above, which the window shows as it is. Every
+         other analysis is a live-server job. */
+      if (p === "/api/analyse") {
+        const body = await req.clone().json().catch(() => null);
+        const action = body && body.action;
+        if (action === "extract") {
+          const total = mem.rows.filter((r) => r.category === "certificate" && !r.removedAt).length;
+          return json({ read: total, total, remaining: 0, extracted: 0, failures: [] });
+        }
+        if (action === "refile") return json({ moved: [], remaining: 0 });
+      }
       if (p === "/api/analyse" || p === "/api/ai-checker" || p === "/api/archive")
         return json(
           { error: "This runs on the live server, so it isn't available in the test preview — everything else here works." },
