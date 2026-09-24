@@ -24,8 +24,14 @@ import { getEnv } from "../env.js";
 export type FileStore = {
   get(key: string, opts?: { type?: "arrayBuffer" }): Promise<ArrayBuffer | null>;
   get(key: string, opts: { type: "stream" }): Promise<ReadableStream | null>;
-  set(key: string, value: ArrayBuffer): Promise<void>;
+  /** `intoExistingFolder`: the write goes straight to the address and
+   *  makes no folder on the way - a parent that is not there is the
+   *  library's own refusal, never a folder the portal made. For a file
+   *  that goes into a folder of the owner's, such as the backup. */
+  set(key: string, value: ArrayBuffer, opts?: { intoExistingFolder?: boolean }): Promise<void>;
   delete(key: string): Promise<void>;
+  /** Whether the key names a folder that is there. One look, no listing. */
+  hasFolder(key: string): Promise<boolean>;
   getMetadata(key: string): Promise<{ key: string; size?: number } | null>;
   /** `modified` is when the library last touched the file, as an ISO
    *  string, where the driver knows; the sync weighs two qualification
@@ -48,6 +54,10 @@ function r2Store(): FileStore {
     },
     async delete(key) {
       await bucket().delete(key);
+    },
+    async hasFolder() {
+      // R2 has no folders: a key is its whole address, so every folder is there.
+      return true;
     },
     async getMetadata(key) {
       const head = await bucket().head(key);
@@ -165,7 +175,7 @@ function mappings(): [string, string][] {
    and said so. */
 const ELSEWHERE = "library/";
 
-const toReal = (key: string) => {
+export const toReal = (key: string) => {
   if (key.startsWith(ELSEWHERE)) return key.slice(ELSEWHERE.length);
   for (const [from, to] of mappings()) {
     if (key.startsWith(from)) return to + key.slice(from.length);
@@ -226,9 +236,12 @@ function sharepointStore(): FileStore {
       if (!res.ok) throw new Error(`SharePoint read failed (${res.status}) for ${key}`);
       return opts?.type === "stream" ? res.body : await res.arrayBuffer();
     },
-    async set(key, value) {
+    async set(key, value, opts) {
       const drive = await driveId();
-      await ensureFolders(drive, toReal(key));
+      // Straight to the address when asked: no folder is looked for and
+      // none made, so a parent that is not there comes back as Graph's
+      // own 404 on the write itself.
+      if (!opts?.intoExistingFolder) await ensureFolders(drive, toReal(key));
       const res = await graph(`/drives/${drive}/root:/${encodePath(toReal(key))}:/content`, {
         method: "PUT",
         headers: { "Content-Type": "application/octet-stream" },
@@ -239,6 +252,15 @@ function sharepointStore(): FileStore {
     async delete(key) {
       const res = await graph(`/drives/${await driveId()}/root:/${encodePath(toReal(key))}`, { method: "DELETE" });
       if (!res.ok && res.status !== 404) throw new Error(`SharePoint delete failed (${res.status}) for ${key}`);
+    },
+    async hasFolder(key) {
+      // One look at the item itself. Only an item that is a folder counts:
+      // a file of that name is not somewhere to write into.
+      const res = await graph(`/drives/${await driveId()}/root:/${encodePath(toReal(key))}`);
+      if (res.status === 404) return false;
+      if (!res.ok) throw new Error(`SharePoint check failed (${res.status}) for ${key}`);
+      const item = (await res.json()) as { folder?: unknown };
+      return !!item.folder;
     },
     async getMetadata(key) {
       const res = await graph(`/drives/${await driveId()}/root:/${encodePath(toReal(key))}`);

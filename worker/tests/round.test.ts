@@ -2463,6 +2463,99 @@ test("the library driver refuses to make a folder outside the portal's own, and 
   }
 });
 
+/** Graph, answered by hand for the backup's write: the folders in `exists`
+ *  are folders, a PUT lands only where its parent is one, and every call
+ *  is written down. */
+function graphLibrary(exists: Set<string>) {
+  const calls: { method: string; path: string }[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = (init?.method || "GET").toUpperCase();
+    const path = decodeURIComponent(url.replace(/^https:\/\/[^/]+/, ""));
+    calls.push({ method, path });
+    const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+    if (path.includes("/oauth2/")) return json({ access_token: "t", expires_in: 3600 });
+    if (/^\/v1\.0\/sites\/[^/]+:\/sites\/\w+$/.test(path)) return json({ id: "site1" });
+    if (path === "/v1.0/sites/site1/drives") return json({ value: [{ id: "d1", name: "Documents" }] });
+    if (method === "GET") {
+      const m = /^\/v1\.0\/drives\/d1\/root:\/(.+)$/.exec(path);
+      return m && exists.has(m[1]) ? json({ id: "f", folder: {} }) : json({ error: "not found" }, 404);
+    }
+    if (method === "POST" && path.endsWith(":/children")) {
+      const parent = /root:\/(.+):\/children$/.exec(path)![1];
+      exists.add(`${parent}/${JSON.parse(String(init!.body)).name}`);
+      return json({ id: "new" }, 201);
+    }
+    if (method === "PUT") {
+      const parent = /root:\/(.+)\/[^/]+:\/content$/.exec(path)![1];
+      return exists.has(parent) ? json({ id: "put" }, 201) : json({ error: { code: "itemNotFound", message: "The resource could not be found." } }, 404);
+    }
+    if (method === "DELETE") return new Response(null, { status: 204 });
+    return json({ error: "unexpected " + method + " " + path }, 500);
+  }) as typeof fetch;
+  const posts = () => calls.filter((c) => c.method === "POST" && c.path.endsWith(":/children")).map((c) => c.path);
+  const puts = () => calls.filter((c) => c.method === "PUT").map((c) => c.path);
+  return { calls, posts, puts, restore: () => { globalThis.fetch = realFetch; } };
+}
+const sharepointEnv = (over: Record<string, unknown> = {}) => ({
+  FILE_STORE: "sharepoint", MS_TENANT_ID: "tenant", MS_CLIENT_ID: "app", MS_CLIENT_SECRET: "secret",
+  SHAREPOINT_HOSTNAME: "x.sharepoint.com", SHAREPOINT_SITE_PATH: "/sites/Team", SHAREPOINT_LIBRARY: "Documents",
+  SHAREPOINT_ROOT: "United Operations Team/Crew Portal",
+  SHAREPOINT_MAP: JSON.stringify({ "opms/": "United Operations Team/OPMS Documents/" }),
+  ...over,
+});
+
+test("a write into an existing folder goes straight to the address and makes nothing on the way", async () => {
+  const graph = graphLibrary(new Set(["United Operations Team", "United Operations Team/Backups"]));
+  try {
+    setEnv(sharepointEnv() as never);
+    const { fileStore } = await import("../src/files/store.js");
+    const store = fileStore();
+    assert.equal(await store.hasFolder("library/United Operations Team/Backups"), true, "the folder is there");
+    assert.equal(await store.hasFolder("library/United Operations Team/Nowhere"), false, "…and this one is not");
+    graph.calls.length = 0;
+
+    // The folder is there: one PUT, and no folder asked about or made.
+    await store.set("library/United Operations Team/Backups/Crew Portal backup 2026-09-24.json", bytesOf("{}"), { intoExistingFolder: true });
+    assert.deepEqual(graph.puts(), ["/v1.0/drives/d1/root:/United Operations Team/Backups/Crew Portal backup 2026-09-24.json:/content"]);
+    assert.deepEqual(graph.posts(), [], "no folder made");
+    assert.deepEqual(graph.calls.filter((c) => c.method === "GET"), [], "and none looked for");
+
+    // The folder is not there: the write is Graph's own 404, and still no folder.
+    graph.calls.length = 0;
+    await assert.rejects(
+      store.set("library/United Operations Team/Nowhere/Crew Portal backup 2026-09-24.json", bytesOf("{}"), { intoExistingFolder: true }),
+      /SharePoint write failed \(404\)/,
+    );
+    assert.deepEqual(graph.posts(), [], "no folder made");
+    assert.equal(graph.puts().length, 1, "the one write, refused");
+  } finally {
+    graph.restore();
+  }
+});
+
+test("a folder that goes between the look and the write: the write fails, and still no folder is made", async () => {
+  const exists = new Set(["United Operations Team", "United Operations Team/Backups"]);
+  const graph = graphLibrary(exists);
+  try {
+    setEnv(sharepointEnv() as never);
+    const { fileStore } = await import("../src/files/store.js");
+    const store = fileStore();
+    assert.equal(await store.hasFolder("library/United Operations Team/Backups"), true);
+    // Somebody in Teams deletes the folder in the instant between.
+    exists.delete("United Operations Team/Backups");
+    await assert.rejects(
+      store.set("library/United Operations Team/Backups/Crew Portal backup 2026-09-24.json", bytesOf("{}"), { intoExistingFolder: true }),
+      /SharePoint write failed \(404\)/,
+    );
+    assert.deepEqual(graph.posts(), [], "no folder made");
+    assert.equal(exists.has("United Operations Team/Backups"), false, "and the library is as the person left it");
+  } finally {
+    graph.restore();
+  }
+});
+
 /* ------------------------------------------------------------------------ *
  * The two columns the worker adds itself, on a database that has no
  * documents table yet: nothing to alter, and the request goes through.
