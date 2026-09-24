@@ -337,7 +337,7 @@ function CrewReport({ onClose }) {
     const soon = soonOf(items).length;
     const stand = ticketStandingFor(row, QUALS);
     return `${row[1]} · ${row[2]} · ${items.length} item${items.length === 1 ? "" : "s"}`
-      + (soon ? ` · ${soon} due within 90 days` : "")
+      + (soon ? ` · ${soon} due within ${RED_DAYS} days` : "")
       + (stand ? ` · ${stand.label.toLowerCase()}` : "");
   };
 
@@ -403,7 +403,7 @@ function IndividualReport({ onClose }) {
       filename: `${slugOf(row[0])}-${TODAY}.pdf`,
       empty: "Nothing is held against this name.",
       groups: [
-        ...(soon.length ? [{ heading: "Needs attention", meta: `${soon.length} within 90 days or not held`, items: soon.map(line) }] : []),
+        ...(soon.length ? [{ heading: "Needs attention", meta: `${soon.length} within ${RED_DAYS} days or not held`, items: soon.map(line) }] : []),
         ...Array.from(new Set(items.map((x) => x.group))).map((g) => ({
           heading: g,
           meta: "",
@@ -549,7 +549,7 @@ function MatrixPerson({ row, onClose }) {
                 fg: t.band.fg, bg: t.band.bg })) }]
           : []),
         ...(attention.length
-          ? [{ heading: "Needs attention", meta: `${attention.length} expired, due within 90 days or not held`,
+          ? [{ heading: "Needs attention", meta: `${attention.length} expired, due within ${RED_DAYS} days or not held`,
               items: attention.map(line) }]
           : []),
         ...groups.map((g) => ({

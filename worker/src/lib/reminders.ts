@@ -71,7 +71,24 @@ export const NO_EMAIL = "email sending is not set up on this portal - nothing wa
  *  reminders come before them: a send that hangs must not eat the round's
  *  time. Past it no new send is started, and whoever was not reached is
  *  named on the record (a test shortens it). */
-export const reminderLimits = { sendingForMs: 60_000 };
+export const reminderLimits = { sendingForMs: 60_000, answerWithinMs: 20_000 };
+
+/** The wait for the email service to answer one send: past
+ *  `answerWithinMs` the send is given up on and counted as failed, so one
+ *  send that never returns cannot hold the hour until the platform cuts
+ *  it off - the minute above only stops new sends starting. The stop
+ *  clears the timer once the send has answered. The tests swap it, as
+ *  they do graphWaits. */
+export const reminderWaits = {
+  sleep: (ms: number, stop?: AbortSignal) =>
+    new Promise<void>((done) => {
+      const timer = setTimeout(done, ms);
+      stop?.addEventListener("abort", () => { clearTimeout(timer); done(); });
+    }),
+};
+
+/** Why a send given up on is on the failed list. */
+export const NO_ANSWER = "no answer from the email service";
 
 /** The record's line where the time ran out before the first send: nothing
  *  went, so the next hour tries again. */
@@ -160,14 +177,26 @@ export async function weeklyReminders(now: number): Promise<ReminderRecord | nul
           failed.push(to);
           return false;
         }
+        const stop = new AbortController();
         try {
           sentAny = true;
-          await email.send({ to, from: vessel.mailFrom, subject: mail.subject, text: mail.text, html: mail.html });
+          const answered = Promise.resolve(email.send({ to, from: vessel.mailFrom, subject: mail.subject, text: mail.text, html: mail.html }));
+          // A send given up on may still fail after; there is nobody left
+          // to tell, and it must not surface as an unhandled rejection.
+          answered.catch(() => {});
+          await Promise.race([
+            answered,
+            reminderWaits.sleep(reminderLimits.answerWithinMs, stop.signal).then(() => {
+              if (!stop.signal.aborted) throw new Error(NO_ANSWER);
+            }),
+          ]);
           return true;
         } catch (e) {
-          console.error("a reminder email was not sent:", e);
+          console.error("a reminder email was not sent:", to, said(e));
           failed.push(to);
           return false;
+        } finally {
+          stop.abort();
         }
       };
       for (const o of own) {

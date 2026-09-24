@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -2265,6 +2265,8 @@ const is = (got, want, what) => {
   const bands = await import(pathToFileURL(join(ROOT, "source", "shared", "bands.js")).href);
   is([RED_DAYS, AMBER_DAYS], [90, 180], "red is expired or within 90 days, amber within 180");
   is([bands.RED_DAYS, bands.AMBER_DAYS], [RED_DAYS, AMBER_DAYS], "the page and the worker read the same two numbers");
+  is([/within 90\b/.test(portalJsx()), (portalJsx().match(/within \$\{RED_DAYS\} days/g) || []).length], [false, 6],
+    "the reports' headings say the red band's days from RED_DAYS, never a 90 written in by hand");
   is(daysUntil("2026-10-12", "2026-09-24"), 18, "18 days from 24 Sep to 12 Oct");
   is(daysUntil("2026-09-21", "2026-09-24"), -3, "three days gone is -3");
   is(daysUntil("2026-04-06", "2026-04-04"), 2, "a daylight-saving weekend elsewhere moves nothing");
@@ -2360,6 +2362,52 @@ const is = (got, want, what) => {
     "Your certificates expiring within 90 days - " + VESSEL.name + " " + VESSEL.nameAccent, "the crew member's subject");
   is(summaryText(VESSEL, byPerson(items), today, 90).text.split("\n").slice(-2), ["https://" + VESSEL.domain, ""],
     "the summary ends on the portal's address");
+}
+
+/* ---- offline, every reminder control on Access Grants is held down under
+        the badge's line; online, none is ---- */
+{
+  /* The page compiled again with a React that builds the elements instead
+     of dropping them, and a portal that is offline or not. The switch is
+     drawn and every component in it opened up, so each button and box is
+     seen as the browser would get it: held down by itself or by the
+     fieldset round it, with its own title or the nearest one above it. */
+  const drawn = (portal) => {
+    const el = (type, props, ...children) => ({ type, props: props || {}, children: children.flat(Infinity) });
+    const R = { ...ReactStub, createElement: el, useContext: () => portal, useEffect: () => {} };
+    const page = fn(
+      R, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
+      windowStub.navigator, windowStub.location, sessionStub, sessionStub, () => {}, async () => ({ ok: false }),
+      () => 0, () => 0, () => {}, () => {}, () => 0, () => {}, () => false,
+      function N() {}, function I() {}, function A() {}, class { observe() {} }, function F() {},
+      function X() {}, { now: () => 0 }, {}, {},
+    );
+    const open = (n) => {
+      if (!n || typeof n !== "object") return n;
+      if (typeof n.type === "function") return open(n.type({ ...n.props, children: n.children.length <= 1 ? n.children[0] : n.children }));
+      return { ...n, children: n.children.map(open) };
+    };
+    const controls = [];
+    const walk = (n, held, title) => {
+      if (!n || typeof n !== "object") return;
+      const heldHere = held || (n.type === "fieldset" && !!n.props.disabled);
+      const titleHere = n.props.title !== undefined ? n.props.title : title;
+      if (n.type === "button" || n.type === "input") controls.push({ held: heldHere || !!n.props.disabled, title: titleHere });
+      n.children.forEach((c) => walk(c, heldHere, titleHere));
+    };
+    walk(open(el(page.ReminderSwitch, null)), false, undefined);
+    return controls;
+  };
+  const setting = { on: true, days: 90, weekday: 1, hour: 7 };
+  const STAMP = "2026-09-25T01:00:00.000Z";
+  const offline = drawn({ reminders: setting, setReminders: () => {}, offlineAt: STAMP });
+  is(offline.length, 11, "the reminder row has On, Off, the seven weekdays and the two boxes");
+  is(offline.filter((c) => !c.held).length, 0, "offline, every one of them is held down");
+  is([...new Set(offline.map((c) => c.title))], [lib.offlineLine(STAMP)], "…under the badge's line");
+  const online = drawn({ reminders: setting, setReminders: () => {}, offlineAt: null });
+  is(online.length, 11, "online, the same eleven");
+  is(online.filter((c) => c.held).length, 0, "…and none is held down");
+  is(online.filter((c) => c.title !== undefined).length, 0, "…nor carries the offline line");
 }
 
 if (failed) {

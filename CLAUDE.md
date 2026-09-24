@@ -183,12 +183,18 @@ on any line that still names this one.
   is moved to (`reminderOwed`); a set day whose every tick was missed is
   sent the next day, as that set day, only where last week's went. The
   sends stop starting a minute in (`reminderLimits`) and name whoever was
-  not reached, so they never eat the round's hour. The reminders read the
+  not reached, and a send the email service does not answer within
+  `answerWithinMs` (twenty seconds, the wait through `reminderWaits`) is
+  given up on and counted as failed, so they never eat the round's hour.
+  Offline the switch, the weekdays and both boxes are held down under the
+  badge's line like every other control that writes. The reminders read the
   document every hour before the lease; the lease test allows that one
   read and nothing else of the books. The
   red band's 90 days is one number, `RED_DAYS` in `source/shared/bands.js`,
   with the day count (`daysUntil`) the page and the reminders both use; a
-  test holds the reminders' default window to it.
+  test holds the reminders' default window to it. The matrix reports' "due
+  within ... days" and the assistant's expiring (`expiringIn`,
+  `EXPIRING_MEANS` in `worker/src/lib/portal.ts`) read it too.
 - **One round.** Every Update matrix button starts the server's round
   (`POST /api/round`, `runMatrixRound` in `source/index.html`); the page
   reads new certificates and refiles first, and never applies dates itself

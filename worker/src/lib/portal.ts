@@ -55,6 +55,7 @@ import {
 import { heldOpmsAnswer, type OpmsHeld } from "./opms.js";
 import { shiftKeyFor, shiftSheetRow, shiftStore, type ShiftHeld } from "./shift.js";
 import { vessel } from "../vessel.js";
+import { RED_DAYS } from "../../../source/shared/bands.js";
 
 /** The swings' names as the office says them, the two labels with "Swing"
  *  taken off and joined with "and", off the vessel file. */
@@ -178,6 +179,15 @@ function daysAway(iso: string) {
   return Math.round((at - now) / 86400000);
 }
 
+/** Whether a certificate this many days from its expiry is expiring: not
+ *  gone yet, and inside the matrix's red band - RED_DAYS, the one number
+ *  the page's colours and the weekly reminder emails read too, so the
+ *  assistant never calls something current that the matrix shows red. */
+export const expiringIn = (away: number | null) => away !== null && away >= 0 && away <= RED_DAYS;
+
+/** The status filter's word on expiring, as the model is told it. */
+export const EXPIRING_MEANS = `expiring is anything with ${RED_DAYS} days or less to run`;
+
 /** An expiry as a person would say it: the date, and where it stands today. */
 function standing(iso: string | null | undefined) {
   if (!iso) return "no expiry recorded";
@@ -185,7 +195,7 @@ function standing(iso: string | null | undefined) {
   if (n === null) return iso;
   if (n < 0) return `${iso} — EXPIRED ${-n} ${-n === 1 ? "day" : "days"} ago`;
   if (n === 0) return `${iso} — expires today`;
-  if (n <= 90) return `${iso} — ${n} ${n === 1 ? "day" : "days"} left`;
+  if (n <= RED_DAYS) return `${iso} — ${n} ${n === 1 ? "day" : "days"} left`;
   return `${iso} — current`;
 }
 
@@ -431,7 +441,7 @@ export const PORTAL_TOOLS: Record<string, unknown>[] = [
           type: "string",
           enum: ["all", "current", "expiring", "expired", "unread", "unreadable"],
           description:
-            "Which certificates to include. current is anything not expired; expiring is anything with 90 days or less to run; unread is the ones nobody has read yet; unreadable is the ones a model could not read. Defaults to all.",
+            `Which certificates to include. current is anything not expired; ${EXPIRING_MEANS}; unread is the ones nobody has read yet; unreadable is the ones a model could not read. Defaults to all.`,
         },
         limit: {
           type: "integer",
@@ -757,7 +767,7 @@ async function toolReadCertificates(input: Record<string, unknown>): Promise<Too
     if (status === "unreadable" && (!reading || reading.readable)) continue;
     if (status === "current" && away !== null && away < 0) continue;
     if (status === "expired" && (away === null || away >= 0)) continue;
-    if (status === "expiring" && (away === null || away < 0 || away > 90)) continue;
+    if (status === "expiring" && !expiringIn(away)) continue;
 
     held++;
     if (shown >= limit) continue;

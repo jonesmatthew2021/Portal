@@ -26,7 +26,7 @@ function daysTo(iso) {
    written down once in source/shared/bands.js, where the worker's weekly
    reminder emails read the same red band. */
 
-// Expired or within 90 days red, 90-180 orange, beyond 180 green.
+// Expired or within RED_DAYS red, to AMBER_DAYS orange, beyond that green.
 function bandFor(v) {
   if (!v) return null;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) {

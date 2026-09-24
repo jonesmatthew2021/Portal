@@ -21,6 +21,7 @@ import { vessel, checkVessel, vesselNow } from "../src/vessel.js";
 import { crewRowsOnly, crewRegister, nameLetters, registerWords } from "../../source/shared/names.js";
 import { RED_DAYS, daysUntil } from "../../source/shared/bands.js";
 import * as reminders from "../../source/shared/reminders.js";
+import { expiringIn, EXPIRING_MEANS, PORTAL_TOOLS } from "../src/lib/portal.js";
 
 /** The office's equivalence sheet, as the portal stores it. */
 const SHEET = [
@@ -453,6 +454,13 @@ test("the red band and the reminder window are the same 90 days", () => {
   assert.equal(RED_DAYS, 90);
   assert.equal(reminders.REMINDER_DEFAULTS.days, RED_DAYS);
   assert.deepEqual(reminders.REMINDER_DEFAULTS, { on: false, days: 90, weekday: 1, hour: 7 }, "off, 90 days, Monday, 07:00");
+});
+
+test("the assistant's expiring is the red band: RED_DAYS, and it says so", () => {
+  assert.deepEqual([-1, 0, RED_DAYS, RED_DAYS + 1, null].map(expiringIn), [false, true, true, false, false]);
+  assert.equal(EXPIRING_MEANS, "expiring is anything with 90 days or less to run", "the sentence reads as it always did");
+  const certs = PORTAL_TOOLS.find((t) => t.name === "read_certificates") as { input_schema: { properties: { status: { description: string } } } };
+  assert.ok(certs.input_schema.properties.status.description.includes(EXPIRING_MEANS), "and the model is told it");
 });
 
 test("the setting reads the document with the defaults where a key will not do, and only a real true is on", () => {

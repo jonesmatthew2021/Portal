@@ -323,26 +323,40 @@ function AccessGrantsPage() {
  * it when the box is left or Enter is pressed - never on a keystroke, so
  * typing 60 never saves a 6 the hour could send by. A figure that is not a
  * whole number in range puts the box back to the setting as it stands.
+ *
+ * Offline every one of them is held down under the badge's line, as every
+ * other control that writes is: put() would refuse the change, and a
+ * figure left in a box would look saved when it was not. Choices takes no
+ * disabled of its own, so the row is a fieldset - a disabled fieldset
+ * holds down every button and box inside it - and the boxes are held down
+ * and put back to the setting by name as well.
  */
 function ReminderSwitch() {
-  const { reminders, setReminders } = usePortal();
+  const { reminders, setReminders, offlineAt } = usePortal();
+  const heldTitle = offlineAt ? offlineLine(offlineAt) : undefined;
   const [days, setDays] = useState(String(reminders.days));
   const [hour, setHour] = useState(String(reminders.hour));
   // Another tab's change arrives on the poll: the boxes follow it.
   React.useEffect(() => { setDays(String(reminders.days)); }, [reminders.days]);
   React.useEffect(() => { setHour(String(reminders.hour)); }, [reminders.hour]);
+  // Gone offline with a figure half typed: the box goes back to what is saved.
+  React.useEffect(() => {
+    if (offlineAt) { setDays(String(reminders.days)); setHour(String(reminders.hour)); }
+  }, [offlineAt]);
   const save = (patch) => setReminders({ ...reminders, ...patch });
   const settle = (text, lo, hi, key, set) => {
     const n = Number(text);
-    if (text.trim() !== "" && Number.isInteger(n) && n >= lo && n <= hi) {
+    if (!offlineAt && text.trim() !== "" && Number.isInteger(n) && n >= lo && n <= hi) {
       if (n !== reminders[key]) save({ [key]: n });
       set(String(n));
     } else set(String(reminders[key]));
   };
   const onEnter = (e) => { if (e.key === "Enter") e.currentTarget.blur(); };
   return (
-    <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderLeft: `4px solid ${T.teal}`,
-      borderRadius: 2, padding: "13px 15px", marginBottom: 16, display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
+    <fieldset disabled={!!offlineAt} title={heldTitle}
+      style={{ background: T.panel, border: `1px solid ${T.rule}`, borderLeft: `4px solid ${T.teal}`,
+      borderRadius: 2, padding: "13px 15px", margin: "0 0 16px", minWidth: 0, display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end",
+      ...(offlineAt ? { opacity: 0.45, cursor: "not-allowed" } : null) }}>
       <ChoiceField label="Expiry reminders">
         <Choices compact value={reminders.on ? "on" : "off"} onPick={(v) => save({ on: v === "on" })}
           options={[{ value: "on", label: "On" }, { value: "off", label: "Off" }]} />
@@ -351,6 +365,7 @@ function ReminderSwitch() {
         <Field label="Days">
           <input className="um-in" type="number" min={1} max={365} step={1} style={{ width: "100%" }} value={days}
             onChange={(e) => setDays(e.target.value)} onKeyDown={onEnter}
+            disabled={!!offlineAt} title={heldTitle}
             onBlur={(e) => settle(e.target.value, 1, 365, "days", setDays)} />
         </Field>
       </div>
@@ -362,10 +377,11 @@ function ReminderSwitch() {
         <Field label="Hour">
           <input className="um-in" type="number" min={0} max={23} step={1} style={{ width: "100%" }} value={hour}
             onChange={(e) => setHour(e.target.value)} onKeyDown={onEnter}
+            disabled={!!offlineAt} title={heldTitle}
             onBlur={(e) => settle(e.target.value, 0, 23, "hour", setHour)} />
         </Field>
       </div>
-    </div>
+    </fieldset>
   );
 }
 

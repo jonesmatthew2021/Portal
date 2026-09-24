@@ -35,7 +35,7 @@ import { graphBudget } from "../src/files/store.js";
 import { writeZip, readZip, partOf, partText, datedWorkbookName } from "../../source/shared/workbook.js";
 import { asKnownPerson, crewRegister } from "../../source/shared/names.js";
 import { backupDue, backupName, namesToDrop, folderAllowed, nightlyBackup } from "../src/lib/backup.js";
-import { REMINDER_USERS_SQL, NO_EMAIL, UNFINISHED, OUT_OF_TIME, reminderLimits, weeklyReminders } from "../src/lib/reminders.js";
+import { REMINDER_USERS_SQL, NO_EMAIL, UNFINISHED, OUT_OF_TIME, reminderLimits, reminderWaits, weeklyReminders } from "../src/lib/reminders.js";
 import { vessel, vesselNow } from "../src/vessel.js";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -3477,6 +3477,60 @@ test("the sends stop at their time limit: whoever was not reached is named, and 
   const next = fakeEmail();
   await hourAt(MONDAY_0710 + 3_600_000, reminderEnv(late, next));
   assert.equal(next.sent.length, 4, "the next hour sends them");
+});
+
+test("a send that never answers is given up on: the rest still go, the claim stands, and the hour runs", async () => {
+  // Kachin's send never returns - the service took it and said nothing.
+  const hanging = () => {
+    const email = fakeEmail();
+    return {
+      sent: email.sent,
+      send: (m: { to: string; from: string; subject: string; text: string; html: string }) =>
+        m.to === "kachin@example.com" ? new Promise<void>(() => {}) : email.send(m),
+    };
+  };
+  const waited: number[] = [];
+  const realSleep = reminderWaits.sleep;
+  try {
+    // The wait for an answer ends on the next turn here, as if its time
+    // had passed: a send that answers at all has answered by then.
+    const aTurn = () => new Promise<void>((done) => setTimeout(done, 0));
+    reminderWaits.sleep = async (ms: number) => { waited.push(ms); await aTurn(); };
+    const r = await reminderPortal();
+    const email = hanging();
+    await quiet(() => hourAt(MONDAY_0710, reminderEnv(r, email)));
+    assert.ok(waited.includes(reminderLimits.answerWithinMs), "each send waited on for its limit");
+    assert.ok(reminderLimits.answerWithinMs > 0 && reminderLimits.answerWithinMs < reminderLimits.sendingForMs);
+    assert.deepEqual(email.sent.map((m) => m.to), ["brenton@example.com", "boss@example.com", "help@example.com"], "everybody else's went");
+    const rec = reminderRecord(r.portal);
+    assert.deepEqual(rec.failed, ["kachin@example.com"], "Kachin is named");
+    assert.equal(rec.own, 1);
+    assert.equal(rec.summary, 2);
+    assert.equal(rec.error, null);
+    assert.equal(rec.day, "2026-09-28", "the claim stands");
+    const hourly = JSON.parse(r.portal.blobs.get("sync|last-hourly")!);
+    assert.equal(hourly.syncError, null, "the sync ran");
+    assert.equal(hourly.applied, 1, "and the round, and the hour's line is written");
+    const again = fakeEmail();
+    await hourAt(MONDAY_0710 + 3_600_000, reminderEnv(r, again));
+    assert.equal(again.sent.length, 0, "a second tick sends nothing");
+
+    // The wait on Kachin's used up the minute: the two after are named as
+    // not reached, and the hour still runs.
+    reminderWaits.sleep = async (ms: number, stop?: AbortSignal) => {
+      await aTurn();
+      if (!stop?.aborted) Date.now = () => MONDAY_0710 + ms + 45_000;
+    };
+    const late = await reminderPortal();
+    const email2 = hanging();
+    await quiet(() => hourAt(MONDAY_0710, reminderEnv(late, email2)));
+    assert.deepEqual(email2.sent.map((m) => m.to), ["brenton@example.com"]);
+    assert.deepEqual(reminderRecord(late.portal).failed, ["kachin@example.com", "boss@example.com", "help@example.com"]);
+    assert.equal(reminderRecord(late.portal).day, "2026-09-28");
+    assert.equal(JSON.parse(late.portal.blobs.get("sync|last-hourly")!).applied, 1, "the round still ran");
+  } finally {
+    reminderWaits.sleep = realSleep;
+  }
 });
 
 test("the weekday moved after the week's send: nothing more that week", async () => {
