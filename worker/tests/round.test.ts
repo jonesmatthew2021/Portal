@@ -3896,6 +3896,7 @@ test("the back-fill looks once at the certificates that can answer for the keys 
   assert.equal(stored("nc-card").evidenceKind, "extension", "and the evidence key rides along with it");
   assert.equal("endorsements" in stored("induction"), false, "the induction was never asked");
   assert.equal(hourly(portal).particularsRead, 4);
+  assert.ok(model.calls.every((c) => /high risk work licence/i.test(c)), "the question asks for the classes printed on a high risk work licence");
 
   // And the next hour asks nothing: every key they were missing is there.
   const again = modelByFile(() => ({ status: 200, body: readingStream(reading) }));
@@ -3905,6 +3906,35 @@ test("the back-fill looks once at the certificates that can answer for the keys 
     again.restore();
   }
   assert.equal(again.calls.length, 0);
+});
+
+test("the back-fill looks once at a high risk work licence, named for a column or not, for the classes it prints", async () => {
+  /* Seventeen licences on file print several classes on one card and were
+     read before the units were asked for; twelve of them are named for no
+     column at all, so a pass that goes by the certificate's column would
+     never reach them. A licence is known by its title, and by the two
+     columns the vessel file reads the classes into. */
+  const { portal, env } = await particularsPortal({ model: true,
+    people: [{ ...EVANS_P, msic: "TYPED 1", dob: "1980-01-01" }],
+    certs: [
+      { id: "h1", checksum: "hrwl-unnamed", code: null,
+        reading: oldReading({ qualCode: null, codeConfidence: "low", certificateTitle: "National Licence to Perform High Risk Work" }) },
+      { id: "h2", checksum: "hrwl-tagged", code: "HR-01", reading: oldReading({ qualCode: "HR-01", certificateTitle: "Licence to Perform High Risk Work" }) },
+      { id: "h3", checksum: "hrwl-read", code: null,
+        reading: newReading({ qualCode: null, codeConfidence: "low", certificateTitle: "Licence to Perform High Risk Work", units: ["LF"] }) },
+    ] });
+  const model = modelByFile(() => ({ status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans", qualCode: null,
+    certificateTitle: "Licence to Perform High Risk Work", endorsements: [], units: ["C6", "DG", "LF", "RB", "WP"] }) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    model.restore();
+  }
+  const stored = (checksum: string) => JSON.parse(portal.blobs.get(`certificate-readings|r1/${checksum}.json`)!);
+  assert.deepEqual(stored("hrwl-unnamed").units, ["C6", "DG", "LF", "RB", "WP"], "the licence named for no column is read for its classes");
+  assert.deepEqual(stored("hrwl-tagged").units, ["C6", "DG", "LF", "RB", "WP"], "and so is the one tagged for dogging");
+  assert.deepEqual(stored("hrwl-read").units, ["LF"], "one read since the question asked for units is left as it was");
+  assert.equal(hourly(portal).particularsRead, 3, "his Master ticket and the two licences, once each");
 });
 
 test("a box somebody typed is never paid for: its certificates are not read again", async () => {
@@ -4437,6 +4467,62 @@ test("covers: a training statement's unit codes fill their own columns, and the 
   const noted = db.asked.filter((a) => /UPDATE documents\s+SET read_code/.test(a.sql));
   assert.deepEqual(noted.map((n) => n.args[1]), ["QL-18"],
     "the row's own read code is written once and the covered column never writes over it");
+});
+
+test("covers: a high risk work licence with no column of its own still fills the columns its classes cover", async () => {
+  /* The licence prints "DG, LF, RI, CV" and the model rightly names no
+     single column for it, so it holds no cell of its own - and until now
+     only a certificate holding its own column covered anything, which left
+     every one of the seventeen licences filling nothing. The classes are
+     printed codes: the reading lists them as units and the vessel file's
+     rows read DG into HR-01 and CV into HR-02, dated as the licence is. */
+  const cols = [
+    ["HR-01", "HRWL - Dogging - Dogging (DG)", "High Risk Work Licence (HRWL)"],
+    ["HR-02", "HRWL - Vehicle loading crane (CV)", "High Risk Work Licence (HRWL)"],
+    ["PT-02", "Enter and Work in Confined Spaces - RIIWHS202E", "Permit to Work"],
+  ] as [string, string, string][];
+  const licence = {
+    ...evansCoC, certificateTitle: "Licence to Perform High Risk Work", issuer: "WorkSafe WA",
+    qualCode: null, codeConfidence: "low", issuedOn: "2025-04-01", expiresOn: "2030-04-01",
+    endorsements: [], units: ["DG", "LF", "RI", "CV"],
+  };
+  const db = coversDb([{ row: { id: "hrwl", qualCode: null }, reading: licence }]);
+  setEnv({ DB: db, FILE_STORE: "r2" } as never);
+  const out = await compareMatrix(
+    { cols, rows: [["EVANS, Brenton", "GPH", "", ["", "", ""]]] as [string, string, string, string[]][] },
+    null, evansOnly,
+  );
+  assert.deepEqual(out.settled.map((s) => [s.code, s.value]).sort(), [["HR-01", "2030-04-01"], ["HR-02", "2030-04-01"]],
+    "dogging and the crane, both to the licence's own expiry, and nothing on a column its classes do not name");
+  assert.deepEqual(out.claimed.sort(), ["EVANS, BRENTON::HR-01", "EVANS, BRENTON::HR-02"], "claimed, so taking the licence off takes its dates off");
+  assert.equal(out.notes.some((n) => n.kind === "no-code"), false, "a licence that covers two columns is not 'nothing on the matrix'");
+  assert.equal(out.items.find((i) => i.code === "HR-01")!.certificate!.id, "hrwl", "the cell links to the licence");
+  assert.deepEqual(db.asked.filter((a) => /UPDATE documents\s+SET read_code/.test(a.sql)), [],
+    "no read code is written for it: the licence IS no one column");
+
+  // The page's own dates say the same, or the grid and the round would disagree.
+  setEnv({ DB: coversDb([{ row: { id: "hrwl", qualCode: null }, reading: licence }]), FILE_STORE: "r2" } as never);
+  const page = await certificateStanding();
+  assert.deepEqual(page.dates.map((d) => [d.code, d.expires, d.fileId, d.covered]).sort(),
+    [["HR-01", "2030-04-01", "hrwl", true], ["HR-02", "2030-04-01", "hrwl", true]]);
+
+  // A licence printing neither class, and no column of its own, is still nothing on the matrix.
+  setEnv({ DB: coversDb([{ row: { id: "hrwl", qualCode: null }, reading: { ...licence, units: ["LF", "WP"] } }]), FILE_STORE: "r2" } as never);
+  const none = await compareMatrix(
+    { cols, rows: [["EVANS, Brenton", "GPH", "", ["", "", ""]]] as [string, string, string, string[]][] },
+    null, evansOnly,
+  );
+  assert.deepEqual(none.settled, []);
+  assert.equal(none.notes.filter((n) => n.kind === "no-code").length, 1, "and the account of the run says so");
+
+  // One printed in another man's name covers nothing, its own column or any other.
+  setEnv({ DB: coversDb([{ row: { id: "hrwl", qualCode: null }, reading: { ...licence, holderName: "Kachin Sittiyos" } }]), FILE_STORE: "r2" } as never);
+  const hers = await compareMatrix(
+    { cols, rows: [["EVANS, Brenton", "GPH", "", ["", "", ""]]] as [string, string, string, string[]][] },
+    null, evansOnly,
+  );
+  assert.deepEqual(hers.settled, []);
+  assert.equal(hers.notes.filter((n) => n.kind === "name-mismatch").length, 1);
 });
 
 test("covers: the page's own dates carry the covered column, linked to the certificate that filled it", async () => {

@@ -186,7 +186,9 @@ Rules:
   boats". Give "until" only where a date of expiry is printed against that
   endorsement; otherwise null. [] where the document prints none.
 - units: the national training unit codes printed on the document, as printed —
-  "HLTAID011", "HLTAID015", "SITXFSA005", "RIIWHS202E". [] where there are none.
+  "HLTAID011", "HLTAID015", "SITXFSA005", "RIIWHS202E" — and the class codes
+  printed on a high risk work licence, such as DG or CV, one each. [] where
+  there are none.
 - recognises: only for a certificate of recognition, and only what it prints
   about the certificate it recognises. null for anything else.
 - conditions: a limitation on what the holder may do, as printed — "fit for
@@ -918,7 +920,16 @@ export async function compareMatrix(
       rehomed.push({ person: row.person, old: guess, expiry: typedOld || reading.expiresOn || null });
     }
 
-    if (!code || !colAt.has(code.trim().toUpperCase())) {
+    /* A document that is no one column can still fill the columns it
+       covers: a high risk work licence printing five classes is rightly
+       given no code, and its DG and CV classes fill dogging and the crane
+       all the same (the vessel file's rows, source/shared/covers.js). Such
+       a document goes through every check below as a certificate would
+       and joins only the covering pass; only one that covers nothing
+       either is nothing on the matrix. */
+    const ownColumn = !!code && colAt.has(code.trim().toUpperCase());
+    if (!ownColumn && !coveredCells(reading, vessel.covers, vessel.qualColumns, null)
+      .some((cell) => !!cell.until && colAt.has(cell.code.trim().toUpperCase()))) {
       notes.push({
         kind: "no-code",
         person: row.person,
@@ -982,7 +993,7 @@ export async function compareMatrix(
        only, and neither the certificate of safety training nor the marine
        cook certificate is among them. A recognition claiming either proves
        nothing about that column and fills nothing. */
-    if (isRecognitionReading(reading) && !recognitionFills(code, vessel.neverRecognised.codes)) {
+    if (ownColumn && isRecognitionReading(reading) && !recognitionFills(code!, vessel.neverRecognised.codes)) {
       notes.push({
         kind: "no-code",
         person: row.person,
@@ -992,7 +1003,8 @@ export async function compareMatrix(
       continue;
     }
 
-    standing.push({ row, reading, person, code: code.trim().toUpperCase() });
+    // An empty code is a document with no column of its own: it covers only.
+    standing.push({ row, reading, person, code: ownColumn ? code!.trim().toUpperCase() : "" });
   }
 
   const keyFor = (person: string, code: string) =>
@@ -1004,7 +1016,7 @@ export async function compareMatrix(
      pair of documents differently depending on the order the library
      happened to list the files in. */
   for (const { row, reading, person, code } of standing) {
-    if (isRecognitionReading(reading)) continue;
+    if (!code || isRecognitionReading(reading)) continue;
     const own = (isDate(row.expiresOn) ? normDate(row.expiresOn!) : null) || reading.expiresOn || "";
     const key = keyFor(person, code);
     if (own && own > (foreignAt.get(key) || "")) foreignAt.set(key, own);
@@ -1023,8 +1035,12 @@ export async function compareMatrix(
     return isRecognitionReading(rd) ? recognisedUntil(rd, own, foreignAt.get(key)).until : own;
   };
 
-  // One certificate per person and code, decided as above.
+  // One certificate per person and code, decided as above. A document with
+  // no column of its own has no contest to join here: it covers below.
+  const coverOnly: { row: Row; reading: Reading; person: string }[] = [];
   for (const { row, reading, person, code } of standing) {
+    // Keyed as the claims are keyed: the register's name, upper case.
+    if (!code) { coverOnly.push({ row, reading, person: person.trim().toUpperCase() }); continue; }
     const key = keyFor(person, code);
     const sitting = claim.get(key);
     if (!sitting) {
@@ -1094,11 +1110,19 @@ export async function compareMatrix(
      Only the certificates that hold their own column cover anything: a
      ticket the contest above has just decided was superseded is the one it
      replaced, and the endorsements printed on a spent document cannot date a
-     column nothing in force carries. */
+     column nothing in force carries. And the documents that are no one
+     column - a licence printing five classes - which have nothing to hold
+     and cover on their own account. */
   const displaced: { row: Row; reading: Reading; code: string }[] = [];
-  for (const [ownKey, { row, reading }] of [...claim.entries()]) {
-    const person = ownKey.slice(0, ownKey.indexOf("::"));
-    const code = ownKey.slice(ownKey.indexOf("::") + 2);
+  const covering = [
+    ...[...claim.entries()].map(([ownKey, { row, reading }]) => ({
+      row, reading,
+      person: ownKey.slice(0, ownKey.indexOf("::")),
+      code: ownKey.slice(ownKey.indexOf("::") + 2) as string | null,
+    })),
+    ...coverOnly.map((c) => ({ ...c, code: null as string | null })),
+  ];
+  for (const { row, reading, person, code } of covering) {
     for (const cell of coveredCells(reading, vessel.covers, vessel.qualColumns, code)) {
       if (!cell.until) continue;
       const at = cell.code.trim().toUpperCase();
@@ -1721,7 +1745,18 @@ export async function topUpParticulars(
      columns whose titles carry a unit code; the cards are the near-coastal
      ones, which print their conditions. */
   const endorsedKinds = new Set(Object.keys(vessel.tickets).map((c) => c.trim().toUpperCase()));
-  const unitKinds = new Set(unitColumnsIn(vessel.qualColumns));
+  /* The columns filled off a printed unit code: the titles carrying one,
+     and the columns the vessel file reads a licence class into (a high
+     risk work licence's DG and CV) - so the seventeen licences on file are
+     looked at once for the classes they print. */
+  const unitKinds = new Set([
+    ...unitColumnsIn(vessel.qualColumns),
+    ...vessel.covers.filter((c) => c.from === "units").map((c) => c.code.trim().toUpperCase()),
+  ]);
+  /* A high risk work licence prints several classes and is rightly named
+     for no column at all, so it is known by its title too: twelve of the
+     seventeen have no code for the columns above to find them by. */
+  const isLicence = (r: Reading) => /high[\s-]*risk\s+work/i.test(String(r.certificateTitle || ""));
   const ncCards = new Set(nearCoastalCards(vessel.qualColumns));
 
   const certs = await liveCertificates();
@@ -1744,7 +1779,7 @@ export async function topUpParticulars(
    *  nothing is paid for a document that was never going to say it. */
   const wantsMore = (c: Cert) => {
     const r = c.reading;
-    const covers = (endorsedKinds.has(c.code) || unitKinds.has(c.code)) && !("endorsements" in r);
+    const covers = (endorsedKinds.has(c.code) || unitKinds.has(c.code) || isLicence(r)) && !("endorsements" in r);
     const recognition = !("isRecognition" in r) && /\brecognition\b/i.test(String(r.certificateTitle || ""));
     const conditions = (medical.has(c.code) || ncCards.has(c.code)) && !("assessedOn" in r);
     return covers || recognition || conditions;

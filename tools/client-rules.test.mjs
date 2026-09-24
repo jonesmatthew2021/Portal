@@ -2615,6 +2615,10 @@ const is = (got, want, what) => {
   is(codes({ endorsements: [{ text: "IV/2", until: null }] }, "QL-01"), [], "GMDSS is never read off a certificate of competency");
   is(codes({ units: ["HLTAID011", "HLTAID015"] }, "QL-18"), ["QL-19"], "a unit code printed on a statement fills the column whose title carries it");
   is(codes({ units: ["HLTAID01"] }, null), [], "HLTAID01 is not HLTAID011");
+  is(codes({ expiresOn: "2030-04-01", units: ["C6", "DG", "LF", "RB", "WP"] }, null), ["HR-01"],
+    "a high risk work licence's DG class fills the dogging column and nothing else");
+  is(codes({ expiresOn: "2030-04-01", units: ["DG", "LF", "RI", "CV"] }, null), ["HR-01", "HR-02"], "DG and CV fill both");
+  is(shared.coveredCodes(read({ units: ["DG", "LF", "RI", "CV"] }), table, cols, null), ["HR-01", "HR-02"], "the worker's module reads the classes the same");
   is(codes({ readable: false, endorsements: coc }, "QL-01"), [], "an unreadable certificate covers nothing");
   is(coveredCodes({ readable: true, expiresOn: "2031-05-26" }, table, cols, "QL-01"), [], "nor does a reading made before the question was asked");
   is(unitColumnsIn(cols), ["QL-18", "QL-19", "QL-20", "PT-02", "PT-03"], "the training columns are read off the column titles");

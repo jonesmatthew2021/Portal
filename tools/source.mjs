@@ -30,6 +30,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renewalNeedsProblem } from "../source/shared/renewals.js";
 import { evidenceKindsProblem } from "../source/shared/evidence.js";
+import { COVER_SOURCES } from "../source/shared/covers.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SOURCE = join(ROOT, "source");
@@ -180,6 +181,8 @@ export function checkVessel(vessel, from = "source/vessel.json") {
     if (!compiles(c.when)) throw wrong("covers[" + i + "].when", "a pattern that compiles");
     // The row's exclusion, where it has one: a line it matches fills nothing.
     if (c.unless !== undefined && !(word(c.unless) && compiles(c.unless))) throw wrong("covers[" + i + "].unless", "a pattern that compiles");
+    // Which list of the reading the row reads: the endorsements unless it says.
+    if (c.from !== undefined && !COVER_SOURCES.includes(String(c.from))) throw wrong("covers[" + i + "].from", "one of " + COVER_SOURCES.join(", "));
     if (!columnCodes.has(String(c.code).trim().toUpperCase())) throw wrong("covers[" + i + "].code", "one of the codes in qualColumns");
     if (c.perpetual !== undefined && typeof c.perpetual !== "boolean") throw wrong("covers[" + i + "].perpetual", "true or false");
     if (c.why !== undefined && !word(c.why)) throw wrong("covers[" + i + "].why", "the clause it comes from, as a string");

@@ -9,7 +9,7 @@
  * gave one column, so a man's ECDIS cell was empty unless somebody filed the
  * same certificate a second time and tagged it by hand.
  *
- * Two ways a certificate covers another column:
+ * Three ways a certificate covers another column:
  *  - an endorsement printed on it (the reading's `endorsements`). Which
  *    endorsement fills which column is the vessel file's `covers` table -
  *    a fixed table, never the model's guess. The model only lists what is
@@ -19,6 +19,12 @@
  *    statement of attainment that lists HLTAID011 and HLTAID015 fills both
  *    of those columns. That needs no table - the column titles carry the
  *    codes already.
+ *  - a licence class printed on it (the reading's `units` again - a high
+ *    risk work licence prints its classes as codes, "C6, DG, LF, RB, WP",
+ *    and the model rightly names no single column for a card carrying
+ *    five). A row of the `covers` table saying `from: "units"` reads a class
+ *    as a whole token: DG fills the dogging column, CV the vehicle loading
+ *    crane, each to the licence's own expiry.
  *
  * What the law says about the two, and why the dates come out as they do:
  *  - An endorsement is a line on a certificate, not a document of its own
@@ -63,15 +69,24 @@
  * @typedef {{ readable?: boolean, expiresOn?: string | null, qualCode?: string | null,
  *   endorsements?: { text?: string | null, until?: string | null }[] | unknown,
  *   units?: string[] | unknown }} CoversReading
- * @typedef {{ code: string, when: string, unless?: string, perpetual?: boolean, why?: string }} CoverRule
+ * @typedef {{ code: string, when: string, unless?: string, from?: string, perpetual?: boolean, why?: string }} CoverRule
  *   One row of the vessel file's `covers` table: the column a printed
  *   endorsement fills, the pattern that recognises it (read without regard
  *   to case), an optional pattern that stops the row on a line that names
- *   the endorsement only to exclude it, and whether the endorsement never
- *   expires - in which case the column takes the certificate's own date
- *   whatever the document prints against the endorsement itself.
+ *   the endorsement only to exclude it, which list of the reading the row
+ *   reads (`from`: the endorsements unless it says otherwise), and whether
+ *   the endorsement never expires - in which case the column takes the
+ *   certificate's own date whatever the document prints against the
+ *   endorsement itself.
  * @typedef {{ code: string, until: string | null }} CoveredCell
  */
+
+/** The lists of a reading a covers row may read. A row that names none
+ *  reads the endorsements. A row reading the units matches its pattern as a
+ *  whole token - a high risk work licence prints its classes as codes
+ *  ("C6, DG, LF, RB, WP"), and DG is the class, not a word inside one. Both
+ *  `checkVessel`s refuse a row naming any other list. */
+export const COVER_SOURCES = ["endorsements", "units"];
 
 /** A training unit code as this rule recognises one: letters and digits
  *  together, six characters or more - "HLTAID011", "SITXFSA005",
@@ -190,9 +205,18 @@ export function coveredCells(reading, covers, columns, ownCode) {
   };
 
   const printed = Array.isArray(reading.endorsements) ? reading.endorsements : [];
+  /* The classes a licence prints, each as its own token: the model may list
+     "C6, DG, LF, RB, WP" as five codes or as one line, and either way DG is
+     one of them and DGA is not. Read off the units as the reading listed
+     them - only what the reading says are codes, never a word in a title. */
+  const unitTokens = (Array.isArray(reading.units) ? reading.units : [])
+    .flatMap((u) => String(u == null ? "" : u).toUpperCase().split(/[^A-Z0-9]+/))
+    .filter(Boolean);
   (Array.isArray(covers) ? covers : []).forEach((rule) => {
     if (!rule || typeof rule !== "object") return;
     const code = asCode(rule.code);
+    const from = rule.from === undefined ? "endorsements" : String(rule.from);
+    if (!COVER_SOURCES.includes(from)) return;   // a list the rule does not read covers nothing
     let when;
     /* The row's exclusion. AMSA prints the survival craft endorsement as
        "proficiency in survival craft and rescue boats other than fast rescue
@@ -206,6 +230,19 @@ export function coveredCells(reading, covers, columns, ownCode) {
       if (rule.unless !== undefined) notWhen = new RegExp(String(rule.unless), "i");
     } catch (e) {
       return;        // a pattern that does not compile covers nothing
+    }
+    if (from === "units") {
+      /* A printed class, whole: the pattern is the token, start to end. The
+         column takes the licence's own expiry - a class is a line on the
+         licence and runs as long as the licence does. */
+      let whole;
+      try {
+        whole = new RegExp("^(?:" + String(rule.when) + ")$", "i");
+      } catch (e) {
+        return;
+      }
+      if (unitTokens.some((t) => whole.test(t) && !(notWhen && notWhen.test(t)))) keep(code, certUntil);
+      return;
     }
     printed.forEach((e) => {
       const text = e && typeof e === "object" ? String(e.text == null ? "" : e.text) : String(e == null ? "" : e);

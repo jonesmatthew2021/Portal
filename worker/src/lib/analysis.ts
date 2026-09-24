@@ -881,6 +881,8 @@ export async function certificateStanding() {
      recognises (MO70 s 33(2), s 36(3), s 37(4)); the latest of two, because
      two on file are a renewal beside the one it renewed. */
   const foreignAt = new Map<string, string>();
+  /* The documents that are no one column and cover on their own account. */
+  const coverOnly: { row: Row; reading: Reading; person: string }[] = [];
 
   for (const { row, reading } of readings) {
     if (!reading || !reading.readable || !row.person || !row.person.trim()) continue;
@@ -892,17 +894,24 @@ export async function certificateStanding() {
        (source/shared/evidence.js, and `covers` below); the round refuses it
        the same way, or the grid and the round would disagree. */
     if (reading.evidenceKind) continue;
-    const code = codeFor(row, reading, eqTable);
-    if (!code || !code.trim()) continue;
+    const named = codeFor(row, reading, eqTable);
+    /* A document that is no one column can still fill the columns it
+       covers - a high risk work licence printing five classes is rightly
+       given no code, and its DG and CV fill dogging and the crane all the
+       same. It goes through the same checks and joins only the covering
+       pass, as it does in the round (compareMatrix in routes/analyse.ts). */
+    const code = named && named.trim() ? named : null;
+    if (!code && !coveredCells(reading, vessel.covers, vessel.qualColumns, null).some((c) => !!c.until)) continue;
     // AMSA recognises only the classes MO70 s 7(2)(b) lists, which leave out
     // the certificate of safety training and the marine cook certificate.
-    if (isRecognitionReading(reading) && !recognitionFills(code, vessel.neverRecognised.codes)) continue;
+    if (code && isRecognitionReading(reading) && !recognitionFills(code, vessel.neverRecognised.codes)) continue;
 
     // Whose certificate this is, as the register names him.
     const person = register.nameOf(row.person) || row.person;
     // Printed in another man's name: his folder, not his certificate. The
     // round refuses the same document (the rule is in source/shared/names.js).
     if (nameIsSomebodyElse(reading.holderName, row.person, person)) continue;
+    if (!code) { coverOnly.push({ row, reading, person: person.trim().toUpperCase() }); continue; }
 
     // A date typed against the certificate on the portal beats the model's
     // reading of the scan, same as in the comparison. An item recorded as
@@ -987,10 +996,17 @@ export async function certificateStanding() {
 
      Only the certificate in force for its own column covers anything: a
      ticket the contest above decided was superseded is the one it replaced,
-     and the endorsements printed on a spent document cannot date a column. */
-  for (const [ownKey, { row, reading }] of [...inForce.entries()]) {
-    const person = ownKey.slice(0, ownKey.indexOf("::"));
-    const code = ownKey.slice(ownKey.indexOf("::") + 2);
+     and the endorsements printed on a spent document cannot date a column.
+     And the documents that are no one column, which cover on their own. */
+  const covering = [
+    ...[...inForce.entries()].map(([ownKey, { row, reading }]) => ({
+      row, reading,
+      person: ownKey.slice(0, ownKey.indexOf("::")),
+      code: ownKey.slice(ownKey.indexOf("::") + 2) as string | null,
+    })),
+    ...coverOnly.map((c) => ({ ...c, code: null as string | null })),
+  ];
+  for (const { row, reading, person, code } of covering) {
     for (const cell of coveredCells(reading, vessel.covers, vessel.qualColumns, code)) {
       if (!cell.until || neverLapses(cell.code)) continue;
       if (isRecognitionReading(reading) && !recognitionFills(cell.code, vessel.neverRecognised.codes)) continue;

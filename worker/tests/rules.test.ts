@@ -956,6 +956,33 @@ test("covers: a unit code printed on a training statement fills every column who
   assert.deepEqual(unitCodesIn(["HLTAID011", " hltaid011 ", "x", null]), ["HLTAID011"], "the same code twice is one code");
 });
 
+test("covers: a high risk work licence's printed classes fill the dogging and crane columns", () => {
+  /* WorkSafe prints several classes on one card - "C6, DG, LF, RB, WP" -
+     and the model rightly picks no single column for it, so none of the
+     seventeen on file reached HR-01 or HR-02. The classes are printed codes,
+     so the reading lists them as units, and two rows in the vessel file read
+     them as whole tokens (`from: "units"`): DG fills HR-01 and CV fills
+     HR-02, each with the licence's own expiry. The existing rule - a unit
+     code printed in a column's title - stays as it is. */
+  const licence = (units: unknown) => ({ expiresOn: "2030-04-01", certificateTitle: "Licence to Perform High Risk Work", units });
+  assert.deepEqual(cellsCovered(licence(["C6", "DG", "LF", "RB", "WP"]), null), [{ code: "HR-01", until: "2030-04-01" }],
+    "DG fills dogging only, dated as the licence is dated");
+  assert.deepEqual(codesCovered(licence(["DG", "LF", "RI", "CV"]), null), ["HR-01", "HR-02"], "DG and CV fill both");
+  assert.deepEqual(codesCovered(licence(["LF", "WP"]), null), [], "neither class printed: neither column");
+  assert.deepEqual(codesCovered(licence(["C6, DG, LF, RB, WP"]), null), ["HR-01"], "the classes listed as one line are read as tokens");
+  assert.deepEqual(codesCovered(licence(["dg"]), null), ["HR-01"], "however the model cased it");
+  assert.deepEqual(codesCovered(licence(["DG"]), "HR-01"), [], "its own column is not covered again");
+  assert.deepEqual(codesCovered(licence(["DGA", "CVB", "1DG", "D G"]), null), [], "whole tokens only: DGA is not DG");
+  assert.deepEqual(codesCovered({ expiresOn: "2030-04-01", certificateTitle: "Dogging DG course", units: [],
+    endorsements: [{ text: "DG", until: null }] }, null), [],
+  "a word in a title or an endorsement is not a class the reading listed as a code");
+  const rows = vessel.covers.filter((c) => c.from === "units");
+  assert.deepEqual(rows.map((c) => [c.code, c.when]).sort(), [["HR-01", "DG"], ["HR-02", "CV"]], "the vessel file's two rows");
+  for (const row of rows) assert.ok(row.why && /licence/i.test(row.why), row.code + " says what it reads");
+  assert.throws(() => checkVessel({ ...vessel, covers: [{ code: "HR-01", when: "DG", from: "hearsay" }] }, "a vessel file"),
+    /"covers\[0\].from" - it must be one of endorsements, units/, "a source the rule does not read is refused, naming the row");
+});
+
 test("covers: a reading that says nothing covers nothing", () => {
   assert.deepEqual(codesCovered({ readable: false, endorsements: EVANS_COC }, "QL-01"), [], "a certificate that could not be read");
   const before = { readable: true, expiresOn: "2031-05-26" };      // read before the question was asked
@@ -980,7 +1007,9 @@ test("the vessel file's covers table is checked: a pattern that will not compile
   const { covers: _dropped, ...without } = vessel;
   assert.throws(() => checkVessel(without, "a vessel file"), /a vessel file has no usable "covers"/);
   assert.equal(checkVessel(vessel), vessel, "the file as it is passes");
-  for (const rule of vessel.covers) assert.ok(rule.why && /MO\d\d/.test(rule.why), rule.code + " carries the clause it comes from");
+  // A Marine Order for the endorsements; the licence classes are outside the
+  // orders (the report's Part 8, item 15) and cite the regulations instead.
+  for (const rule of vessel.covers) assert.ok(rule.why && /MO\d\d|Regulations \d{4}/.test(rule.why), rule.code + " carries the clause it comes from");
 });
 
 test("the figures the orders turn on are in the vessel file, and checked", () => {

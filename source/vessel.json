@@ -194,6 +194,18 @@
       "when": "(^|[^-])vi/2\\s*(\\(\\s*2\\s*\\)|para\\.?\\s*2)|fast rescue (boat|craft)",
       "unless": "other than fast rescue",
       "why": "MO70 s 37(3) item 2, s 37(5): the fast rescue boat endorsement runs 5 years from the day the proficiency was issued, so its own printed end date governs where AMSA printed one. STCW VI/2 (1) and A-VI/2 (1-4) are survival craft and fill nothing - and AMSA prints that endorsement as 'survival craft and rescue boats other than fast rescue boats' (A-VI/2-1; s 37(3) item 1), so a line saying 'other than fast rescue' fills nothing whatever else it says."
+    },
+    {
+      "code": "HR-01",
+      "from": "units",
+      "when": "DG",
+      "why": "A WorkSafe high risk work licence prints its classes as codes on one card ('C6, DG, LF, RB, WP'), so the reading lists them as units and DG, whole, is the dogging class. Outside the Marine Orders (Work Health and Safety Regulations 2022 (WA) Sch 3): the licence's own expiry dates the cell."
+    },
+    {
+      "code": "HR-02",
+      "from": "units",
+      "when": "CV",
+      "why": "The same licence: CV, whole, is the vehicle loading crane class (Work Health and Safety Regulations 2022 (WA) Sch 3). The licence's own expiry dates the cell."
     }
   ],
   "certPageNotes": [

@@ -16,6 +16,7 @@
 import raw from "../../source/vessel.json";
 import { renewalNeedsProblem } from "../../source/shared/renewals.js";
 import { evidenceKindsProblem } from "../../source/shared/evidence.js";
+import { COVER_SOURCES } from "../../source/shared/covers.js";
 
 export type VesselColours = {
   deep: string; panel: string; raised: string; rule: string; text: string;
@@ -84,9 +85,12 @@ export type Vessel = {
    *  (source/shared/covers.js reads this table; the model only lists what
    *  the certificate prints). `unless` is a pattern that stops the row on a
    *  line naming the endorsement only to exclude it ("other than fast rescue
-   *  boats"). `perpetual` is an endorsement that never expires, whose column
-   *  takes the certificate's own date. */
-  covers: { code: string; when: string; unless?: string; perpetual?: boolean; why?: string }[];
+   *  boats"). `from` is which list of the reading the row reads - the
+   *  endorsements unless it says `units`, where the pattern is a whole
+   *  printed class (a high risk work licence's DG). `perpetual` is an
+   *  endorsement that never expires, whose column takes the certificate's
+   *  own date. */
+  covers: { code: string; when: string; unless?: string; from?: string; perpetual?: boolean; why?: string }[];
   /** What the law wants in hand before a certificate can be renewed, and the
    *  clause it comes from (source/shared/renewals.js reads this table). */
   renewalNeeds: Record<string, { needs: string[]; why: string }>;
@@ -236,6 +240,8 @@ export function checkVessel(value: unknown, from = "source/vessel.json"): Vessel
     if (!compiles(c.when)) throw wrong(`covers[${i}].when`, "a pattern that compiles");
     // The row's exclusion, where it has one: a line it matches fills nothing.
     if (c.unless !== undefined && !(word(c.unless) && compiles(c.unless))) throw wrong(`covers[${i}].unless`, "a pattern that compiles");
+    // Which list of the reading the row reads: the endorsements unless it says.
+    if (c.from !== undefined && !COVER_SOURCES.includes(String(c.from))) throw wrong(`covers[${i}].from`, "one of " + COVER_SOURCES.join(", "));
     if (!columnCodes.has(String(c.code).trim().toUpperCase())) throw wrong(`covers[${i}].code`, "one of the codes in qualColumns");
     if (c.perpetual !== undefined && typeof c.perpetual !== "boolean") throw wrong(`covers[${i}].perpetual`, "true or false");
     if (c.why !== undefined && !word(c.why)) throw wrong(`covers[${i}].why`, "the clause it comes from, as a string");
