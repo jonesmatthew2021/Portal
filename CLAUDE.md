@@ -144,10 +144,14 @@ modules. Edit that code there and only there.
   longer held under the record's `by` (`running` false, or `holder`
   another name - the hour can take a lapsed lease within fifteen seconds
   and hold it for up to nine minutes plus its write); the lease lapses at
-  `LEASE_FOR_MS`. Never by the age of the
+  `LEASE_FOR_MS` from its take or its last renewal - the round renews it
+  on every word of progress (`renewLease`, the holder's token only), so a
+  lapsed lease only ever means a round that died. Never by the age of the
   last word, because the workbook step can outlast any of them. Every
   writer of the workbook refused for the lease answers 409 with the one
-  sentence (`writingTheWorkbook`), naming the holder (`leaseHolder`).
+  sentence (`writingTheWorkbook`), naming the holder (`leaseHolder`), and
+  `GET /api/sync/last` names the holder too, so a page waiting on the
+  lease holds its buttons down under whoever has it at each look.
   The hour's own work stops starting things nine minutes after its lease
   or twelve after the tick, whichever is first (`hourDeadline`). The
   Equivalence sheet is never kept as an empty table, and is read again

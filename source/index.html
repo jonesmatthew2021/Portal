@@ -522,19 +522,26 @@ async function uploadSingleDocument(file, category, fields, decide = "ask") {
    whether the lease is free; a portal that cannot say counts as free, and
    the request that follows is what gets refused, plainly.
 
-   `saw` is told what each look found, so the provider can hold whether the
-   hour is running and keep the buttons that write the workbook out of its
-   way (see roundRunning) without a clock of its own. A portal that cannot
-   say is told as free too, so the buttons never stay down on its account. */
+   `saw` is told what each look found - whether the lease is held, and by
+   whom - so the provider can hold whether the hour is running and keep the
+   buttons that write the workbook out of its way (see roundRunning), under
+   whoever holds it at each look, without a clock of its own. A portal that
+   cannot say is told as free too, so the buttons never stay down on its
+   account. */
 async function waitForRound(onWait, saw) {
   const until = Date.now() + 15 * 60000;
   for (;;) {
     let running = false;
+    let holder = null;
     try {
       const r = await fetch("/api/sync/last", { cache: "no-store" });
-      if (r.ok) running = !!(await r.json()).running;
+      if (r.ok) {
+        const body = await r.json();
+        running = !!body.running;
+        holder = body.holder == null ? null : String(body.holder);
+      }
     } catch (e) { if (saw) saw(false); return true; }
-    if (saw) saw(running);
+    if (saw) saw(running, holder);
     if (!running) return true;
     if (Date.now() > until) return false;
     if (onWait) onWait();
@@ -653,12 +660,14 @@ function roundBusyTitle(holder) {
   return !h || h === "the round on the hour" ? ROUND_BUSY : `${h} is writing the workbook`;
 }
 
-/* When the matrix last moved: the round writes matrixUpdated when a date
-   moves and files the workbook when a cell does, so the later of the two
-   is the day the matrix last followed a certificate. */
+/* When a certificate last moved a date on the matrix: the round's own stamp
+   (matrixUpdated, written when a date moves). Only where there is no stamp
+   yet does the day the workbook was last filed stand in - a workbook
+   uploaded by hand moves no date, so it never outranks the stamp. */
 function matrixLastMoved(matrixUpdated, trainingMatrix) {
-  const stamps = [matrixUpdated, trainingMatrix && trainingMatrix.uploaded].filter(Boolean).map((s) => String(s).slice(0, 10));
-  return stamps.sort().pop() || "";
+  const stamp = String(matrixUpdated || "").slice(0, 10);
+  if (stamp) return stamp;
+  return String((trainingMatrix && trainingMatrix.uploaded) || "").slice(0, 10);
 }
 
 /* The done panel, off the round's outcome: the eyebrow, and the lines
@@ -6718,8 +6727,12 @@ function UploadCertificates() {
 
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
             <Button onClick={fileAll} disabled={busy || queue.length === 0}>
+              {/* Keyed on this batch's own step: while a file is going up the
+                  count shows; once the batch is sent the round is reading it.
+                  Not on a run being present - a round from elsewhere can be
+                  live while the batch is still going up. */}
               {busy
-                ? (auto ? "Reading what was filed..." : `Filing ${at || "..."}`)
+                ? (at ? `Filing ${at}` : "Reading what was filed...")
                 : `File ${queue.length} certificate${queue.length === 1 ? "" : "s"}`}
             </Button>
             {queue.length > ready && (
@@ -7873,7 +7886,9 @@ function StartAgain() {
     setFilledFromCert({});
     setRenewalMarks({});
     setOpmsMarks({});
-    // Anything still reading gets no say in what the matrix holds afterwards.
+    // A finished run's window goes. A run still going is on the server by
+    // now and is left to finish (runCleared); this tab pulls whatever it
+    // saves, over the empty matrix, like any other round's.
     if (clearMatrixRun) clearMatrixRun();
     log("Admin", "The portal was started again",
       rows + " crew and " + dated + " dates cleared — nothing was taken out of SharePoint");
@@ -12013,7 +12028,7 @@ function UpdateDocumentation() {
         if (r.ok) last = await r.json();
       } catch (e) { last = null; }
       // A portal that cannot say holds nothing: the buttons come back.
-      setRoundRunning(!!(last && last.running));
+      setRoundRunning(!!(last && last.running), last && last.holder);
       unanswered.current = missesInARow(unanswered.current, wants, last);
       if (!wants || !due(last, unanswered.current) || going.current || heldElsewhere()) return;
       take();
@@ -15535,9 +15550,11 @@ function CoolibahPortal({ role, onSignOut }) {
   /* Whether somebody holds the workbook, as the portal last said when this
      tab asked (/api/sync/last): asked by the hourly tick and by every wait
      before a round, never on a clock of its own. The buttons that write
-     the workbook are held down while it is true - under the holder's name
-     where a 409 gave one, which stands while the lease is held and goes
-     with it. A look that only says "running" keeps the name it has. */
+     the workbook are held down while it is true - under the holder's name,
+     as the 409 or the last look gave it, so the lease passing to the hour
+     or another person mid-wait renames the buttons; the name goes with the
+     lease. A look that says "running" and names nobody keeps the name it
+     has. */
   const [roundHeld, setRoundHeld] = useState({ running: false, holder: null });
   const roundRunning = roundHeld.running;
   const roundHolder = roundHeld.holder;

@@ -1,8 +1,8 @@
 import type { PortalUser } from "../auth.js";
 import { getStore } from "../compat/blobs.js";
 import {
-  dropLease, keepEquivalences, keepValidityRules, leaseHolder, roundRunning, runMatrixRound, takeLease, validityRulesHeld,
-  writingTheWorkbook,
+  dropLease, keepEquivalences, keepValidityRules, leaseHolder, renewLease, roundRunning, runMatrixRound, takeLease,
+  validityRulesHeld, writingTheWorkbook,
 } from "../lib/round.js";
 import { recordHourly } from "./sync.js";
 
@@ -37,7 +37,9 @@ import { recordHourly } from "./sync.js";
  *     document (workbookPending) and paid by the next round, whoever runs it;
  *   - the lease is taken for the budget plus two minutes, not the hour's
  *     fifteen, so a round cut off frees it before the hour's five-minute
- *     wait for it runs out;
+ *     wait for it runs out - and renewed for the same again on every word
+ *     of progress (renewLease), so a workbook write that runs past it
+ *     keeps the lease and a lapsed lease only ever means a dead round;
  *   - the progress record carries the page's own runId and stays done:false
  *     until the round says otherwise. A page treats a record that is not
  *     done as dead once the lease is no longer held under the record's
@@ -50,11 +52,12 @@ import { recordHourly } from "./sync.js";
  */
 const PROGRESS_KEY = "round-progress";
 export const BUDGET_MS = 2 * 60 * 1000;
-/** How long the lease stands should the drop never land. The budget only
- *  decides whether the workbook step may start; the rewrite and the
- *  replace in the library run on past it, so two minutes are kept in hand
- *  for the write in flight - and the hour's last try for the lease is at
- *  five, so a lapsed round still frees it in time. */
+/** How long the lease stands from its take, and from each word of progress
+ *  that renews it, should the drop never land. The budget only decides
+ *  whether the workbook step may start; the rewrite and the replace in the
+ *  library run on past it, so two minutes are kept in hand for the write in
+ *  flight - and the hour's last try for the lease is at five, so a dead
+ *  round still frees it in time. */
 export const LEASE_FOR_MS = BUDGET_MS + 2 * 60 * 1000;
 
 const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -135,7 +138,19 @@ export default async function round(
   const work = (async () => {
     const t0 = Date.now();
     const timeLeft = () => Date.now() - t0 < BUDGET_MS;
-    const say = (pct: number, word: string, extra: Record<string, unknown> = {}) => sayRound(pct, word, { by: who, runId, ...extra });
+    // Every word of progress also keeps the lease: it was taken short, so
+    // a round cut off frees it soon, and a live round that runs long - the
+    // workbook step can - holds on to it by saying so. The last word is
+    // followed by the drop, so it renews nothing.
+    const say = async (pct: number, word: string, extra: Record<string, unknown> = {}) => {
+      await sayRound(pct, word, { by: who, runId, ...extra });
+      if (extra.done) return;
+      try {
+        await renewLease(lease.token, LEASE_FOR_MS);
+      } catch (e) {
+        console.error("the round's lease was not renewed:", e);
+      }
+    };
     try {
       await say(1, "Starting");
       // Idempotent: an hour or a prepare that already kept it costs a look.

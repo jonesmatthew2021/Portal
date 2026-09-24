@@ -24,9 +24,24 @@ import readOne from "./routes/read-one.js";
 import clearR2 from "./routes/clear-r2.js";
 import importSingle from "./routes/import-single.js";
 import fauna, { ensureTable as ensureFaunaTable, settleLog as settleFaunaLog } from "./routes/fauna.js";
-import { runMatrixRound, roundRunning, takeLease, dropLease, keepEquivalences, type Lease } from "./lib/round.js";
+import { runMatrixRound, roundRunning, leaseHolder, takeLease, dropLease, keepEquivalences, type Lease } from "./lib/round.js";
 import { readDocument } from "./lib/shared-state.js";
 import { crewRowsOnly } from "../../source/shared/names.js";
+
+/** What GET /api/sync/last answers: when the folders were last read and
+ *  what the hourly round last did - the round's own word for it, error
+ *  included - and whether somebody holds the lease right now, and who. The
+ *  page asks this every fifteen seconds while it waits for the lease, so
+ *  the name it holds the buttons down under is whoever holds it at each
+ *  look, not the one it was first told. */
+export async function syncLastAnswer(): Promise<Record<string, unknown>> {
+  return {
+    sync: await lastSync().catch(() => null),
+    hourly: await lastHourly().catch(() => null),
+    running: await roundRunning().catch(() => false),
+    holder: await leaseHolder().catch(() => null),
+  };
+}
 
 /**
  * The portal's front door on Cloudflare.
@@ -105,18 +120,8 @@ export default {
           headers: { "Cache-Control": "no-store" },
         });
       }
-      // When the folders were last read and what the hourly round last did —
-      // the round's own word for it, error included — and whether one holds
-      // the lease right now.
       if (path === "/api/sync/last") {
-        return Response.json(
-          {
-            sync: await lastSync().catch(() => null),
-            hourly: await lastHourly().catch(() => null),
-            running: await roundRunning().catch(() => false),
-          },
-          { headers: { "Cache-Control": "no-store" } },
-        );
+        return Response.json(await syncLastAnswer(), { headers: { "Cache-Control": "no-store" } });
       }
       if (path === "/api/sync") return await sync(req);
       // The round, started from the page: where it has got to, the rules it

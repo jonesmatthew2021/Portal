@@ -143,6 +143,22 @@ export async function dropLease(token: string) {
   await leases.setJSON(LEASE_KEY, { ...lease, until: 0 }, { onlyIfMatch: held.etag });
 }
 
+/** The lease kept alive by its holder: `until` moved out to now plus `ms`,
+ *  only where the lease is still this holder's, and only against the mark
+ *  it was read at - one that has passed to somebody else is left as theirs,
+ *  and the answer is false. The round from the page takes a short lease
+ *  and its workbook write can run past it, so it renews on every word of
+ *  progress; a lease that has lapsed then only ever means a round that
+ *  died, and a second press cannot start a second writer over a live one. */
+export async function renewLease(token: string, ms: number): Promise<boolean> {
+  const leases = getStore("sync");
+  const held = await leases.getWithMetadata(LEASE_KEY, { type: "json" });
+  const lease = held ? (held.data as Lease | null) : null;
+  if (!held || !lease || lease.token !== token) return false;
+  const { modified } = await leases.setJSON(LEASE_KEY, { ...lease, until: Date.now() + ms }, { onlyIfMatch: held.etag });
+  return !!modified;
+}
+
 // The office's workbook is rewritten in memory, and a Worker has a fixed
 // amount of that. Six megabytes is well past the real workbook and well
 // inside the room; anything bigger is left to the page's own button.

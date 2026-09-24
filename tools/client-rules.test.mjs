@@ -367,9 +367,11 @@ const is = (got, want, what) => {
         before its own round, a look at a time, and goes on once it has ---- */
 {
   /* The same compiled page, with a portal that says the round is running
-     for two looks and then not, and a clock that does not wait. */
+     for two looks and then not - under the hour's name, then a person's,
+     as the lease passes between them mid-wait - and a clock that does not
+     wait. */
   let looks = 0;
-  const running = async () => ({ ok: true, json: async () => ({ running: ++looks < 3 }) });
+  const running = async () => ({ ok: true, json: async () => (++looks < 3 ? { running: true, holder: looks === 1 ? "the round on the hour" : "Kachin" } : { running: false, holder: null }) });
   const page = fn(
     ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
     windowStub.navigator, windowStub.location, sessionStub, sessionStub, () => {}, running,
@@ -379,10 +381,11 @@ const is = (got, want, what) => {
   );
   let waited = 0;
   const seen = [];
-  is(await page.waitForRound(() => waited++, (running) => seen.push(running)), true, "the lease came free and the page may go on");
+  is(await page.waitForRound(() => waited++, (running, holder) => seen.push([running, holder])), true, "the lease came free and the page may go on");
   is(looks, 3, "it looked until the portal said the round had finished");
   is(waited, 2, "…and said it was waiting each time it was not");
-  is(seen, [true, true, false], "…and told the provider what every look found, the last look included, so the buttons come back");
+  is(seen, [[true, "the round on the hour"], [true, "Kachin"], [false, null]],
+    "…and told the provider what every look found, the holder's name at each look and the last look included, so the buttons are held under whoever has it and come back");
   is(await lib.waitForRound(), true, "a portal that cannot say counts as free: the request itself is what gets refused");
   const told = [];
   is(await lib.waitForRound(undefined, (running) => told.push(running)), true, "…and the page may go on");
@@ -715,11 +718,11 @@ const is = (got, want, what) => {
   is(lib.roundBusyTitle(" Kachin "), "Kachin is writing the workbook", "a person: named");
   is(lib.roundBusyTitle("Update portal"), "Update portal is writing the workbook", "…or the press that holds it");
 
-  /* When the matrix last moved: the later of the round's stamp and the workbook's. */
-  is(lib.matrixLastMoved("2026-08-01", { uploaded: "2026-09-20T03:00:00.000Z" }), "2026-09-20", "the workbook filed later: its day");
+  /* When a certificate last moved a date: the round's stamp; the workbook's day only where there is no stamp. */
+  is(lib.matrixLastMoved("2026-08-01", { uploaded: "2026-09-20T03:00:00.000Z" }), "2026-08-01", "a workbook uploaded by hand since moved no date: the round's stamp stands");
   is(lib.matrixLastMoved("2026-09-22", { uploaded: "2026-09-20T03:00:00.000Z" }), "2026-09-22", "the round's stamp later: its day");
   is(lib.matrixLastMoved("2026-09-22", null), "2026-09-22", "no workbook on file: the round's stamp");
-  is(lib.matrixLastMoved("", { uploaded: "2026-09-20T03:00:00.000Z" }), "2026-09-20", "no stamp: the workbook's day");
+  is(lib.matrixLastMoved("", { uploaded: "2026-09-20T03:00:00.000Z" }), "2026-09-20", "no stamp yet: the workbook's day stands in");
   is(lib.matrixLastMoved("", null), "", "neither: nothing, and no nudge");
 
   const full = {

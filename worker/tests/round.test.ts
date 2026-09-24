@@ -18,14 +18,14 @@ import analyse, { compareMatrix, refile } from "../src/routes/analyse.js";
 import { KeptInPlace, ensureDocumentColumns, forgetDocumentColumns, purgeDocument, relocateToRemovedBlob, removeDocument, restoreDocument } from "../src/db/documents.js";
 import { replaceSingleFile } from "../src/db/single-file.js";
 import { saveDocument } from "../src/lib/shared-state.js";
-import { runMatrixRound, roundRunning, takeLease, dropLease, keepEquivalences } from "../src/lib/round.js";
+import { runMatrixRound, roundRunning, leaseHolder, takeLease, dropLease, renewLease, keepEquivalences } from "../src/lib/round.js";
 import { todayThere } from "../src/lib/analysis.js";
 import sync, { apply, outranks, sheetOrder, survey } from "../src/routes/sync.js";
 import roundRoute, { BUDGET_MS, LEASE_FOR_MS, progressAnswer } from "../src/routes/round.js";
 import files from "../src/routes/files.js";
 import renameFile from "../src/routes/rename-file.js";
 import importSingle from "../src/routes/import-single.js";
-import worker, { hourWaits, hourDeadline } from "../src/index.js";
+import worker, { hourWaits, hourDeadline, syncLastAnswer } from "../src/index.js";
 import { writeZip, readZip, partOf, partText, datedWorkbookName } from "../../source/shared/workbook.js";
 import { asKnownPerson, crewRegister } from "../../source/shared/names.js";
 import { settleRound, applySettled } from "../../source/shared/matrix-rules.js";
@@ -1627,6 +1627,103 @@ test("the round from the page holds a short lease, is kept alive past the browse
   assert.ok(LEASE_FOR_MS < 5 * 60 * 1000, "shorter than the hour's wait for it");
   const words = progressWrites(portal.db) as unknown as { runId: string }[];
   assert.ok(words.length >= 2 && words.every((w) => w.runId === "run-7"), "every word carries the runId");
+});
+
+test("the round from the page keeps its lease alive on every word, so a lapsed lease only ever means a dead round", async () => {
+  /* A fake clock: the matrix save moves it a minute and a half (inside the
+     budget, so the workbook step still starts), and the workbook step's
+     first read three minutes more - four and a half in all, past the
+     LEASE_FOR_MS the lease was taken for, as a slow store or a long write
+     might. The lease as taken would have lapsed by the workbook's filing
+     word, and a second press, or the hour, could have taken it over a
+     write still in flight. The round renews it on every word of progress,
+     so at that word it is still the round's own, and a second taker is
+     refused. */
+  const { portal } = await oneManPortal();
+  const realNow = Date.now;
+  let offset = 0;
+  Date.now = () => realNow() + offset;
+  const seen = { lease: null as { until: number; by: string; token: string } | null, now: 0, running: false, holder: null as string | null, secondTake: null as unknown };
+  const clock = beforeStatement(portal.db, (sql) => /UPDATE portal_state SET data/.test(sql), async () => { offset += 90 * 1000; });
+  let pastSeventyFive = false;
+  const word = beforeStatement(portal.db,
+    (sql, a) => /^(INSERT INTO|UPDATE) blobs/.test(sql) && a[1] === "round-progress" && (JSON.parse(String(a[2])) as { pct: number }).pct === 75,
+    async () => { pastSeventyFive = true; });
+  const write = beforeStatement(portal.db,
+    (sql, a) => pastSeventyFive && /FROM documents WHERE category = \?1 AND removed_at IS NULL/.test(sql) && a[0] === "training-matrix",
+    async () => { offset += 3 * 60 * 1000; });
+  const look = beforeStatement(portal.db,
+    (sql, a) => /^(INSERT INTO|UPDATE) blobs/.test(sql) && a[1] === "round-progress" && (JSON.parse(String(a[2])) as { pct: number }).pct === 85,
+    async () => {
+      seen.lease = JSON.parse(portal.blobs.get("sync|round-lease")!);
+      seen.now = Date.now();
+      seen.running = await roundRunning();
+      seen.holder = await leaseHolder();
+      seen.secondTake = await takeLease("Matthew again", undefined, LEASE_FOR_MS);
+    });
+  try {
+    const res = await postRound({ by: "Matthew", runId: "run-11" });
+    assert.equal(res.status, 200, await res.text());
+  } finally {
+    Date.now = realNow;
+    clock();
+    word();
+    write();
+    look();
+  }
+  const take = JSON.parse(String(leaseWrites(portal.db)[0].args[2])) as { until: number; token: string };
+  assert.ok(seen.lease, "the workbook step was reached");
+  assert.ok(LEASE_FOR_MS < 270 * 1000, "the clock moved four and a half minutes, past the lease as taken");
+  assert.ok(take.until < seen.now, "the lease as taken had lapsed by the workbook's filing word");
+  assert.equal(seen.lease!.token, take.token, "…and the lease held then is still the round's own");
+  assert.equal(seen.lease!.by, "Matthew");
+  assert.ok(seen.lease!.until > seen.now, "renewed: it stands");
+  assert.ok(seen.lease!.until <= seen.now + LEASE_FOR_MS + 1000, "…for the same again, not the hour's fifteen");
+  assert.equal(seen.running, true, "so the lease reads as held");
+  assert.equal(seen.holder, "Matthew", "…under the round's name, and the page's rule does not call it cut off");
+  assert.equal(seen.secondTake, null, "a second press mid-write is refused: never two writers");
+  assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).until, 0, "given back at the end all the same");
+  const renewals = leaseWrites(portal.db).map((a) => JSON.parse(String(a.args[2])) as { until: number; token: string });
+  assert.ok(renewals.filter((l) => l.token === take.token && l.until > 0).length >= 2, "taken once and renewed on the words that followed");
+});
+
+test("a lease is renewed by its holder alone: a foreign token changes nothing", async () => {
+  const { portal } = await oneManPortal();
+  const held = { until: Date.now() + 60000, by: "Matthew", token: "mine" };
+  portal.blobs.set("sync|round-lease", JSON.stringify(held));
+  assert.equal(await renewLease("not-mine", LEASE_FOR_MS), false, "not the holder's token: refused");
+  assert.deepEqual(JSON.parse(portal.blobs.get("sync|round-lease")!), held, "…and the lease is as it was");
+  assert.equal(await renewLease("mine", LEASE_FOR_MS), true, "the holder's own: renewed");
+  const now = JSON.parse(portal.blobs.get("sync|round-lease")!) as { until: number; by: string; token: string };
+  assert.equal(now.token, "mine");
+  assert.equal(now.by, "Matthew");
+  assert.ok(now.until >= held.until + LEASE_FOR_MS - 60000 - 1000, "…for the full span again");
+  // A holder whose lease lapsed with nobody taking it can still renew: the
+  // round is alive, and the token is still the last taker's.
+  portal.blobs.set("sync|round-lease", JSON.stringify({ ...held, until: Date.now() - 1000 }));
+  assert.equal(await renewLease("mine", LEASE_FOR_MS), true, "lapsed but not taken: the round that holds it carries on");
+  assert.equal(await renewLease("mine", LEASE_FOR_MS), true);
+  portal.blobs.delete("sync|round-lease");
+  assert.equal(await renewLease("mine", LEASE_FOR_MS), false, "no lease at all: nothing to renew");
+});
+
+test("GET /api/sync/last says whether the lease is held and by whom, so a wait names whoever has it at each look", async () => {
+  const { portal } = await oneManPortal();
+  const free = await syncLastAnswer();
+  assert.equal(free.running, false);
+  assert.equal(free.holder, null);
+  assert.equal(free.sync, null);
+  assert.equal(free.hourly, null);
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "the round on the hour", token: "x" }));
+  const hours = await syncLastAnswer();
+  assert.equal(hours.running, true);
+  assert.equal(hours.holder, "the round on the hour");
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "Kachin", token: "y" }));
+  assert.equal((await syncLastAnswer()).holder, "Kachin", "the lease passed to a person: the next look names them");
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: 0, by: "Kachin", token: "y" }));
+  const done = await syncLastAnswer();
+  assert.equal(done.running, false);
+  assert.equal(done.holder, null, "given back: nobody named");
 });
 
 test("with no name sent and nobody signed in, the round is the page's", async () => {

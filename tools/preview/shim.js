@@ -246,11 +246,11 @@
         return json({ registered: [], mirrored: 0, followed: 0, moved: [], removed: [] });
       /* The hourly round's last outcome: the preview has no cron, so nothing
          has run and the page says so. */
-      if (p === "/api/sync/last") return json({ sync: null, hourly: null, running: false });
+      if (p === "/api/sync/last") return json({ sync: null, hourly: null, running: false, holder: null });
       /* The round from the page: nothing has run, there are no rules to
          keep, and the round itself writes the office's workbook, which is
          a live-portal job. */
-      if (p === "/api/round/progress") return json({ pct: 0, word: "No round has run yet", done: true, running: false });
+      if (p === "/api/round/progress") return json({ pct: 0, word: "No round has run yet", done: true, running: false, holder: null });
       if (p === "/api/round/prepare") return json({ equivalences: 0, validity: false, problem: null });
       if (p === "/api/round") return json({ error: "The round only runs on the live portal." }, 503);
       /* The undo list. The preview keeps no history, so the one version it
