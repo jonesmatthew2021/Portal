@@ -42,8 +42,8 @@ import { recordHourly } from "./sync.js";
  *     until the round says otherwise. A page treats a record that is not
  *     done as dead once the lease is no longer held under the record's
  *     `by` (`running` false, or `holder` another name - the hour can take
- *     a lapsed lease within fifteen seconds and hold it for twelve
- *     minutes); the lease lapses at LEASE_FOR_MS. Never by the age of
+ *     a lapsed lease within fifteen seconds and hold it for up to nine
+ *     minutes plus its write); the lease lapses at LEASE_FOR_MS. Never by the age of
  *     `at`, because the workbook step between 75 and 100 (the rewrite,
  *     then the replace in the library) can take longer than any word is
  *     fresh for.

@@ -138,8 +138,9 @@ modules. Edit that code there and only there.
   budget), and the page matches its progress by the `runId` it sent. A
   page treats a record that is not done as dead once the lease is no
   longer held under the record's `by` (`running` false, or `holder`
-  another name - the hour can take a lapsed lease and hold it for twelve
-  minutes); the lease lapses at `LEASE_FOR_MS`. Never by the age of the
+  another name - the hour can take a lapsed lease within fifteen seconds
+  and hold it for up to nine minutes plus its write); the lease lapses at
+  `LEASE_FOR_MS`. Never by the age of the
   last word, because the workbook step can outlast any of them. Every
   writer of the workbook refused for the lease answers 409 with the one
   sentence (`writingTheWorkbook`), naming the holder (`leaseHolder`).

@@ -96,16 +96,18 @@ export async function roundRunning(): Promise<boolean> {
  *  round died. */
 export async function leaseHolder(): Promise<string | null> {
   // Read the way takeLease reads it, so wherever the lease can be taken
-  // its holder can be named.
-  const held = await getStore("sync").getWithMetadata(LEASE_KEY, { type: "json" });
+  // its holder can be named. A read the store refuses names nobody: this
+  // is asked on the way to a 409, and a 409 with no name beats a 500.
+  const held = await getStore("sync").getWithMetadata(LEASE_KEY, { type: "json" }).catch(() => null);
   const lease = held ? (held.data as Lease | null) : null;
   return lease && lease.until > Date.now() ? lease.by : null;
 }
 
 /** The one sentence every writer of the workbook answers 409 with while
  *  the lease is held. The page shows it as it is, so it is a sentence, and
- *  it promises no time: the hour holds the lease for up to nine minutes
- *  plus its write, a page's round for four. */
+ *  it promises no time: the hour can take a lapsed lease within fifteen
+ *  seconds and hold it for up to nine minutes plus its write, a page's
+ *  round for four. */
 export const writingTheWorkbook = (holder: string | null) =>
   `${holder ? holder[0].toUpperCase() + holder.slice(1) : "Another round"} is writing the workbook; try again when it has finished.`;
 

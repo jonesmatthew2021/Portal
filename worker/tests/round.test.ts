@@ -1731,6 +1731,39 @@ test("POST /api/round while the hour holds the lease is refused, and says who ho
   assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).by, "the round on the hour", "the hour's lease stands");
 });
 
+test("refused for the lease, a store that cannot say who holds it still answers 409, with nobody named", async () => {
+  /* The take reads the lease held; the second read - the one that names
+     the holder for the sentence - is refused by the store. That is a 409
+     with the plain sentence, never a 500: the page's rule for a 409 body
+     with no `by` is to wait, and a 500 would read as a broken round. */
+  const { portal } = await oneManPortal();
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "the round on the hour", token: "x" }));
+  const plain = portal.db.prepare;
+  let reads = 0;
+  portal.db.prepare = (sql: string) => {
+    const s = plain(sql);
+    if (!/SELECT value, etag FROM blobs/.test(sql)) return s;
+    const bind = s.bind;
+    s.bind = (...a: unknown[]) => {
+      const b = bind(...a);
+      if (a[1] !== "round-lease" || ++reads !== 2) return b;
+      b.all = async () => { throw new Error("D1 is having a bad morning"); };
+      b.first = async () => { throw new Error("D1 is having a bad morning"); };
+      return b;
+    };
+    return s;
+  };
+  const res = await postRound({ by: "Matthew", runId: "run-10" });
+  portal.db.prepare = plain;
+  assert.equal(res.status, 409, "refused, not fallen over");
+  const out = (await res.json()) as { error: string; by: string | null; runId: string };
+  assert.equal(out.error, "Another round is writing the workbook; try again when it has finished.");
+  assert.equal(out.by, null, "nobody named: the read was refused");
+  assert.equal(out.runId, "run-10");
+  assert.equal(reads, 2, "the take read it, then the naming read was the one refused");
+  assert.equal(portal.state.rev, 1, "the document is untouched");
+});
+
 test("the round from the page and the round on the hour leave the same document", async () => {
   const hour = await oneManPortal();
   await worker.scheduled({} as never, { DB: hour.portal.db, FILES: hour.bucket, FILE_STORE: "r2" } as never);
