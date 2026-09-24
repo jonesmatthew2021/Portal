@@ -29,7 +29,7 @@ import { renewalBlockers, renewalNeedsProblem } from "../../source/shared/renewa
 import { coveredBy, evidenceKindsProblem, EVIDENCE_KINDS } from "../../source/shared/evidence.js";
 import { expiringIn, EXPIRING_MEANS, PORTAL_TOOLS } from "../src/lib/portal.js";
 import { dueMeans } from "../src/lib/matrix.js";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -1049,15 +1049,53 @@ test("the figures the orders turn on are in the vessel file, and checked", () =>
     assert.ok(facts[f] > 0);
   }
   assert.match(facts.why, /MO504/, "with the clauses that read them");
-  assert.match(vessel.evidenceKinds["crewing-permit"].why, /vesselFacts\.lengthMetres/,
+  assert.match(vessel.evidenceKinds["crewing-permit"].why, /vesselFacts/,
     "and the table that turns on the length says where the length is written down");
+  /* The figures Matthew gave (160 m, 10,000 GT, 3,730 kW) cannot be the tug
+     measured the MO505 s 5 way - a tug of 3,730 kW is 30-40 m - so they read
+     as the tug-and-barge unit, and Matthew has not yet said which. The file
+     says whose they are and that the tug's own length and tonnage are not
+     confirmed, and nothing on the portal reads a figure whose meaning is
+     unconfirmed as if it were settled. The propulsion power is the tug's. */
+  assert.equal(facts.confirmedForTug, false, "not yet confirmed for the tug");
+  assert.match(facts.asGiven, /tug-and-barge unit/, "labelled as the unit's figures");
+  assert.match(facts.asGiven, /not yet confirmed/, "and said to be unconfirmed for the tug");
   const bad = (vesselFacts: unknown) => () => checkVessel({ ...vessel, vesselFacts }, "a vessel file");
   assert.throws(bad({ ...facts, lengthMetres: "160 m" }), /"vesselFacts.lengthMetres" - it must be a number/);
   assert.throws(bad({ ...facts, grossTonnage: 0 }), /"vesselFacts.grossTonnage"/);
   assert.throws(bad({ ...facts, propulsionKW: undefined }), /"vesselFacts.propulsionKW"/);
   assert.throws(bad({ ...facts, why: "" }), /"vesselFacts.why"/);
+  assert.throws(bad({ ...facts, asGiven: "" }), /"vesselFacts.asGiven" - it must be whose figures they are/);
+  assert.throws(bad({ ...facts, confirmedForTug: "no" }), /"vesselFacts.confirmedForTug" - it must be true or false/);
+  assert.throws(bad({ ...facts, confirmedForTug: undefined }), /"vesselFacts.confirmedForTug"/);
   const { vesselFacts: _gone, ...without } = vessel;
   assert.throws(() => checkVessel(without, "a vessel file"), /a vessel file has no usable "vesselFacts"/);
+});
+
+test("nothing on the portal reads the vessel's length or gross tonnage while they are unconfirmed for the tug", () => {
+  /* The guard on the relabelling above: the two unconfirmed figures are
+     read by the two checkVessels (that they are numbers) and by nothing
+     else - no rule, no screen, no route. The propulsion power may be read:
+     it is the tug's. Every source file the worker and the page are built
+     from is looked at, bar the vessel file itself and the one place the
+     worker reads it. */
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const name of readdirSync(dir)) {
+      const at = join(dir, name);
+      if (statSync(at).isDirectory()) { if (name !== "node_modules" && name !== "vendor" && name !== "assets") walk(at); }
+      else if (/\.(ts|js|jsx|mjs|html)$/.test(name)) files.push(at);
+    }
+  };
+  walk(join(root, "worker", "src"));
+  walk(join(root, "source"));
+  const readers = files
+    .filter((f) => !/vessel\.ts$/.test(f) && !/tools[\\/]source\.mjs$/.test(f))
+    .filter((f) => /lengthMetres|grossTonnage/.test(readFileSync(f, "utf8")))
+    .map((f) => f.slice(root.length + 1));
+  assert.deepEqual(readers, [], "no source file reads lengthMetres or grossTonnage");
+  assert.equal(vessel.vesselFacts.confirmedForTug, false, "which is what this guard is for while the figures stand unconfirmed");
 });
 
 test("checkVessel asks the renewal, evidence and recognition tables the same questions the rules do", () => {

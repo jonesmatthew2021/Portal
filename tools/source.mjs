@@ -170,6 +170,12 @@ export function checkVessel(vessel, from = "source/vessel.json") {
     const said = vessel.vesselFacts[f];
     if (typeof said !== "number" || !Number.isFinite(said) || said <= 0) throw wrong("vesselFacts." + f, "a number of the vessel's own, greater than nothing");
   }
+  /* Whose figures they are, and whether they are the tug's: the figures
+   * given for this vessel read as the tug-and-barge unit, and until the
+   * Master says which hull they describe nothing may read the length or the
+   * gross tonnage as if it were settled (a rule test holds the code to that). */
+  if (!word(vessel.vesselFacts.asGiven)) throw wrong("vesselFacts.asGiven", "whose figures they are and what they describe, as a string");
+  if (typeof vessel.vesselFacts.confirmedForTug !== "boolean") throw wrong("vesselFacts.confirmedForTug", "true or false");
   if (!word(vessel.vesselFacts.why)) throw wrong("vesselFacts.why", "whose figures they are and which clauses turn on them, as a string");
   /* The covers table: which column a printed endorsement fills (read by
    * source/shared/covers.js). A pattern that does not compile would cover

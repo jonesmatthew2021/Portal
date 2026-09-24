@@ -79,8 +79,11 @@ export type Vessel = {
    *  clauses read them: length (MO504 Sch 1 cl 8(2), s 16(3)), gross tonnage
    *  (MO71 Sch 1) and propulsion power (MO505 s 5, Sch 1). Data, so a table
    *  in this file can cite a figure anybody can check; nothing on the portal
-   *  is worked out from them. */
-  vesselFacts: { lengthMetres: number; grossTonnage: number; propulsionKW: number; why: string };
+   *  is worked out from them. `asGiven` says whose the figures are and what
+   *  they describe; while `confirmedForTug` is false the length and the
+   *  gross tonnage are the unit's as given and nothing reads them (the
+   *  propulsion power is the tug's own and may be). */
+  vesselFacts: { asGiven: string; lengthMetres: number; grossTonnage: number; propulsionKW: number; confirmedForTug: boolean; why: string };
   /** Which column a printed endorsement fills, and the clause it comes from
    *  (source/shared/covers.js reads this table; the model only lists what
    *  the certificate prints). `unless` is a pattern that stops the row on a
@@ -230,6 +233,12 @@ export function checkVessel(value: unknown, from = "source/vessel.json"): Vessel
     const said = v.vesselFacts[f];
     if (typeof said !== "number" || !Number.isFinite(said) || said <= 0) throw wrong("vesselFacts." + f, "a number of the vessel's own, greater than nothing");
   }
+  /* Whose figures they are, and whether they are the tug's - the same check
+   * as tools/source.mjs. Until the Master says which hull the figures
+   * describe nothing may read the length or the gross tonnage as if it were
+   * settled (a rule test holds the code to that). */
+  if (!word(v.vesselFacts.asGiven)) throw wrong("vesselFacts.asGiven", "whose figures they are and what they describe, as a string");
+  if (typeof v.vesselFacts.confirmedForTug !== "boolean") throw wrong("vesselFacts.confirmedForTug", "true or false");
   if (!word(v.vesselFacts.why)) throw wrong("vesselFacts.why", "whose figures they are and which clauses turn on them, as a string");
   /* The covers table - the same check as tools/source.mjs. A pattern that
    * does not compile would cover nothing and say nothing about it, and a

@@ -527,15 +527,30 @@ on any line that still names this one.
   (MO70 s 5(a), s 45; MO505 s 17). Never word anything as "valid".
 
   **The figures the orders turn on are data** (`vesselFacts` in the vessel file,
-  checked by both `checkVessel`s): 160 m, 10,000 GT, 3730 kW - Matthew's own
-  figures, 25 Sep 2026. MO504 Sch 1 cl 8(2) counts the minimum crew by length
-  and its note * makes the master and the engineer two people at 750 kW,
-  MO504 s 16(3) holds the master's role at 24 m, MO71 Sch 1 reads a master's
-  ticket against gross tonnage and MO505 s 5 an engineer's against propulsion
-  power. The portal works no crewing number out from them - MO504's table stops
-  at 80 m and MO505 Sch 1 at 100 m and 3000 GT, and which hull the figures
-  describe is Matthew's to say; a table in the vessel file cites them so its
-  premise can be checked against the order.
+  checked by both `checkVessel`s): 160 m, 10,000 GT, 3730 kW - the figures as
+  Matthew gave them, 25 Sep 2026, **labelled as the tug-and-barge unit's and
+  not yet confirmed for the tug** (`asGiven`, `confirmedForTug: false`). They
+  cannot be the tug measured the MO505 s 5 way - a tug of 3,730 kW is 30 to
+  40 m - and Matthew has not yet said which hull they describe, so the portal
+  carries the numbers but reads neither the length nor the gross tonnage while
+  they stand unconfirmed (a rule test holds every source file to that); the
+  propulsion power is the tug's own and may be read. MO504 Sch 1 cl 8(2)
+  counts the minimum crew by length and its note * makes the master and the
+  engineer two people at 750 kW, MO504 s 16(3) holds the master's role at
+  24 m, MO71 Sch 1 reads a master's ticket against gross tonnage and MO505 s 5
+  an engineer's against propulsion power. The portal works no crewing number
+  out from them - MO504's table stops at 80 m and MO505 Sch 1 at 100 m and
+  3000 GT; a table in the vessel file cites them so its premise can be checked
+  against the order.
+
+  **A man's printed medical limitation stays out of the crew's hands and in
+  management's records.** `crewStateView` (`worker/src/authz.ts`) takes
+  `conditions` and `assessedOn` off every `certDates` cell before a crew
+  login is handed the document, offline copy included (tested in
+  `worker/tests/offline.test.ts`). The nightly backup and the 200 kept
+  revisions are left as they are: they are management's and IT's, and already
+  hold every man's MSIC number and date of birth, so a limitation line there
+  sits in the same place as the rest - decided 25 Sep 2026.
 
   **The office's own spreadsheet is wrong by law in five places** (Part 7 of
   the report): QL-13 ECDIS is not "5 years" but perpetual; a plain Chief Mate
