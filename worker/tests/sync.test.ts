@@ -453,7 +453,7 @@ test("R2, the route: a survey that falls over is 502 with the error, and last-ru
   const record = lastRun(portal);
   assert.deepEqual(
     { ...record, at: 0 },
-    { at: 0, by: "Update portal", registered: 0, adopted: 0, strays: 0, missing: 0, leftAlone: 0, error: "D1 is having a bad morning" },
+    { at: 0, by: "Update portal", registered: 0, adopted: 0, missing: 0, leftAlone: 0, error: "D1 is having a bad morning" },
   );
   assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).until, 0, "the lease was given back");
 });
@@ -468,7 +468,7 @@ test("R2, the route: a good run's record carries the counts, who asked, when, an
   assert.ok(record.at >= before && record.at <= Date.now(), "stamped when it began");
   assert.deepEqual(
     { ...record, at: 0 },
-    { at: 0, by: "Import new files", registered: 1, adopted: 0, strays: 0, missing: 1, leftAlone: 1, error: null },
+    { at: 0, by: "Import new files", registered: 1, adopted: 0, missing: 1, leftAlone: 1, error: null },
   );
   assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).until, 0, "the lease was given back");
 });

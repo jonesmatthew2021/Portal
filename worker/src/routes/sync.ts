@@ -171,7 +171,6 @@ export async function survey(tick: (pct: number, word: string) => Promise<void> 
    * not looked for where it is not, so the library can be half renamed and
    * every certificate in it still finds its way onto the books. */
   const newCertificates: { key: string; folder: string; person: string; size?: number }[] = [];
-  const strays: Found[] = [];
   // The certificate home: where the office keeps each person's certificates
   // up to date, and where the portal's own uploads now land. Many of these
   // files are already on the books from the old certification folders — the
@@ -348,7 +347,7 @@ export async function survey(tick: (pct: number, word: string) => Promise<void> 
   ).length;
 
   const people = [...folks.entries()].map(([folder, name]) => ({ folder, name })).sort((a, b) => a.name.localeCompare(b.name));
-  return { newCertificates, singles, strays, missing, returned, scannedLive, moved, trainingSheet, sheetSeen, people };
+  return { newCertificates, singles, missing, returned, scannedLive, moved, trainingSheet, sheetSeen, people };
 }
 
 /** The one sentence the record carries when the missing files were too
@@ -363,7 +362,6 @@ export type SyncRecord = {
   by: string;
   registered: number;
   adopted: number;
-  strays: number;
   missing: number;
   leftAlone: number;
   error: string | null;
@@ -449,7 +447,6 @@ export async function runSync(by: string) {
       by,
       registered: out.registered.length,
       adopted: out.adopted.length,
-      strays: out.strays.length,
       missing: out.missing.length,
       leftAlone: out.leftAlone.length,
       // A shortfall too big to believe is said here, where the page's
@@ -461,7 +458,7 @@ export async function runSync(by: string) {
     return out;
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
-    await record({ at, by, registered: 0, adopted: 0, strays: 0, missing: 0, leftAlone: 0, error });
+    await record({ at, by, registered: 0, adopted: 0, missing: 0, leftAlone: 0, error });
     await sayProgress(100, "Failed", { done: true, error });
     throw e;
   }
@@ -723,7 +720,6 @@ export async function apply(
   return {
     registered,
     adopted: sheetTaken ? [...adopted, { category: "training-matrix", key: sheetTaken.key }] : adopted,
-    strays: result.strays,
     missing: result.missing,
     // Files that turned up somewhere else, with the books now pointing at them.
     followed: result.moved.length,
