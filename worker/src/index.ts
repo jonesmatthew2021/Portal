@@ -13,7 +13,7 @@ import { history, restore } from "./routes/history.js";
 import restoreFile from "./routes/restore-file.js";
 import files from "./routes/files.js";
 import file from "./routes/file.js";
-import analyse, { extract, refile } from "./routes/analyse.js";
+import analyse, { extract, refile, topUpParticulars } from "./routes/analyse.js";
 import aiChecker from "./routes/ai-checker.js";
 import archive from "./routes/archive.js";
 import run from "./routes/run.js";
@@ -192,7 +192,7 @@ export default {
     // Whatever happens below is written down: the counts on a good hour,
     // the error on a bad one. A round that fails in silence is how the
     // matrix once sat empty for three hours with nobody told.
-    const outcome = { read: 0, refiled: 0, syncError: null as string | null, readError: null as string | null, readStopped: null as string | null, readTried: false };
+    const outcome = { read: 0, refiled: 0, particularsRead: 0, syncError: null as string | null, readError: null as string | null, readStopped: null as string | null, readTried: false };
     const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
     const written = async (round: Record<string, unknown>) => {
       try {
@@ -312,7 +312,7 @@ export const hourDeadline = (tick: number, leaseAt: number) =>
  */
 async function theHour(
   env: PortalEnv, lease: Lease, deadline: number,
-  outcome: { read: number; refiled: number; syncError: string | null; readError: string | null; readStopped: string | null; readTried: boolean },
+  outcome: { read: number; refiled: number; particularsRead: number; syncError: string | null; readError: string | null; readStopped: string | null; readTried: boolean },
   written: (round: Record<string, unknown>) => Promise<void>,
 ): Promise<Record<string, unknown>> {
   const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -334,6 +334,12 @@ async function theHour(
        a row update each - call it a hundred and seventy, plus the labels
        in a couple of batches. The rest wait for the next hour. */
   const MAX_EXTRACT_BATCHES = 20;
+  /* Readings made before the reading asked for the MSIC number and the
+     date of birth, read again for them: at most twenty an hour - a model
+     call, a file read and a store write each, about sixty calls - so the
+     crew's older readings are topped up over a few hours, never all at
+     once, and never at the round's expense. */
+  const MAX_PARTICULARS_READS = 20;
   const MAX_REFILE_CALLS = 1;
   const REFILE_SLICE = 40;
 
@@ -431,8 +437,21 @@ async function theHour(
           outcome.refiled += (out.moved || []).length;
           if (!out.remaining) break;
         }
-        if (outcome.read || outcome.refiled) {
-          console.log("hourly read: " + outcome.read + " certificates read, " + outcome.refiled + " refiled");
+        // The older readings topped up for the MSIC number and date of
+        // birth, after the ordinary reading and the refile (so a certificate
+        // is asked about under the man it is filed under now) and before the
+        // round, which fills the boxes. Not on an hour the account already
+        // said no to, and on the same terms if it says no now.
+        if (names.length && loopsLeft() && !outcome.readError && !outcome.readStopped && env.ANTHROPIC_BASE_URL) {
+          const top = await topUpParticulars(codes, { cap: MAX_PARTICULARS_READS, timeLeft: loopsLeft });
+          outcome.particularsRead += top.read;
+          if (top.stopped) {
+            if (top.stopped.kind === "credit" || top.stopped.kind === "key") outcome.readError = top.stopped.line;
+            else outcome.readStopped = top.stopped.line;
+          }
+        }
+        if (outcome.read || outcome.refiled || outcome.particularsRead) {
+          console.log("hourly read: " + outcome.read + " certificates read, " + outcome.refiled + " refiled, " + outcome.particularsRead + " read again for particulars");
         }
       }
     } catch (e) {

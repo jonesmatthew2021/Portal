@@ -1463,9 +1463,10 @@ function mergeQuals(base, mine, theirs) {
  * A save that landed on top of somebody else's, worked out again.
  *
  * Theirs is the shape of the answer, and only the slices this tab touched
- * go back over it. Four of those slices the round on the hour writes too -
+ * go back over it. Some of those slices the round on the hour writes too -
  * the matrix, the change log, the note of cells filled from a certificate,
- * and its sightings and what it owes the workbook - so laid back whole they
+ * its sightings and what it owes the workbook, and each man's MSIC number
+ * and date of birth with its note of what it put there - so laid back whole they
  * would write the tab's stale copy over the hour's work. Each is merged
  * against what this tab last loaded or saved (base) instead: mergeQuals for
  * the matrix, and the merges beside it in source/shared/matrix-rules.js for
@@ -1498,6 +1499,18 @@ function mergeSaved({ touched, mine, theirs, base }) {
   if (touched.includes("workbookPending")) {
     merged.workbookPending = mergePending(b.pending, mine.workbookPending || [], t.workbookPending || []);
   }
+  // The round fills each man's MSIC number and date of birth from his
+  // certificates. A tab that changed somebody's rank meanwhile carries the
+  // whole crew list, boxes and all: laid back whole it would empty the
+  // round's fill, and a box put back to an old card's number would read as
+  // typed and hold the new card off. So the two boxes come from theirs
+  // wherever this tab did not change them (mergeParticulars).
+  if (touched.includes("people") && Array.isArray(t.people) && Array.isArray(b.people)) {
+    merged.people = mergeParticulars(b.people, mine.people, t.people);
+  }
+  if (touched.includes("particularsFromCert")) {
+    merged.particularsFromCert = mergeFilled(b.particulars, mine.particularsFromCert || {}, t.particularsFromCert || {});
+  }
   // ISO stamps compare as text; whichever side moved the document last is right.
   const ours = String(mine.lastDocUpdate || ""), theirStamp = String(t.lastDocUpdate || "");
   merged.lastDocUpdate = (ours > theirStamp ? ours : theirStamp) || null;
@@ -1525,7 +1538,8 @@ function afterMergedSave(now, merged, carried, inFlight) {
   return mergeSaved({
     touched: inFlight, mine: now, theirs: merged,
     base: { quals: carried.quals, filled: carried.filledFromCert, seen: carried.orphanSeen,
-      pending: carried.workbookPending, history: carried.history },
+      pending: carried.workbookPending, history: carried.history,
+      people: carried.people, particulars: carried.particularsFromCert },
   });
 }
 

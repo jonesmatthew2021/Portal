@@ -158,6 +158,34 @@ export function particularsKeyOf(p) {
   return String(p.name || "").trim();
 }
 
+/** Two values of one box as the same: an MSIC number however it was
+ *  spaced or cased, a date as written.
+ * @param {"msic" | "dob"} field
+ * @param {unknown} a
+ * @param {unknown} b
+ */
+function sameParticular(field, a, b) {
+  return field === "msic"
+    ? msicAsWritten(a) === msicAsWritten(b)
+    : String(a == null ? "" : a).trim() === String(b == null ? "" : b).trim();
+}
+
+/** Whether a man's box is the certificates' to fill: empty, or still
+ *  holding exactly what they last put there. Anything else was typed. The
+ *  hour asks this before it pays to read a certificate again for it.
+ * @param {ParticularPerson} p
+ * @param {"msic" | "dob"} field
+ * @param {Record<string, Partial<Particulars>> | null | undefined} fromCert
+ */
+export function openToCertificates(p, field, fromCert) {
+  const box = p && typeof p[field] === "string" ? String(p[field]).trim() : "";
+  if (!box) return true;
+  const key = particularsKeyOf(p);
+  const had = key && fromCert && typeof fromCert === "object" ? fromCert[key] : null;
+  const last = had && typeof had === "object" && typeof had[field] === "string" ? had[field] : "";
+  return !!last && sameParticular(field, box, last);
+}
+
 /**
  * The boxes on Crew Details, filled from what the certificates found.
  *
@@ -186,16 +214,13 @@ export function fillParticulars(people, found, fromCert) {
     PARTICULAR_FIELDS.forEach((field) => {
       const value = f[field];
       if (!value) return;
-      const same = (/** @type {unknown} */ a, /** @type {unknown} */ b) => field === "msic"
-        ? msicAsWritten(a) === msicAsWritten(b)
-        : String(a == null ? "" : a).trim() === String(b == null ? "" : b).trim();
       const box = typeof p[field] === "string" ? String(p[field]).trim() : "";
       const had = record[key] && typeof record[key] === "object" ? record[key] : {};
       const last = typeof had[field] === "string" ? String(had[field]) : "";
-      if (box && !same(box, value) && !(last && same(box, last))) return; // typed by hand
+      if (!sameParticular(field, box, value) && !openToCertificates(p, field, record)) return; // typed by hand
       // Empty, or the certificates' own: the certificates' value goes in -
       // unless it is already there as typed, which is left as typed.
-      if (!box || !same(box, value)) {
+      if (!box || !sameParticular(field, box, value)) {
         out = { ...out, [field]: value };
         changed = true;
       }

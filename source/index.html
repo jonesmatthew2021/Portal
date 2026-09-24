@@ -5439,12 +5439,19 @@ function Portal({ role, onSignOut }) {
   // version put back from Revisions) is not brought back by a tab that
   // still held it - only the lines this tab wrote since go over.
   const baselineHistory = useRef(null);
+  // And the crew list with the note of what the certificates put in each
+  // man's two boxes, so the round's fill survives a tab saving the list
+  // over it.
+  const baselinePeople = useRef(null);
+  const baselineParticulars = useRef(null);
   const rebase = (data) => {
     baseline.current = (data && data.quals) || null;
     baselineFilled.current = (data && data.filledFromCert) || {};
     baselineSeen.current = (data && data.orphanSeen) || {};
     baselinePending.current = (data && data.workbookPending) || [];
     baselineHistory.current = (data && data.history) || [];
+    baselinePeople.current = (data && data.people) || [];
+    baselineParticulars.current = (data && data.particularsFromCert) || {};
   };
 
   // Load once, then keep checking for other people's changes.
@@ -5567,7 +5574,8 @@ function Portal({ role, onSignOut }) {
           // meantime were built on this one.
           const base = { quals: baseline.current, filled: baselineFilled.current,
             seen: baselineSeen.current, pending: baselinePending.current,
-            history: baselineHistory.current };
+            history: baselineHistory.current, people: baselinePeople.current,
+            particulars: baselineParticulars.current };
           const merged = mergeSaved({ touched, mine: store, theirs: res.data, base });
           sent = withoutStoredFiles(merged);
           res = await saveState(sent, res.rev);

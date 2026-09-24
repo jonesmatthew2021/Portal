@@ -1,10 +1,11 @@
-import { asKnownPerson, crewRowsOnly } from "../../../source/shared/names.js";
+import { asKnownPerson, crewRegister, crewRowsOnly } from "../../../source/shared/names.js";
+import { fillParticulars, msicCodeIn, particularsFor, particularsKeyOf } from "../../../source/shared/particulars.js";
 import { vessel } from "../vessel.js";
 import { applySettled, readExpiryRules, settleRound } from "../../../source/shared/matrix-rules.js";
 import {
   datedWorkbookName, listSheets, partOf, partText, readSheetRows, readZip, updateFiledWorkbook, XLSX_MIME,
 } from "../../../source/shared/workbook.js";
-import { compareMatrix } from "../routes/analyse.js";
+import { compareMatrix, type ParticularsInput } from "../routes/analyse.js";
 import { readDocument, saveDocument, type SharedDocument } from "./shared-state.js";
 import { EQUIV_KEY, equivalenceColsKey, matrixReadingKey, matrixStore, todayThere, type Matrix } from "./analysis.js";
 import { getStore } from "../compat/blobs.js";
@@ -423,6 +424,7 @@ export async function runMatrixRound(opts: {
       { cols: quals.cols, rows: quals.rows } as Matrix,
       null,
       asKnownPerson(cur.doc.people),
+      { withParticulars: true },
     );
     const s = res.summary;
     out.summary = {
@@ -472,10 +474,22 @@ export async function runMatrixRound(opts: {
       out.changes = done.applied.slice(0, CHANGES_CAP);
       changedKeys = new Set(done.applied.map((a) => `${as(a.person).trim().toUpperCase()}|${a.code}`));
 
-      // An idle hour writes nothing: no revision bump, no history copy.
-      if (!done.applied.length
+      // Each man's MSIC number and date of birth off his certificates, into
+      // the boxes on Crew Details that are empty or still the certificates'
+      // own - worked out on this fresh copy, like the matrix, so a box
+      // somebody typed a moment ago is seen as typed.
+      const parts = particularsFilled(doc, res.particulars);
+      const matrixIdle = !done.applied.length
         && sameRecord(round.noteNow, doc.filledFromCert)
-        && sameRecord(round.seenNow, doc.orphanSeen)) return null;
+        && sameRecord(round.seenNow, doc.orphanSeen);
+      // An idle hour writes nothing: no revision bump, no history copy.
+      if (matrixIdle && !parts.changed) return null;
+      if (parts.changed) {
+        doc.people = parts.people as SharedDocument["people"];
+        doc.particularsFromCert = parts.fromCert;
+      }
+      // Only the boxes moved: the one save carries them and nothing else.
+      if (matrixIdle) return doc;
 
       doc.quals = done.next;
       if (out.applied) doc.matrixUpdated = todayThere();
@@ -531,6 +545,24 @@ export async function runMatrixRound(opts: {
       console.error("the round's lease was not dropped:", e);
     }
   }
+}
+
+/** The particulars rule (source/shared/particulars.js) run for every man
+ *  on the register against the document as it is at the moment of saving.
+ *  Nothing to go on - no certificates, nobody on the register - changes
+ *  nothing. */
+function particularsFilled(doc: SharedDocument, input: ParticularsInput | undefined) {
+  const people = (Array.isArray(doc.people) ? doc.people : []) as { id?: unknown; name?: string }[];
+  if (!input || !people.length) return { changed: false, people, fromCert: {} };
+  const register = crewRegister(people);
+  const msic = msicCodeIn(vessel.qualColumns);
+  const today = todayThere();
+  const found: Record<string, { msic: string | null; dob: string | null }> = {};
+  for (const p of people) {
+    const key = particularsKeyOf(p);
+    if (key && p && p.name) found[key] = particularsFor(p.name, input.rows, input.readings, register, today, msic);
+  }
+  return fillParticulars(people, found, doc.particularsFromCert as Record<string, { msic?: string | null; dob?: string | null }> | null);
 }
 
 /** The cells the document says the workbook is still owed. */

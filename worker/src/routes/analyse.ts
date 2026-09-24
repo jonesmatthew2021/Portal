@@ -8,7 +8,9 @@ import {
 } from "../db/documents.js";
 import { imageToPdf } from "../lib/pdf-wrap.js";
 import { readDocument } from "../lib/shared-state.js";
-import { asKnownPerson } from "../../../source/shared/names.js";
+import { asKnownPerson, crewRegister } from "../../../source/shared/names.js";
+import { msicCodeIn, openToCertificates, particularsKeyOf } from "../../../source/shared/particulars.js";
+import { vessel } from "../vessel.js";
 import { getEnv } from "../env.js";
 import {
   askJson,
@@ -719,7 +721,12 @@ export async function compareMatrix(
   matrix: Matrix,
   sheet: Sheet,
   nameOf: (name: string) => string | null | undefined = (n) => n,
-): Promise<CompareResult> {
+  /** The round asks for the certificates as the particulars rule reads
+   *  them (source/shared/particulars.js), off the same listing and
+   *  readings this pass has already loaded - the route asks for nothing,
+   *  so its answer to the page is as it was. */
+  opts: { withParticulars?: boolean } = {},
+): Promise<CompareResult & { particulars?: ParticularsInput }> {
   const as = (n: string) => { const k = nameOf(n); return k == null || k === "" ? n : k; };
   const certs = await liveCertificates();
   const held = await allReadings();
@@ -1225,7 +1232,171 @@ export async function compareMatrix(
       validitySheet: validity ? validity.filename : null,
       derived,
     },
+    ...(opts.withParticulars ? { particulars: particularsInput(certs, held, eqTable) } : {}),
   };
+}
+
+/** What the particulars rule reads: every certificate on the books with
+ *  the column it answers to - worked out the way the comparison works it
+ *  out (codeFor) - and the readings by key. */
+export type ParticularsInput = {
+  rows: { person: string | null; code: string | null; key: string; filedOn: string | null }[];
+  readings: Map<string, Reading>;
+};
+
+function particularsInput(certs: Row[], held: Map<string, Reading>, eqTable: Awaited<ReturnType<typeof equivalences>>): ParticularsInput {
+  const rows = certs.map((row) => {
+    const key = readingKey(row);
+    return { person: row.person, code: codeFor(row, held.get(key) || null, eqTable), key, filedOn: row.filedOn ? String(row.filedOn) : null };
+  });
+  return { rows, readings: held };
+}
+
+// ---------------------------------------------------------------------------
+// Topping up readings made before the particulars were asked for
+// ---------------------------------------------------------------------------
+
+/** How many certificates one man's date of birth may be looked for on. */
+const DOB_TRIES = 3;
+/** How many certificates are read at once. */
+const TOP_UP_AT_ONCE = 4;
+
+/**
+ * The readings made before the reading asked for the document's number and
+ * the holder's date of birth, topped up - a few an hour, never the whole
+ * crew read again (that is $15-25 of Matthew's credit, and READING_VERSION
+ * is left alone for exactly that reason).
+ *
+ * For each man on the register whose box is empty or still the
+ * certificates' own (openToCertificates):
+ *  - MSIC: his newest MSIC card, where its reading has no documentNumber key.
+ *  - Date of birth: where no certificate of his gives one yet and none of
+ *    the ones below has the holderBirthDate key, his certificates of
+ *    competency and proficiency (the QL- columns) newest first, then his
+ *    medical, until one gives a date - at most DOB_TRIES.
+ * A re-read reading carries both keys, so it is never read again: that is
+ * all the memory there is, and no other store. Only readable certificates
+ * in his own name are asked about - one in another man's name could give
+ * him nothing.
+ *
+ * What a re-read gives is added to the reading already held - the two new
+ * keys and nothing else - so a second look can never move a date or a code
+ * on the matrix, and a second look that could not read the scan leaves the
+ * first reading standing, with the keys null.
+ *
+ * Stops on the first answer about the model's account, as the reading
+ * does, and stores nothing for it. Never more than `cap` reads, and none
+ * started once `timeLeft` says no.
+ */
+export async function topUpParticulars(
+  codes: [string, string][],
+  opts: { cap: number; timeLeft: () => boolean },
+): Promise<{ read: number; stopped: ReadStopped; failed: number }> {
+  const out: { read: number; stopped: ReadStopped; failed: number } = { read: 0, stopped: null, failed: 0 };
+  const cur = await readDocument();
+  const people = (Array.isArray(cur?.doc.people) ? cur!.doc.people : []) as { id?: unknown; name?: string; msic?: unknown; dob?: unknown }[];
+  if (!people.length || opts.cap <= 0) return out;
+  const fromCert = (cur!.doc.particularsFromCert || {}) as Record<string, { msic?: string; dob?: string }>;
+  const register = crewRegister(people);
+  const msic = msicCodeIn(vessel.qualColumns);
+  const medical = new Set(Object.keys(vessel.certStated).map((c) => c.trim().toUpperCase()));
+
+  const certs = await liveCertificates();
+  const held = await allReadings();
+  const eqTable = await equivalences();
+  const store = readingStore();
+
+  type Cert = { row: Row; reading: Reading; code: string };
+  const newestFirst = (a: Cert, b: Cert) =>
+    String(b.reading.expiresOn || "").localeCompare(String(a.reading.expiresOn || ""))
+    || String(b.reading.issuedOn || "").localeCompare(String(a.reading.issuedOn || ""))
+    || String(b.row.filedOn || "").localeCompare(String(a.row.filedOn || ""));
+
+  // Each man's jobs: a list read in turn until one gives what is wanted.
+  const jobs: { certs: Cert[]; wants: "documentNumber" | "holderBirthDate" }[] = [];
+  const asked = new Set<string>();
+  for (const p of people) {
+    const me = p && p.name ? register.nameOf(p.name) : null;
+    if (!me || !particularsKeyOf(p)) continue;
+    const mine: Cert[] = [];
+    for (const row of certs) {
+      if (!row.person || register.nameOf(row.person) !== me) continue;
+      const reading = held.get(readingKey(row));
+      if (!reading || reading.readable === false) continue;
+      if (reading.holderName && register.nameOf(reading.holderName) !== me) continue;
+      mine.push({ row, reading, code: String(codeFor(row, reading, eqTable) || "").trim().toUpperCase() });
+    }
+    const fresh = (list: Cert[]) => list.filter((c) => !asked.has(readingKey(c.row)));
+    if (msic && openToCertificates(p, "msic", fromCert)) {
+      const newest = mine.filter((c) => c.code === msic).sort(newestFirst)[0];
+      if (newest && !("documentNumber" in newest.reading) && fresh([newest]).length) {
+        jobs.push({ certs: [newest], wants: "documentNumber" });
+        asked.add(readingKey(newest.row));
+      }
+    }
+    // Looked for only where no certificate of his gives a date yet and
+    // none of the ones it would be looked for on has been asked: an MSIC
+    // card topped up for its number carries the key too, and must not
+    // stand for his tickets having been asked.
+    const tickets = mine.filter((c) => c.code.startsWith("QL-") && !medical.has(c.code)).sort(newestFirst);
+    const medicals = mine.filter((c) => medical.has(c.code)).sort(newestFirst);
+    const candidates = [...tickets, ...medicals];
+    if (openToCertificates(p, "dob", fromCert)
+      && !mine.some((c) => c.reading.holderBirthDate)
+      && !candidates.some((c) => "holderBirthDate" in c.reading)) {
+      const list = fresh(candidates).slice(0, DOB_TRIES);
+      if (list.length) {
+        jobs.push({ certs: list, wants: "holderBirthDate" });
+        list.forEach((c) => asked.add(readingKey(c.row)));
+      }
+    }
+  }
+
+  let left = opts.cap;
+  const readOne = async (c: Cert): Promise<Reading | "halt" | "skip"> => {
+    if (out.stopped || !opts.timeLeft()) return "halt";
+    let again: Reading;
+    try {
+      again = await readCertificate(c.row, codes);
+    } catch (e) {
+      // The account, not the scan: nothing stored, and nothing more asked
+      // this hour. Anything else costs this one certificate its turn.
+      if (e instanceof ModelRefusal && e.kind !== "document" && e.kind !== "other") {
+        if (!out.stopped) out.stopped = { kind: e.kind, line: plainLine(e) };
+        return "halt";
+      }
+      out.failed++;
+      console.error("a certificate was not read again for its particulars:", c.row.filename, e);
+      return "skip";
+    }
+    const topped: Reading = {
+      ...c.reading,
+      documentNumber: again.readable ? again.documentNumber ?? null : null,
+      holderBirthDate: again.readable ? again.holderBirthDate ?? null : null,
+    };
+    await store.setJSON(readingKey(c.row), topped);
+    out.read++;
+    return topped;
+  };
+  // A man's list is started only with room for all of it, so the cap never
+  // cuts his date of birth short after one certificate that printed none.
+  const runJob = async (job: (typeof jobs)[number]) => {
+    if (left < job.certs.length) return;
+    left -= job.certs.length;
+    let used = 0;
+    for (const c of job.certs) {
+      const r = await readOne(c);
+      if (r === "halt") break;
+      used++;
+      if (r !== "skip" && r[job.wants]) break;
+    }
+    left += job.certs.length - used;
+  };
+  let next = 0;
+  await Promise.all(Array.from({ length: TOP_UP_AT_ONCE }, async () => {
+    while (next < jobs.length && !out.stopped && opts.timeLeft()) await runJob(jobs[next++]);
+  }));
+  return out;
 }
 
 /**

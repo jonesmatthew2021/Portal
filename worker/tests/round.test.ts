@@ -3586,3 +3586,232 @@ test("the reminders ask the users table only for columns it has", () => {
   const m = /^SELECT (.+) FROM users WHERE (\w+) = 0$/.exec(REMINDER_USERS_SQL)!;
   for (const c of [...m[1].split(", "), m[2]]) assert.ok(has.includes(c), c + " is a column of users");
 });
+
+/* ------------------------------------------------------------------------ *
+ * A man's MSIC number and date of birth, off his certificates: filled in
+ * the round's own save (the hour's and Update matrix's alike), a typed box
+ * left as typed, and the readings made before the question was asked
+ * topped up a few an hour - once each, and never on an account that has
+ * said no.
+ * ------------------------------------------------------------------------ */
+
+/** A certificate for the particulars tests: filed under `person` in
+ *  Brenton's folder, answering to `code`, with `reading` held for it (or
+ *  none, where it has never been read). */
+type PCert = { id: string; checksum: string; code: string | null; person?: string; filedOn?: string; reading?: Record<string, unknown> | null };
+/** A reading made since the particulars were asked for: both keys there. */
+const newReading = (over: Record<string, unknown>) => ({ ...reading, holderName: "Brenton Evans", documentNumber: null, holderBirthDate: null, ...over });
+/** A reading made before: neither key. */
+const oldReading = (over: Record<string, unknown>) => {
+  const r: Record<string, unknown> = { ...reading, holderName: "Brenton Evans", ...over };
+  delete r.documentNumber;
+  delete r.holderBirthDate;
+  return r;
+};
+const EVANS_P = { id: "p1", name: "EVANS, Brenton", aliases: ["bRENTON"] };
+
+const particularsPortal = async (o: {
+  people?: Record<string, unknown>[];
+  fromCert?: Record<string, unknown>;
+  certs?: PCert[];
+  /** The model switched on (answered by hand in the test). */
+  model?: boolean;
+} = {}) => {
+  const made = await oneManPortal();
+  const doc = made.portal.doc();
+  doc.people = o.people || [EVANS_P];
+  if (o.fromCert) doc.particularsFromCert = o.fromCert;
+  made.portal.state.data = JSON.stringify(doc);
+  for (const c of o.certs || []) {
+    const key = `opms/Brenton - OPMS/${c.checksum}.pdf`;
+    await made.bucket.put(key, bytesOf("a scan"));
+    made.portal.rows.push({ ...billysTicket, id: c.id, person: c.person || "EVANS, Brenton", checksum: c.checksum, blobKey: key,
+      filename: `${c.checksum}.pdf`, sizeBytes: 6, qualCode: c.code, filedOn: c.filedOn || "2026-09-01" });
+    if (c.reading) made.portal.blobs.set(`certificate-readings|r1/${c.checksum}.json`, JSON.stringify(c.reading));
+  }
+  made.bucket.made.length = 0;
+  const env = { DB: made.portal.db, FILES: made.bucket, FILE_STORE: "r2",
+    ...(o.model ? { ANTHROPIC_API_KEY: "k", ANTHROPIC_BASE_URL: "https://model.test" } : {}) };
+  setEnv(env as never);
+  return { ...made, env };
+};
+const person = (portal: { doc: () => { people: Record<string, unknown>[] } }, id = "p1") => portal.doc().people.find((p) => p.id === id)!;
+const hourly = (portal: { blobs: Map<string, string> }) => JSON.parse(portal.blobs.get("sync|last-hourly")!);
+
+/** The model, answered by which certificate it was sent. */
+const modelByFile = (answer: (filename: string) => { status: number; body: string }) => {
+  const box: { m: ReturnType<typeof modelAnswers> | null } = { m: null };
+  box.m = modelAnswers((n) => answer(/Filename: (.+?)\\n/.exec(box.m!.calls[n - 1])?.[1] || ""));
+  return box.m;
+};
+
+test("the hour fills an empty MSIC box off his newest card and his date of birth where his certificates agree, and an idle hour saves nothing", async () => {
+  const { portal, env } = await particularsPortal({ certs: [
+    { id: "v1", checksum: "old-card", code: "VS-01", filedOn: "2024-01-01",
+      reading: newReading({ qualCode: "VS-01", documentNumber: "msic 1111", expiresOn: "2027-01-01", holderBirthDate: "1980-03-10" }) },
+    { id: "v2", checksum: "new-card", code: "VS-01", filedOn: "2026-06-01",
+      reading: newReading({ qualCode: "VS-01", documentNumber: " msic  2222 ", expiresOn: "2030-01-01", holderBirthDate: "1980-03-10" }) },
+    { id: "m1", checksum: "medical", code: "QL-17",
+      reading: newReading({ qualCode: "QL-17", holderName: "evans brenton", holderBirthDate: "1980-10-03" }) },
+  ] });
+  await worker.scheduled({} as never, env as never);
+  assert.equal(person(portal).msic, "MSIC 2222", "the card that runs out last, as the box writes it");
+  assert.equal(person(portal).dob, "1980-03-10", "two of his three certificates say 10 Mar 1980");
+  assert.deepEqual(portal.doc().particularsFromCert, { p1: { msic: "MSIC 2222", dob: "1980-03-10" } }, "and what went in is remembered");
+  assert.equal(hourly(portal).particularsRead, 0, "nothing was read again: every reading already carried both");
+
+  const rev = portal.state.rev;
+  await worker.scheduled({} as never, env as never);
+  assert.equal(portal.state.rev, rev, "the next hour has nothing new: no save at all");
+});
+
+test("Update matrix fills the boxes too, and a save with nothing else to carry carries only them", async () => {
+  const { portal } = await particularsPortal({ certs: [
+    { id: "v1", checksum: "card", code: "VS-01", reading: newReading({ qualCode: "VS-01", documentNumber: "MSIC 3333", expiresOn: "2030-01-01" }) },
+  ] });
+  // The matrix already carries the certificates' date: only the box can move.
+  const doc = portal.doc();
+  doc.quals.rows[0][3][0] = "2031-05-26";
+  doc.filledFromCert = { "EVANS, BRENTON::QL-01": true };
+  portal.state.data = JSON.stringify(doc);
+  const before = portal.doc();
+  const res = await postRound({ by: "Matthew" });
+  assert.equal(res.status, 200);
+  const after = portal.doc();
+  assert.equal(person(portal).msic, "MSIC 3333");
+  const { people: _p, particularsFromCert: _f, ...rest } = after;
+  const { people: _q, particularsFromCert: _g, ...was } = before;
+  assert.deepEqual(rest, was, "nothing else on the document moved - no history line, no stamp");
+});
+
+test("a box somebody typed is left as typed, and a renewed card's number replaces the old card's", async () => {
+  const typed = await particularsPortal({
+    people: [{ ...EVANS_P, msic: "TYPED 1", dob: "" }],
+    certs: [{ id: "v1", checksum: "card", code: "VS-01",
+      reading: newReading({ qualCode: "VS-01", documentNumber: "MSIC 1111", expiresOn: "2027-01-01", holderBirthDate: "1980-03-10" }) }],
+  });
+  await worker.scheduled({} as never, typed.env as never);
+  assert.equal(person(typed.portal).msic, "TYPED 1", "typed by hand: left as typed");
+  assert.equal(person(typed.portal).dob, "1980-03-10", "the empty box beside it is filled");
+  assert.deepEqual(typed.portal.doc().particularsFromCert, { p1: { dob: "1980-03-10" } }, "the typed box is not the certificates'");
+
+  const renewed = await particularsPortal({
+    people: [{ ...EVANS_P, msic: "MSIC 1111" }],
+    fromCert: { p1: { msic: "MSIC 1111" } },
+    certs: [
+      { id: "v1", checksum: "old-card", code: "VS-01", reading: newReading({ qualCode: "VS-01", documentNumber: "MSIC 1111", expiresOn: "2027-01-01" }) },
+      { id: "v2", checksum: "new-card", code: "VS-01", reading: newReading({ qualCode: "VS-01", documentNumber: "MSIC 2222", expiresOn: "2031-01-01" }) },
+    ],
+  });
+  await worker.scheduled({} as never, renewed.env as never);
+  assert.equal(person(renewed.portal).msic, "MSIC 2222", "the box held the old card's number as the certificates put it: the new card's replaces it");
+  assert.deepEqual(renewed.portal.doc().particularsFromCert, { p1: { msic: "MSIC 2222" } });
+});
+
+test("a card filed under one man and printed in another's name gives neither of them anything", async () => {
+  const { portal, env } = await particularsPortal({
+    people: [EVANS_P, { id: "p2", name: "SITTIYOS, Kachin", aliases: [] }],
+    certs: [{ id: "v1", checksum: "kachins-card", code: "VS-01",
+      reading: newReading({ qualCode: "VS-01", holderName: "Kachin Sittiyos", documentNumber: "MSIC 9999", expiresOn: "2030-01-01", holderBirthDate: "1975-05-05" }) }],
+  });
+  await worker.scheduled({} as never, env as never);
+  assert.equal(person(portal).msic, undefined, "not Evans's: the name on it is Kachin's");
+  assert.equal(person(portal).dob, undefined);
+  assert.equal(person(portal, "p2").msic, undefined, "not Kachin's either: it is not filed under him");
+  assert.equal(portal.doc().particularsFromCert, undefined, "nothing written");
+});
+
+test("the readings made before are read again once for the particulars, keep everything else they said, and are never read again", async () => {
+  const { portal, env } = await particularsPortal({ model: true, certs: [
+    { id: "v1", checksum: "card", code: "VS-01", reading: oldReading({ qualCode: "VS-01", expiresOn: "2030-01-01" }) },
+    { id: "m1", checksum: "medical", code: "QL-17", reading: oldReading({ qualCode: "QL-17", expiresOn: "2027-01-01" }) },
+  ] });
+  // Evans's Master ticket (evans-master, from oneManPortal) was read before too.
+  const model = modelByFile((file) => ({ status: 200, body: readingStream(
+    file === "card.pdf" ? { ...reading, holderName: "Brenton Evans", documentNumber: "msic 4444", expiresOn: "2099-01-01" }
+      : file === "master.pdf" ? { ...reading, holderName: "Brenton Evans", holderBirthDate: "1980-03-10", expiresOn: "2099-01-01" }
+        : { ...reading, holderName: "Brenton Evans", holderBirthDate: "1980-03-10" }) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    model.restore();
+  }
+  assert.equal(model.calls.length, 2, "the card for its number, the Master ticket for his date of birth - the medical not needed");
+  assert.equal(hourly(portal).particularsRead, 2, "the count is on the hour's record");
+  const card = JSON.parse(portal.blobs.get("certificate-readings|r1/card.json")!);
+  assert.equal(card.documentNumber, "msic 4444");
+  assert.equal(card.expiresOn, "2030-01-01", "the second look moved nothing else: the date the matrix reads is the first reading's");
+  assert.equal(card.version, "r1");
+  assert.equal(JSON.parse(portal.blobs.get("certificate-readings|r1/evans-master.json")!).holderBirthDate, "1980-03-10");
+  assert.equal("holderBirthDate" in JSON.parse(portal.blobs.get("certificate-readings|r1/medical.json")!), false, "the medical was never asked");
+  assert.equal(person(portal).msic, "MSIC 4444", "and the round filled the boxes the same hour");
+  assert.equal(person(portal).dob, "1980-03-10");
+
+  const again = modelByFile(() => ({ status: 200, body: readingStream(reading) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    again.restore();
+  }
+  assert.equal(again.calls.length, 0, "the next hour asks the model nothing");
+  assert.equal(hourly(portal).particularsRead, 0);
+});
+
+test("a box somebody typed is never paid for: its certificates are not read again", async () => {
+  const { portal, env } = await particularsPortal({ model: true,
+    people: [{ ...EVANS_P, msic: "TYPED 1", dob: "1980-01-01" }],
+    certs: [{ id: "v1", checksum: "card", code: "VS-01", reading: oldReading({ qualCode: "VS-01" }) }] });
+  const model = modelByFile(() => ({ status: 200, body: readingStream(reading) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    model.restore();
+  }
+  assert.equal(model.calls.length, 0);
+  assert.equal(hourly(portal).particularsRead, 0);
+});
+
+test("no more than twenty certificates are read again in an hour; the rest wait for the next", async () => {
+  const crew = Array.from({ length: 25 }, (_, i) => {
+    const letters = String.fromCharCode(65 + Math.floor(i / 26), 65 + (i % 26));
+    return { id: `c${i}`, name: `CREW, ${letters}man`, aliases: [] as string[] };
+  });
+  const { portal, env } = await particularsPortal({ model: true, people: crew,
+    certs: crew.map((p, i) => ({ id: `v${i}`, checksum: `card-${i}`, code: "VS-01", person: p.name,
+      reading: oldReading({ qualCode: "VS-01", holderName: p.name }) })) });
+  const first = modelByFile((file) => ({ status: 200, body: readingStream({ ...reading, documentNumber: file }) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    first.restore();
+  }
+  assert.equal(first.calls.length, 20, "twenty this hour");
+  assert.equal(hourly(portal).particularsRead, 20);
+  const second = modelByFile((file) => ({ status: 200, body: readingStream({ ...reading, documentNumber: file }) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    second.restore();
+  }
+  assert.equal(second.calls.length, 5, "the other five the next");
+  assert.equal(portal.doc().people.filter((p: { msic?: string }) => p.msic).length, 25, "every box filled by then");
+});
+
+test("the account saying no stops the topping up: nothing stored, the line in red, and the round still runs", async () => {
+  const { portal, env } = await particularsPortal({ model: true, certs: [
+    { id: "v1", checksum: "card", code: "VS-01", reading: oldReading({ qualCode: "VS-01" }) },
+  ] });
+  const model = modelAnswers(() => ({ status: 400, body: CREDIT_BODY }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    model.restore();
+  }
+  assert.ok(model.calls.length >= 1 && model.calls.length <= 2, "no more asked once the account said no");
+  const h = hourly(portal);
+  assert.equal(h.readError, OUT_OF_CREDIT);
+  assert.equal(h.particularsRead, 0);
+  assert.equal(h.applied, 1, "the round still ran");
+  assert.deepEqual(readingWrites(portal.db), [], "nothing stored against the certificates: they are asked again once there is credit");
+  assert.equal("documentNumber" in JSON.parse(portal.blobs.get("certificate-readings|r1/card.json")!), false);
+});

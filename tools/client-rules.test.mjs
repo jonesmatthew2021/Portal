@@ -562,6 +562,25 @@ const is = (got, want, what) => {
   const page = lib.mergeHistory(base.history, mine.history, theirs.history);
   is(page, rules.mergeHistory(base.history, mine.history, theirs.history), "mergeHistory in the page answers as the module does");
 
+  /* The round filled Evans's MSIC number while this tab was changing
+     Kachin's rank and typing Kachin's date of birth. The tab's save lands
+     on the round's: Kachin's rank and date are the tab's, Evans's number
+     and the note of what the certificates put there are the round's -
+     the fill survives, it is not left to the next round to put back. */
+  const crewBase = [{ id: "p1", name: "EVANS, Brenton", msic: "" }, { id: "p2", name: "SITTIYOS, Kachin", rank: "Cook", dob: "" }];
+  const crewMine = { people: [{ id: "p1", name: "EVANS, Brenton", msic: "" }, { id: "p2", name: "SITTIYOS, Kachin", rank: "Deckhand", dob: "1975-05-06" }],
+    particularsFromCert: {} };
+  const crewTheirs = { people: [{ id: "p1", name: "EVANS, Brenton", msic: "MSIC 0002" }, { id: "p2", name: "SITTIYOS, Kachin", rank: "Cook", dob: "" }],
+    particularsFromCert: { p1: { msic: "MSIC 0002" } } };
+  const crew = lib.mergeSaved({ touched: ["people"], mine: crewMine, theirs: crewTheirs, base: { people: crewBase, particulars: {} } });
+  is(crew.people, [{ id: "p1", name: "EVANS, Brenton", msic: "MSIC 0002" }, { id: "p2", name: "SITTIYOS, Kachin", rank: "Deckhand", dob: "1975-05-06" }],
+    "a tab's save of the crew list keeps the round's fill in the boxes it did not touch");
+  is(crew.particularsFromCert, { p1: { msic: "MSIC 0002" } }, "…and the round's note of what it put there");
+  const crewAfter = lib.afterMergedSave(
+    { people: [{ id: "p1", name: "EVANS, Brenton", msic: "" }, { id: "p2", name: "SITTIYOS, Kachin", rank: "Master", dob: "1975-05-06" }] },
+    crew, crewMine, ["people"]);
+  is(crewAfter.people[0].msic, "MSIC 0002", "…and an edit made while that save was in the air does not take it off again");
+
   /* An edit made while the merged copy was still in the air is laid back
      over it the same way, not raw: the local copy was built before the
      merge, so laid back whole it would take the hour's work off again.
