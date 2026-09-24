@@ -499,11 +499,17 @@ on any line that still names this one.
     model's `evidenceKind`**: the model sometimes reads an ordinary
     certificate as one of the five papers, and left to the reading that
     certificate stopped filling its cell and had its date cleared as an
-    orphan; so a row somebody tagged (`documents.qual_code`) is the
-    certificate for its column whatever the reading calls it - on the round,
-    on the page's dates and in the evidence rule (`tagged` on its rows), a
-    document being the certificate or a paper and never both - and a paper
-    is filed untagged, its column read off the document.
+    orphan; so a row somebody tagged (`documents.qual_code`) with no kind
+    picked is the certificate for its column whatever the reading calls it.
+    **The person names the paper**: the upload page's column picker offers
+    the five papers under the columns (the names alone), and the row keeps
+    the kind picked (`documents.evidence_kind`, added lazily beside the
+    other late columns) next to the column the paper is about. One shared
+    rule, `paperKind` in `source/shared/evidence.js`, reads the person's
+    kind first, then a hand tag (the certificate), then the model's word -
+    for the round, the page's cells and the cover rule alike, a document
+    being the certificate or a paper and never both. A paper's typed date
+    is never written to a cell.
   - **A covered column runs no longer than the certificate carrying it.** An
     endorsement exists only as a line on a certificate that has to be in force
     to carry it (MO70 s 36(2)(a)), so QL-16 takes the **earlier** of the
@@ -521,6 +527,32 @@ on any line that still names this one.
     (`hasExpired` in `source/shared/bands.js`, MO70 s 5(a)(iii)). `daysUntil` is a
     plain day count and answers 0 on that day; everything that decides whether
     somebody holds something reads the rule, not the count.
+  - **The column a certificate is filed under is the office's word**
+    (`source/shared/filed-as.js`; Matthew, 25 Sep 2026: "every file needs to
+    go into the matrix"). A document reaches the portal filed under a column
+    two ways - the upload page's hand tag, or the code in its filename
+    ("<PERSON> - <CODE> <Title>.<ext>", the refile's own naming and the
+    office's) - and both count: hand tag, then the filename's code, then the
+    Equivalence sheet, then the model's confident guess (`codeFor` in
+    `worker/src/lib/analysis.ts`, handed the live matrix's columns by every
+    caller, so the round and the page's cells place a document the same
+    way). The filename's code is a filing only as a whole token and only for
+    a column of the live matrix (`filedCodeIn`); anything else is a name.
+    Where the filed column and the reading disagree the filed column still
+    takes the date and **Needs attention says so**, for management, in one
+    line - "<person> — <code>: filed as <column>, reads as <title>"
+    (`filedAsFor`, `filedAsLine`; the round's report carries the same
+    sentence as a `filed-as` note) - so a wrong filing is visible rather than
+    silently accepted; where the model gave the same column, no line. **An
+    unreadable document fills nothing from its name**: a filename is not
+    evidence that a paper exists. And the documents no column places at all -
+    read, readable, no hand tag, no code in the name, nothing the sheet or the
+    model could place, covering nothing - are listed under Needs attention as
+    **On file, not on the matrix — n**, one line each, "<person> — <title or
+    filename>", by person (`notOnMatrix` from `certificateStanding`,
+    `notOnMatrixLines` on the page). Whether any of them becomes a column is
+    the office's decision; the portal adds no column of its own. The preview
+    shows both under `?filedas=1`.
 
   A green cell means "not expired" and nothing more: suspension and
   cancellation are invisible on a document and only AMSA can confirm them
