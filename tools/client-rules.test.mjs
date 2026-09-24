@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -2408,6 +2408,67 @@ const is = (got, want, what) => {
   is(online.length, 11, "online, the same eleven");
   is(online.filter((c) => c.held).length, 0, "…and none is held down");
   is(online.filter((c) => c.title !== undefined).length, 0, "…nor carries the offline line");
+}
+
+/* ---- a man's MSIC number and date of birth, off his own certificates ---- */
+{
+  /* The page's own copy of the rules (spliced in at @shared), and the
+     module the worker imports, answer the same. */
+  const shared = await import(pathToFileURL(join(ROOT, "source", "shared", "particulars.js")).href);
+  const { particularsFor, fillParticulars, mergeParticulars, msicCodeIn, VESSEL, crewRegister } = lib;
+  const people = [
+    { id: "p1", name: "EVANS, Brenton", aliases: ["bRENTON"] },
+    { id: "p2", name: "SITTIYOS, Kachin", aliases: ["bILLY"] },
+    { id: "p3", name: "SAMPLE, Sam", aliases: [] },
+  ];
+  const register = crewRegister(people);
+  const today = "2026-09-25";
+  const rows = [
+    { person: "bRENTON", code: "VS-01", key: "m1", filedOn: "2024-01-01" },
+    { person: "EVANS, Brenton", code: "VS-01", key: "m2", filedOn: "2026-01-01" },
+    { person: "EVANS, Brenton", code: "QL-01", key: "q1" },
+    { person: "EVANS, Brenton", code: "VS-01", key: "w1", filedOn: "2026-06-01" },
+    { person: "bILLY", code: "QL-01", key: "k1" },
+    { person: "SITTIYOS, Kachin", code: "QL-17", key: "k2" },
+    { person: "SAMPLE, Sam", code: "QL-12", key: "s1" },
+    { person: "SAMPLE, Sam", code: "QL-17", key: "s2" },
+    { person: "SAMPLE, Sam", code: "QL-01", key: "s3" },
+  ];
+  const readings = {
+    m1: { readable: true, holderName: "Brenton Evans", documentNumber: "msic 0001", expiresOn: "2027-01-01", holderBirthDate: "1980-03-10" },
+    m2: { readable: true, holderName: "brenton EVANS", documentNumber: " msic  0002 ", expiresOn: "2030-01-01", holderBirthDate: "1980-03-10" },
+    q1: { readable: true, holderName: "Evans Brenton", holderBirthDate: "1980-10-03" },
+    w1: { readable: true, holderName: "Kachin Sittiyos", documentNumber: "WRONG", expiresOn: "2035-01-01", holderBirthDate: "1970-01-01" },
+    k1: { readable: true, holderName: "Kachin Sittiyos", holderBirthDate: "1975-05-05" },
+    k2: { readable: true, holderName: "SITTIYOS Kachin", holderBirthDate: "1976-06-06" },
+    s1: { readable: true, holderName: "Sam Sample", holderBirthDate: "2030-01-01" },
+    s2: { readable: true, holderName: "Sam Sample", holderBirthDate: "2021-06-01" },
+    s3: { readable: true, holderName: "Sam Sample", holderBirthDate: "1906-01-01" },
+  };
+  const of = (name, code = "VS-01") => particularsFor(name, rows, readings, register, today, code);
+  is(msicCodeIn(VESSEL.qualColumns), "VS-01", "the MSIC column is found by its title on the vessel file");
+  is(of("EVANS, Brenton"), { msic: "MSIC 0002", dob: "1980-03-10" },
+    "Evans: the card that runs out last, tidied; the date two of three give; nothing from the card in Kachin's name");
+  is(shared.particularsFor("EVANS, Brenton", rows, readings, names.crewRegister(people), today, "VS-01"), of("EVANS, Brenton"),
+    "the worker's module answers the same");
+  is(of("brenton evans"), of("EVANS, Brenton"), "another order or case is the same man through the register");
+  is(of("SITTIYOS, Kachin"), { msic: null, dob: null }, "Kachin: two dates once each is no answer");
+  is(of("SAMPLE, Sam"), { msic: null, dob: null }, "a future date, a five-year-old and a 120-year-old say nothing");
+  is(of("EVANS, Brenton", msicCodeIn([["QL-01", "Master", "Qualification"]])).msic, null, "no MSIC column, no number");
+
+  const F = { p1: { msic: "MSIC 0002", dob: "1980-03-10" } };
+  const filled = fillParticulars([{ id: "p1" }], F, {});
+  is([filled.changed, filled.people, filled.fromCert], [true, [{ id: "p1", msic: "MSIC 0002", dob: "1980-03-10" }], F], "empty boxes filled, and remembered");
+  is(fillParticulars(filled.people, F, filled.fromCert).changed, false, "the same again changes nothing");
+  const typed = fillParticulars([{ id: "p1", msic: "TYPED 9" }], F, { p1: { msic: "MSIC 0001" } });
+  is([typed.people[0].msic, typed.fromCert.p1.msic], ["TYPED 9", "MSIC 0001"], "a typed number is left as typed, the record kept");
+  const renewed = fillParticulars([{ id: "p1", msic: "MSIC 0001" }], F, { p1: { msic: "MSIC 0001" } });
+  is(renewed.people[0].msic, "MSIC 0002", "a renewed card's number replaces the old card's");
+  const same = fillParticulars([{ id: "p1", msic: "msic 0002" }], F, {});
+  is([same.people[0].msic, same.fromCert.p1.msic], ["msic 0002", "MSIC 0002"], "typed as the certificate says: kept as typed, not marked typed");
+  is(fillParticulars([{ id: "p1", msic: "MSIC 0001" }], null, { p1: { msic: "MSIC 0001" } }).changed, false, "nothing found clears nothing");
+  is(mergeParticulars([{ id: "p1", msic: "", rank: "Mate" }], [{ id: "p1", msic: "", rank: "Master" }], [{ id: "p1", msic: "MSIC 0002", rank: "Mate" }]),
+    [{ id: "p1", msic: "MSIC 0002", rank: "Master" }], "a tab's save keeps the round's fill in a box the tab did not touch");
 }
 
 /* ---- a person's Needs attention heading says the days it lists by ---- */

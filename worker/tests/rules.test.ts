@@ -21,6 +21,7 @@ import { vessel, checkVessel, vesselNow } from "../src/vessel.js";
 import { crewRowsOnly, crewRegister, nameLetters, registerWords } from "../../source/shared/names.js";
 import { RED_DAYS, daysUntil } from "../../source/shared/bands.js";
 import * as reminders from "../../source/shared/reminders.js";
+import { particularsFor, fillParticulars, mergeParticulars, msicCodeIn } from "../../source/shared/particulars.js";
 import { expiringIn, EXPIRING_MEANS, PORTAL_TOOLS } from "../src/lib/portal.js";
 import { dueMeans } from "../src/lib/matrix.js";
 import { readFileSync } from "node:fs";
@@ -625,4 +626,96 @@ test("the emails say the list in plain words, and nothing else but the portal's 
   // A name is written into the html as text, never as markup.
   const odd = reminders.reminderText(vessel, "<b>O'NEIL</b>, Pat", [{ ...it(5, "2026-10-03"), title: "A & B" }], REMINDER_TODAY, 90);
   assert.ok(odd.html.includes("&lt;b&gt;O'NEIL&lt;/b&gt;") && odd.html.includes("A &amp; B") && !odd.html.includes("<b>O'NEIL"));
+});
+
+/* ---- a man's MSIC number and date of birth, off his own certificates ---- */
+const P_PEOPLE = [
+  { id: "p1", name: "EVANS, Brenton", aliases: ["bRENTON"] },
+  { id: "p2", name: "SITTIYOS, Kachin", aliases: ["bILLY"] },
+  { id: "p3", name: "SAMPLE, Sam", aliases: [] },
+];
+const P_REGISTER = crewRegister(P_PEOPLE);
+const P_TODAY = "2026-09-25";
+const P_ROWS = [
+  { person: "bRENTON", code: "VS-01", key: "m1", filedOn: "2024-01-01" },
+  { person: "EVANS, Brenton", code: "VS-01", key: "m2", filedOn: "2026-01-01" },
+  { person: "EVANS, Brenton", code: "QL-01", key: "q1", filedOn: "2025-01-01" },
+  // Filed in Evans's folder, printed in Kachin's name.
+  { person: "EVANS, Brenton", code: "VS-01", key: "w1", filedOn: "2026-06-01" },
+  { person: "bILLY", code: "QL-01", key: "k1", filedOn: "2025-01-01" },
+  { person: "SITTIYOS, Kachin", code: "QL-17", key: "k2", filedOn: "2025-02-01" },
+  { person: "SAMPLE, Sam", code: "QL-12", key: "s1" },
+  { person: "SAMPLE, Sam", code: "QL-17", key: "s2" },
+  { person: "SAMPLE, Sam", code: "QL-01", key: "s3" },
+  { person: "SAMPLE, Sam", code: "QL-02", key: "s4" },
+];
+const P_READINGS: Record<string, Record<string, unknown>> = {
+  m1: { readable: true, holderName: "Brenton Evans", documentNumber: "msic 0001", expiresOn: "2027-01-01", holderBirthDate: "1980-03-10" },
+  m2: { readable: true, holderName: "brenton EVANS", documentNumber: " msic  0002 ", expiresOn: "2030-01-01", holderBirthDate: "1980-03-10" },
+  q1: { readable: true, holderName: "Evans Brenton", holderBirthDate: "1980-10-03" },
+  w1: { readable: true, holderName: "Kachin Sittiyos", documentNumber: "WRONG", expiresOn: "2035-01-01", holderBirthDate: "1970-01-01" },
+  k1: { readable: true, holderName: "Kachin Sittiyos", holderBirthDate: "1975-05-05" },
+  k2: { readable: true, holderName: "SITTIYOS Kachin", holderBirthDate: "1976-06-06" },
+  s1: { readable: true, holderName: "Sam Sample", holderBirthDate: "2030-01-01" },
+  s2: { readable: true, holderName: "Sam Sample", holderBirthDate: "2021-06-01" },
+  s3: { readable: true, holderName: "Sam Sample", holderBirthDate: "1906-01-01" },
+  s4: { readable: true, holderName: "Sam Sample", holderBirthDate: "1985-02-30" },
+};
+const particularsOf = (name: string, msic: string | null = "VS-01", readings = P_READINGS) =>
+  particularsFor(name, P_ROWS, readings, P_REGISTER, P_TODAY, msic);
+
+test("particulars: the newest MSIC card's number, in his name only, and the date his certificates agree on", () => {
+  assert.equal(msicCodeIn(vessel.qualColumns), "VS-01", "the MSIC column is found by its title on the vessel file");
+  assert.deepEqual(particularsOf("EVANS, Brenton"), { msic: "MSIC 0002", dob: "1980-03-10" },
+    "the card that runs out last, tidied; two of three say 10 Mar 1980; the card in Kachin's name gives neither");
+  assert.deepEqual(particularsOf("brenton evans"), particularsOf("EVANS, Brenton"), "names in another order or case are the same man through the register");
+  assert.deepEqual(particularsOf("SITTIYOS, Kachin"), { msic: null, dob: null },
+    "his certificates say two dates once each: no guess; the card in his name filed under Evans is not his to take");
+  assert.deepEqual(particularsOf("SAMPLE, Sam"), { msic: null, dob: null },
+    "a date in the future, five years ago, 120 years ago or not a day at all says nothing");
+  assert.equal(particularsOf("EVANS, Brenton", msicCodeIn([["QL-01", "Master", "Qualification"]])).msic, null, "no MSIC column, no MSIC number");
+  const unread = { ...P_READINGS, m2: { ...P_READINGS.m2, readable: false } };
+  assert.equal(particularsOf("EVANS, Brenton", "VS-01", unread).msic, "MSIC 0001", "an unreadable reading gives nothing");
+});
+
+test("particulars: an empty box is filled, a typed one kept, a renewed card replaces the old number, nothing found clears nothing", () => {
+  const F = { p1: { msic: "MSIC 0002", dob: "1980-03-10" } };
+  const empty = fillParticulars([{ id: "p1", name: "EVANS, Brenton" }], F, {});
+  assert.equal(empty.changed, true);
+  assert.deepEqual(empty.people, [{ id: "p1", name: "EVANS, Brenton", msic: "MSIC 0002", dob: "1980-03-10" }], "empty boxes filled");
+  assert.deepEqual(empty.fromCert, { p1: { msic: "MSIC 0002", dob: "1980-03-10" } }, "and what went in is remembered");
+
+  const again = fillParticulars(empty.people, F, empty.fromCert);
+  assert.equal(again.changed, false, "nothing new: nothing changes");
+  assert.equal(again.people, empty.people, "the same list back");
+
+  const typed = fillParticulars([{ id: "p1", msic: "TYPED 9", dob: "1980-03-11" }], F, { p1: { msic: "MSIC 0001", dob: "1980-03-10" } });
+  assert.equal(typed.changed, false);
+  assert.deepEqual(typed.people, [{ id: "p1", msic: "TYPED 9", dob: "1980-03-11" }], "what somebody typed is left as typed");
+  assert.deepEqual(typed.fromCert, { p1: { msic: "MSIC 0001", dob: "1980-03-10" } }, "and the certificates' record is kept");
+
+  const renewed = fillParticulars([{ id: "p1", msic: "MSIC 0001" }], { p1: { msic: "MSIC 0002", dob: null } }, { p1: { msic: "MSIC 0001" } });
+  assert.deepEqual(renewed.people, [{ id: "p1", msic: "MSIC 0002" }], "the new card's number replaces the old card's");
+  assert.deepEqual(renewed.fromCert, { p1: { msic: "MSIC 0002" } });
+
+  const sameAsCert = fillParticulars([{ id: "p1", msic: "msic 0002" }], { p1: { msic: "MSIC 0002", dob: null } }, {});
+  assert.deepEqual(sameAsCert.people, [{ id: "p1", msic: "msic 0002" }], "a typed value that is the certificate's stays as typed");
+  assert.deepEqual(sameAsCert.fromCert, { p1: { msic: "MSIC 0002" } }, "and is the certificates' from then on");
+  const next = fillParticulars(sameAsCert.people, { p1: { msic: "MSIC 0003", dob: null } }, sameAsCert.fromCert);
+  assert.deepEqual(next.people, [{ id: "p1", msic: "MSIC 0003" }], "so the next card replaces it: it was never marked typed");
+
+  const none = fillParticulars([{ id: "p1", msic: "MSIC 0001", dob: "1980-03-10" }], null, { p1: { msic: "MSIC 0001", dob: "1980-03-10" } });
+  assert.equal(none.changed, false, "nothing found clears nothing");
+  const blank = fillParticulars([{ id: "p1", msic: "MSIC 0001" }], { p1: { msic: null, dob: null } }, { p1: { msic: "MSIC 0001" } });
+  assert.deepEqual([blank.changed, blank.people[0].msic], [false, "MSIC 0001"], "nor does a man the certificates now say nothing about");
+});
+
+test("particulars: a tab's save over the round's keeps the round's fill where the tab did not touch the box", () => {
+  const base = [{ id: "p1", name: "EVANS, Brenton", msic: "", rank: "Mate" }, { id: "p2", name: "SITTIYOS, Kachin", dob: "" }];
+  const theirs = [{ id: "p1", name: "EVANS, Brenton", msic: "MSIC 0002", rank: "Mate" }, { id: "p2", name: "SITTIYOS, Kachin", dob: "1975-05-05" }];
+  const mine = [{ id: "p1", name: "EVANS, Brenton", msic: "", rank: "Master" }, { id: "p2", name: "SITTIYOS, Kachin", dob: "1975-05-06" }];
+  assert.deepEqual(mergeParticulars(base, mine, theirs), [
+    { id: "p1", name: "EVANS, Brenton", msic: "MSIC 0002", rank: "Master" },
+    { id: "p2", name: "SITTIYOS, Kachin", dob: "1975-05-06" },
+  ], "Evans's rank is the tab's and his number the round's; the date the tab typed for Kachin is the tab's");
 });
