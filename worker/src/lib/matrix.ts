@@ -340,6 +340,14 @@ not lapsing, say so with neverExpires rather than inventing a period for it.`;
   return { ...held, which, cached: false };
 }
 
+/** What the checker is told "due" means: the window the documents give, or
+ *  the red band's days where they give none - read from bands.js, so the
+ *  checker's "due" is the same number of days as the matrix's red. */
+export const dueMeans = (withValidity: boolean) =>
+  withValidity
+    ? `the validity periods matrix or the skills matrix gives — the periods matrix first where the two differ — or expiring within ${RED_DAYS} days if neither gives one`
+    : `the skills matrix gives, or expiring within ${RED_DAYS} days if it gives none`;
+
 /**
  * Hold the training status against the skills requirements, and against the
  * validity periods where one has been filed.
@@ -351,14 +359,6 @@ not lapsing, say so with neverExpires rather than inventing a period for it.`;
  * documents it was made from, so it survives a refresh, reads the same for
  * everyone, and is asked again when any of them is replaced.
  */
-/** What the checker is told "due" means: the window the documents give, or
- *  the red band's days where they give none - read from bands.js, so the
- *  checker's "due" is the same number of days as the matrix's red. */
-export const dueMeans = (withValidity: boolean) =>
-  withValidity
-    ? `the validity periods matrix or the skills matrix gives — the periods matrix first where the two differ — or expiring within ${RED_DAYS} days if neither gives one`
-    : `the skills matrix gives, or expiring within ${RED_DAYS} days if it gives none`;
-
 export async function checkMatricesOnce(force: boolean) {
   const { training, skills, validity, missing } = await matrixDocuments();
   if (missing.length) throw new MatrixMissing(bothRequiredMessage(missing), missing);

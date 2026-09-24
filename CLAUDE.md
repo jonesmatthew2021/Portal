@@ -110,10 +110,15 @@ folder is Matthew's to make — the portal makes the files, never the folder.
 
 `source/shared/` holds the code the page and the worker both run: the workbook
 writer (`workbook.js`), the matrix rules (`matrix-rules.js`), the names
-register (`names.js`) and the offline rules (`offline-rules.js`). The build
-splices them into the page at `/* @shared */` with the `export` taken off
-each declaration, and the worker imports them as modules. Edit that code
-there and only there.
+register (`names.js`), the offline rules (`offline-rules.js`), the three
+sentences said when the model's account stops a reading
+(`reading-lines.js`), the red and amber bands' day counts (`bands.js`), the
+weekly expiry reminders' rules (`reminders.js`) and a man's MSIC number and
+date of birth off his certificates (`particulars.js`). The build splices
+them into the page at `/* @shared */` with the `export` taken off each
+declaration, and the worker imports them as modules. A shared file cannot
+import another: what one leans on from another is handed in by the caller.
+Edit that code there and only there.
 
 `source/app/sw.js` is the service worker that keeps the last-loaded portal
 readable offline, built to `/sw.js` with the build's stamp written in as its
