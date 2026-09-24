@@ -25,9 +25,12 @@ import sync, { runSync } from "../src/routes/sync.js";
 import { graphWaits, graphBudget } from "../src/files/store.js";
 import { fakeBucket, portalDb, graphLibrary, sharepointEnv, wranglerVars, keptRow, type FakeFile } from "./helpers.js";
 
-/* The library's real folders (wrangler.toml): "opms/" is OPMS Documents,
-   and a man's certificates sit in a folder of his own inside it. */
-const OPMS = "United Operations Team/OPMS Documents";
+/* The library's real folders, read off wrangler.toml so a map that moves
+   moves these with it: "opms/" is OPMS Documents, and a man's certificates
+   sit in a folder of his own inside it. */
+const MAP = JSON.parse(wranglerVars().SHAREPOINT_MAP) as Record<string, string>;
+if (!MAP["opms/"]) throw new Error("wrangler.toml's SHAREPOINT_MAP no longer says where opms/ is");
+const OPMS = MAP["opms/"].replace(/\/+$/, "");
 const BRENTON = `${OPMS}/Brenton - OPMS`;
 
 /** A certificate row on the books, as the sync reads them: Brenton's, by
@@ -67,6 +70,15 @@ const post = (by = "Import new files") => sync(new Request("http://portal/api/sy
 }));
 const lastRun = (portal: ReturnType<typeof portalDb>) => JSON.parse(portal.blobs.get("sync|last-run") || "null");
 
+/** The survey reads; it never writes to the library. Every Graph test ends
+ *  on this, so a change that wrote during a failed or held survey - the
+ *  case where it would matter most - fails here. */
+const nothingWritten = (graph: ReturnType<typeof graphLibrary>) => {
+  assert.deepEqual(graph.made, [], "no folder was made");
+  assert.deepEqual([...graph.posts(), ...graph.puts()], [], "nothing was written to the library");
+  assert.deepEqual(graph.calls.filter((c) => c.method === "DELETE"), [], "nothing was deleted from the library");
+};
+
 /* ------------------------------------------------------------------------ *
  * The driver: a call Graph turns away is made again, and one it keeps
  * turning away fails the survey out loud.
@@ -92,6 +104,7 @@ test("Graph: a 429 on page two of a crew folder is asked again after the wait Gr
     );
     assert.deepEqual(waits.sleeps, [3000], "one wait, the three seconds Graph named");
     assert.equal(lastRun(portal).error, null);
+    nothingWritten(graph);
   } finally {
     waits.restore();
     graph.restore();
@@ -117,6 +130,7 @@ test("Graph: four 503s in a row fail the survey - 502, the error on last-run wit
     );
     assert.equal(portal.rows[0].removedAt, null, "the row is still live");
     assert.equal(portal.rows.length, 1, "and nothing was registered");
+    nothingWritten(graph);
   } finally {
     waits.restore();
     graph.restore();
@@ -139,8 +153,7 @@ test("Graph, under the hour's budget: a wait that would run past it is not waite
     assert.deepEqual(graph.listings, [{ folder: OPMS, skip: 0 }], "asked once, never again");
     assert.equal(lastRun(portal).error, said.error, "the same sentence on the record");
     assert.equal(portal.rows[0].removedAt, null, "the row is still live");
-    assert.deepEqual(graph.made, [], "no folder was made");
-    assert.deepEqual([...graph.posts(), ...graph.puts()], [], "nothing was written to the library");
+    nothingWritten(graph);
   } finally {
     graphBudget.until = 0;
     waits.restore();
@@ -167,6 +180,7 @@ test("Graph: with time in hand the minute Graph names is waited in full under a 
     await runSync("Import new files");
     assert.deepEqual(waits.sleeps, [60000], "a minute, not the ninety");
     assert.equal(lastRun(portal).error, null);
+    nothingWritten(graph);
   } finally {
     graphBudget.until = 0;
     waits.restore();
@@ -197,6 +211,7 @@ test("Graph: the certificate home renamed in the library fails the survey by nam
     assert.deepEqual(graph.listings, [], "the walk never began");
     assert.equal(portal.rows[0].removedAt, null, "the row is still live");
     assert.ok(portal.blobs.has("certificate-readings|r1/sum-c1.json"), "and its reading is still there");
+    nothingWritten(graph);
   } finally {
     graph.restore();
   }
@@ -226,8 +241,7 @@ test("Graph: a man's folder outside the home, with his certificates on the books
     assert.equal(portal.rows.find((r) => r.id === "k1")!.removedAt, null, "Kyle's row is still live");
     assert.ok(portal.blobs.has("certificate-readings|r1/sum-k1.json"), "and its reading is still there");
     assert.equal(portal.rows.length, 2, "nothing registered");
-    assert.deepEqual(graph.made, [], "no folder was made");
-    assert.deepEqual([...graph.posts(), ...graph.puts()], [], "nothing was written to the library");
+    nothingWritten(graph);
   } finally {
     graph.restore();
   }
@@ -242,7 +256,7 @@ test("Graph: the same folder with nothing on the books under it is allowed not t
     assert.deepEqual(out.missing, []);
     assert.equal(out.mirrored, 0);
     assert.equal(lastRun(portal).error, null);
-    assert.deepEqual(graph.made, [], "no folder was made");
+    nothingWritten(graph);
   } finally {
     graph.restore();
   }
@@ -257,8 +271,7 @@ test("Graph: a file in the OPMS sheet's own folder under the home is the single 
     assert.deepEqual(out.adopted, [{ category: "opms-sheet", key: "opms/spreadsheet/OPMS.xlsx" }]);
     assert.deepEqual(out.people, [], "and no such person");
     assert.deepEqual(portal.rows.map((r) => [r.category, r.blobKey, r.adoptedFromFolder]), [["opms-sheet", "opms/spreadsheet/OPMS.xlsx", 1]]);
-    assert.deepEqual(graph.made, [], "no folder was made");
-    assert.deepEqual([...graph.posts(), ...graph.puts()], [], "nothing was written to the library");
+    nothingWritten(graph);
   } finally {
     graph.restore();
   }
@@ -293,6 +306,7 @@ test("Graph, listing cut short: 25 missing of 100 live are mirrored off (25 is n
     assert.equal(lastRun(portal).error, null, "nothing to say on the record");
     assert.equal(lastRun(portal).heldBack, 0);
     assert.equal(lastRun(portal).missing, 25);
+    nothingWritten(graph);
   } finally {
     graph.restore();
   }
@@ -312,6 +326,7 @@ test("Graph, listing cut short: 26 missing of 100 live are held, and the record 
     assert.equal(lastRun(portal).error, null, "not a failure");
     assert.equal(lastRun(portal).heldBack, 26, "the count the SharePoint page's line shows");
     assert.equal(lastRun(portal).missing, 26);
+    nothingWritten(graph);
   } finally {
     graph.restore();
   }
@@ -326,6 +341,7 @@ test("Graph, listing cut short: with 400 live the line is 10% - 40 missing mirro
     assert.equal(forty.portal.rows.filter((r) => r.removedAt).length, 40);
     assert.equal(lastRun(forty.portal).error, null);
     assert.equal(lastRun(forty.portal).heldBack, 0);
+    nothingWritten(forty.graph);
   } finally {
     forty.graph.restore();
   }
@@ -338,6 +354,7 @@ test("Graph, listing cut short: with 400 live the line is 10% - 40 missing mirro
     assert.equal(fortyOne.portal.rows.filter((r) => r.removedAt).length, 0);
     assert.equal(lastRun(fortyOne.portal).error, null);
     assert.equal(lastRun(fortyOne.portal).heldBack, 41);
+    nothingWritten(fortyOne.graph);
   } finally {
     fortyOne.graph.restore();
   }
@@ -398,6 +415,7 @@ test("Graph: a row with no size on record and a listing that names none never ma
     assert.equal(out.mirrored, 1);
     assert.ok(row(portal, "c1").removedAt, "the old row is off the books");
     assert.equal(portal.rows.find((r) => r.blobKey === "opms/EVANS, Brenton/master.pdf")!.sizeBytes, 0, "the new row records no size as 0");
+    nothingWritten(graph);
   } finally {
     graph.restore();
   }
@@ -533,7 +551,8 @@ test("R2: a candidate beside a live single document is left alone, and the why s
  * The route itself.
  * ------------------------------------------------------------------------ */
 test("R2, the route: GET is the survey only - it writes nothing, takes no lease and leaves no record", async () => {
-  const portal = booksOf([certRow("c1", "opms/Brenton - OPMS/gone.pdf")]);
+  // A reading on the gone file too: a survey that applied would delete it.
+  const portal = booksOf([certRow("c1", "opms/Brenton - OPMS/gone.pdf")], { "r1/sum-c1.json": { version: "r1", readable: true } });
   bucketOf(portal, { "opms/Brenton - OPMS/new.pdf": "scan!!" });
   const res = await sync(new Request("http://portal/api/sync"));
   assert.equal(res.status, 200);
@@ -542,8 +561,10 @@ test("R2, the route: GET is the survey only - it writes nothing, takes no lease 
   assert.deepEqual(out.missing.map((m) => m.id), ["c1"], "and what is gone");
   assert.equal(out.note, "Survey only — POST /api/sync to take these onto the portal's books.");
   assert.deepEqual(bookWrites(portal), [], "nothing written on the books");
+  assert.deepEqual(portal.db.asked.filter((a) => /^(INSERT|UPDATE|DELETE)/i.test(a.sql)), [], "no write of any kind, on any table");
   assert.equal(row(portal, "c1").removedAt, null);
   assert.equal(portal.rows.length, 1);
+  assert.ok(portal.blobs.has("certificate-readings|r1/sum-c1.json"), "the reading of the gone file is still there");
   assert.equal(portal.blobs.get("sync|last-run"), undefined, "no record: nothing was applied");
   assert.equal(portal.blobs.get("sync|round-lease"), undefined, "no lease: nothing was written");
 });
