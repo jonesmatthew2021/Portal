@@ -111,6 +111,16 @@ modules. Edit that code there and only there.
   `opmsCertPrefix(token)`, which works a name out and so makes new folders.
 - **No explainer text.** The UI carries what Matthew asked for and nothing else.
   Don't add helpful notes to the screen.
+- **The nightly backup goes into a folder Matthew made.** `worker/src/lib/backup.ts`:
+  the first hour after `BACKUP_HOUR` (Perth) writes one JSON file — the shared
+  document byte for byte, the file index, the users, the readings, the fauna
+  log; never sessions, sign-in codes or history — into `BACKUP_FOLDER`
+  (wrangler.toml; empty means off and nothing shown), never making the folder
+  (`set(..., { intoExistingFolder: true })`) and refusing one the portal files
+  into (`folderAllowed`). A month of dailies and a year of monthlies are kept by
+  name, never by listing. `POST /api/state/restore-file` puts one back
+  (`routes/restore-file.ts`, from a terminal: the document as a save under a
+  name of its own; the file index, users, readings and fauna only when named).
 - **One round.** Every Update matrix button starts the server's round
   (`POST /api/round`, `runMatrixRound` in `source/index.html`); the page
   reads new certificates and refiles first, and never applies dates itself
@@ -163,7 +173,17 @@ modules. Edit that code there and only there.
   `GET /api/sync/last` names the holder too, so a page waiting on the
   lease holds its buttons down under whoever has it at each look.
   The hour's own work stops starting things nine minutes after its lease
-  or twelve after the tick, whichever is first (`hourDeadline`). The
+  or twelve after the tick, whichever is first (`hourDeadline`). Before it
+  takes the lease it writes the nightly backup (`nightlyBackup`), which
+  takes none and can stop nothing. Its reading stops on the first answer
+  about the model's account: no credit or a refused key goes on the record
+  in red (`readError`), a busy model or the rate as an aside
+  (`readStopped`), and the refile and the round still run. A refusal from
+  the model is sorted once (`ModelRefusal.kind` in `lib/analysis.ts`,
+  message before status) and said in one of the three sentences in
+  `source/shared/reading-lines.js`; only a document the model turned away
+  is ever stored as unreadable — nothing about the account is a fact
+  about a scan. The
   Equivalence sheet is never kept as an empty table, and is read again
   when the skills matrix or the crew matrix's columns change.
   An open admin tab runs the round only when the server has not

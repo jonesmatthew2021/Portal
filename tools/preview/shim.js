@@ -70,6 +70,16 @@
      runs outside the page's own script; a check holds the two the same. */
   const flag = (name) => { try { return new URLSearchParams(location.search).get(name); } catch (e) { return null; } };
   const OUT_OF_CREDIT = "Out of credit — top it up at console.anthropic.com";
+  // The nightly backup's record: landed this morning, or, under
+  // ?backup=missing, refused because the folder is not in the library.
+  const fakeBackup = () => {
+    const at = new Date(); at.setHours(2, 10, 0, 0);
+    return flag("backup") === "missing"
+      ? { day: null, at: at.getTime(), name: null, bytes: 0, rev: null, counts: {},
+        error: "the folder United Operations Team/Backups is not in the library; make it in Teams" }
+      : { day: todayISO(), at: at.getTime(), name: "Crew Portal backup " + todayISO() + ".json", bytes: 3251200,
+        rev: mem.rev, counts: { documents: mem.rows.length, users: 12, readings: 900, fauna: 3 }, error: null };
+  };
   const fakeHourly = () => ({
     at: Date.now() - 20 * 60000, durationMs: 41000, read: 0, refiled: 0, syncError: null,
     readError: flag("hourly") === "credit" ? OUT_OF_CREDIT : null, readStopped: null,
@@ -266,7 +276,8 @@
       /* The SharePoint page's listing: no library behind the preview, so
          an empty folder, and the hour's line only under its flag. */
       if (p === "/api/sharepoint")
-        return json({ path: url.searchParams.get("path") || "", entries: [], lastSync: null, lastHourly: flag("hourly") ? fakeHourly() : null });
+        return json({ path: url.searchParams.get("path") || "", entries: [], lastSync: null,
+          lastHourly: flag("hourly") ? fakeHourly() : null, lastBackup: fakeBackup() });
       /* The round from the page: nothing has run, there are no rules to
          keep, and the round itself writes the office's workbook, which is
          a live-portal job. */
