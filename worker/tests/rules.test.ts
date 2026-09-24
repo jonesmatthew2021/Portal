@@ -932,6 +932,30 @@ test("the vessel file's covers table is checked: a pattern that will not compile
   for (const rule of vessel.covers) assert.ok(rule.why && /MO\d\d/.test(rule.why), rule.code + " carries the clause it comes from");
 });
 
+test("the figures the orders turn on are in the vessel file, and checked", () => {
+  /* Length, gross tonnage and propulsion power decide things in MO504, MO71
+     and MO505, and a table in the vessel file cites them - the temporary
+     crewing permit leaves the master's column out because the vessel is 24 m
+     or more (MO504 s 16(3)). They were prose in one "why" and recorded
+     nowhere, so nothing could be checked against the order. Nothing on the
+     portal works a crewing number out from them. */
+  const facts = vessel.vesselFacts;
+  for (const f of ["lengthMetres", "grossTonnage", "propulsionKW"] as const) {
+    assert.equal(typeof facts[f], "number", f + " is a figure, not words");
+    assert.ok(facts[f] > 0);
+  }
+  assert.match(facts.why, /MO504/, "with the clauses that read them");
+  assert.match(vessel.evidenceKinds["crewing-permit"].why, /vesselFacts\.lengthMetres/,
+    "and the table that turns on the length says where the length is written down");
+  const bad = (vesselFacts: unknown) => () => checkVessel({ ...vessel, vesselFacts }, "a vessel file");
+  assert.throws(bad({ ...facts, lengthMetres: "160 m" }), /"vesselFacts.lengthMetres" - it must be a number/);
+  assert.throws(bad({ ...facts, grossTonnage: 0 }), /"vesselFacts.grossTonnage"/);
+  assert.throws(bad({ ...facts, propulsionKW: undefined }), /"vesselFacts.propulsionKW"/);
+  assert.throws(bad({ ...facts, why: "" }), /"vesselFacts.why"/);
+  const { vesselFacts: _gone, ...without } = vessel;
+  assert.throws(() => checkVessel(without, "a vessel file"), /a vessel file has no usable "vesselFacts"/);
+});
+
 test("checkVessel asks the renewal, evidence and recognition tables the same questions the rules do", () => {
   /* The two rules that hold a table (renewalNeedsProblem, evidenceKindsProblem)
      are pure and tested on their own; this is the wiring - the worker and the

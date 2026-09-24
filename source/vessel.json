@@ -174,6 +174,12 @@
   "elearningCodes": ["VS-04"],
   "noExpiryCodes": ["VS-04"],
   "elearningGroups": ["Project Induction", "Vessel Induction", "Project Specific"],
+  "vesselFacts": {
+    "lengthMetres": 160,
+    "grossTonnage": 10000,
+    "propulsionKW": 3730,
+    "why": "The Master's own figures, 25 Sep 2026. The orders turn on them - MO504 Sch 1 cl 8(2) counts the minimum crew by length, MO504 Sch 1 cl 8(2) note * makes the master and the engineer two people at 750 kW or more, MO504 s 16(3) holds the master's role at 24 m or more, MO71 Sch 1 reads a master's ticket against gross tonnage, and MO505 s 5 and Sch 1 read an engineer's against propulsion power - so they are written down here as data anybody can check rather than left in prose beside one rule. Nothing on the portal works a crewing number out from them: MO504's table stops at 80 m and MO505 Sch 1 at 100 m and 3000 GT, and which hull these figures describe is the Master's to say. They are here to be cited"
+  },
   "certStated": { "QL-17": "1 or 2 years — as printed on the certificate" },
   "covers": [
     {
@@ -237,7 +243,7 @@
       "days": 92,
       "from": "issued",
       "covers": ["QL-02", "QL-03", "QL-04", "QL-05", "QL-06", "QL-07", "QL-08", "QL-09", "QL-10", "QL-11"],
-      "why": "MO504 s 16(2) and MO505 s 7(4) - AMSA may permit a vessel to go below its crewing for up to three months (92 days at their longest). QL-01 is left out because this vessel is 160 m: on a vessel of 24 m or more the master's role cannot be permitted away except in force majeure (MO504 s 16(3))"
+      "why": "MO504 s 16(2) and MO505 s 7(4) - AMSA may permit a vessel to go below its crewing for up to three months (92 days at their longest). QL-01 is left out because this vessel is 24 m or more (vesselFacts.lengthMetres): the master's role cannot be permitted away except in force majeure (MO504 s 16(3))"
     },
     "assessor-declaration": {
       "days": 60,

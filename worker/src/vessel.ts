@@ -74,6 +74,12 @@ export type Vessel = {
   noExpiryCodes: string[];
   elearningGroups: string[];
   certStated: Record<string, string>;
+  /** The figures the Marine Orders turn on, with whose they are and which
+   *  clauses read them: length (MO504 Sch 1 cl 8(2), s 16(3)), gross tonnage
+   *  (MO71 Sch 1) and propulsion power (MO505 s 5, Sch 1). Data, so a table
+   *  in this file can cite a figure anybody can check; nothing on the portal
+   *  is worked out from them. */
+  vesselFacts: { lengthMetres: number; grossTonnage: number; propulsionKW: number; why: string };
   /** Which column a printed endorsement fills, and the clause it comes from
    *  (source/shared/covers.js reads this table; the model only lists what
    *  the certificate prints). `perpetual` is an endorsement that never
@@ -127,7 +133,7 @@ const SHAPE: [string, Kind][] = [
   ["customerMarks.elearning", "string"], ["customerMarks.auIssuers", "string[]"],
   ["customerMarks.nameStopWords", "string[]"],
   ["elearningCodes", "string[]"], ["noExpiryCodes", "string[]"], ["elearningGroups", "string[]"],
-  ["certStated", "object"], ["covers", "array"],
+  ["certStated", "object"], ["vesselFacts", "object"], ["covers", "array"],
   ["renewalNeeds", "object"], ["evidenceKinds", "object"], ["neverRecognised.codes", "string[]"],
   ["neverRecognised.why", "string"],
   ["certPageNotes", "string[]"], ["tickets", "object"],
@@ -208,6 +214,17 @@ export function checkVessel(value: unknown, from = "source/vessel.json"): Vessel
   v.qualColumns.forEach((c, i) => {
     if (!Array.isArray(c) || c.length !== 3 || !word(c[0]) || !word(c[1]) || typeof c[2] !== "string") throw wrong(`qualColumns[${i}]`, "a code, a title and a group, all strings");
   });
+  /* The figures the Marine Orders turn on - the same check as
+   * tools/source.mjs. The minimum crew by length (MO504 Sch 1 cl 8(2)), two
+   * people at 750 kW (note *), the master's role at 24 m (MO504 s 16(3)),
+   * gross tonnage against a master's ticket (MO71 Sch 1) and propulsion
+   * power against an engineer's (MO505 s 5). A figure missing or typed as
+   * words would be a clause in this file citing nothing. */
+  for (const f of ["lengthMetres", "grossTonnage", "propulsionKW"] as const) {
+    const said = v.vesselFacts[f];
+    if (typeof said !== "number" || !Number.isFinite(said) || said <= 0) throw wrong("vesselFacts." + f, "a number of the vessel's own, greater than nothing");
+  }
+  if (!word(v.vesselFacts.why)) throw wrong("vesselFacts.why", "whose figures they are and which clauses turn on them, as a string");
   /* The covers table - the same check as tools/source.mjs. A pattern that
    * does not compile would cover nothing and say nothing about it, and a
    * code that is not a column would fill a cell the matrix has not got. */

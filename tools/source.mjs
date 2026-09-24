@@ -77,7 +77,7 @@ const VESSEL_SHAPE = [
   ["customerMarks.elearning", "string"], ["customerMarks.auIssuers", "string[]"],
   ["customerMarks.nameStopWords", "string[]"],
   ["elearningCodes", "string[]"], ["noExpiryCodes", "string[]"], ["elearningGroups", "string[]"],
-  ["certStated", "object"], ["covers", "array"],
+  ["certStated", "object"], ["vesselFacts", "object"], ["covers", "array"],
   ["renewalNeeds", "object"], ["evidenceKinds", "object"], ["neverRecognised.codes", "string[]"],
   ["neverRecognised.why", "string"],
   ["certPageNotes", "string[]"], ["tickets", "object"],
@@ -158,6 +158,18 @@ export function checkVessel(vessel, from = "source/vessel.json") {
   vessel.qualColumns.forEach((c, i) => {
     if (!Array.isArray(c) || c.length !== 3 || !word(c[0]) || !word(c[1]) || typeof c[2] !== "string") throw wrong("qualColumns[" + i + "]", "a code, a title and a group, all strings");
   });
+  /* The figures the Marine Orders turn on: the minimum crew by length
+   * (MO504 Sch 1 cl 8(2)), the master and the engineer as two people at
+   * 750 kW (note *), the master's role at 24 m (MO504 s 16(3)), a master's
+   * ticket against gross tonnage (MO71 Sch 1) and an engineer's against
+   * propulsion power (MO505 s 5, Sch 1). Written down as data so the tables
+   * that cite them can be checked against the order; a figure missing or
+   * typed as words would be a clause citing nothing. */
+  for (const f of ["lengthMetres", "grossTonnage", "propulsionKW"]) {
+    const said = vessel.vesselFacts[f];
+    if (typeof said !== "number" || !Number.isFinite(said) || said <= 0) throw wrong("vesselFacts." + f, "a number of the vessel's own, greater than nothing");
+  }
+  if (!word(vessel.vesselFacts.why)) throw wrong("vesselFacts.why", "whose figures they are and which clauses turn on them, as a string");
   /* The covers table: which column a printed endorsement fills (read by
    * source/shared/covers.js). A pattern that does not compile would cover
    * nothing and say nothing about it, and a code that is not a column would

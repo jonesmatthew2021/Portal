@@ -160,6 +160,12 @@
   "elearningCodes": ["VS-04"],
   "noExpiryCodes": ["VS-04"],
   "elearningGroups": ["Project Induction", "Vessel Induction", "Project Specific"],
+  "vesselFacts": {
+    "lengthMetres": 35,
+    "grossTonnage": 400,
+    "propulsionKW": 900,
+    "why": "The figures the orders turn on: MO504 Sch 1 cl 8(2) counts the minimum crew by length, its note * makes the master and the engineer two people at 750 kW or more, MO504 s 16(3) holds the master's role at 24 m or more, MO71 Sch 1 reads a master's ticket against gross tonnage and MO505 s 5 against propulsion power. Recorded as data so the law's mapping can be checked; nothing is computed from them"
+  },
   "certStated": { "QL-17": "1 or 2 years — as printed on the certificate" },
   "covers": [
     {
