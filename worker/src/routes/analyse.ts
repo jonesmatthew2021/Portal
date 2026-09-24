@@ -11,6 +11,7 @@ import { readDocument } from "../lib/shared-state.js";
 import { asKnownPerson, crewRegister } from "../../../source/shared/names.js";
 import { isMsicCard, msicAsWritten, msicCodeIn, newestCard, openToCertificates, particularsFor, particularsKeyOf, ticketCodesIn } from "../../../source/shared/particulars.js";
 import { coveredCells, unitColumnsIn } from "../../../source/shared/covers.js";
+import { isRecognitionReading, recognisedUntil, recognitionFills } from "../../../source/shared/recognition.js";
 import { vessel } from "../vessel.js";
 import { getEnv } from "../env.js";
 import {
@@ -879,6 +880,11 @@ export async function compareMatrix(
      column its printed endorsements and unit codes cover as well as its own
      (source/shared/covers.js, the table in the vessel file). */
   const standing: { row: Row; reading: Reading; person: string; code: string }[] = [];
+  /* The expiry of the foreign certificate itself, where one is on the portal
+     for the same column: a recognition can never run longer than the
+     certificate it recognises (MO70 s 33(2), s 36(3), s 37(4)). The latest of
+     them, because two on file are a renewal beside the one it renewed. */
+  const foreignAt = new Map<string, string>();
 
   for (const { row, reading } of readings) {
     const link = { id: row.id, filename: row.filename, url: `/api/files/${row.id}` };
@@ -949,9 +955,28 @@ export async function compareMatrix(
       }
     }
 
+    /* Two columns AMSA may not recognise into at all: MO70 s 7(2)(b) allows
+       recognition of the competency, rating, cook-adjacent and GMDSS classes
+       only, and neither the certificate of safety training nor the marine
+       cook certificate is among them. A recognition claiming either proves
+       nothing about that column and fills nothing. */
+    if (isRecognitionReading(reading) && !recognitionFills(code, vessel.neverRecognised.codes)) {
+      notes.push({
+        kind: "no-code",
+        person: row.person,
+        detail: `Read as a certificate of recognition for ${code}, which is not a class AMSA recognises, so it fills nothing.`,
+        certificate: link,
+      });
+      continue;
+    }
+
     standing.push({ row, reading, person, code: code.trim().toUpperCase() });
 
     const key = `${person.trim().toUpperCase()}::${code.trim().toUpperCase()}`;
+    if (!isRecognitionReading(reading)) {
+      const own = (isDate(row.expiresOn) ? normDate(row.expiresOn!) : null) || reading.expiresOn || "";
+      if (own && own > (foreignAt.get(key) || "")) foreignAt.set(key, own);
+    }
     const sitting = claim.get(key);
     if (sitting) {
       // The one that runs the longer is the certificate in force; the other is
@@ -963,14 +988,23 @@ export async function compareMatrix(
         const typed = isDate(r.expiresOn) ? normDate(r.expiresOn!) : null;
         return neverLapses(code) ? null : typed || rd.expiresOn || null;
       };
-      const inForce =
-        (expiryOf(row, reading) || "") > (expiryOf(sitting.row, sitting.reading) || "") ? { row, reading } : sitting;
+      /* A certificate of recognition beats the foreign certificate it
+         recognises whichever runs the longer: the recognition is the document
+         that counts on this vessel (MO505 s 4, s 7(2)), and the cell must
+         open it. Its date is cut back to the foreign certificate's below. */
+      const mineIsRec = isRecognitionReading(reading);
+      const sittingIsRec = isRecognitionReading(sitting.reading);
+      const inForce = mineIsRec !== sittingIsRec
+        ? (mineIsRec ? { row, reading } : sitting)
+        : (expiryOf(row, reading) || "") > (expiryOf(sitting.row, sitting.reading) || "") ? { row, reading } : sitting;
       const replaced = inForce === sitting ? { row, reading } : sitting;
       claim.set(key, inForce);
       notes.push({
         kind: "superseded",
         person: replaced.row.person,
-        detail: `Two certificates on file for ${code}. ${inForce.row.filename} runs the longer, so ${replaced.row.filename} is treated as the one it replaced.`,
+        detail: mineIsRec !== sittingIsRec
+          ? `Two certificates on file for ${code}. ${inForce.row.filename} is AMSA's certificate of recognition, which is the document that counts here, so ${replaced.row.filename} is the foreign certificate behind it.`
+          : `Two certificates on file for ${code}. ${inForce.row.filename} runs the longer, so ${replaced.row.filename} is treated as the one it replaced.`,
         certificate: { id: replaced.row.id, filename: replaced.row.filename, url: `/api/files/${replaced.row.id}` },
       });
       continue;
@@ -994,6 +1028,8 @@ export async function compareMatrix(
       if (!cell.until) continue;
       const at = cell.code.trim().toUpperCase();
       if (!colAt.has(at)) continue;
+      // A recognition reaches no further than it may reach itself.
+      if (isRecognitionReading(reading) && !recognitionFills(at, vessel.neverRecognised.codes)) continue;
       const key = `${person.trim().toUpperCase()}::${at}`;
       const sitting = claim.get(key);
       if (sitting) {
@@ -1052,7 +1088,17 @@ export async function compareMatrix(
        endorsement's own printed end where AMSA printed one, otherwise the
        certificate's. The date typed against the certificate on the portal is
        the person's answer about its OWN column, so it says nothing here. */
-    const expiry = coveredUntil || typed || reading.expiresOn || null;
+    const own = coveredUntil || typed || reading.expiresOn || null;
+    /* A certificate of recognition can never outlive the certificate it
+       recognises - it is revalidated only after that one is (MO70 s 33(2)),
+       endorsed only after it is (s 36(3)), and its endorsement runs for the
+       remainder of that one's (s 37(4)). So the cell takes the earlier of
+       the two: the date printed on the recognition itself, and the foreign
+       certificate's, whether printed on the recognition or read off the
+       certificate where it too is on the portal. */
+    const expiry = isRecognitionReading(reading)
+      ? recognisedUntil(reading, own, foreignAt.get(key)).until
+      : own;
 
     const link = {
       id: row.id,

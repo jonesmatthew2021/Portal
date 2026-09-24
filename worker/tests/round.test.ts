@@ -4443,3 +4443,80 @@ test("covers: the page's own dates carry the covered column, linked to the certi
   assert.equal(by["QL-13"].fileId, "coc", "Open on the ECDIS cell opens the ticket that covers it");
   assert.equal(by["QL-13"].issued, "2026-05-26", "with the covering certificate's own issue date");
 });
+
+/* ------------------------------------------------------------------------ *
+ * The certificate of recognition in a cell. A foreign ticket counts on this
+ * vessel only through AMSA's recognition of it (MO505 s 4, s 7(2)), and the
+ * recognition can never outlive the certificate behind it.
+ * ------------------------------------------------------------------------ */
+const recognitionOf = (over: Record<string, unknown> = {}) => ({
+  ...evansCoC, certificateTitle: "Certificate of Recognition - Master",
+  expiresOn: "2030-06-30", endorsements: [], units: [],
+  isRecognition: true,
+  recognises: { authority: "MCA", country: "United Kingdom", number: "UK-9921", expiresOn: "2029-03-01" },
+  ...over,
+});
+
+test("recognition: the cell takes the earlier of the recognition and the certificate it recognises", async () => {
+  setEnv({ DB: coversDb([{ row: { id: "rec", qualCode: "QL-01" }, reading: recognitionOf() }]), FILE_STORE: "r2" } as never);
+  const out = await compareMatrix(coversMatrix, null, evansOnly);
+  assert.deepEqual(out.settled, [{ person: "EVANS, Brenton", code: "QL-01", value: "2029-03-01" }],
+    "the foreign certificate runs out first, so that is the day the cell stops counting");
+  assert.equal(out.items.find((i) => i.code === "QL-01")!.certificate!.id, "rec",
+    "and the cell opens the recognition, which is the document that counts here");
+});
+
+test("recognition: the foreign certificate on file beats what the recognition printed, and the cell still opens the recognition", async () => {
+  const foreign = {
+    ...evansCoC, certificateTitle: "Master (MCA)", issuer: "MCA",
+    expiresOn: "2027-05-05", endorsements: [], units: [], isRecognition: false,
+  };
+  setEnv({ DB: coversDb([
+    { row: { id: "foreign", qualCode: "QL-01" }, reading: foreign },
+    { row: { id: "rec", qualCode: "QL-01" }, reading: recognitionOf() },
+  ]), FILE_STORE: "r2" } as never);
+  const out = await compareMatrix(coversMatrix, null, evansOnly);
+  assert.deepEqual(out.settled, [{ person: "EVANS, Brenton", code: "QL-01", value: "2027-05-05" }],
+    "the certificate in hand runs shorter than what the recognition printed, so it governs");
+  assert.equal(out.items.find((i) => i.code === "QL-01")!.certificate!.id, "rec",
+    "the recognition is the document that counts, whichever of the two runs the longer");
+});
+
+test("recognition: nothing is ever recognised into the safety training or the cook column", async () => {
+  setEnv({ DB: coversDb([
+    { row: { id: "rec", qualCode: "QL-12" }, reading: recognitionOf({ certificateTitle: "Certificate of Recognition - Basic Safety Training" }) },
+  ]), FILE_STORE: "r2" } as never);
+  const out = await compareMatrix(coversMatrix, null, evansOnly);
+  assert.deepEqual(out.settled, [], "MO70 s 7(2)(b) does not let AMSA recognise a foreign basic safety certificate");
+  assert.deepEqual(out.claimed, [], "and nothing claims the cell, so nothing of the office's is written over");
+});
+
+test("recognition: an endorsement on a recognition runs no longer than the foreign endorsement", async () => {
+  /* MO70 s 37(4): the endorsement on a recognition runs for the remainder of
+     the foreign certificate's. So the covered column takes the earlier-of
+     rule the recognition's own column takes. */
+  setEnv({ DB: coversDb([
+    { row: { id: "rec", qualCode: "QL-01" }, reading: recognitionOf({ endorsements: [{ text: "II/2 (incl. generic ECDIS)", until: null }] }) },
+  ]), FILE_STORE: "r2" } as never);
+  const out = await compareMatrix(coversMatrix, null, evansOnly);
+  assert.deepEqual(out.settled.map((s) => [s.code, s.value]).sort(),
+    [["QL-01", "2029-03-01"], ["QL-13", "2029-03-01"]],
+    "both the recognition's own column and the one it covers stop when the foreign certificate does");
+});
+
+test("recognition: where nothing is known about the certificate behind it, the cell says so", async () => {
+  setEnv({ DB: coversDb([
+    { row: { id: "rec", qualCode: "QL-01" }, reading: recognitionOf({ recognises: null }) },
+  ]), FILE_STORE: "r2" } as never);
+  const out = await certificateStanding();
+  const one = out.dates.find((d) => d.code === "QL-01")!;
+  assert.equal(one.expires, "2030-06-30", "the recognition's own date is all there is, so the cell takes it");
+  assert.equal(one.recognition, true);
+  assert.equal(one.foreignUnknown, true, "and the office is told the certificate behind it is not on the portal");
+
+  setEnv({ DB: coversDb([{ row: { id: "rec", qualCode: "QL-01" }, reading: recognitionOf() }]), FILE_STORE: "r2" } as never);
+  const told = await certificateStanding();
+  const two = told.dates.find((d) => d.code === "QL-01")!;
+  assert.equal(two.expires, "2029-03-01", "where it prints the foreign expiry, the earlier of the two governs on the page too");
+  assert.equal(two.foreignUnknown, false);
+});

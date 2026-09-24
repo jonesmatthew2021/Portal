@@ -22,6 +22,7 @@ import { documents } from "../db/schema.js";
 import { fileStore } from "../db/documents.js";
 import { OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM } from "../../../source/shared/reading-lines.js";
 import { coveredCells } from "../../../source/shared/covers.js";
+import { isRecognitionReading, recognisedUntil, recognitionFills } from "../../../source/shared/recognition.js";
 
 // Certificates are read with a vision model — most of them are scans rather than
 // text PDFs, and a scan of a 1998 certificate of competency is not something a
@@ -845,7 +846,10 @@ export async function certificateStanding() {
 
   const claim = new Map<
     string,
-    { issued: string | null; expires: string | null; issuer: string | null; fileId: string | null; covered?: boolean }
+    {
+      issued: string | null; expires: string | null; issuer: string | null; fileId: string | null;
+      covered?: boolean; recognition?: boolean; foreignUnknown?: boolean;
+    }
   >();
   /* Every certificate that reached a column of its own, kept for the covering
      pass below: one document fills every column its printed endorsements and
@@ -853,13 +857,23 @@ export async function certificateStanding() {
      vessel file). The page's cells read these dates, so they have to carry
      the covered columns or the grid and the round would disagree about a
      man's ECDIS. */
-  const standing: { row: Row; reading: Reading; person: string; code: string }[] = [];
+  const standing: {
+    row: Row; reading: Reading; code: string; key: string;
+    expires: string | null; issued: string | null; issuer: string | null;
+  }[] = [];
+  /* The expiry of the foreign certificate itself, where one is on the portal
+     for the same column. A recognition can never run longer than what it
+     recognises (MO70 s 33(2), s 36(3), s 37(4)); the latest of two, because
+     two on file are a renewal beside the one it renewed. */
+  const foreignAt = new Map<string, string>();
 
   for (const { row, reading } of readings) {
     if (!reading || !reading.readable || !row.person || !row.person.trim()) continue;
     const code = codeFor(row, reading, eqTable);
     if (!code || !code.trim()) continue;
-    standing.push({ row, reading, person: row.person, code: code.trim().toUpperCase() });
+    // AMSA recognises only the classes MO70 s 7(2)(b) lists, which leave out
+    // the certificate of safety training and the marine cook certificate.
+    if (isRecognitionReading(reading) && !recognitionFills(code, vessel.neverRecognised.codes)) continue;
 
     // A date typed against the certificate on the portal beats the model's
     // reading of the scan, same as in the comparison. An item recorded as
@@ -872,38 +886,66 @@ export async function certificateStanding() {
     const issuer = (reading.issuer || "").trim() || null;
 
     const key = `${row.person.trim().toUpperCase()}::${code.trim().toUpperCase()}`;
+    if (!isRecognitionReading(reading) && expires && expires > (foreignAt.get(key) || "")) foreignAt.set(key, expires);
+    standing.push({ row, reading, code: code.trim().toUpperCase(), key, expires, issued, issuer });
+  }
+
+  /** The date a document gives a column, with the recognition rule applied.
+   *  `own` is what it would give on its own. */
+  const dateFor = (reading: Reading, key: string, own: string | null) =>
+    isRecognitionReading(reading) ? recognisedUntil(reading, own, foreignAt.get(key)) : { until: own, foreignUnknown: false };
+
+  for (const { row, reading, key, expires: ownExpiry, issued, issuer } of standing) {
+    const { until: expires, foreignUnknown } = dateFor(reading, key, ownExpiry);
+    const mineIsRec = isRecognitionReading(reading);
     const sitting = claim.get(key);
     if (sitting) {
-      if ((sitting.expires || "") >= (expires || "")) {
-        // The one already claimed runs the longer; an issue date or issuer is
-        // still worth carrying over where the one in force didn't print one.
-        // The file the line links to stays the one in force.
+      /* The recognition is the document that counts on this vessel
+         (MO505 s 4, s 7(2)), so it holds the cell against the foreign
+         certificate whichever runs the longer; two of a kind are decided the
+         way they always were, by which runs the longer. */
+      const beats = mineIsRec !== !!sitting.recognition ? mineIsRec : (expires || "") > (sitting.expires || "");
+      if (!beats) {
+        // An issue date or issuer is still worth carrying over where the one
+        // in force didn't print one. The file the line links to stays the
+        // one in force.
         if (!sitting.issued && issued) sitting.issued = issued;
         if (!sitting.issuer && issuer) sitting.issuer = issuer;
         continue;
       }
-      claim.set(key, { issued: issued || sitting.issued, expires, issuer: issuer || sitting.issuer, fileId: row.id });
+      claim.set(key, {
+        issued: issued || sitting.issued, expires, issuer: issuer || sitting.issuer,
+        fileId: row.id, recognition: mineIsRec, foreignUnknown,
+      });
       continue;
     }
-    claim.set(key, { issued, expires, issuer, fileId: row.id });
+    claim.set(key, { issued, expires, issuer, fileId: row.id, recognition: mineIsRec, foreignUnknown });
   }
 
   /* The covered columns, joining the same contest: the one that runs the
      longer holds the cell, and the cell's Open opens whichever document that
      is. A covered column with no date to give claims nothing - there would be
-     nothing to put in the cell. */
-  for (const { row, reading, person, code } of standing) {
+     nothing to put in the cell. An endorsement on a recognition runs for the
+     remainder of the foreign certificate's (MO70 s 37(4)), so a covered
+     column takes the same earlier-of rule. */
+  for (const { row, reading, key: ownKey, code } of standing) {
+    const person = ownKey.slice(0, ownKey.indexOf("::"));
     for (const cell of coveredCells(reading, vessel.covers, vessel.qualColumns, code)) {
       if (!cell.until || neverLapses(cell.code)) continue;
-      const key = `${person.trim().toUpperCase()}::${cell.code.trim().toUpperCase()}`;
+      if (isRecognitionReading(reading) && !recognitionFills(cell.code, vessel.neverRecognised.codes)) continue;
+      const key = `${person}::${cell.code.trim().toUpperCase()}`;
+      const { until, foreignUnknown } = dateFor(reading, key, cell.until);
+      if (!until) continue;
       const sitting = claim.get(key);
-      if (sitting && (sitting.expires || "") >= cell.until) continue;
+      if (sitting && (sitting.expires || "") >= until) continue;
       claim.set(key, {
         issued: reading.issuedOn || null,
-        expires: cell.until,
+        expires: until,
         issuer: (reading.issuer || "").trim() || null,
         fileId: row.id,
         covered: true,
+        recognition: isRecognitionReading(reading),
+        foreignUnknown,
       });
     }
   }
@@ -920,6 +962,13 @@ export async function certificateStanding() {
         // Whether the cell was filled by a column this certificate covers
         // rather than by a certificate of its own.
         covered: !!v.covered,
+        /* Whether the document behind the cell is an AMSA certificate of
+           recognition, and whether nothing at all is known about the foreign
+           certificate it recognises - neither printed on it nor on the
+           portal. The gaps list says so: a recognition whose certificate
+           nobody holds is a date the portal cannot check. */
+        recognition: !!v.recognition,
+        foreignUnknown: !!v.recognition && !!v.foreignUnknown,
       };
     }),
   };

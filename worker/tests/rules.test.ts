@@ -23,6 +23,7 @@ import { RED_DAYS, daysUntil } from "../../source/shared/bands.js";
 import * as reminders from "../../source/shared/reminders.js";
 import { particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, ticketCodesIn, isMsicCard, openToCertificates } from "../../source/shared/particulars.js";
 import { coveredCells, coveredCodes, unitCodesIn, unitColumnsIn } from "../../source/shared/covers.js";
+import { foreignExpiryOn, isRecognitionReading, recognisedUntil, recognitionFills } from "../../source/shared/recognition.js";
 import { medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote } from "../../source/shared/medical.js";
 import { renewalBlockers, renewalNeedsProblem } from "../../source/shared/renewals.js";
 import { coveredBy, evidenceKindsProblem, EVIDENCE_KINDS } from "../../source/shared/evidence.js";
@@ -1232,4 +1233,51 @@ test("evidence: a document in another man's name covers nobody, and an issue let
     "where the letter prints its own end, that date governs - and this one has gone");
   assert.equal(coveredBy("QL-04", "EVANS, Brenton", letter, issued, EV_TODAY, { ...EV_RULES, kinds: null }), null,
     "no table, no cover - never a ceiling written into the code");
+});
+
+/* ------------------------------------------------------------------------ *
+ * The certificate of recognition (source/shared/recognition.js): the one
+ * document that counts on this vessel for a man holding a foreign ticket,
+ * and the two rules that keep it honest - it can never outlive the
+ * certificate it recognises (MO70 s 33(2), s 36(3), s 37(4)), and it can
+ * never fill a column AMSA may not recognise into (s 7(2)(b)).
+ * ------------------------------------------------------------------------ */
+const RECOGNITION = {
+  readable: true, isRecognition: true,
+  recognises: { authority: "MCA", country: "United Kingdom", number: "UK-9921", expiresOn: "2029-03-01" },
+};
+
+test("recognition: the cell takes the earlier of the recognition and the certificate it recognises", () => {
+  // The foreign certificate's printed expiry is the earlier: it governs.
+  assert.deepEqual(recognisedUntil(RECOGNITION, "2030-06-30", null),
+    { until: "2029-03-01", foreignUnknown: false },
+    "a recognition can be revalidated only after the certificate behind it, so it never runs the longer");
+  // The recognition's own is the earlier: it governs.
+  assert.deepEqual(recognisedUntil(RECOGNITION, "2028-01-01", null),
+    { until: "2028-01-01", foreignUnknown: false });
+  // The foreign certificate itself is on the portal and runs shorter than
+  // what the recognition printed: the document in hand governs.
+  assert.deepEqual(recognisedUntil(RECOGNITION, "2030-06-30", "2027-05-05"),
+    { until: "2027-05-05", foreignUnknown: false });
+  // Nothing known about the foreign certificate at all: the cell still takes
+  // the recognition's date - it is all there is - and the office is told.
+  assert.deepEqual(recognisedUntil({ readable: true, isRecognition: true, recognises: null }, "2030-06-30", null),
+    { until: "2030-06-30", foreignUnknown: true });
+  assert.deepEqual(recognisedUntil({ readable: true, isRecognition: true, recognises: { expiresOn: "not a date" } }, null, null),
+    { until: null, foreignUnknown: true }, "words somebody typed are not a date");
+  assert.equal(foreignExpiryOn(RECOGNITION), "2029-03-01");
+  assert.equal(foreignExpiryOn({ readable: true, isRecognition: false }), null);
+  assert.equal(isRecognitionReading(RECOGNITION), true);
+  assert.equal(isRecognitionReading({ readable: true }), false, "a reading made before the key existed is not a recognition");
+});
+
+test("recognition: the safety training and cook columns are never filled by one", () => {
+  const barred = vessel.neverRecognised.codes;
+  assert.deepEqual(barred.slice().sort(), ["QL-11", "QL-12"],
+    "MO70 s 7(2)(b) recognises neither a foreign basic safety training nor a foreign cook certificate");
+  assert.equal(recognitionFills("QL-12", barred), false);
+  assert.equal(recognitionFills("ql-11", barred), false, "however the code was cased");
+  assert.equal(recognitionFills("QL-01", barred), true);
+  assert.equal(recognitionFills("QL-14", barred), true, "a recognition of GMDSS is the one on file today and still fills it");
+  assert.equal(recognitionFills("QL-12", null), true, "no list, no bar - the vessel file decides, not the code");
 });

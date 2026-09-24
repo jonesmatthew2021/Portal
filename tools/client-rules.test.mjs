@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, EVIDENCE_KINDS };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, recognisedUntil, recognitionFills, foreignExpiryOn, isRecognitionReading, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, EVIDENCE_KINDS };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -2704,6 +2704,31 @@ const is = (got, want, what) => {
   is(coveredBy("QL-01", "EVANS, Brenton", rows, recognised, today, rules), null, "and none of a certificate of recognition");
   const spent = { ...readings, ext: { ...readings.ext, expiresOn: "2026-09-01" } };
   is(coveredBy("QL-01", "EVANS, Brenton", rows, spent, today, rules), null, "a cover that has run out is no cover");
+}
+
+/* ---- the certificate of recognition: never longer than the certificate it
+        recognises, and never the safety training or cook column
+        (MO70 s 33(2), s 36(3), s 37(4), s 7(2)(b)) ---- */
+{
+  /* The page draws these cells, so its own copy of the rule (spliced in at
+     @shared) must answer what the worker's module answers. */
+  const shared = await import(pathToFileURL(join(ROOT, "source", "shared", "recognition.js")).href);
+  const { recognisedUntil, recognitionFills, foreignExpiryOn, isRecognitionReading, VESSEL } = lib;
+  const rec = { readable: true, isRecognition: true, recognises: { expiresOn: "2029-03-01" } };
+  is(recognisedUntil(rec, "2030-06-30", null), { until: "2029-03-01", foreignUnknown: false },
+    "the recognition never runs longer than the certificate behind it");
+  is(shared.recognisedUntil(rec, "2030-06-30", null), recognisedUntil(rec, "2030-06-30", null),
+    "the worker's module answers the same");
+  is(recognisedUntil(rec, "2028-01-01", null), { until: "2028-01-01", foreignUnknown: false },
+    "and where it is the earlier of the two, its own date governs");
+  is(recognisedUntil({ readable: true, isRecognition: true }, "2030-06-30", null),
+    { until: "2030-06-30", foreignUnknown: true },
+    "nothing known about the foreign certificate: the cell takes what there is, and the office is told");
+  is(foreignExpiryOn(rec), "2029-03-01");
+  is(isRecognitionReading({ readable: true }), false);
+  is(VESSEL.neverRecognised.codes.slice().sort(), ["QL-11", "QL-12"]);
+  is(recognitionFills("QL-12", VESSEL.neverRecognised.codes), false, "no recognition ever fills the certificate of safety training");
+  is(recognitionFills("QL-14", VESSEL.neverRecognised.codes), true);
 }
 
 if (failed) {
