@@ -200,13 +200,22 @@ modules. Edit that code there and only there.
 - **The last 200 saves are kept** (`portal_state_history`) and any one of them
   can be put back from `Admin → Access Grants`, under Revisions.
 - **A listing the library refuses fails the survey and moves nothing.** A 404
-  on the certificate home (`hasFolder` before the walk in `survey`), or a 429
-  or 5xx still standing after the driver's three retries (`graph` in
-  `files/store.ts`, waits through `graphWaits`), throws: 502, the error on
-  `last-run`, no row marked missing. The hold-back guard in `apply` (missing
-  > max(25, 10% of the live rows the walk covered)) holds every mirror-off and
-  says so in one sentence on `last-run.error` (`heldBackLine`), which the
-  SharePoint page's last-import line shows. Tests: `worker/tests/sync.test.ts`.
+  on the certificate home, or on a man's folder outside it once anything
+  live is on the books under it (`hasFolder` before the walk in `survey`; a
+  folder with nothing under it yet may not exist), or a 429 or 5xx still
+  standing after the driver's three retries (`graph` in `files/store.ts`,
+  waits through `graphWaits`), throws: 502, the error on `last-run`, no row
+  marked missing. On the hour the driver's waits stop at the hour's settling
+  time (`graphBudget.until`, set by `scheduled()` around the whole hour, the
+  Retry-After honoured in full under it and capped at a minute without one):
+  a wait that would run past it throws at once, and the hour's record is
+  written before the sync so a cut-off invocation still leaves this hour's
+  line. The single-file folders under the home (`opms/spreadsheet`) are
+  nobody's crew folder. The hold-back guard in `apply` (missing > max(25, 10%
+  of the live rows the walk covered)) holds every mirror-off and is not a
+  failure: `last-run.heldBack` carries the count, `error` stays null, and the
+  SharePoint page's last-import line says it on its missing clause. Tests:
+  `worker/tests/sync.test.ts`.
 
 ## Working in parallel
 
