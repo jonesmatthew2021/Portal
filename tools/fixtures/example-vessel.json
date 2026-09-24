@@ -170,9 +170,10 @@
   "covers": [
     {
       "code": "QL-13",
-      "when": "\\becdis\\b",
+      "when": "generic\\s+ecdis|ecdis[\\s-]+trained|\\bii/[12]\\b.*\\becdis\\b|\\becdis\\b.*\\bii/[12]\\b",
+      "unless": "type[\\s-]*specific",
       "perpetual": true,
-      "why": "MO70 s 37(3) table item 8: the ECDIS endorsement never expires, so the column takes the certificate's own printed date."
+      "why": "MO70 s 37(3) table item 8: the ECDIS endorsement never expires, so the column takes the certificate's own printed date. A type-specific course is not the endorsement."
     },
     {
       "code": "QL-16",

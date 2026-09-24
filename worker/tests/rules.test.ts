@@ -835,6 +835,26 @@ test("covers: an ECDIS endorsement fills the ECDIS column with the certificate's
     [{ code: "QL-13", until: "2031-05-26" }], "ECDIS does not expire of itself: the certificate's date");
 });
 
+test("covers: the ECDIS column is the STCW endorsement, never a type-specific Furuno course", () => {
+  /* QL-13 is the STCW ECDIS proficiency - "certificate of proficiency as
+     ECDIS trained", printed inside the II/1 or II/2 line of a certificate of
+     competency (MO70 s 37(3) item 8; MO71 s 9(2)(a)). This vessel's VS-02 is
+     type-specific familiarisation on the Furuno FMD, which is not that
+     endorsement, so a Furuno certificate listing its course as an
+     endorsement must fill nothing on QL-13 - the bare word used to. */
+  assert.deepEqual(codesCovered({ endorsements: [{ text: "II/2 (incl. generic ECDIS)", until: null }] }, "QL-01"), ["QL-13"],
+    "Brenton's exact line");
+  assert.deepEqual(codesCovered({ endorsements: [{ text: "Certificate of proficiency as ECDIS trained", until: null }] }, "QL-01"), ["QL-13"],
+    "the endorsement by its name in the order");
+  assert.deepEqual(codesCovered({ endorsements: [{ text: "Furuno FMD-3200 Type Specific ECDIS Training", until: null }] }, "QL-01"), [],
+    "a type-specific course is not the STCW endorsement");
+  assert.deepEqual(codesCovered({ endorsements: [{ text: "ECDIS Type-Specific (FMD series)", until: null }] }, "QL-01"), []);
+  assert.deepEqual(codesCovered({ endorsements: [{ text: "ECDIS", until: null }] }, "QL-01"), [],
+    "the bare word says nothing about which ECDIS it is");
+  const row = vessel.covers.find((c) => c.code === "QL-13")!;
+  assert.match(String(row.unless), /furuno/i, "the vessel file's row names the type-specific words it excludes");
+});
+
 test("covers: the fast rescue craft column takes the endorsement's own printed date where AMSA printed one", () => {
   // MO70 s 37(3) item 2, s 37(5): five years from the proficiency's issue,
   // which is not the day it was written onto the certificate of competency.
@@ -946,7 +966,7 @@ test("covers: a reading that says nothing covers nothing", () => {
     "a column this matrix has not got is never filled");
   assert.deepEqual(coveredCodes(covering({ endorsements: EVANS_COC }), [{ code: "QL-13", when: "(unclosed" }], vessel.qualColumns, "QL-01"), [],
     "a pattern that does not compile covers nothing");
-  assert.deepEqual(cellsCovered({ expiresOn: null, endorsements: [{ text: "ECDIS", until: null }] }, "QL-01"),
+  assert.deepEqual(cellsCovered({ expiresOn: null, endorsements: [{ text: "generic ECDIS", until: null }] }, "QL-01"),
     [{ code: "QL-13", until: null }], "no date anywhere: the column is covered and the caller has no date to put in it");
 });
 

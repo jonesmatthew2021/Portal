@@ -2600,6 +2600,8 @@ const is = (got, want, what) => {
     "the worker's module answers the same");
   is(codes({ endorsements: coc }, "QL-01").includes("QL-12"), false, "a VI/1 line never fills the certificate of safety training");
   is(codes({ endorsements: [{ text: "II/2", until: null }] }, "QL-01"), [], "II/2 alone is not ECDIS");
+  is(codes({ endorsements: [{ text: "Furuno FMD-3200 Type Specific ECDIS Training", until: null }] }, "QL-01"), [],
+    "a type-specific Furuno course is not the STCW ECDIS endorsement (the row's unless)");
   is(codes({ endorsements: [{ text: "VI/2 (1) s. A-VI/2 (1-4)", until: null }] }, "QL-01"), [], "survival craft is not fast rescue craft");
   is(codes({ endorsements: [{ text: "VI/2 (2) s. A-VI/2 (5-8)", until: null }] }, "QL-01"), ["QL-16"], "VI/2 (2) is fast rescue craft");
   is(coveredCells(read({ endorsements: [{ text: "VI/2 (2)", until: "2029-06-18" }] }), table, cols, "QL-01"), [{ code: "QL-16", until: "2029-06-18" }],
