@@ -151,7 +151,11 @@ function AccessGrantsPage() {
   return (
     <div>
       <div style={{ marginBottom: 10 }}><Eyebrow color={T.accent}>Who can enter, and at what level</Eyebrow></div>
-      
+
+      {/* The weekly certificate-expiry emails: on or off, and when. Here
+          because this is the page that holds everybody's address. */}
+      {myRole !== "crew" && <ReminderSwitch />}
+
       {/* Granting */}
       <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderLeft: `4px solid ${T.accent}`,
         borderRadius: 2, padding: "13px 15px", marginBottom: 16, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -303,6 +307,56 @@ function AccessGrantsPage() {
       <div style={{ background: T.panel, border: `1px solid ${T.rule}`,
         borderLeft: `4px solid ${T.bRed}`, borderRadius: 2, padding: "13px 15px", marginTop: 18 }}>
         <StartAgain />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The weekly certificate-expiry emails' switch and when they go: the window
+ * in days, the weekday and the hour, as the vessel's clock tells them. The
+ * worker sends them (worker/src/lib/reminders.ts) and reads this same
+ * setting from the document, so a change here is an ordinary save.
+ *
+ * The two number boxes keep what is being typed in the box itself and save
+ * only a whole number in range - clearing a box to type 60 would otherwise
+ * save the default back over it between the two keystrokes.
+ */
+function ReminderSwitch() {
+  const { reminders, setReminders } = usePortal();
+  const [days, setDays] = useState(String(reminders.days));
+  const [hour, setHour] = useState(String(reminders.hour));
+  // Another tab's change arrives on the poll: the boxes follow it.
+  React.useEffect(() => { setDays(String(reminders.days)); }, [reminders.days]);
+  React.useEffect(() => { setHour(String(reminders.hour)); }, [reminders.hour]);
+  const save = (patch) => setReminders({ ...reminders, ...patch });
+  const typed = (text, lo, hi, key, set) => {
+    set(text);
+    const n = Number(text);
+    if (text.trim() !== "" && Number.isInteger(n) && n >= lo && n <= hi && n !== reminders[key]) save({ [key]: n });
+  };
+  return (
+    <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderLeft: `4px solid ${T.teal}`,
+      borderRadius: 2, padding: "13px 15px", marginBottom: 16, display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
+      <ChoiceField label="Expiry reminders">
+        <Choices compact value={reminders.on ? "on" : "off"} onPick={(v) => save({ on: v === "on" })}
+          options={[{ value: "on", label: "On" }, { value: "off", label: "Off" }]} />
+      </ChoiceField>
+      <div style={{ flex: "0 1 90px" }}>
+        <Field label="Days">
+          <input className="um-in" type="number" min={1} max={365} step={1} style={{ width: "100%" }} value={days}
+            onChange={(e) => typed(e.target.value, 1, 365, "days", setDays)} />
+        </Field>
+      </div>
+      <ChoiceField label="Weekday">
+        <Choices compact value={reminders.weekday} onPick={(v) => save({ weekday: Number(v) })}
+          options={REMINDER_WEEKDAYS.map((w, i) => ({ value: i, label: w.slice(0, 3) }))} />
+      </ChoiceField>
+      <div style={{ flex: "0 1 80px" }}>
+        <Field label="Hour">
+          <input className="um-in" type="number" min={0} max={23} step={1} style={{ width: "100%" }} value={hour}
+            onChange={(e) => typed(e.target.value, 0, 23, "hour", setHour)} />
+        </Field>
       </div>
     </div>
   );

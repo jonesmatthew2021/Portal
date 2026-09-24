@@ -5088,6 +5088,11 @@ function Portal({ role, onSignOut }) {
     // and the days per swing. Four weeks, Wednesday to Wednesday, from
     // 12 Aug 2026 — until somebody moves it on Swing Compliance.
     rosterPattern: { ...ROSTER_DEFAULTS },
+    // The weekly certificate-expiry emails the worker sends (worker/src/lib/
+    // reminders.ts): switched on or off on Access Grants, with the window in
+    // days, the weekday and the hour. Off until somebody switches it on. In
+    // the document, so it is backed up and put back with everything else.
+    reminders: { ...REMINDER_DEFAULTS },
     history: [],
     comments: {},
     hiddenTabs: [],
@@ -5235,6 +5240,10 @@ function Portal({ role, onSignOut }) {
   const certRoot = store.certRoot || "", setCertRoot = put("certRoot");
   const rosterPattern = { ...ROSTER_DEFAULTS, ...(store.rosterPattern || {}) };
   const setRosterPattern = put("rosterPattern");
+  // The reminder emails' setting, read the way the worker reads it
+  // (reminderSetting): the defaults wherever the document has no word, and
+  // on only where it says a plain true.
+  const reminders = reminderSetting(store.reminders), setReminders = put("reminders");
   ROSTER_ANCHOR = /^\d{4}-\d{2}-\d{2}$/.test(rosterPattern.anchor || "")
     ? rosterPattern.anchor : ROSTER_DEFAULTS.anchor;
   CYCLE = Number(rosterPattern.cycle) > 0 ? Math.round(Number(rosterPattern.cycle)) : ROSTER_DEFAULTS.cycle;
@@ -6476,7 +6485,7 @@ function Portal({ role, onSignOut }) {
   };
 
   const ctx = { role, admin, session: SESSION, pending, offlineAt, roundRunning, roundHolder, setRoundRunning, removeCrew, renameCrew, setCrewRank, people, setPeople,
-    notPeople, setNotPeople, certRoot, setCertRoot, writeCrewToWorkbooks, lastDocUpdate, setLastDocUpdate, folderNames, setFolderNames, filledFromCert, setFilledFromCert, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixRun, runMatrixRound, clearMatrixRun };
+    notPeople, setNotPeople, certRoot, setCertRoot, writeCrewToWorkbooks, lastDocUpdate, setLastDocUpdate, folderNames, setFolderNames, filledFromCert, setFilledFromCert, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, reminders, setReminders, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixRun, runMatrixRound, clearMatrixRun };
 
   return (
     <Ctx.Provider value={ctx}>
