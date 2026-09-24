@@ -16142,7 +16142,9 @@ function CoolibahPortal({ role, onSignOut }) {
 
       // The server's round, watched by the runId this page sends: only a
       // progress record carrying it is this round's (progressAccept).
-      const runId = crypto.randomUUID();
+      // (A page opened over plain http has no randomUUID; a stamp will do,
+      // the mark only has to be this round's and nobody else's.)
+      const runId = crypto.randomUUID ? crypto.randomUUID() : "run-" + Date.now() + "-" + Math.random().toString(36).slice(2);
       show({ ...base, ...progress, phase: "starting", pct: 0, word: "Starting" });
       poll = setInterval(async () => {
         let rec = null;
