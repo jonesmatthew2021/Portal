@@ -21,7 +21,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setEnv } from "../src/env.js";
 import { todayThere } from "../src/lib/analysis.js";
-import sync, { runSync, heldBackLine } from "../src/routes/sync.js";
+import sync, { runSync } from "../src/routes/sync.js";
 import { graphWaits, graphBudget } from "../src/files/store.js";
 import { fakeBucket, portalDb, graphLibrary, sharepointEnv, wranglerVars, keptRow, type FakeFile } from "./helpers.js";
 
@@ -291,13 +291,14 @@ test("Graph, listing cut short: 25 missing of 100 live are mirrored off (25 is n
     assert.equal(out.heldBack, 0);
     assert.equal(portal.rows.filter((r) => r.removedAt).length, 25);
     assert.equal(lastRun(portal).error, null, "nothing to say on the record");
+    assert.equal(lastRun(portal).heldBack, 0);
     assert.equal(lastRun(portal).missing, 25);
   } finally {
     graph.restore();
   }
 });
 
-test("Graph, listing cut short: 26 missing of 100 live are held, and the record says so in one sentence", async () => {
+test("Graph, listing cut short: 26 missing of 100 live are held, and the record says so - a count beside missing, not a failure", async () => {
   const { portal, graph } = cutShort(100, 74);
   try {
     const out = await runSync("hourly schedule");
@@ -305,8 +306,11 @@ test("Graph, listing cut short: 26 missing of 100 live are held, and the record 
     assert.equal(out.mirrored, 0, "one over the boundary and nothing comes off");
     assert.equal(out.heldBack, 26);
     assert.equal(portal.rows.filter((r) => r.removedAt).length, 0, "every row still live");
-    assert.equal(lastRun(portal).error, heldBackLine(26), "the sentence the SharePoint page shows");
-    assert.equal(lastRun(portal).error, "26 on the books but not in the folders is too many to be believed in one pass, so nothing was taken off the books.");
+    // The run did not fail: it registered and adopted as normal and only
+    // held the write-off. The page's last-import line says so on its
+    // missing clause, from heldBack.
+    assert.equal(lastRun(portal).error, null, "not a failure");
+    assert.equal(lastRun(portal).heldBack, 26, "the count the SharePoint page's line shows");
     assert.equal(lastRun(portal).missing, 26);
   } finally {
     graph.restore();
@@ -321,6 +325,7 @@ test("Graph, listing cut short: with 400 live the line is 10% - 40 missing mirro
     assert.equal(out.mirrored, 40, "40 is not more than 10% of 400");
     assert.equal(forty.portal.rows.filter((r) => r.removedAt).length, 40);
     assert.equal(lastRun(forty.portal).error, null);
+    assert.equal(lastRun(forty.portal).heldBack, 0);
   } finally {
     forty.graph.restore();
   }
@@ -331,7 +336,8 @@ test("Graph, listing cut short: with 400 live the line is 10% - 40 missing mirro
     assert.equal(out.mirrored, 0, "41 is more than 10% of 400, so nothing comes off");
     assert.equal(out.heldBack, 41);
     assert.equal(fortyOne.portal.rows.filter((r) => r.removedAt).length, 0);
-    assert.equal(lastRun(fortyOne.portal).error, heldBackLine(41));
+    assert.equal(lastRun(fortyOne.portal).error, null);
+    assert.equal(lastRun(fortyOne.portal).heldBack, 41);
   } finally {
     fortyOne.graph.restore();
   }
@@ -566,7 +572,7 @@ test("R2, the route: a survey that falls over is 502 with the error, and last-ru
   const record = lastRun(portal);
   assert.deepEqual(
     { ...record, at: 0 },
-    { at: 0, by: "Update portal", registered: 0, adopted: 0, missing: 0, leftAlone: 0, error: "D1 is having a bad morning" },
+    { at: 0, by: "Update portal", registered: 0, adopted: 0, missing: 0, leftAlone: 0, heldBack: 0, error: "D1 is having a bad morning" },
   );
   assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).until, 0, "the lease was given back");
 });
@@ -581,7 +587,7 @@ test("R2, the route: a good run's record carries the counts, who asked, when, an
   assert.ok(record.at >= before && record.at <= Date.now(), "stamped when it began");
   assert.deepEqual(
     { ...record, at: 0 },
-    { at: 0, by: "Import new files", registered: 1, adopted: 0, missing: 1, leftAlone: 1, error: null },
+    { at: 0, by: "Import new files", registered: 1, adopted: 0, missing: 1, leftAlone: 1, heldBack: 0, error: null },
   );
   assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).until, 0, "the lease was given back");
 });

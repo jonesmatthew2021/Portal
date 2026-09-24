@@ -65,7 +65,8 @@
      would only reach on a bad day, so the lines for that day can be looked
      at: ?reading=credit (the reading stops for credit), ?hourly=credit
      (the last hour stopped for credit), ?backup=missing (the backup folder
-     is not in the library). The out-of-credit sentence is the one in
+     is not in the library), ?sync=held (the last import found too many
+     files gone to believe and held the write-off). The out-of-credit sentence is the one in
      source/shared/reading-lines.js, written here again because this shim
      runs outside the page's own script; a check holds the two the same. */
   const flag = (name) => { try { return new URLSearchParams(location.search).get(name); } catch (e) { return null; } };
@@ -274,9 +275,13 @@
          has run and the page says so. */
       if (p === "/api/sync/last") return json({ sync: null, hourly: flag("hourly") ? fakeHourly() : null, running: false, holder: null });
       /* The SharePoint page's listing: no library behind the preview, so
-         an empty folder, and the hour's line only under its flag. */
+         an empty folder, and the hour's and the import's lines only under
+         their flags. */
       if (p === "/api/sharepoint")
-        return json({ path: url.searchParams.get("path") || "", entries: [], lastSync: null,
+        return json({ path: url.searchParams.get("path") || "", entries: [],
+          lastSync: flag("sync") === "held"
+            ? { at: Date.now() - 20 * 60000, by: "hourly schedule", registered: 2, adopted: 0, missing: 26, leftAlone: 0, heldBack: 26, error: null }
+            : null,
           lastHourly: flag("hourly") ? fakeHourly() : null, lastBackup: fakeBackup() });
       /* The round from the page: nothing has run, there are no rules to
          keep, and the round itself writes the office's workbook, which is

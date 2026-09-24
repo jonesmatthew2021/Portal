@@ -61,7 +61,8 @@ function SharePointPage() {
     if (ls.error) return `Last import ${when} (${ls.by}) failed: ${ls.error}`;
     return `Folders last read ${when} (${ls.by}): ${ls.registered} new certificate${ls.registered === 1 ? "" : "s"} taken on` +
       (ls.adopted ? `, ${ls.adopted} document${ls.adopted === 1 ? "" : "s"} adopted` : "") +
-      (ls.missing ? `, ${ls.missing} on the books but gone from the folders` : "") + ". Runs every hour.";
+      (ls.missing ? `, ${ls.missing} on the books but gone from the folders` +
+        (ls.heldBack ? " — too many to believe in one pass, nothing was taken off the books" : "") : "") + ". Runs every hour.";
   };
 
   // The worker's own word on its last hourly round — in red when it fell over.

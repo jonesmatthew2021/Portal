@@ -367,12 +367,6 @@ export async function survey(tick: (pct: number, word: string) => Promise<void> 
   return { newCertificates, singles, missing, returned, scannedLive, moved, trainingSheet, sheetSeen, people };
 }
 
-/** The one sentence the record carries when the missing files were too
- *  many to act on (the guard in apply): the SharePoint page shows it on
- *  its last-import line, and a person goes and looks at the library. */
-export const heldBackLine = (n: number) =>
-  `${n} on the books but not in the folders is too many to be believed in one pass, so nothing was taken off the books.`;
-
 /** What the last applied sync did — shown on the SharePoint page. */
 export type SyncRecord = {
   at: number;
@@ -381,6 +375,11 @@ export type SyncRecord = {
   adopted: number;
   missing: number;
   leftAlone: number;
+  /** The missing count when it was too many to act on (the guard in
+   *  apply), else 0. Not an error: the run registered and adopted as
+   *  normal and only held the write-off, so the page says it beside the
+   *  missing count and a person goes and looks at the library. */
+  heldBack: number;
   error: string | null;
 };
 
@@ -466,16 +465,14 @@ export async function runSync(by: string) {
       adopted: out.adopted.length,
       missing: out.missing.length,
       leftAlone: out.leftAlone.length,
-      // A shortfall too big to believe is said here, where the page's
-      // last-import line shows it: the files are still on the books, and
-      // somebody has to look at the library to see why they are not in it.
-      error: out.heldBack ? heldBackLine(out.heldBack) : null,
+      heldBack: out.heldBack,
+      error: null,
     });
     await sayProgress(100, "Done", { done: true });
     return out;
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
-    await record({ at, by, registered: 0, adopted: 0, missing: 0, leftAlone: 0, error });
+    await record({ at, by, registered: 0, adopted: 0, missing: 0, leftAlone: 0, heldBack: 0, error });
     await sayProgress(100, "Failed", { done: true, error });
     throw e;
   }
