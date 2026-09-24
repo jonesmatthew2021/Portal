@@ -142,11 +142,18 @@ export default async function round(
     // a round cut off frees it soon, and a live round that runs long - the
     // workbook step can - holds on to it by saying so. The last word is
     // followed by the drop, so it renews nothing.
+    //
+    // A renewal that finds the lease no longer this round's - it lapsed in
+    // a silence longer than LEASE_FOR_MS and the hour or an upload took it -
+    // is remembered as `lost`, and the workbook step asks before it writes
+    // (leaseHeld): the workbook is the new holder's now. A renewal that
+    // throws says nothing either way, so it is not a loss.
+    let lost = false;
     const say = async (pct: number, word: string, extra: Record<string, unknown> = {}) => {
       await sayRound(pct, word, { by: who, runId, ...extra });
       if (extra.done) return;
       try {
-        await renewLease(lease.token, LEASE_FOR_MS);
+        if (!(await renewLease(lease.token, LEASE_FOR_MS))) lost = true;
       } catch (e) {
         console.error("the round's lease was not renewed:", e);
       }
@@ -156,7 +163,7 @@ export default async function round(
       // Idempotent: an hour or a prepare that already kept it costs a look.
       // The expiry rules are kept inside the round itself.
       const eq = await keepEquivalences();
-      const outcome = await runMatrixRound({ by: who, timeLeft, mirroredThisHour: 0, lease, say });
+      const outcome = await runMatrixRound({ by: who, timeLeft, mirroredThisHour: 0, lease, say, leaseHeld: () => !lost });
       // The line on the SharePoint page: the counts, not the cells. A
       // workbook the server cannot write is a reason for the open tab to
       // run the round itself, so it goes where the tab reads it.

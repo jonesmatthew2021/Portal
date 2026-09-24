@@ -407,8 +407,11 @@ async function uploadSingleFile(form: FormData, file: File, category: string) {
   const lease = await takeLease(field(form, "uploadedBy") || "an upload");
   if (!lease) {
     // Names the holder - the hour or a person's round - and promises no
-    // time: the same sentence every writer of the workbook answers with.
-    return Response.json({ error: writingTheWorkbook(await leaseHolder()) }, { status: 409 });
+    // time: the same sentence every writer of the workbook answers with,
+    // and the holder's name beside it (`by`), as POST /api/round answers,
+    // so a page waiting on the lease holds its buttons down under the name.
+    const holder = await leaseHolder();
+    return Response.json({ error: writingTheWorkbook(holder), by: holder }, { status: 409 });
   }
 
   try {

@@ -1053,7 +1053,9 @@ test("Update portal takes the lease for its turn and gives it back; while somebo
   portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "the round on the hour", token: "x" }));
   const held = await sync(post());
   assert.equal(held.status, 409);
-  assert.equal(((await held.json()) as { error: string }).error, "The round on the hour is writing the workbook; try again when it has finished.", "names the holder, promises no time");
+  const heldSaid = (await held.json()) as { error: string; by: string | null };
+  assert.equal(heldSaid.error, "The round on the hour is writing the workbook; try again when it has finished.", "names the holder, promises no time");
+  assert.equal(heldSaid.by, "the round on the hour", "…and carries the holder's name beside the sentence, as the round's 409 does");
   assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).by, "the round on the hour", "the hour's lease is untouched");
 
   // The holder may be a person's round from the page, not the hour: the
@@ -1061,7 +1063,9 @@ test("Update portal takes the lease for its turn and gives it back; while somebo
   portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "matthew", token: "x" }));
   const theirs = await sync(post());
   assert.equal(theirs.status, 409);
-  assert.equal(((await theirs.json()) as { error: string }).error, "Matthew is writing the workbook; try again when it has finished.");
+  const theirsSaid = (await theirs.json()) as { error: string; by: string | null };
+  assert.equal(theirsSaid.error, "Matthew is writing the workbook; try again when it has finished.");
+  assert.equal(theirsSaid.by, "matthew", "the person named, as the lease has them");
 });
 
 test("the workbook upload takes the lease too, and is refused while somebody holds it", async () => {
@@ -1077,8 +1081,18 @@ test("the workbook upload takes the lease too, and is refused while somebody hol
   portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "the round on the hour", token: "x" }));
   const held = await files(upload());
   assert.equal(held.status, 409);
-  assert.equal(((await held.json()) as { error: string }).error, "The round on the hour is writing the workbook; try again when it has finished.", "the same sentence as every other writer: the holder named, no time promised");
+  const heldSaid = (await held.json()) as { error: string; by: string | null };
+  assert.equal(heldSaid.error, "The round on the hour is writing the workbook; try again when it has finished.", "the same sentence as every other writer: the holder named, no time promised");
+  assert.equal(heldSaid.by, "the round on the hour", "…and the holder's name beside it, as the round's 409 carries, so the page holds its buttons under the name from the first refusal");
   assert.equal(bucket.text("opms/20260930 - CREW QUALIFICATION EXPIRY.xlsx"), null, "nothing was written");
+
+  // A person's round from the page holding it: named as the lease has them.
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "Kachin", token: "x" }));
+  const theirs = await files(upload());
+  assert.equal(theirs.status, 409);
+  const theirsSaid = (await theirs.json()) as { error: string; by: string | null };
+  assert.equal(theirsSaid.error, "Kachin is writing the workbook; try again when it has finished.");
+  assert.equal(theirsSaid.by, "Kachin");
 
   portal.blobs.set("sync|round-lease", JSON.stringify({ until: 0, by: "the round on the hour", token: "x" }));
   const res = await files(upload());
@@ -1705,6 +1719,66 @@ test("a lease is renewed by its holder alone: a foreign token changes nothing", 
   assert.equal(await renewLease("mine", LEASE_FOR_MS), true);
   portal.blobs.delete("sync|round-lease");
   assert.equal(await renewLease("mine", LEASE_FOR_MS), false, "no lease at all: nothing to renew");
+});
+
+test("a lease that passed to the hour between the workbook's words leaves the workbook to the hour, and the cells stay owed", async () => {
+  /* The bytes read and the rewrite between the 75 and 85 words are the
+     round's longest silence. Here the lease lapses in it and the hour
+     takes it (the lease blob is the hour's by the time the workbook's row
+     is read). The 85 word's renewal then finds the lease no longer the
+     round's, so the round does not run the replace on the office's
+     workbook beside the hour: the matrix stays saved, the cell is owed,
+     the record names who has the lease, and the hour's lease is left as
+     the hour's. Then, the lease free, the next round pays the cell - so a
+     live lease never trips the same check. */
+  const { portal, bucket, tmKey } = await oneManPortal();
+  let pastSeventyFive = false;
+  const word = beforeStatement(portal.db,
+    (sql, a) => /^(INSERT INTO|UPDATE) blobs/.test(sql) && a[1] === "round-progress" && (JSON.parse(String(a[2])) as { pct: number }).pct === 75,
+    async () => { pastSeventyFive = true; });
+  const taken = beforeStatement(portal.db,
+    (sql, a) => pastSeventyFive && /FROM documents WHERE category = \?1 AND removed_at IS NULL/.test(sql) && a[0] === "training-matrix",
+    async () => { portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "the round on the hour", token: "hour" })); });
+  let out: Record<string, unknown>;
+  try {
+    const res = await postRound({ by: "Matthew", runId: "run-12" });
+    out = (await res.json()) as Record<string, unknown>;
+    assert.equal(res.status, 200, JSON.stringify(out));
+  } finally {
+    word();
+    taken();
+  }
+  assert.equal(out.applied, 1, "the matrix took the date before the lease passed");
+  assert.equal(out.roundError, null, "nothing failed: the round stood aside");
+  assert.equal(out.roundSkipped, "the lease passed to the round on the hour mid-round; the workbook was not written", "the reason names the holder");
+  assert.equal(out.workbook, null, "no workbook filed");
+  assert.equal(out.written, null);
+  const named = datedWorkbookName("20260901 - CREW QUALIFICATION EXPIRY.xlsx", todayThere());
+  assert.equal(bucket.text("opms/" + named), null, "the replace never ran: no dated copy in the library");
+  assert.ok(bucket.text(tmKey), "…and the office's workbook is where it was");
+  assert.equal(portal.doc().quals.rows[0][3][0], "2031-05-26", "the matrix keeps the date");
+  assert.deepEqual(portal.doc().workbookPending, ["EVANS, BRENTON|QL-01"], "the cell is written down as owed to the workbook");
+  assert.deepEqual(progressWrites(portal.db).map((p) => p.pct), [1, 20, 30, 60, 75, 85, 100], "the 85 word was said - it is the renewal that found the lease gone");
+  const hourly = JSON.parse(portal.blobs.get("sync|last-hourly")!);
+  assert.equal(hourly.roundSkipped, "the lease passed to the round on the hour mid-round; the workbook was not written", "…and the record says so");
+  const lease = JSON.parse(portal.blobs.get("sync|round-lease")!) as { by: string; token: string; until: number };
+  assert.equal(lease.by, "the round on the hour", "the hour's lease is left as the hour's");
+  assert.equal(lease.token, "hour");
+  assert.ok(lease.until > 0, "…and not run out by the round's own drop");
+
+  // The hour done and the lease free: the next round from the page finds
+  // its lease its own at every word and pays the owed cell.
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: 0, by: "the round on the hour", token: "hour" }));
+  const again = await postRound({ by: "Matthew", runId: "run-13" });
+  const paid = (await again.json()) as Record<string, unknown>;
+  assert.equal(again.status, 200, JSON.stringify(paid));
+  assert.equal(paid.roundSkipped, null, "a lease held all the way through trips nothing");
+  assert.equal(paid.applied, 0, "nothing new on the matrix");
+  assert.equal(paid.written, 1, "…and the owed cell reached the workbook");
+  assert.equal(paid.workbook, named);
+  assert.ok(bucket.text("opms/" + named), "the dated workbook is in the library now");
+  assert.deepEqual(portal.doc().workbookPending, [], "nothing owed any more");
+  assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).until, 0, "given back");
 });
 
 test("GET /api/sync/last says whether the lease is held and by whom, so a wait names whoever has it at each look", async () => {

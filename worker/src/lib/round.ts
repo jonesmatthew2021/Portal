@@ -109,7 +109,7 @@ export async function leaseHolder(): Promise<string | null> {
  *  the lease is held. The page shows it as it is, so it is a sentence, and
  *  it promises no time: the hour can take a lapsed lease within fifteen
  *  seconds and hold it for up to nine minutes plus its write, a page's
- *  round for four. */
+ *  round for four minutes from its last word of progress (renewLease). */
 export const writingTheWorkbook = (holder: string | null) =>
   `${holder ? holder[0].toUpperCase() + holder.slice(1) : "Another round"} is writing the workbook; try again when it has finished.`;
 
@@ -368,6 +368,13 @@ export async function runMatrixRound(opts: {
   /** Where the round has got to, for a page holding a request open on it:
    *  a percentage and a word. The hour passes nothing and says nothing. */
   say?: (pct: number, word: string) => void | Promise<void>;
+  /** Whether the lease the caller took is still its own, as its last
+   *  renewal found it. The round from the page renews on every word, and
+   *  a silence longer than the lease - the workbook's bytes read and its
+   *  rewrite - can let the hour or an upload take a lapsed one: the
+   *  workbook is theirs then, and this round must not write it beside
+   *  them. The hour holds its lease for the whole hour and passes nothing. */
+  leaseHeld?: () => boolean;
 }): Promise<RoundOutcome> {
   const out: RoundOutcome = {
     at: new Date().toISOString(),
@@ -496,7 +503,7 @@ export async function runMatrixRound(opts: {
     try {
       if (!opts.timeLeft()) return skip("out of time before the workbook; the next hour writes it");
       await say(75, "Writing the training matrix workbook");
-      landed = await writeWorkbook({ by: opts.by, say }, out, owed);
+      landed = await writeWorkbook({ by: opts.by, say, leaseHeld: opts.leaseHeld }, out, owed);
       return out;
     } finally {
       try {
@@ -560,9 +567,13 @@ async function rememberOwed(by: string, owed: Set<string>) {
  * `say` is the round's progress word: the rewrite and the replace in the
  * library are the longest stretch of the round, so a word goes down
  * between them and a page watching is not left on 75 for the whole of it.
+ * That word also renews the lease, and `leaseHeld` says what the renewal
+ * found: a lease that passed to somebody else during the silence is not
+ * written under.
  */
 async function writeWorkbook(
-  opts: { by: string; say: (pct: number, word: string) => Promise<void> }, out: RoundOutcome, changedKeys: Set<string>,
+  opts: { by: string; say: (pct: number, word: string) => Promise<void>; leaseHeld?: () => boolean },
+  out: RoundOutcome, changedKeys: Set<string>,
 ): Promise<boolean> {
   const [tm] = await liveRowsOf("training-matrix");
   if (!tm) { out.roundSkipped = "no training matrix on file"; return false; }
@@ -606,6 +617,17 @@ async function writeWorkbook(
   if (!blob) { out.written = 0; return true; }
 
   await opts.say(85, "Filing the workbook in the library");
+  // The bytes read and the rewrite above are the round's longest silence.
+  // If the lease lapsed in it and the hour or an upload took it, the word
+  // just said found the lease no longer this round's: the workbook is the
+  // new holder's now and is not written beside them. The cells stay owed
+  // (the caller writes them down when nothing lands) and the next round
+  // pays them.
+  if (opts.leaseHeld && !opts.leaseHeld()) {
+    const holder = await leaseHolder().catch(() => null);
+    out.roundSkipped = `the lease passed to ${holder || "another round"} mid-round; the workbook was not written`;
+    return false;
+  }
   const { row } = await replaceSingleFile({
     category: "training-matrix",
     bytes: await blob.arrayBuffer(),

@@ -151,7 +151,13 @@ modules. Edit that code there and only there.
   `LEASE_FOR_MS` from its take or its last renewal - the round renews it
   on every word of progress (`renewLease`, the holder's token only), so a
   lapsed lease only ever means a round that died. Never by the age of the
-  last word, because the workbook step can outlast any of them. Every
+  last word, because the workbook step can outlast any of them. The hour
+  never takes a lease that is still being renewed: it tries for five
+  minutes and then gives up on the hour (`another round is still
+  running`). A page round whose renewal finds the lease taken - it lapsed
+  in a silence longer than `LEASE_FOR_MS` and the hour or an upload took
+  it - writes the workbook no further (`leaseHeld` into `runMatrixRound`)
+  and leaves its cells owed. Every
   writer of the workbook refused for the lease answers 409 with the one
   sentence (`writingTheWorkbook`), naming the holder (`leaseHolder`), and
   `GET /api/sync/last` names the holder too, so a page waiting on the
