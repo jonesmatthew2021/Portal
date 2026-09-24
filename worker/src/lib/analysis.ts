@@ -500,6 +500,13 @@ export function plainLine(e: ModelRefusal): string {
   }
 }
 
+/** What a job that fell over says on its screen: the account's short
+ *  sentence when the model refused, otherwise the error's own words. One
+ *  place for the four long readers (matrix, matrix check, OPMS, shift). */
+export function errorLine(e: unknown): string {
+  return e instanceof ModelRefusal ? plainLine(e) : e instanceof Error ? e.message : String(e);
+}
+
 export { OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM };
 
 /**

@@ -32,8 +32,7 @@ import { liveSingleFileRow, singleFileCategory } from "../db/documents.js";
 import {
   askJson,
   contentFor,
-  ModelRefusal,
-  plainLine,
+  errorLine,
   MATRIX_VERSION,
   matrixCheckKey,
   matrixReadingKey,
@@ -619,7 +618,7 @@ export async function runMatrixReadJob(id: string) {
   } catch (e) {
     // The account's refusals in their one short sentence, the same as
     // everywhere else; anything else as it stands.
-    const error = e instanceof ModelRefusal ? plainLine(e) : e instanceof Error ? e.message : String(e);
+    const error = errorLine(e);
     const missing = e instanceof MatrixMissing ? e.missing : undefined;
     await finish({ state: "error", error, missing });
   }
@@ -703,7 +702,7 @@ export async function runMatrixCheckJob(id: string) {
   } catch (e) {
     // The account's refusals in their one short sentence, the same as
     // everywhere else; anything else as it stands.
-    const error = e instanceof ModelRefusal ? plainLine(e) : e instanceof Error ? e.message : String(e);
+    const error = errorLine(e);
     const missing = e instanceof MatrixMissing ? e.missing : undefined;
     const unread = e instanceof MatrixUnread ? e.unread : undefined;
     await finish({ state: "error", error, missing, unread });

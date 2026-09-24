@@ -11,7 +11,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { equivalentCode, codeFor, ModelRefusal, plainLine, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM } from "../src/lib/analysis.js";
+import { equivalentCode, codeFor, ModelRefusal, plainLine, errorLine, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM } from "../src/lib/analysis.js";
 import { AI_BUSY, checkerRefusalLine } from "../src/lib/checker.js";
 import { crewFolderIn, looseIn, whoseFolder } from "../src/routes/sync.js";
 import { asKey } from "../src/db/cert-home.js";
@@ -269,6 +269,15 @@ test("a document the model turned away is about the document, said plainly", () 
   const e = new ModelRefusal(400, api("invalid_request_error", "messages.0.content.0.pdf.source.base64.data: The PDF specified was not valid."));
   assert.equal(e.kind, "document");
   assert.equal(plainLine(e), "The PDF specified was not valid.", "the field prefix is taken off");
+});
+
+test("a job that fell over says the account's sentence for a refusal and its own words for anything else", () => {
+  const low = api("invalid_request_error", "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.");
+  assert.equal(errorLine(new ModelRefusal(400, low)), OUT_OF_CREDIT);
+  assert.equal(errorLine(new ModelRefusal(529, api("overloaded_error", "Overloaded"))), READING_UNAVAILABLE);
+  assert.equal(errorLine(new ModelRefusal(401, api("authentication_error", "invalid x-api-key"))), KEY_PROBLEM);
+  assert.equal(errorLine(new Error("the sheet has no Equivalence tab")), "the sheet has no Equivalence tab");
+  assert.equal(errorLine("plain words"), "plain words");
 });
 
 test("an answer the portal cannot read is other, and other is never stored", () => {

@@ -29,8 +29,7 @@ import { liveSingleFileRow } from "../db/documents.js";
 import {
   askJson,
   contentFor,
-  ModelRefusal,
-  plainLine,
+  errorLine,
   MAX_ANSWER_TOKENS,
   MODEL,
   todayThere,
@@ -433,7 +432,7 @@ export async function runShiftJob(id: string) {
   } catch (e) {
     // The account's refusals in their one short sentence, the same as
     // everywhere else; anything else as it stands.
-    const error = e instanceof ModelRefusal ? plainLine(e) : e instanceof Error ? e.message : String(e);
+    const error = errorLine(e);
     const missing = e instanceof ShiftMissing ? e.missing : undefined;
     await finish({ state: "error", error, missing });
   }

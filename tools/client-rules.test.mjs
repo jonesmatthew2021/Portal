@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -878,6 +878,10 @@ const is = (got, want, what) => {
   is(lib.badgeShouldClear(lib.OUT_OF_CREDIT, up, { hourly: { at: up + 60_000, readError: null, readTried: false, roundSkipped: "the crew matrix has no items" } }), false, "an hour with nothing to read leaves it up");
   is(lib.badgeShouldClear(lib.OUT_OF_CREDIT, up, { hourly: { at: up + 60_000, readError: null } }), false, "a record that does not say whether it read leaves it up");
   is(lib.badgeShouldClear(lib.OUT_OF_CREDIT, up, null), false, "no answer, no change");
+  is(lib.accountLine(lib.KEY_PROBLEM), true, "the key's line is the account's");
+  is(lib.accountLine(lib.READING_UNAVAILABLE), true, "the busy line is the account's");
+  is(lib.accountLine("Failed to fetch"), false, "a line about the network is not the hour's to take down, so the tab does not ask for it");
+  is(lib.accountLine(""), false, "no line, nothing to ask about");
   is(lib.badgeShouldClear(lib.OUT_OF_CREDIT, up, { hourly: null }), false, "no hour yet, no change");
   // Only the account's three lines come down by themselves. An hour that
   // read says nothing about a library that could not be reached, a round

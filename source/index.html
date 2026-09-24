@@ -11958,9 +11958,15 @@ function missesInARow(before, wants, last) {
    hour that read says nothing about a library that could not be reached,
    a round refused for the lease or a save that never landed, so every
    other line stays until the button is pressed again, as it always did. */
+// The three lines about the account are the only ones an hour can answer for:
+// they come down by themselves once an hour reads clean. Every other line
+// under the button stays until the next press.
+function accountLine(err) {
+  return [OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM].includes(err);
+}
+
 function badgeShouldClear(err, errAt, last) {
-  if (!err) return false;
-  if (![OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM].includes(err)) return false;
+  if (!accountLine(err)) return false;
   const h = last && last.hourly;
   if (!h || h.at == null) return false;
   const at = typeof h.at === "number" ? h.at : Date.parse(h.at);
@@ -12209,8 +12215,10 @@ function UpdateDocumentation() {
       const wants = due(null) && !going.current && !heldElsewhere();
       // Asked all the same while the last answer said the hour was running,
       // so the buttons held down for it come back when it stops - and while
-      // the red line is up, so it can come down once an hour reads clean.
-      if (!wants && !roundRunning && !err) { unanswered.current = 0; return; }
+      // one of the account's lines is up, so it can come down once an hour
+      // reads clean. Any other line is not the hour's to take down, so it
+      // is no reason to ask.
+      if (!wants && !roundRunning && !accountLine(err)) { unanswered.current = 0; return; }
       let last = null;
       try {
         const r = await fetch("/api/sync/last", { cache: "no-store" });

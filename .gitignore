@@ -15,3 +15,8 @@ tools/preview/data.json
 
 # Scratch copies made by Claude Code workflows
 .claude/worktrees/
+
+# A session token and its hash, left by a hand test on 22 Sep 2026 - never source.
+worker/x
+worker/x.token
+worker/x.hash
