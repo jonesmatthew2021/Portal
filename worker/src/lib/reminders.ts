@@ -2,10 +2,10 @@ import { getEnv } from "../env.js";
 import { getStore } from "../compat/blobs.js";
 import { readDocument } from "./shared-state.js";
 import { vessel, vesselNow } from "../vessel.js";
-import { crewRowsOnly, crewRegister } from "../../../source/shared/names.js";
+import { crewRowsOnly, crewRegister, nameLetters, registerWords } from "../../../source/shared/names.js";
 import { daysUntil } from "../../../source/shared/bands.js";
 import {
-  reminderSetting, reminderDue, expiringWithin, byPerson, recipientsFor, reminderText, summaryText,
+  reminderSetting, reminderOwed, expiringWithin, byPerson, recipientsFor, reminderText, summaryText,
 } from "../../../source/shared/reminders.js";
 
 /**
@@ -28,16 +28,16 @@ import {
  * The day is claimed in the record - written against the version of the
  * record just read, so of two runs of the same tick only one can - before
  * a single email goes. A run cut off halfway through the sends leaves the
- * claim standing, and the rest of that day's ticks send nothing: an email
+ * claim standing, and the rest of that week's ticks send nothing: an email
  * missed is a line on the SharePoint page, an email sent twice is not
  * something that can be taken back. A failure before anything was sent
  * hands the day back, so the next hour tries again.
  */
 
 /** What the last week's reminders did, kept in the sync store under
- *  "last-reminder": the vessel's day they went on (the day a send was
- *  claimed, or the day before where nothing went and the next hour is to
- *  try again), when, the window in days, how many crew emails and
+ *  "last-reminder": the set day they went for (the day a send was claimed,
+ *  or the last one before where nothing went and the next hour is to try
+ *  again), when, the window in days, how many crew emails and
  *  summaries were sent, the addresses a send failed for, why nothing was
  *  sent where nothing needed to be, and the error where it could not be.
  *  The SharePoint page shows it. */
@@ -61,14 +61,25 @@ export const REMINDER_USERS_SQL = "SELECT id, email, name, role, disabled FROM u
 
 /** What a claim says until the sends are done: if the run is cut off, this
  *  is the line the SharePoint page shows. */
-export const UNFINISHED = "the reminders were started and did not finish - nothing more is sent today";
+export const UNFINISHED = "the reminders were started and did not finish - nothing more is sent this week";
 
-/** No sending on this deploy. */
-export const NO_EMAIL = "email sending isn't switched on for this deploy (no EMAIL binding) - nothing was sent";
+/** No sending on this deploy (no EMAIL binding in wrangler.toml). */
+export const NO_EMAIL = "email sending is not set up on this portal - nothing was sent";
+
+/** How long the sends may go on for, from the job's start. The hour's
+ *  deadline for the sync and the round is counted from the tick, and the
+ *  reminders come before them: a send that hangs must not eat the round's
+ *  time. Past it no new send is started, and whoever was not reached is
+ *  named on the record (a test shortens it). */
+export const reminderLimits = { sendingForMs: 60_000 };
+
+/** The record's line where the time ran out before the first send: nothing
+ *  went, so the next hour tries again. */
+export const OUT_OF_TIME = "the reminders ran out of time before the first email - the next hour tries again";
 
 /** The rules from names.js and bands.js the shared reminder rules lean on
  *  (a shared file cannot import another, so they are handed in). */
-const RULES = { crewRowsOnly, crewRegister, daysUntil };
+const RULES = { crewRowsOnly, crewRegister, nameLetters, registerWords, daysUntil };
 
 const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -79,6 +90,7 @@ const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
  * nothing to do. Never throws.
  */
 export async function weeklyReminders(now: number): Promise<ReminderRecord | null> {
+  const started = Date.now();
   try {
     const env = getEnv();
     const store = getStore("sync");
@@ -89,24 +101,31 @@ export async function weeklyReminders(now: number): Promise<ReminderRecord | nul
     const there = vesselNow(now);
     const held = await store.getWithMetadata(RECORD, { type: "json" });
     const record = held ? (held.data as ReminderRecord | null) : null;
-    if (!reminderDue(record, there, setting.weekday, setting.hour)) return null;
+    // The set day owed: today, or yesterday where its every tick was missed.
+    const owed = reminderOwed(record, there, setting.weekday, setting.hour);
+    if (!owed) return null;
 
     const base: ReminderRecord = {
-      day: there.day, at: now, window: setting.days, own: 0, summary: 0, failed: [], skipped: null, error: null,
+      day: owed, at: now, window: setting.days, own: 0, summary: 0, failed: [], skipped: null, error: null,
     };
-    // The claim: only one run of this tick can write it, and none after it
-    // today finds the reminders due.
+    // The claim: only one run of this tick can write it, and no tick after
+    // it this week finds the reminders owed.
     const claim: ReminderRecord = { ...base, error: UNFINISHED };
     const took = held
       ? (await store.setJSON(RECORD, claim, { onlyIfMatch: held.etag })).modified
       : (await store.setJSONIfAbsent(RECORD, claim)).written;
     if (!took) return null;
 
+    // Tried twice: a record left at the claim reads as a run that did not
+    // finish, when the emails went.
     const write = async (next: ReminderRecord) => {
-      try {
-        await store.setJSON(RECORD, next);
-      } catch (e) {
-        console.error("the reminders' record was not written:", e);
+      for (let tries = 1; tries <= 2; tries++) {
+        try {
+          await store.setJSON(RECORD, next);
+          break;
+        } catch (e) {
+          if (tries === 2) console.error("the reminders' record was not written:", e);
+        }
       }
       return next;
     };
@@ -117,7 +136,12 @@ export async function weeklyReminders(now: number): Promise<ReminderRecord | nul
       return write({ ...base, day: record?.day ?? null, error });
     };
 
+    // Kept outside the sends so a run that falls over part way still says
+    // what went and what did not.
     let sentAny = false;
+    const failed: string[] = [];
+    let ownSent = 0;
+    let summarySent = 0;
     try {
       const email = env.EMAIL;
       if (!email) return await notSent(NO_EMAIL);
@@ -127,12 +151,15 @@ export async function weeklyReminders(now: number): Promise<ReminderRecord | nul
       const { own, summary } = recipientsFor(users as never[], cur.doc.people, items, RULES);
       if (!own.length && !summary.length) return await write({ ...base, skipped: "nobody to send to" });
 
-      const failed: string[] = [];
-      let ownSent = 0;
-      let summarySent = 0;
+      let outOfTime = false;
       // Each on its own: one address the service refuses costs that one
       // email, not everybody's.
       const send = async (to: string, mail: { subject: string; text: string; html: string }) => {
+        if (outOfTime || Date.now() - started > reminderLimits.sendingForMs) {
+          outOfTime = true;
+          failed.push(to);
+          return false;
+        }
         try {
           sentAny = true;
           await email.send({ to, from: vessel.mailFrom, subject: mail.subject, text: mail.text, html: mail.html });
@@ -150,11 +177,18 @@ export async function weeklyReminders(now: number): Promise<ReminderRecord | nul
       for (const u of summary) {
         if (await send(String(u.email).trim(), all)) summarySent++;
       }
+      // Out of time before a single send: nothing went, so the day is handed
+      // back like any other failure before sending.
+      if (outOfTime && !sentAny) return await notSent(OUT_OF_TIME);
+      // Otherwise whoever was not reached is on the failed list, in red on
+      // the SharePoint page; the claim stands, so nobody is sent it twice.
       return await write({ ...base, own: ownSent, summary: summarySent, failed });
     } catch (e) {
       // Once anything has gone the claim stands: the day is kept, so
-      // nothing is sent again today.
-      return sentAny ? await write({ ...base, error: said(e) }) : await notSent(said(e));
+      // nothing is sent again this week.
+      return sentAny
+        ? await write({ ...base, own: ownSent, summary: summarySent, failed, error: said(e) })
+        : await notSent(said(e));
     }
   } catch (e) {
     console.error("the weekly reminders fell over:", e);

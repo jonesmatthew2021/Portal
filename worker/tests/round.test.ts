@@ -35,7 +35,7 @@ import { graphBudget } from "../src/files/store.js";
 import { writeZip, readZip, partOf, partText, datedWorkbookName } from "../../source/shared/workbook.js";
 import { asKnownPerson, crewRegister } from "../../source/shared/names.js";
 import { backupDue, backupName, namesToDrop, folderAllowed, nightlyBackup } from "../src/lib/backup.js";
-import { REMINDER_USERS_SQL, NO_EMAIL, UNFINISHED } from "../src/lib/reminders.js";
+import { REMINDER_USERS_SQL, NO_EMAIL, UNFINISHED, OUT_OF_TIME, reminderLimits, weeklyReminders } from "../src/lib/reminders.js";
 import { vessel, vesselNow } from "../src/vessel.js";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -3395,6 +3395,103 @@ test("an all-clear week sends nothing and says so; a day already claimed sends n
   await hourAt(MONDAY_0710 + 3_600_000, reminderEnv(cut, email));
   assert.equal(email.sent.length, 0, "a claimed day is never sent again");
   assert.equal(reminderRecord(cut.portal).error, UNFINISHED);
+});
+
+test("two runs of the same tick send once between them: the claim is on the record before the first email goes", async () => {
+  const r = await reminderPortal();
+  const seen: { day: string; error: string | null }[] = [];
+  const email = fakeEmail();
+  // What the record said at the moment each email went.
+  const watching = {
+    sent: email.sent,
+    async send(m: { to: string; from: string; subject: string; text: string; html: string }) {
+      seen.push(reminderRecord(r.portal));
+      return email.send(m);
+    },
+  };
+  setEnv(reminderEnv(r, watching) as never);
+  const both = await withClock(MONDAY_0710, () => Promise.all([weeklyReminders(MONDAY_0710), weeklyReminders(MONDAY_0710)]));
+  assert.equal(email.sent.length, 4, "four emails between the two runs, not eight");
+  assert.equal(both.filter((b) => b === null).length, 1, "one run found the day claimed and did nothing");
+  assert.equal(seen[0].day, "2026-09-28", "the day was claimed before the first email");
+  assert.equal(seen[0].error, UNFINISHED, "and the claim says so until the sends are done");
+  assert.equal(reminderRecord(r.portal).error, null);
+});
+
+test("a run that falls over after an email has gone keeps the day: the next hour sends nothing", async () => {
+  const r = await reminderPortal();
+  const email = fakeEmail();
+  // IT's address reads as itself twice - when the grants are sorted - and
+  // then throws, after Brenton's, Kachin's and the manager's have gone:
+  // something going wrong outside a send, part way through.
+  let looks = 0;
+  const trips = { toString() { if (++looks > 2) throw new Error("the list fell over part way"); return "help@example.com"; } };
+  const users = REMINDER_USERS.map((u) => (u.role === "it" ? { ...u, email: trips } : u));
+  const env = { ...reminderEnv(r, email), DB: withUsersTable(r.portal.db, users) };
+  await quiet(() => hourAt(MONDAY_0710, env));
+  assert.deepEqual(email.sent.map((m) => m.to), ["brenton@example.com", "kachin@example.com", "boss@example.com"]);
+  const rec = reminderRecord(r.portal);
+  assert.equal(rec.day, "2026-09-28", "the day stands, because emails went");
+  assert.equal(rec.error, "the list fell over part way");
+  assert.equal(rec.own, 2, "what went is on the record");
+  assert.equal(rec.summary, 1);
+  assert.equal(JSON.parse(r.portal.blobs.get("sync|last-hourly")!).applied, 1, "the hour ran");
+  const again = fakeEmail();
+  await hourAt(MONDAY_0710 + 3_600_000, reminderEnv(r, again));
+  assert.equal(again.sent.length, 0, "nobody is sent it twice");
+});
+
+test("the sends stop at their time limit: whoever was not reached is named, and nobody is sent it twice", async () => {
+  const r = await reminderPortal();
+  const email = fakeEmail();
+  // The first send takes a minute and a second.
+  const slow = {
+    sent: email.sent,
+    async send(m: { to: string; from: string; subject: string; text: string; html: string }) {
+      await email.send(m);
+      Date.now = () => MONDAY_0710 + 61_000;
+    },
+  };
+  await hourAt(MONDAY_0710, reminderEnv(r, slow));
+  assert.deepEqual(email.sent.map((m) => m.to), ["brenton@example.com"], "no send started past the minute");
+  const rec = reminderRecord(r.portal);
+  assert.deepEqual(rec.failed, ["kachin@example.com", "boss@example.com", "help@example.com"], "the rest are named on the record");
+  assert.equal(rec.own, 1);
+  assert.equal(rec.day, "2026-09-28", "Brenton's went, so the day stands");
+  assert.equal(JSON.parse(r.portal.blobs.get("sync|last-hourly")!).applied, 1, "the round still ran");
+  const again = fakeEmail();
+  await hourAt(MONDAY_0710 + 3_600_000, reminderEnv(r, again));
+  assert.equal(again.sent.length, 0, "Brenton is not sent it twice");
+
+  // Out of time before the first send: nothing went, so the next hour tries.
+  const late = await reminderPortal();
+  const real = reminderLimits.sendingForMs;
+  reminderLimits.sendingForMs = -1;
+  try {
+    await quiet(() => hourAt(MONDAY_0710, reminderEnv(late, email)));
+  } finally {
+    reminderLimits.sendingForMs = real;
+  }
+  assert.equal(reminderRecord(late.portal).error, OUT_OF_TIME);
+  assert.equal(reminderRecord(late.portal).day, null, "the day handed back");
+  const next = fakeEmail();
+  await hourAt(MONDAY_0710 + 3_600_000, reminderEnv(late, next));
+  assert.equal(next.sent.length, 4, "the next hour sends them");
+});
+
+test("the weekday moved after the week's send: nothing more that week", async () => {
+  const r = await reminderPortal();
+  const email = fakeEmail();
+  await hourAt(MONDAY_0710, reminderEnv(r, email));
+  assert.equal(email.sent.length, 4);
+  // Management moves the reminders to Thursday.
+  const doc = JSON.parse(r.portal.state.data);
+  r.portal.state.data = JSON.stringify({ ...doc, reminders: { ...REMINDERS_ON, weekday: 4 } });
+  const thursday = Date.parse("2026-09-30T23:10:00Z");
+  await hourAt(thursday, reminderEnv(r, email));
+  assert.equal(email.sent.length, 4, "not again three days later");
+  await hourAt(thursday + 7 * 86_400_000, reminderEnv(r, email));
+  assert.equal(email.sent.length, 8, "the Thursday after, as set");
 });
 
 test("the reminders ask the users table only for columns it has", () => {

@@ -150,11 +150,12 @@ function AccessGrantsPage() {
 
   return (
     <div>
-      <div style={{ marginBottom: 10 }}><Eyebrow color={T.accent}>Who can enter, and at what level</Eyebrow></div>
-
       {/* The weekly certificate-expiry emails: on or off, and when. Here
-          because this is the page that holds everybody's address. */}
+          because this is the page that holds everybody's address; a block
+          of its own at the top, so the heading below stays the grants'. */}
       {myRole !== "crew" && <ReminderSwitch />}
+
+      <div style={{ marginBottom: 10 }}><Eyebrow color={T.accent}>Who can enter, and at what level</Eyebrow></div>
 
       {/* Granting */}
       <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderLeft: `4px solid ${T.accent}`,
@@ -319,8 +320,9 @@ function AccessGrantsPage() {
  * setting from the document, so a change here is an ordinary save.
  *
  * The two number boxes keep what is being typed in the box itself and save
- * only a whole number in range - clearing a box to type 60 would otherwise
- * save the default back over it between the two keystrokes.
+ * it when the box is left or Enter is pressed - never on a keystroke, so
+ * typing 60 never saves a 6 the hour could send by. A figure that is not a
+ * whole number in range puts the box back to the setting as it stands.
  */
 function ReminderSwitch() {
   const { reminders, setReminders } = usePortal();
@@ -330,11 +332,14 @@ function ReminderSwitch() {
   React.useEffect(() => { setDays(String(reminders.days)); }, [reminders.days]);
   React.useEffect(() => { setHour(String(reminders.hour)); }, [reminders.hour]);
   const save = (patch) => setReminders({ ...reminders, ...patch });
-  const typed = (text, lo, hi, key, set) => {
-    set(text);
+  const settle = (text, lo, hi, key, set) => {
     const n = Number(text);
-    if (text.trim() !== "" && Number.isInteger(n) && n >= lo && n <= hi && n !== reminders[key]) save({ [key]: n });
+    if (text.trim() !== "" && Number.isInteger(n) && n >= lo && n <= hi) {
+      if (n !== reminders[key]) save({ [key]: n });
+      set(String(n));
+    } else set(String(reminders[key]));
   };
+  const onEnter = (e) => { if (e.key === "Enter") e.currentTarget.blur(); };
   return (
     <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderLeft: `4px solid ${T.teal}`,
       borderRadius: 2, padding: "13px 15px", marginBottom: 16, display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -345,7 +350,8 @@ function ReminderSwitch() {
       <div style={{ flex: "0 1 90px" }}>
         <Field label="Days">
           <input className="um-in" type="number" min={1} max={365} step={1} style={{ width: "100%" }} value={days}
-            onChange={(e) => typed(e.target.value, 1, 365, "days", setDays)} />
+            onChange={(e) => setDays(e.target.value)} onKeyDown={onEnter}
+            onBlur={(e) => settle(e.target.value, 1, 365, "days", setDays)} />
         </Field>
       </div>
       <ChoiceField label="Weekday">
@@ -355,7 +361,8 @@ function ReminderSwitch() {
       <div style={{ flex: "0 1 80px" }}>
         <Field label="Hour">
           <input className="um-in" type="number" min={0} max={23} step={1} style={{ width: "100%" }} value={hour}
-            onChange={(e) => typed(e.target.value, 0, 23, "hour", setHour)} />
+            onChange={(e) => setHour(e.target.value)} onKeyDown={onEnter}
+            onBlur={(e) => settle(e.target.value, 0, 23, "hour", setHour)} />
         </Field>
       </div>
     </div>
