@@ -30,6 +30,10 @@ import importSingle from "../src/routes/import-single.js";
 import worker, { hourWaits, hourDeadline, syncLastAnswer } from "../src/index.js";
 import { writeZip, readZip, partOf, partText, datedWorkbookName } from "../../source/shared/workbook.js";
 import { asKnownPerson, crewRegister } from "../../source/shared/names.js";
+import { perthNow, backupDue, backupName, namesToDrop, folderAllowed } from "../src/lib/backup.js";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { settleRound, applySettled } from "../../source/shared/matrix-rules.js";
 
 /* ------------------------------------------------------------------------ *
@@ -2675,6 +2679,87 @@ test("a phone photo the model cannot read is still taken off again when the phon
   assert.equal(row.removedBy, "not clear — retake");
   assert.equal(bucket.text("opms/Brenton - OPMS/unread-1.pdf"), null, "the photo is parked, not left live");
   assert.deepEqual(bucket.made, [], "no folder was made");
+});
+
+/* ------------------------------------------------------------------------ *
+ * The nightly backup's rules: Perth decides the day, a backup is owed once
+ * a day after the hour, the file is named for its day, a month of dailies
+ * and a year of monthlies are kept by name alone, and a folder the portal
+ * files into is refused.
+ * ------------------------------------------------------------------------ */
+test("Perth decides the backup's day and hour", () => {
+  assert.deepEqual(perthNow(Date.parse("2026-09-24T15:59:00Z")), { day: "2026-09-24", hour: 23 });
+  assert.deepEqual(perthNow(Date.parse("2026-09-24T16:00:00Z")), { day: "2026-09-25", hour: 0 });
+  assert.deepEqual(perthNow(Date.parse("2026-09-23T18:10:00Z")), { day: "2026-09-24", hour: 2 }, "ten past two in the morning, Perth");
+});
+
+test("a backup is owed after the hour, once a day, and again every hour until it lands", () => {
+  const two = { day: "2026-09-24", hour: 2 };
+  assert.equal(backupDue(null, two, 2), true, "never backed up: due at 02:10");
+  assert.equal(backupDue(null, { day: "2026-09-24", hour: 1 }, 2), false, "not at 01:10");
+  assert.equal(backupDue({ day: "2026-09-23" }, two, 2), true, "yesterday's on the record: due");
+  assert.equal(backupDue({ day: "2026-09-24" }, two, 2), false, "today's on the record: not again");
+  assert.equal(backupDue({ day: "2026-09-24" }, { day: "2026-09-24", hour: 14 }, 2), false, "…nor later in the day");
+  assert.equal(backupDue({ day: null, error: "the library refused the write" } as never, two, 2), true, "a record with an error and no day is one that never landed: due");
+  assert.equal(backupDue({ day: "2026-09-23", error: "the library refused the write" } as never, { day: "2026-09-24", hour: 3 }, 2), true, "…and so is one whose day is yesterday's");
+});
+
+test("the backup is named for its day", () => {
+  assert.equal(backupName("2026-09-24"), "Crew Portal backup 2026-09-24.json");
+});
+
+test("a month of dailies and a year of monthlies are kept, by name and never by listing", () => {
+  const n = (d: string) => `Crew Portal backup ${d}.json`;
+  assert.deepEqual(namesToDrop("2026-10-01"), [
+    n("2026-08-31"), n("2026-08-30"), n("2026-08-29"), n("2026-08-28"), n("2026-08-27"), n("2026-08-26"), n("2026-08-25"),
+    n("2025-09-01"),
+  ], "seven dailies from 31 to 37 days back, and the monthly 13 months back");
+  assert.deepEqual(namesToDrop("2026-10-31"), [
+    n("2026-09-30"), n("2026-09-29"), n("2026-09-28"), n("2026-09-27"), n("2026-09-26"), n("2026-09-25"), n("2026-09-24"),
+    n("2025-09-01"),
+  ]);
+  assert.deepEqual(namesToDrop("2026-10-02"), [
+    n("2026-08-31"), n("2026-08-30"), n("2026-08-29"), n("2026-08-28"), n("2026-08-27"), n("2026-08-26"),
+    n("2025-09-01"),
+  ], "31 days back is the first of September: that one stays as the month's");
+  assert.deepEqual(namesToDrop("2026-01-15"), [
+    n("2025-12-15"), n("2025-12-14"), n("2025-12-13"), n("2025-12-12"), n("2025-12-11"), n("2025-12-10"), n("2025-12-09"),
+    n("2024-12-01"),
+  ], "across a year end");
+});
+
+test("a folder the portal files into is refused, against the real map in wrangler.toml", () => {
+  const toml = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "wrangler.toml"), "utf8");
+  const setting = (name: string) => /"([^"]*)"/.exec(toml.split("\n").find((l) => l.startsWith(name + " = "))!)![1];
+  const env = {
+    SHAREPOINT_MAP: /SHAREPOINT_MAP = """([\s\S]*?)"""/.exec(toml)![1],
+    SHAREPOINT_FAUNA_FOLDER: setting("SHAREPOINT_FAUNA_FOLDER"),
+    SHAREPOINT_ROOT: setting("SHAREPOINT_ROOT"),
+  };
+  assert.equal(setting("BACKUP_FOLDER"), "", "ships empty: the owner names the folder");
+  assert.equal(setting("BACKUP_HOUR"), "2");
+  assert.deepEqual(folderAllowed("United Operations Team/Backups", env), { ok: true });
+  assert.deepEqual(folderAllowed("/United Operations Team/Backups/", env), { ok: true }, "slashes either end are nothing");
+  const refused = (folder: string, because: RegExp) => {
+    const said = folderAllowed(folder, env);
+    assert.equal(said.ok, false, folder + " should be refused");
+    assert.match((said as { reason: string }).reason, /is one the portal files into/);
+    assert.match((said as { reason: string }).reason, because);
+  };
+  refused("United Operations Team/Crew Certificate Verifications", /Crew Certificate Verifications/);
+  refused("United Operations Team/Crew Certificate Verifications/Backups", /Crew Certificate Verifications/);
+  refused("United Operations Team/OPMS Documents/Backups", /OPMS Documents/);
+  refused("United Operations Team/Crew Portal/Matrix", /Matrix/);
+  refused("United Operations Team/Handover Notes", /Handover Notes/);
+  refused("United Operations Team/Fauna", /Fauna/);
+  refused("united operations team/fauna/backups", /Fauna/);
+  refused("United Operations Team/Crew Portal/Backups", /Crew Portal/);
+  // What Crew Details points at joins the list: the certificate home and a man's own folder.
+  const alsoFiled = ["United Operations Team/Somewhere Else", "United Operations Team/Certs/Kyle"];
+  assert.equal(folderAllowed("United Operations Team/Somewhere Else/Backups", env, alsoFiled).ok, false);
+  assert.equal(folderAllowed("United Operations Team/Certs/Kyle", env, alsoFiled).ok, false);
+  assert.equal(folderAllowed("United Operations Team/Certs", env, alsoFiled).ok, true, "beside a man's folder is fine");
+  assert.equal(folderAllowed("", env).ok, false, "no folder named");
 });
 
 test("a dated sheet beats an undated one whatever the alphabet says", () => {

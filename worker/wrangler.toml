@@ -117,6 +117,16 @@ SHAREPOINT_ROOT = "United Operations Team/Crew Portal"
 # files, never the folder. Empty, and the app only offers the month as a
 # download.
 SHAREPOINT_FAUNA_FOLDER = "United Operations Team/Fauna"
+# The nightly backup: one JSON file a day - the shared document, the file
+# index, the users, the AI readings and the fauna log - written into this
+# folder in the library by the first hour after BACKUP_HOUR (Perth). The
+# folder is the owner's to make in Teams; the portal writes the file and
+# never the folder, and refuses a folder it already files into (the
+# certificate folders, Matrix, Fauna). Empty, and no backup is written
+# and nothing is shown. To put a backup back: POST /api/state/restore-file
+# (src/routes/restore-file.ts).
+BACKUP_FOLDER = ""
+BACKUP_HOUR = "2"
 SHAREPOINT_MAP = """
 {
   "certification/spreadsheet/": "United Operations Team/Crew Portal/Crew Certificates Spreadsheet/",
