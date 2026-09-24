@@ -77,7 +77,14 @@ CREATE TABLE IF NOT EXISTS documents (
   -- 2026; the worker adds them itself to an existing table
   -- (ensureDocumentColumns in src/db/documents.ts).
   adopted_from_folder INTEGER,
-  kept_in_place INTEGER
+  kept_in_place INTEGER,
+  -- What paper a certificate row is, where the person filing it said: one of
+  -- the five that stand in for a certificate (extension, lodged-renewal,
+  -- crewing-permit, assessor-declaration, issue-letter), beside qual_code,
+  -- which is then the column the paper is about. NULL is a certificate.
+  -- Added 25 Sep 2026; the worker adds it itself to an existing table
+  -- (ensureDocumentColumns in src/db/documents.ts).
+  evidence_kind TEXT
 );
 
 CREATE INDEX IF NOT EXISTS documents_category_idx ON documents (category, bucket);

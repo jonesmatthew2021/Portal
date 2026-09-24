@@ -45,6 +45,7 @@ const COLUMNS: Record<Exclude<Part, "readings">, string[]> = {
     "tag", "source", "party", "rank", "swing", "filed_on", "session_id", "created_at", "person", "folder",
     "qual_code", "expires_on", "checksum", "read_code", "read_expires", "read_issued", "read_issuer",
     "read_title", "read_at", "removed_at", "removed_by", "adopted_from_folder", "kept_in_place",
+    "evidence_kind",
   ],
   users: ["id", "email", "name", "role", "disabled", "created_at", "created_by", "last_login", "phone"],
   fauna: [

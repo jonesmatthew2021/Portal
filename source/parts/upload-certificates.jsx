@@ -483,6 +483,9 @@ function UploadCertificates() {
         person: person || found.person || guessPerson(e.file.name, names),
         custom: false,
         qualCode: "",
+        // What paper it is, where it is one of the five that stand in for a
+        // certificate rather than the certificate itself; "" is a certificate.
+        evidenceKind: "",
         expires: "",
         checksum: null,
         state: null,
@@ -577,13 +580,16 @@ function UploadCertificates() {
     if (!edit || edit.busy) return;
     const code = edit.qualCode || null;
     const expires = edit.expires || null;
+    // What paper it is, if it is one: a paper's date is the day its cover
+    // runs out, never the certificate's expiry, so it is written to no cell.
+    const kind = edit.evidenceKind || null;
     setEdit((ed) => (ed ? { ...ed, busy: true, err: "" } : ed));
     try {
       const title = code ? (QUALS.cols.find((x) => x[0] === code) || [])[1] || null : null;
-      await editStoredCertificate(c.id, { qualCode: code, expiresOn: expires, title });
-      updateCertificate(c.id, { qualCode: code || "", title: title || "", expires: expires || "" });
+      await editStoredCertificate(c.id, { qualCode: code, expiresOn: expires, title, evidenceKind: kind });
+      updateCertificate(c.id, { qualCode: code || "", title: title || "", expires: expires || "", evidenceKind: kind || "" });
 
-      if (code && expires) {
+      if (code && expires && !kind) {
         // An item recorded as carrying no expiry can only be held or not held,
         // so a date typed against one of those certificates records it as held
         // rather than putting an expiry into a cell that can't have one.
@@ -655,6 +661,7 @@ function UploadCertificates() {
       const fields = {
         person: item.person,
         qualCode: item.qualCode,
+        evidenceKind: item.evidenceKind,
         title: item.qualCode ? (QUALS.cols.find((c) => c[0] === item.qualCode) || [])[1] : "",
         expiresOn: item.expires,
         uploadedBy: role,
@@ -1107,6 +1114,13 @@ function UploadCertificates() {
                             onPick={(v) => patch(item.key, { qualCode: v })}
                             options={[{ value: "", label: "Not set" },
                               ...QUALS.cols.map((c) => ({ value: c[0], label: `${c[0]} · ${c[1]}` }))]} />
+                          {/* Or one of the five papers that stand in for a
+                              certificate, about the column chosen above. */}
+                          <div style={{ marginTop: 6 }}>
+                            <Choices value={item.evidenceKind || ""} compact
+                              onPick={(v) => patch(item.key, { evidenceKind: v })}
+                              options={paperChoices()} />
+                          </div>
                         </div>
                         <div style={{ maxWidth: 220 }}>
                           <div style={{ fontFamily: T.mono, fontSize: 11, color: T.muted, marginBottom: 5 }}>Expiry date (optional)</div>
@@ -1528,7 +1542,7 @@ function UploadCertificates() {
                           <button className="um-btn"
                             onClick={() => setEdit(edit && edit.id === c.id
                               ? null
-                              : { id: c.id, qualCode: c.qualCode || "", expires: c.expires || "", busy: false, err: "" })}
+                              : { id: c.id, qualCode: c.qualCode || "", evidenceKind: c.evidenceKind || "", expires: c.expires || "", busy: false, err: "" })}
                             style={{ background: "transparent", color: T.muted, fontSize: 10, fontWeight: 700, padding: "4px 0" }}>
                             {edit && edit.id === c.id ? "Close" : "Edit"}
                           </button>
@@ -1552,6 +1566,11 @@ function UploadCertificates() {
                                 onPick={(v) => setEdit((ed) => ({ ...ed, qualCode: v }))}
                                 options={[{ value: "", label: "Not on the matrix" },
                                   ...QUALS.cols.map(([code, title]) => ({ value: code, label: `${code} — ${title}` }))]} />
+                              <div style={{ marginTop: 6 }}>
+                                <Choices value={edit.evidenceKind || ""} compact
+                                  onPick={(v) => setEdit((ed) => ({ ...ed, evidenceKind: v }))}
+                                  options={paperChoices()} />
+                              </div>
                             </ChoiceField>
                           </div>
                           <div style={{ flex: "0 1 170px" }}>
@@ -2660,6 +2679,14 @@ function UpdateDocumentation() {
       {asking && <MatrixItems onClose={() => setAsking(false)} />}
     </>
   );
+}
+
+/* The choices for what paper a document is: the certificate itself, or one
+   of the five that stand in for one (source/shared/evidence.js), named and
+   nothing more. */
+function paperChoices() {
+  return [{ value: "", label: "Certificate" },
+    ...EVIDENCE_KINDS.map((k) => ({ value: k, label: EVIDENCE_LABELS[k] || k }))];
 }
 
 /* What the phone's panel says when the reading after an upload failed.

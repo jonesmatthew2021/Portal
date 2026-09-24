@@ -26,10 +26,10 @@ export function ensureDocumentColumns() {
       // stop a request over - the route will say what is missing.
       if (!cols.length) return;
       const have = new Set(cols.map((c) => c.name));
-      for (const col of ["adopted_from_folder", "kept_in_place"]) {
+      for (const [col, type] of [["adopted_from_folder", "INTEGER"], ["kept_in_place", "INTEGER"], ["evidence_kind", "TEXT"]]) {
         if (have.has(col)) continue;
         try {
-          await d1.prepare(`ALTER TABLE documents ADD COLUMN ${col} INTEGER`).run();
+          await d1.prepare(`ALTER TABLE documents ADD COLUMN ${col} ${type}`).run();
         } catch (e) {
           // Another isolate got there first in the same instant: the column
           // is there, which is all that was wanted. And a table that is not

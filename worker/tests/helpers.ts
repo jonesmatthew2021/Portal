@@ -194,7 +194,7 @@ export function portalDb(doc: Record<string, unknown>, rows: Record<string, unkn
   Object.entries(readings).forEach(([k, v]) => blobs.set("certificate-readings|" + k, JSON.stringify(v)));
   const drizzle = drizzleOn(rows);
   const db = fakeDb((sql, args) => {
-    if (/PRAGMA table_info/.test(sql)) return { results: [{ name: "adopted_from_folder" }, { name: "kept_in_place" }] };
+    if (/PRAGMA table_info/.test(sql)) return { results: [{ name: "adopted_from_folder" }, { name: "kept_in_place" }, { name: "evidence_kind" }] };
     if (/SELECT data, rev FROM portal_state/.test(sql)) return { results: stateRow.present ? [{ ...state }] : [] };
     // The restore's seed of an empty row where there is none.
     if (sql === "INSERT INTO portal_state (id, data, rev, updated_at) VALUES (?1, '{}', 0, ?2) ON CONFLICT (id) DO NOTHING") {

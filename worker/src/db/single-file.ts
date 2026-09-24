@@ -217,7 +217,7 @@ export async function replaceSingleFile(
     filedOn: input.filedOn, sessionId: input.sessionId ?? null, createdAt: new Date(at * 1000),
     person: null, folder: null, qualCode: null, expiresOn: null, checksum: null,
     readCode: null, readExpires: null, readIssued: null, readIssuer: null, readTitle: null, readAt: null,
-    removedAt: null, removedBy: null, adoptedFromFolder: null, keptInPlace: null,
+    removedAt: null, removedBy: null, adoptedFromFolder: null, keptInPlace: null, evidenceKind: null,
   } satisfies DocumentRow;
   return { row, replaced: existing.map((r) => ({ id: r.id, filename: r.filename })) };
 }

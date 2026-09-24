@@ -6,6 +6,7 @@ import { getEnv } from "../env.js";
 import { vessel } from "../vessel.js";
 import { imageToPdf, imagesToPdf } from "../lib/pdf-wrap.js";
 import { certHome } from "../db/cert-home.js";
+import { EVIDENCE_KINDS } from "../../../source/shared/evidence.js";
 import {
   CERT_ROOT,
   SINGLE_FILE_CATEGORIES,
@@ -91,6 +92,9 @@ export function toRecord(row: Row) {
          only rename one it has actually read. */
       readCode: read.readCode ?? null,
       readTitle: read.readTitle ?? null,
+      /* What paper the person said it was when they filed it, beside the
+         column it is about (qualCode); null is a certificate. */
+      evidenceKind: row.evidenceKind ?? null,
       by: row.uploadedBy,
       uploaded: row.filedOn,
     };
@@ -151,6 +155,12 @@ async function uploadCertificate(form: FormData, file: File) {
       { error: `${file.name} wasn't filed — no crew member was chosen for it.` },
       { status: 400 },
     );
+  }
+  // What paper it is, where the uploader picked one of the five; anything
+  // else is refused rather than filed as a paper nobody can read.
+  const evidenceKind = field(form, "evidenceKind");
+  if (evidenceKind && !(EVIDENCE_KINDS as readonly string[]).includes(evidenceKind)) {
+    return Response.json({ error: `${file.name} wasn't filed — "${evidenceKind}" is not one of the papers the portal knows.` }, { status: 400 });
   }
 
   const folder = folderFor(person);
@@ -319,6 +329,7 @@ async function uploadCertificate(form: FormData, file: File) {
         qualCode: field(form, "qualCode"),
         expiresOn: field(form, "expiresOn"),
         checksum,
+        evidenceKind,
       })
       .returning();
 
@@ -467,6 +478,7 @@ export default async (req: Request) => {
               d.filed_on AS filedOn, d.session_id AS sessionId, d.person, d.folder,
               d.qual_code AS qualCode, d.expires_on AS expiresOn, d.checksum,
               d.read_code AS readCode, d.read_title AS readTitle,
+              d.evidence_kind AS evidenceKind,
               d.removed_at AS removedAt, d.removed_by AS removedBy,
               d.kept_in_place AS keptInPlace,
               json_extract(b.value, '$.issuedOn') AS readIssued,

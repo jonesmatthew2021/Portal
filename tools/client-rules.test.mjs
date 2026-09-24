@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, recognisedUntil, recognitionFills, foreignExpiryOn, isRecognitionReading, certCoverFor, coverLine, bandWithCover, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, EVIDENCE_KINDS, marineOrderLines };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, recognisedUntil, recognitionFills, foreignExpiryOn, isRecognitionReading, certCoverFor, coverLine, bandWithCover, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, paperKind, EVIDENCE_KINDS, EVIDENCE_LABELS, marineOrderLines };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -2624,6 +2624,11 @@ const is = (got, want, what) => {
     "a high risk work licence's DG class fills the dogging column and nothing else");
   is(codes({ expiresOn: "2030-04-01", units: ["DG", "LF", "RI", "CV"] }, null), ["HR-01", "HR-02"], "DG and CV fill both");
   is(shared.coveredCodes(read({ units: ["DG", "LF", "RI", "CV"] }), table, cols, null), ["HR-01", "HR-02"], "the worker's module reads the classes the same");
+  // A class is an entry that IS the code, alone: a prose entry carrying the
+  // letters is not a licence class and fills nothing.
+  is(codes({ expiresOn: "2030-04-01", units: ["Class DG"] }, null), [], "'Class DG' is a phrase, not the class");
+  is(codes({ expiresOn: "2030-04-01", units: ["Dangerous Goods (DG) awareness"] }, null), [], "a course title bracketing the code is not the class");
+  is(codes({ expiresOn: "2030-04-01", units: ["C6, DG, LF, RB, WP"] }, null), [], "five classes on one line are not one class");
   is(codes({ readable: false, endorsements: coc }, "QL-01"), [], "an unreadable certificate covers nothing");
   is(coveredCodes({ readable: true, expiresOn: "2031-05-26" }, table, cols, "QL-01"), [], "nor does a reading made before the question was asked");
   is(unitColumnsIn(cols), ["QL-18", "QL-19", "QL-20", "PT-02", "PT-03"], "the training columns are read off the column titles");
@@ -2727,6 +2732,19 @@ const is = (got, want, what) => {
   is(coveredBy("QL-01", "EVANS, Brenton", rows, oneWord, today, rules), cover, "a one-word printed name that is his still covers");
   const hers = { ...readings, ext: { ...readings.ext, holderName: "Kachin" } };
   is(coveredBy("QL-01", "EVANS, Brenton", rows, hers, today, rules), null, "one that is another man's does not");
+  /* What paper a document is: the kind the person picked at upload first,
+     then a hand tag with no kind (the certificate for that column, whatever
+     the model called it), then the model's word. The page and the worker
+     answer it the one way. */
+  const { paperKind } = lib;
+  is(paperKind({ qualCode: "QL-01", evidenceKind: "extension" }, { evidenceKind: null }), "extension", "the person's kind beats the model");
+  is(paperKind({ qualCode: "QL-01", evidenceKind: null }, { evidenceKind: "extension" }), "", "a hand tag alone is the certificate");
+  is(paperKind({ qualCode: null, evidenceKind: null }, { evidenceKind: "extension" }), "extension", "untagged, the model's word");
+  is(shared.paperKind({ qualCode: "QL-01", evidenceKind: "extension" }, { evidenceKind: null }), "extension", "the worker's module answers the same");
+  const picked = [{ id: "ext", key: "ext", person: "EVANS, Brenton", code: "QL-01", tagged: true, kind: "extension", filedOn: "2026-08-02" }, rows[1]];
+  const misread = { ...readings, ext: { ...readings.ext, evidenceKind: null } };
+  is(coveredBy("QL-01", "EVANS, Brenton", picked, misread, today, rules), cover, "a letter tagged as an extension about his Master covers it, though the model read it as a certificate");
+  is(coveredBy("QL-01", "EVANS, Brenton", [{ ...picked[0], kind: null }, rows[1]], readings, today, rules), null, "the same tag with no kind is the certificate: no cover");
 }
 
 /* ---- the certificate of recognition: never longer than the certificate it

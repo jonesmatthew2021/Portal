@@ -503,8 +503,10 @@ const certLinkFor = (dates, certificates, person, code) => {
   if (d && d.url) return d.url;
   const P = String(person || "").trim().toUpperCase();
   const C = String(code || "").trim().toUpperCase();
+  // A paper filed about the column (an extension letter, a lodged renewal)
+  // is not the certificate for it, so it never stands in as the link.
   const f = (certificates || []).find(
-    (c) => c.url && String(c.person || "").trim().toUpperCase() === P
+    (c) => c.url && !c.evidenceKind && String(c.person || "").trim().toUpperCase() === P
       && String(c.qualCode || "").trim().toUpperCase() === C,
   );
   return f ? f.url : null;

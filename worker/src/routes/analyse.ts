@@ -11,6 +11,7 @@ import { readDocument } from "../lib/shared-state.js";
 import { asKnownPerson, crewRegister, nameIsSomebodyElse } from "../../../source/shared/names.js";
 import { isMsicCard, msicAsWritten, msicCodeIn, newestCard, openToCertificates, particularsFor, particularsKeyOf, ticketCodesIn } from "../../../source/shared/particulars.js";
 import { coveredCells, unitColumnsIn } from "../../../source/shared/covers.js";
+import { paperKind } from "../../../source/shared/evidence.js";
 import { isRecognitionReading, recognisedUntil, recognitionFills } from "../../../source/shared/recognition.js";
 import { vessel } from "../vessel.js";
 import { getEnv } from "../env.js";
@@ -176,8 +177,11 @@ Rules:
 - Dates: Australian documents are day-first. "10/03/2028" is 2028-03-10.
 - Only give expiresOn if a date of expiry, valid-until or renewal-due is actually
   printed. Never calculate one from the issue date, and never guess a year.
-- Set readable to false when the document is too poor to read, is not a
-  certificate, or is a certificate for something not on the list.
+- Set readable to false only when the document is too poor to read, or is none
+  of these: a certificate, a licence, a training statement of attainment, or
+  one of the five papers named under evidenceKind below. A certificate or
+  course for something not on the list is readable, with qualCode null. The
+  five papers are readable and carry their evidenceKind.
 - Only give qualCode when the document is plainly that item. Use "high" only when
   the printed title and the item title are the same qualification. If two codes
   could fit, pick neither and return null.
@@ -188,8 +192,8 @@ Rules:
   endorsement; otherwise null. [] where the document prints none.
 - units: the national training unit codes printed on the document, as printed —
   "HLTAID011", "HLTAID015", "SITXFSA005", "RIIWHS202E" — and the class codes
-  printed on a high risk work licence, such as DG or CV, one each. [] where
-  there are none.
+  printed on a high risk work licence, each class code alone as its own entry
+  ("DG", "CV"), never inside a phrase. [] where there are none.
 - capacities: the capacities a certificate of competency says the holder may
   serve in, each as printed — "Master", "GMDSS Radio Operator", "Chief Mate".
   [] where the document prints none.
@@ -694,6 +698,17 @@ const words = (s: string | null | undefined) =>
 
 const dmy = (iso: string) => iso.split("-").reverse().join("/");
 
+/** A reading with the date typed against the document on the portal in
+ *  place of the one read off the scan, where somebody typed one. For a
+ *  document that is no one column - a high risk work licence - the covers
+ *  rule reads the expiry off the reading, and the typed date has to beat the
+ *  read one there exactly as it does for a certificate's own column. The
+ *  page's cells do the same (certificateStanding in lib/analysis.ts). */
+export function typedOver(row: { expiresOn?: string | null }, reading: Reading): Reading {
+  const typed = isDate(row.expiresOn) ? normDate(row.expiresOn!) : null;
+  return typed ? { ...reading, expiresOn: typed } : reading;
+}
+
 // isDate() truncates to the first 10 characters before checking the ISO shape,
 // so a value that passed it may still carry more than a bare YYYY-MM-DD — a full
 // timestamp, say. Anything compared against a date or handed to dmy() once it
@@ -951,7 +966,7 @@ export async function compareMatrix(
        and joins only the covering pass; only one that covers nothing
        either is nothing on the matrix. */
     const ownColumn = !!code && colAt.has(code.trim().toUpperCase());
-    if (!ownColumn && !coveredCells(reading, vessel.covers, vessel.qualColumns, null)
+    if (!ownColumn && !coveredCells(typedOver(row, reading), vessel.covers, vessel.qualColumns, null)
       .some((cell) => !!cell.until && colAt.has(cell.code.trim().toUpperCase()))) {
       notes.push({
         kind: "no-code",
@@ -1002,19 +1017,23 @@ export async function compareMatrix(
        (source/shared/evidence.js) and shown as a cover, in amber, saying
        what carries him.
 
-       Unless somebody tagged the row. The model sometimes reads an ordinary
-       certificate as one of the five papers, and left to the reading that
-       certificate stopped filling its cell and had the date cleared as an
-       orphan. The person who tagged it chose the item off the list, which
-       beats the model's guess about what kind of paper it is the same way
-       it beats the model's code: a tagged row is the certificate for its
-       column, and a paper is filed untagged. The page's cells and the
-       evidence rule read the tag the same way. */
-    if (reading.evidenceKind && !row.qualCode) {
+       Which paper it is, if any, is the one question paperKind answers
+       (source/shared/evidence.js): the kind the person picked when they
+       filed it, else - where they tagged its column and picked no kind -
+       the certificate for that column whatever the model called it, else
+       the reading's word. The model sometimes reads an ordinary certificate
+       as one of the five papers, and left to the reading that certificate
+       stopped filling its cell and had the date cleared as an orphan; the
+       person who tagged it chose the item off the list, which beats the
+       model's guess. And a paper filed with its kind and its column is a
+       paper about that column, never the certificate. The page's cells and
+       the evidence rule read the row the same way. */
+    const paper = paperKind(row, reading);
+    if (paper) {
       notes.push({
         kind: "no-code",
         person: row.person,
-        detail: `Read as ${reading.evidenceKind}, which stands in for a certificate rather than being one, so it fills no cell.`,
+        detail: `${row.evidenceKind ? "Filed" : "Read"} as ${paper}, which stands in for a certificate rather than being one, so it fills no cell.`,
         certificate: link,
       });
       continue;
@@ -1071,8 +1090,10 @@ export async function compareMatrix(
   // no column of its own has no contest to join here: it covers below.
   const coverOnly: { row: Row; reading: Reading; person: string }[] = [];
   for (const { row, reading, person, code } of standing) {
-    // Keyed as the claims are keyed: the register's name, upper case.
-    if (!code) { coverOnly.push({ row, reading, person: person.trim().toUpperCase() }); continue; }
+    // Keyed as the claims are keyed: the register's name, upper case. A
+    // document with no column of its own is dated as its own column would
+    // be - the date typed against it first (typedOver).
+    if (!code) { coverOnly.push({ row, reading: typedOver(row, reading), person: person.trim().toUpperCase() }); continue; }
     const key = keyFor(person, code);
     const sitting = claim.get(key);
     if (!sitting) {

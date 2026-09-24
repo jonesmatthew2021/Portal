@@ -97,6 +97,12 @@ export const documents = sqliteTable(
        the live database needed no hand-run migration. */
     adoptedFromFolder: integer("adopted_from_folder"),
     keptInPlace: integer("kept_in_place"),
+
+    /* What paper a certificate row is, where the person filing it said so:
+       one of the five that stand in for a certificate (EVIDENCE_KINDS),
+       beside qualCode, which is then the column the paper is about. Null is
+       a certificate. Added lazily the same way. */
+    evidenceKind: text("evidence_kind"),
   },
   (t) => [
     index("documents_category_idx").on(t.category, t.bucket),

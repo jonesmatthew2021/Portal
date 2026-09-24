@@ -27,7 +27,8 @@ import { readMatrixOnce, startMatrixReadJob, runMatrixReadJob, readMatrixReadJob
 import { todayThere } from "../src/lib/analysis.js";
 import sync, { apply, outranks, sheetOrder, survey } from "../src/routes/sync.js";
 import roundRoute, { BUDGET_MS, LEASE_FOR_MS, progressAnswer } from "../src/routes/round.js";
-import files from "../src/routes/files.js";
+import files, { toRecord } from "../src/routes/files.js";
+import fileRoute from "../src/routes/file.js";
 import renameFile from "../src/routes/rename-file.js";
 import importSingle from "../src/routes/import-single.js";
 import worker, { hourWaits, hourDeadline, syncLastAnswer } from "../src/index.js";
@@ -167,7 +168,7 @@ test("a removed copy is parked flat under removed/, and no folder is made", asyn
 function documentsDb(rows: (ReturnType<typeof liveRow> | ReturnType<typeof keptRow>)[]) {
   const asked: Asked[] = [];
   const db = fakeDb((sql, args) => {
-    if (/PRAGMA table_info/.test(sql)) return { results: [{ name: "adopted_from_folder" }, { name: "kept_in_place" }] };
+    if (/PRAGMA table_info/.test(sql)) return { results: [{ name: "adopted_from_folder" }, { name: "kept_in_place" }, { name: "evidence_kind" }] };
     if (/FROM documents WHERE category = \?1 AND removed_at IS NULL/.test(sql)) return { results: rows.filter((r) => r.category === args[0] && !r.removedAt) };
     if (/SELECT id, removed_at AS removedAt, kept_in_place AS keptInPlace FROM documents WHERE blob_key = \?1/.test(sql)) {
       return { results: rows.filter((r) => r.blobKey === args[0]).map((r) => ({ id: r.id, removedAt: r.removedAt ?? null, keptInPlace: r.keptInPlace ?? null })) };
@@ -2366,7 +2367,7 @@ test("a fresh database with no documents table is let through, not altered", asy
   });
   setEnv({ DB: late } as never);
   await ensureDocumentColumns();
-  assert.equal(late.asked.filter((a) => /ALTER TABLE/.test(a.sql)).length, 2, "both columns were tried, and neither stopped the request");
+  assert.equal(late.asked.filter((a) => /ALTER TABLE/.test(a.sql)).length, 3, "all three columns were tried, and none stopped the request");
   forgetDocumentColumns();
 });
 
@@ -2546,6 +2547,86 @@ test("a PDF the model turns away is stored as unreadable, with the plain reason,
   const stored = JSON.parse(portal.blobs.get("certificate-readings|r1/unread-1.json")!);
   assert.equal(stored.readable, false);
   assert.match(stored.reason, /^The model turned this file away: The PDF specified was not valid\./, "the field prefix is off the reason");
+});
+
+test("a paper that stands in for a certificate is readable, and the question says so", async () => {
+  /* The question used to tell the model that a document which "is not a
+     certificate" is unreadable, and three rules later asked it which of the
+     five papers a non-certificate is. A model that followed the first rule
+     marked every letter unreadable and no evidenceKind ever fired. */
+  const { portal } = await unreadPortal(1);
+  const model = modelAnswers(() => ({ status: 200, body: readingStream({ ...reading, qualCode: null,
+    certificateTitle: "Extension of certificate of competency", evidenceKind: "extension", expiresOn: "2026-11-25" }) }));
+  try {
+    await extract([["QL-01", "Master"]], 4);
+  } finally {
+    model.restore();
+  }
+  const stored = JSON.parse(portal.blobs.get("certificate-readings|r1/unread-1.json")!);
+  assert.equal(stored.readable, true, "a paper answered readable is stored readable");
+  assert.equal(stored.evidenceKind, "extension", "and carries its kind");
+  // The question itself, as it went to the model (the body is JSON, so its
+  // newlines are escaped).
+  const asked = model.calls[0].replace(/\\n/g, " ").replace(/\s+/g, " ");
+  assert.ok(!/is not a certificate, or is a certificate for something not on the list/.test(asked),
+    "the old rule, which made every paper unreadable, is gone");
+  assert.ok(/one of the five papers/.test(asked), "the five papers are named as readable");
+  assert.ok(/for something not on the list is readable/.test(asked), "a certificate the matrix has no column for is still read");
+  assert.ok(/each class code alone/.test(asked), "the licence classes are asked for one per entry, the code alone");
+});
+
+test("a licence with no column of its own takes the date typed against it, in the round and on the page alike", async () => {
+  /* A high risk work licence is no one column: its DG class fills HR-01 by
+     the covers table. It used to be dated from the reading alone, so the
+     expiry the person typed at upload - which beats the reading for every
+     certificate with a column of its own - was ignored for the licence. */
+  const people = [{ name: "EVANS, Brenton", aliases: ["bRENTON"] }];
+  const quals = { cols: [["HR-01", "Dogging (DG)", "High risk work"]] as [string, string, string][],
+    rows: [["EVANS, Brenton", "Master", "", [""]]] as [string, string, string, string[]][] };
+  const licence: Record<string, unknown> = { ...billysTicket, id: "hrw", person: "bRENTON", filename: "licence.pdf", qualCode: null, expiresOn: "2030-04-01", checksum: "hrw" };
+  const read = { ...reading, holderName: "Brenton Evans", certificateTitle: "Licence to Perform High Risk Work",
+    qualCode: null, expiresOn: "2029-01-01", units: ["DG"], endorsements: [], capacities: [] };
+  const portal = portalDb({ quals, people }, [licence], { "r1/hrw.json": read });
+  setEnv({ DB: portal.db, FILE_STORE: "r2" } as never);
+  const out = await compareMatrix(quals, null, asKnownPerson(people));
+  assert.deepEqual(out.settled, [{ person: "EVANS, Brenton", code: "HR-01", value: "2030-04-01" }], "the round takes the typed date");
+  const page = await certificateStanding();
+  assert.deepEqual(page.dates.map((d) => [d.code, d.expires, d.covered]), [["HR-01", "2030-04-01", true]], "and so do the page's cells");
+  // Nothing typed: the reading's date, as before.
+  licence.expiresOn = null;
+  const plain = await compareMatrix(quals, null, asKnownPerson(people));
+  assert.deepEqual(plain.settled, [{ person: "EVANS, Brenton", code: "HR-01", value: "2029-01-01" }]);
+  assert.deepEqual((await certificateStanding()).dates.map((d) => d.expires), ["2029-01-01"]);
+});
+
+test("a paper filed by hand carries its kind and the column it is about, on the row and in the listing", async () => {
+  /* After a hand tag makes a document the certificate, a paper had to be
+     uploaded untagged, so which column a letter was about rested on the
+     model's guess alone. The upload page's picker now says what paper it
+     is; the row keeps the kind beside the column, and the listing hands
+     both back. */
+  const { portal } = await oneManPortal();
+  const patch = (id: string, edit: Record<string, unknown>) => fileRoute(
+    new Request(`http://portal/api/files/${id}?admin=1`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ edit }) }),
+    { params: { id } },
+  );
+  const res = await patch("c2", { qualCode: "QL-01", evidenceKind: "extension" });
+  assert.equal(res.status, 200, await res.clone().text());
+  const said = (await res.json()) as { qualCode: string | null; evidenceKind: string | null };
+  assert.equal(said.qualCode, "QL-01");
+  assert.equal(said.evidenceKind, "extension", "the answer carries the kind");
+  const row = portal.rows.find((r) => r.id === "c2")!;
+  assert.equal(row.evidenceKind, "extension", "the row keeps it");
+
+  assert.equal((toRecord(row as never) as { evidenceKind?: string | null }).evidenceKind, "extension", "the listing's record hands it to the page");
+
+  const bad = await patch("c2", { evidenceKind: "letter-from-a-mate" });
+  assert.equal(bad.status, 400, "a kind that is not one of the five is refused");
+  assert.equal(portal.rows.find((r) => r.id === "c2")!.evidenceKind, "extension", "and nothing changed");
+
+  const cleared = await patch("c2", { evidenceKind: "" });
+  assert.equal(cleared.status, 200);
+  assert.equal(portal.rows.find((r) => r.id === "c2")!.evidenceKind, null, "an empty choice is the certificate again");
 });
 
 test("over the rate: the batch stores nothing and says the reading is unavailable", async () => {

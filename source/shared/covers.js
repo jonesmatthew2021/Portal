@@ -101,6 +101,12 @@ export const COVER_SOURCES = ["endorsements", "units", "capacities"];
  *  every column whose title happens to carry it. */
 const UNIT_CODE = /^(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{6,}$/;
 
+/** A licence class as WorkSafe prints one, and as a `from: "units"` row
+ *  reads one: two or three capital letters with an optional digit ("DG",
+ *  "CV", "WP"), or a letter and a digit ("C6"). The whole entry, nothing
+ *  round it. */
+const CLASS_CODE = /^(?:[A-Z]{2,3}[0-9]?|[A-Z][0-9])$/;
+
 /** A date as the matrix holds it, or null.
  * @param {unknown} v
  * @returns {string | null}
@@ -212,13 +218,16 @@ export function coveredCells(reading, covers, columns, ownCode) {
   };
 
   const printed = Array.isArray(reading.endorsements) ? reading.endorsements : [];
-  /* The classes a licence prints, each as its own token: the model may list
-     "C6, DG, LF, RB, WP" as five codes or as one line, and either way DG is
-     one of them and DGA is not. Read off the units as the reading listed
-     them - only what the reading says are codes, never a word in a title. */
+  /* The classes a licence prints, one entry each: the question asks for
+     each class code alone, and an entry counts as a class only when the
+     whole entry, trimmed, IS a code. The entries used to be split into
+     words, so a course the model listed as a unit - "Dangerous Goods (DG)
+     awareness", "Class DG" - handed its DG to the dogging column with that
+     course's expiry. A phrase is not a licence class, whatever letters it
+     carries. */
   const unitTokens = (Array.isArray(reading.units) ? reading.units : [])
-    .flatMap((u) => String(u == null ? "" : u).toUpperCase().split(/[^A-Z0-9]+/))
-    .filter(Boolean);
+    .map((u) => String(u == null ? "" : u).trim().toUpperCase())
+    .filter((t) => CLASS_CODE.test(t));
   (Array.isArray(covers) ? covers : []).forEach((rule) => {
     if (!rule || typeof rule !== "object") return;
     const code = asCode(rule.code);

@@ -3565,6 +3565,9 @@ function SwingShiftAllocation({ here }) {
     const code = String(c.qualCode || "").trim().toUpperCase();
     const who = String(c.person || "").trim().toUpperCase();
     if (!code || !who) return;
+    // A paper filed about a column - an extension letter, a lodged renewal -
+    // is not the certificate: its date is the day the cover runs out.
+    if (c.evidenceKind) return;
     const held = !!noExpiryPeriod(code);
     const date = !held && /^\d{4}-\d{2}-\d{2}/.test(String(c.expires || "")) ? String(c.expires).slice(0, 10) : null;
     if (!held && !date) return; // a scan with no expiry read off it settles nothing

@@ -1,5 +1,6 @@
 
 import { eq } from "drizzle-orm";
+import { EVIDENCE_KINDS } from "../../../source/shared/evidence.js";
 import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
 import { certHome } from "../db/cert-home.js";
@@ -121,9 +122,17 @@ export default async (req: Request, context: { params: { id: string } }) => {
       const edit = body.edit as Record<string, unknown>;
       const clean = (v: unknown) => (typeof v === "string" && v.trim() !== "" ? v.trim() : null);
 
-      const patch: { qualCode?: string | null; expiresOn?: string | null; title?: string | null } = {};
+      const patch: { qualCode?: string | null; expiresOn?: string | null; title?: string | null; evidenceKind?: string | null } = {};
       if ("qualCode" in edit) patch.qualCode = clean(edit.qualCode);
       if ("title" in edit) patch.title = clean(edit.title);
+      // What paper it is: one of the five, or nothing - a certificate.
+      if ("evidenceKind" in edit) {
+        const kind = clean(edit.evidenceKind);
+        if (kind && !(EVIDENCE_KINDS as readonly string[]).includes(kind)) {
+          return Response.json({ error: `"${kind}" is not one of the papers the portal knows.` }, { status: 400 });
+        }
+        patch.evidenceKind = kind;
+      }
       if ("expiresOn" in edit) {
         const d = clean(edit.expiresOn);
         if (d && !/^\d{4}-\d{2}-\d{2}$/.test(d)) {
@@ -151,6 +160,7 @@ export default async (req: Request, context: { params: { id: string } }) => {
         qualCode: updated.qualCode,
         expiresOn: updated.expiresOn,
         title: updated.title,
+        evidenceKind: updated.evidenceKind ?? null,
       });
     }
 

@@ -26,7 +26,7 @@ import { coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, COVER_SOURCES }
 import { foreignExpiryOn, isRecognitionReading, recognisedUntil, recognitionFills } from "../../source/shared/recognition.js";
 import { medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote } from "../../source/shared/medical.js";
 import { renewalBlockers, renewalNeedsProblem } from "../../source/shared/renewals.js";
-import { coveredBy, evidenceKindsProblem, EVIDENCE_KINDS } from "../../source/shared/evidence.js";
+import { coveredBy, evidenceKindsProblem, paperKind, EVIDENCE_KINDS } from "../../source/shared/evidence.js";
 import { expiringIn, EXPIRING_MEANS, PORTAL_TOOLS } from "../src/lib/portal.js";
 import { dueMeans } from "../src/lib/matrix.js";
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -1002,7 +1002,15 @@ test("covers: a high risk work licence's printed classes fill the dogging and cr
     "DG fills dogging only, dated as the licence is dated");
   assert.deepEqual(codesCovered(licence(["DG", "LF", "RI", "CV"]), null), ["HR-01", "HR-02"], "DG and CV fill both");
   assert.deepEqual(codesCovered(licence(["LF", "WP"]), null), [], "neither class printed: neither column");
-  assert.deepEqual(codesCovered(licence(["C6, DG, LF, RB, WP"]), null), ["HR-01"], "the classes listed as one line are read as tokens");
+  /* An entry counts as a class only when the whole entry, trimmed, IS the
+     code. The question asks for each class code alone; a prose entry that
+     merely carries the letters - a dangerous goods awareness course listed
+     as a unit, "Class DG" - is not a licence class, and used to fill HR-01
+     with that document's expiry. */
+  assert.deepEqual(codesCovered(licence(["C6, DG, LF, RB, WP"]), null), [], "the classes on one line are not one class");
+  assert.deepEqual(codesCovered(licence(["Class DG"]), null), [], "a phrase carrying the code is not the code");
+  assert.deepEqual(codesCovered(licence(["Dangerous Goods (DG) awareness"]), null), [], "nor is a course title that brackets it");
+  assert.deepEqual(codesCovered(licence([" DG "]), null), ["HR-01"], "the code alone, trimmed");
   assert.deepEqual(codesCovered(licence(["dg"]), null), ["HR-01"], "however the model cased it");
   assert.deepEqual(codesCovered(licence(["DG"]), "HR-01"), [], "its own column is not covered again");
   assert.deepEqual(codesCovered(licence(["DGA", "CVB", "1DG", "D G"]), null), [], "whole tokens only: DGA is not DG");
@@ -1455,6 +1463,32 @@ test("evidence: a paper is spent once the certificate it was written about is in
   const undated = { ...readings, card: { ...readings.card, issuedOn: null } };
   assert.deepEqual(coveredBy("QL-04", "EVANS, Brenton", letter, undated, EV_TODAY, EV_RULES),
     { kind: "issue-letter", until: null, rowId: "iss" }, "a card with no issue date read off it settles nothing");
+});
+
+test("evidence: the kind a person picked at upload beats the model's guess, and names the column the paper is about", () => {
+  /* A hand tag makes a document the certificate for its column, so a paper
+     used to have to be filed untagged and which column it was about rested
+     on the model's guess. The upload page's picker now says what paper it
+     is beside the column: the rule reads that first (paperKind), and a
+     letter the model read as a certificate is still the letter. */
+  assert.equal(paperKind({ qualCode: "QL-01", evidenceKind: "extension" }, { evidenceKind: null }), "extension", "the person's word");
+  assert.equal(paperKind({ qualCode: "QL-01", evidenceKind: null }, { evidenceKind: "extension" }), "", "a hand tag with no kind is the certificate, whatever the model called it");
+  assert.equal(paperKind({ qualCode: null, evidenceKind: null }, { evidenceKind: "extension" }), "extension", "untagged, the model's word stands");
+  assert.equal(paperKind({ qualCode: null, evidenceKind: " issue-letter " }, { evidenceKind: "extension" }), "issue-letter", "trimmed, and over the model");
+  assert.equal(paperKind({}, null), "", "no reading, no paper");
+
+  // The letter, tagged as an extension about his Master: the model read it
+  // as a plain certificate, and it covers QL-01 all the same.
+  const rows = [
+    { id: "ext", key: "ext", person: "EVANS, Brenton", code: "QL-01", tagged: true, kind: "extension", filedOn: "2026-08-02" },
+    EV_ROWS[3],
+  ];
+  const misread = { ...EV_READINGS, ext: { ...EV_READINGS.ext, evidenceKind: null } };
+  assert.deepEqual(coverOf("QL-01", rows, misread), { kind: "extension", until: "2026-11-25", rowId: "ext" }, "the picked kind, over a reading that called it a certificate");
+  assert.equal(coverOf("QL-11", rows, misread), null, "and only about the column it was filed against");
+  // The same row with no kind picked is the certificate for QL-01: no cover.
+  const certificate = [{ ...rows[0], kind: null }, EV_ROWS[3]];
+  assert.equal(coverOf("QL-01", certificate), null, "a hand tag alone makes it the certificate, whatever the reading says");
 });
 
 test("evidence: a document in another man's name covers nobody, and an issue letter runs until the card comes", () => {

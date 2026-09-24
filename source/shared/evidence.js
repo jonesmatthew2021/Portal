@@ -42,13 +42,14 @@
 
 /**
  * @typedef {{ id?: unknown, key?: unknown, person?: string | null, code?: string | null,
- *   tagged?: boolean, filedOn?: string | null }} EvidenceRow
+ *   tagged?: boolean, kind?: string | null, filedOn?: string | null }} EvidenceRow
  *   One certificate on the books: the row's own id, the key of its reading,
  *   the name it is filed under, the matrix code it answers to, whether that
- *   code is a hand tag (which makes the row a certificate whatever kind of
- *   paper the reading calls it - the round and the page's cells read the tag
- *   the same way), and when it was filed. Newest upload first, as the
- *   library's listing hands them over.
+ *   code is a hand tag, the kind of paper the person said it was when they
+ *   filed it (null where they said nothing), and when it was filed. What
+ *   paper the row is follows from the tag and the kind together (paperKind),
+ *   the same way for the round and the page's cells. Newest upload first,
+ *   as the library's listing hands them over.
  * @typedef {{ readable?: boolean, holderName?: string | null, issuedOn?: string | null,
  *   expiresOn?: string | null, evidenceKind?: string | null,
  *   isRecognition?: boolean | null }} EvidenceReading
@@ -82,6 +83,40 @@ export const EVIDENCE_KINDS = ["extension", "lodged-renewal", "crewing-permit", 
  *  expiry printed on the certificate it stands in for (MO505 s 7(3) counts
  *  its 90 days from the expiry). */
 export const EVIDENCE_ANCHORS = ["issued", "expiry"];
+
+/** The five papers as the upload page offers them, one choice each. */
+export const EVIDENCE_LABELS = {
+  "extension": "Extension letter",
+  "lodged-renewal": "Renewal lodged",
+  "crewing-permit": "Crewing permit",
+  "assessor-declaration": "Assessor's declaration",
+  "issue-letter": "Issue letter",
+};
+
+/**
+ * What paper a document is, or "" for a certificate.
+ *
+ * The kind the person picked when they filed it comes first: they had the
+ * paper in their hand. Failing that, a document filed under a column by hand
+ * with no kind picked is the certificate for that column, whatever the model
+ * called it - the model sometimes reads an ordinary certificate as one of the
+ * five papers, and left to the reading that certificate stopped filling its
+ * cell. Failing both, the model's word. The round, the page's cells and the
+ * cover rule all ask this one question, so a letter is never the certificate
+ * to one of them and a paper to another.
+ * @param {{ qualCode?: string | null, evidenceKind?: string | null, tagged?: boolean, kind?: string | null } | null | undefined} row
+ *   the document's own row (the column chosen for it in `qualCode`, the kind
+ *   chosen for it in `evidenceKind`), or an EvidenceRow (`tagged`, `kind`)
+ * @param {{ evidenceKind?: string | null } | null | undefined} reading
+ * @returns {string}
+ */
+export function paperKind(row, reading) {
+  const chosen = row ? (row.evidenceKind != null ? row.evidenceKind : row.kind) : null;
+  const picked = String(chosen || "").trim();
+  if (picked) return picked;
+  if (row && (row.tagged === true || row.qualCode)) return "";
+  return String(reading && reading.evidenceKind ? reading.evidenceKind : "").trim();
+}
 
 /** A YYYY-MM-DD day that exists, or "".
  * @param {unknown} v
@@ -207,11 +242,10 @@ export function coveredBy(code, person, rows, readings, todayISO, rules) {
        nobody's here. */
     if (isSomebodyElse(reading.holderName, row.person, me)) return;
     seen.add(key);
-    /* What the document is: one of the five papers where the reading says
-       so - unless somebody tagged the row, which makes it the certificate
-       for that column whatever the reading calls it. A document is the
-       certificate or a paper, never both. */
-    const kind = row.tagged ? "" : String(reading.evidenceKind || "").trim();
+    /* What the document is: the paper the person said it was, else the
+       certificate where they tagged its column, else what the reading calls
+       it (paperKind). A document is the certificate or a paper, never both. */
+    const kind = paperKind(row, reading);
     mine.push({ row, reading, kind });
   });
 

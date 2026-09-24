@@ -23,7 +23,7 @@ import { fileStore } from "../db/documents.js";
 import { OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM } from "../../../source/shared/reading-lines.js";
 import { coveredCells } from "../../../source/shared/covers.js";
 import { isRecognitionReading, recognisedUntil, recognitionFills } from "../../../source/shared/recognition.js";
-import { coveredBy } from "../../../source/shared/evidence.js";
+import { coveredBy, paperKind } from "../../../source/shared/evidence.js";
 import { crewRegister, nameIsSomebodyElse } from "../../../source/shared/names.js";
 import { readDocument } from "./shared-state.js";
 
@@ -741,7 +741,7 @@ export async function liveCertificates(): Promise<Row[]> {
               read_code AS readCode, read_expires AS readExpires, read_issued AS readIssued,
               read_issuer AS readIssuer, read_title AS readTitle,
               created_at AS createdAt, removed_at AS removedAt,
-              removed_by AS removedBy
+              removed_by AS removedBy, evidence_kind AS evidenceKind
        FROM documents WHERE category = 'certificate' AND removed_at IS NULL
        ORDER BY created_at DESC`,
     )
@@ -901,18 +901,25 @@ export async function certificateStanding() {
        never stands as the foreign certificate behind a recognition. The
        cover is worked out separately and shown as a cover
        (source/shared/evidence.js, and `covers` below); the round refuses it
-       the same way, or the grid and the round would disagree. A hand tag
-       beats the reading's kind: a tagged row is the certificate for its
-       column (compareMatrix says why). */
-    if (reading.evidenceKind && !row.qualCode) continue;
+       the same way, or the grid and the round would disagree. Which paper
+       it is, if any, is the one question paperKind answers: the kind the
+       person picked, else a hand tag making it the certificate, else the
+       reading's word (compareMatrix says why). */
+    if (paperKind(row, reading)) continue;
     const named = codeFor(row, reading, eqTable);
+    // A date typed against the certificate on the portal beats the model's
+    // reading of the scan, same as in the comparison.
+    const typed = isDate(row.expiresOn) ? row.expiresOn!.trim().slice(0, 10) : null;
     /* A document that is no one column can still fill the columns it
        covers - a high risk work licence printing five classes is rightly
        given no code, and its DG and CV fill dogging and the crane all the
        same. It goes through the same checks and joins only the covering
-       pass, as it does in the round (compareMatrix in routes/analyse.ts). */
+       pass, as it does in the round (compareMatrix in routes/analyse.ts),
+       dated as its own column would be: the typed date first (the round's
+       typedOver). */
     const code = named && named.trim() ? named : null;
-    if (!code && !coveredCells(reading, vessel.covers, vessel.qualColumns, null).some((c) => !!c.until)) continue;
+    const asDated = typed ? { ...reading, expiresOn: typed } : reading;
+    if (!code && !coveredCells(asDated, vessel.covers, vessel.qualColumns, null).some((c) => !!c.until)) continue;
     // AMSA recognises only the classes MO70 s 7(2)(b) lists, which leave out
     // the certificate of safety training and the marine cook certificate.
     if (code && isRecognitionReading(reading) && !recognitionFills(code, vessel.neverRecognised.codes)) continue;
@@ -922,12 +929,9 @@ export async function certificateStanding() {
     // Printed in another man's name: his folder, not his certificate. The
     // round refuses the same document (the rule is in source/shared/names.js).
     if (nameIsSomebodyElse(reading.holderName, row.person, person)) continue;
-    if (!code) { coverOnly.push({ row, reading, person: person.trim().toUpperCase() }); continue; }
+    if (!code) { coverOnly.push({ row, reading: asDated, person: person.trim().toUpperCase() }); continue; }
 
-    // A date typed against the certificate on the portal beats the model's
-    // reading of the scan, same as in the comparison. An item recorded as
-    // carrying no expiry has none to show either way.
-    const typed = isDate(row.expiresOn) ? row.expiresOn!.trim().slice(0, 10) : null;
+    // An item recorded as carrying no expiry has none to show either way.
     const expires = neverLapses(code) ? null : typed || reading.expiresOn || null;
     const issued = reading.issuedOn || null;
     // The issuing authority as read off the scan, for the not-Australian flag
@@ -1108,12 +1112,14 @@ async function evidenceCovers(
   const rows = readings.map(({ row, reading }) => {
     const key = readingKey(row);
     if (reading) held.set(key, reading);
-    // `tagged` is the hand tag, which makes the row a certificate whatever
-    // kind of paper the reading calls it - as the cells above read it.
-    return { id: row.id, key, person: row.person, code: codeFor(row, reading, eqTable), tagged: !!row.qualCode, filedOn: row.filedOn ? String(row.filedOn) : null };
+    // `tagged` is the hand tag and `kind` the paper the person said it was;
+    // together they say what the row is (paperKind), as the cells above
+    // read it.
+    return { id: row.id, key, person: row.person, code: codeFor(row, reading, eqTable), tagged: !!row.qualCode,
+      kind: row.evidenceKind ?? null, filedOn: row.filedOn ? String(row.filedOn) : null };
   });
   // Nothing on the books is one of the five papers: no cover to work out.
-  if (!rows.some((r) => !r.tagged && !!held.get(r.key)?.evidenceKind)) return [];
+  if (!rows.some((r) => !!paperKind(r, held.get(r.key)))) return [];
 
   const today = todayThere();
   // The name question is the one the cells above and the round ask.
@@ -1122,7 +1128,7 @@ async function evidenceCovers(
   // Whose papers they are, as the register names them.
   const mine = new Set<string>();
   for (const r of rows) {
-    if (r.tagged || !held.get(r.key)?.evidenceKind || !r.person) continue;
+    if (!paperKind(r, held.get(r.key)) || !r.person) continue;
     mine.add(register.nameOf(r.person) || r.person);
   }
 
