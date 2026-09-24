@@ -3,6 +3,7 @@ import { getEnv } from "../env.js";
 import { MAX_BYTES, saveDocument, type SharedDocument } from "../lib/shared-state.js";
 import { READING_STORES } from "../lib/backup.js";
 import { PORTAL_ROW_ID } from "../db/schema.js";
+import { vessel } from "../vessel.js";
 import { ensureTable as ensureFaunaTable } from "./fauna.js";
 
 /**
@@ -18,14 +19,14 @@ import { ensureTable as ensureFaunaTable } from "./fauna.js";
  * There is no button for this; it is run from a terminal by whoever holds
  * the file, signed in as management or IT (the cookie from the browser):
  *
- *   curl -X POST https://coolibah-portal.com/api/state/restore-file \
+ *   curl -X POST https://<the portal's domain>/api/state/restore-file \
  *     -H "content-type: application/json" -H "cookie: portal_session=<from the browser>" \
  *     --data-binary @"Crew Portal backup 2026-09-24.json"
  *
  * To put the other parts back as well, name them on the address, or as
  * `"what": ["readings", "documents", "users", "fauna"]` in the body:
  *
- *   curl -X POST "https://coolibah-portal.com/api/state/restore-file?what=readings,documents" ...
+ *   curl -X POST "https://<the portal's domain>/api/state/restore-file?what=readings,documents" ...
  *
  * Those rows go in through the database's own batch, eighty at a time and
  * every value bound, never as SQL text - D1 refuses a statement over 100 KB,
@@ -85,7 +86,7 @@ export default async (req: Request, actor: PortalUser): Promise<Response> => {
     return bad("The file couldn't be read as JSON.");
   }
   if (!file || typeof file !== "object") return bad("That isn't a backup file.");
-  if (file.portal !== "coolibah") return bad("That isn't a Coolibah backup: the file's portal mark is wrong.");
+  if (file.portal !== vessel.slug) return bad(`That isn't a ${vessel.shortName} backup: the file's portal mark is wrong.`);
   if (file.backupVersion !== 1) return bad(`This portal doesn't know backup version ${String(file.backupVersion)}.`);
   if (typeof file.document !== "string") return bad("The backup holds no shared document.");
   const perthDay = typeof file.perthDay === "string" ? file.perthDay : "an unknown day";

@@ -8,7 +8,7 @@ import { getEnv } from "../env.js";
  *
  *   r2         — Cloudflare's own storage. Free at this portal's size, works
  *                the moment the worker deploys, and what local dev runs on.
- *   sharepoint — the company's Coolibah site, via Microsoft Graph. The
+ *   sharepoint — the company's site for the vessel, via Microsoft Graph. The
  *                long-term home: certificates live where the company already
  *                keeps documents, and the portal reads and files them there.
  *                Switched on by setting FILE_STORE=sharepoint once IT hands

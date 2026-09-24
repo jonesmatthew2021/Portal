@@ -553,7 +553,7 @@ function OPMSChecker() {
           {draftOpen && (() => {
             const openOnes = opms.filter((f) => { const m = markOf("opms", f); return !m || m.status !== "fixed"; });
             const body = [
-              `Hi PK,`,
+              `Hi ${VESSEL.contacts.opms},`,
               ``,
               `Our weekly check of the TR02 export against the certificates on file has found ${openOnes.length} item${openOnes.length === 1 ? "" : "s"} where the export doesn't match the certificate. Details below — scans are on file with us if you need copies.`,
               ``,
@@ -591,7 +591,7 @@ function OPMSChecker() {
                   style={{ width: "100%", marginTop: 10, fontFamily: T.mono, fontSize: 11.5, lineHeight: 1.6,
                     color: T.text, background: T.raised, border: `1px solid ${T.rule}`, borderRadius: 2, padding: 10 }} />
                 <div style={{ fontFamily: T.body, fontSize: 12, color: T.muted, marginTop: 6 }}>
-                  Copy this into an email to PK, attach the PDF from above, and press Mark all as sent.
+                  Copy this into an email to {VESSEL.contacts.opms}, attach the PDF from above, and press Mark all as sent.
                 </div>
               </div>
             );

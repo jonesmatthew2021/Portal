@@ -32,7 +32,7 @@ export type PortalEnv = {
   SHAREPOINT_FAUNA_FOLDER?: string;
   // The nightly backup (lib/backup.ts): the folder in the library it goes
   // to, made by the owner and never by the portal (empty: no backup), and
-  // the Perth hour after which the hour writes it.
+  // the hour, by the vessel's clock, after which the hour writes it.
   BACKUP_FOLDER?: string;
   BACKUP_HOUR?: string;
 };

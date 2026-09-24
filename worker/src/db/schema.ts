@@ -1,12 +1,14 @@
 import { sqliteTable, text, integer, blob, index, primaryKey } from "drizzle-orm/sqlite-core";
+import { vessel } from "../vessel.js";
 
 /**
- * The one row's id — same as it always was; see the earlier build for the
- * full story. This schema is that one re-spoken for D1 (SQLite): jsonb becomes
- * JSON-mode text, timestamps become integer epoch dates, and everything else
- * carries over column for column so the ported queries read identically.
+ * The one row's id — the vessel file's slug, which is what it always was;
+ * see the earlier build for the full story. This schema is that one
+ * re-spoken for D1 (SQLite): jsonb becomes JSON-mode text, timestamps become
+ * integer epoch dates, and everything else carries over column for column so
+ * the ported queries read identically.
  */
-export const PORTAL_ROW_ID = "coolibah";
+export const PORTAL_ROW_ID = vessel.slug;
 
 export const portalState = sqliteTable("portal_state", {
   id: text().primaryKey(),

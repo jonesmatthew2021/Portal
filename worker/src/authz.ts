@@ -1,5 +1,6 @@
 import type { PortalUser } from "./auth.js";
 import { getEnv } from "./env.js";
+import { PORTAL_ROW_ID } from "./db/schema.js";
 
 /**
  * What each role may do — decided here, on the server, for every request.
@@ -61,7 +62,8 @@ export async function crewStateBody(req: Request): Promise<Request> {
   }
 
   const row = await getEnv()
-    .DB.prepare("SELECT data FROM portal_state WHERE id = 'coolibah'")
+    .DB.prepare("SELECT data FROM portal_state WHERE id = ?1")
+    .bind(PORTAL_ROW_ID)
     .first<{ data: string }>();
 
   let base: Record<string, unknown> = {};

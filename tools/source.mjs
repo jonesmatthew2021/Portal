@@ -5,7 +5,9 @@
  * the state everything hangs off. The Admin tabs live one to a file under
  * source/areas/, and this splices them into the shell at the @areas marker.
  * The code the worker runs too lives under source/shared/ and goes in at the
- * @shared marker, where it sat before it was shared.
+ * @shared marker, where it sat before it was shared. What is this vessel's
+ * alone - its name, brand, time zone, ranks and the rest - is source/vessel.json,
+ * declared as VESSEL at the @vessel marker and written into the page's head.
  *
  * Why: one 21,000-line file can only be worked on by one job at a time. Two
  * people, or two sessions, editing different tabs both edited that file and
@@ -25,10 +27,130 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const SOURCE = join(ROOT, "source");
 const AREAS = join(ROOT, "source", "areas");
 const SHARED = join(ROOT, "source", "shared");
 const MARKER = "/* @areas */";
 const SHARED_MARKER = "/* @shared */";
+const VESSEL_MARKER = "/* @vessel */";
+const VESSEL_FILE = join(SOURCE, "vessel.json");
+
+/* ---------------------------------------------------------------------
+ * The vessel file: everything that is this vessel's and not the portal's.
+ *
+ * source/vessel.json carries the name, the brand, the time zone, the domain,
+ * the ranks, the swings, the customer's marks and the crew folders. The page
+ * gets it as `const VESSEL` at the @vessel marker, and the head of the page
+ * (the title, the theme colour, the icons) is written from it as the page is
+ * assembled. The worker reads the same file through worker/src/vessel.ts,
+ * which checks the same shape - change one list, change the other. A key
+ * missing or of the wrong kind is a build error that names the key, so a
+ * vessel file for a new vessel that leaves something out is found at the
+ * build and not on somebody's phone.
+ * ------------------------------------------------------------------- */
+const VESSEL_SHAPE = [
+  ["slug", "string"], ["operator", "string"], ["name", "string"], ["nameAccent", "string"],
+  ["shortName", "string"], ["title", "string"], ["strapline", "string"],
+  ["brand.logo", "string"], ["brand.icon", "string"], ["brand.roundelText", "string[]"],
+  ["theme.themeColor", "string"], ["theme.bodyBackground", "string"],
+  ["theme.signIn.ink", "string"], ["theme.signIn.button", "string"],
+  ["theme.light", "colours"], ["theme.dark", "colours"],
+  ["theme.fonts.display", "string"], ["theme.fonts.body", "string"], ["theme.fonts.mono", "string"],
+  ["timezone", "string"], ["domain", "string"], ["mailFrom", "string"], ["emailDomainGuess", "string"],
+  ["it.name", "string"], ["contacts.opms", "string"], ["contacts.correspondencePoster", "string"],
+  ["links.opms", "string"], ["portways.partnership", "string"], ["portways.vessel", "string"],
+  ["previewAccounts", "array"], ["parties", "string[]"],
+  ["swings.ids", "string[]"], ["swings.labels", "object"], ["swings.pattern.anchor", "string"],
+  ["swings.pattern.cycle", "number"], ["swings.legacyNotes", "array"],
+  ["ranks", "array"], ["depts", "string[]"], ["deptOrder", "string[]"], ["deptRenames", "object"],
+  ["rankGroups", "array"], ["rosterRanks", "string[]"], ["rankToPortways", "object"],
+  ["shift.vesselCode", "string"], ["shift.pools", "array"], ["shift.establishment", "array"],
+  ["shift.groups", "array"], ["shift.sheetWords", "object"],
+  ["customerMarks.elearning", "string"], ["customerMarks.auIssuers", "string[]"],
+  ["customerMarks.nameStopWords", "string[]"],
+  ["elearningCodes", "string[]"], ["noExpiryCodes", "string[]"], ["elearningGroups", "string[]"],
+  ["certStated", "object"], ["certPageNotes", "string[]"], ["tickets", "object"],
+  ["docBuckets", "string[]"], ["labels", "object"], ["qualColumns", "array"], ["crewFolders", "object"],
+];
+// The colours a theme must name: the ones the roundel gives the page.
+const THEME_COLOURS = ["deep", "panel", "raised", "rule", "text", "muted", "accent", "accentSoft", "teal", "blue"];
+
+/** Checks the vessel file's shape; throws naming the first key that is wrong. */
+export function checkVessel(vessel, from = "source/vessel.json") {
+  const at = (path) => path.split(".").reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), vessel);
+  const isObject = (v) => v && typeof v === "object" && !Array.isArray(v);
+  for (const [path, kind] of VESSEL_SHAPE) {
+    const v = at(path);
+    const ok =
+      kind === "string" ? typeof v === "string" && v.trim() !== "" :
+      kind === "number" ? typeof v === "number" && Number.isFinite(v) :
+      kind === "string[]" ? Array.isArray(v) && v.every((x) => typeof x === "string") :
+      kind === "array" ? Array.isArray(v) :
+      kind === "object" ? isObject(v) :
+      kind === "colours" ? isObject(v) && THEME_COLOURS.every((c) => typeof v[c] === "string" && v[c]) :
+      false;
+    if (!ok) {
+      throw new Error(
+        from + " has no usable \"" + path + "\" - it must be " +
+        (kind === "colours" ? "an object naming " + THEME_COLOURS.join(", ") : kind === "string[]" ? "a list of strings" : kind === "array" ? "a list" : kind === "object" ? "an object" : "a " + kind) + ".",
+      );
+    }
+  }
+  return vessel;
+}
+
+/** The vessel file, read and checked. Another file can be given (the checks
+ *  assemble the page for a made-up vessel to prove nothing else names this one). */
+export function readVessel(file = VESSEL_FILE) {
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(file, "utf8"));
+  } catch (e) {
+    throw new Error(file + " could not be read as JSON: " + e.message);
+  }
+  return checkVessel(parsed, file);
+}
+
+/** A PNG under source/, as a data: address the page can carry inline. */
+const inlinePng = (rel) => "data:image/png;base64," + readFileSync(join(SOURCE, rel)).toString("base64");
+
+/* The vessel as the page carries it: the JSON, with the logo and the icon read
+ * off disk and inlined so the portal stays a single file. Nothing else is
+ * changed on the way in. */
+function vesselForPage(vessel) {
+  return { ...vessel, brand: { ...vessel.brand, logo: inlinePng(vessel.brand.logo), icon: inlinePng(vessel.brand.icon) } };
+}
+
+/* The head of the page is HTML, not script, so the title, the theme colour,
+ * the icons and the two colours in the boot stylesheet are written in here
+ * rather than read from VESSEL at run time. Each placeholder must be found
+ * exactly once, or the page has drifted from what the build expects. */
+function withVesselHead(shell, page) {
+  const fills = {
+    "__VESSEL_TITLE__": page.title,
+    "__VESSEL_SHORT_NAME__": page.shortName,
+    "__VESSEL_THEME_COLOR__": page.theme.themeColor,
+    "__VESSEL_BODY_BACKGROUND__": page.theme.bodyBackground,
+    "__VESSEL_MUTED__": page.theme.light.muted,
+    "__VESSEL_ICON__": page.brand.icon,
+  };
+  for (const [mark, value] of Object.entries(fills)) {
+    const n = shell.split(mark).length - 1;
+    const want = mark === "__VESSEL_ICON__" ? 2 : 1;   // the apple icon and the favicon
+    if (n !== want) throw new Error("source/index.html should carry " + mark + " " + want + " time(s) in its head, and carries it " + n + ".");
+    shell = shell.split(mark).join(value);
+  }
+  return shell;
+}
+
+/** The shell with the vessel written in: the head filled and VESSEL declared at the marker. */
+function withVessel(shell, vessel) {
+  const page = vesselForPage(vessel);
+  const at = shell.indexOf(VESSEL_MARKER);
+  if (at < 0) throw new Error("source/index.html has no " + VESSEL_MARKER + " marker, so the page would have no VESSEL at all.");
+  const declared = "const VESSEL = " + JSON.stringify(page) + ";";
+  return withVesselHead(shell.slice(0, at) + declared + shell.slice(at + VESSEL_MARKER.length), page);
+}
 
 /** The area files, in the order they are spliced in. */
 export function areaFiles() {
@@ -64,9 +186,10 @@ export function sharedFiles() {
  * check failed for no reason anybody could see. Everything is read as LF. */
 const asLf = (t) => t.split(String.fromCharCode(13) + "\n").join("\n");
 
-/** source/index.html with every area spliced in. */
-export function portalSource() {
-  const shell = withShared(asLf(readFileSync(join(ROOT, "source", "index.html"), "utf8")));
+/** source/index.html with the vessel written in and every area spliced in.
+ *  `vessel` is the checked vessel file; left out, source/vessel.json is read. */
+export function portalSource({ vessel = readVessel() } = {}) {
+  const shell = withShared(withVessel(asLf(readFileSync(join(ROOT, "source", "index.html"), "utf8")), vessel));
   const names = areaFiles();
   const at = shell.indexOf(MARKER);
 
@@ -136,8 +259,8 @@ function withShared(shell) {
 }
 
 /** Just the JSX, lifted out of the assembled page. */
-export function portalJsx() {
-  const src = portalSource();
+export function portalJsx(options) {
+  const src = portalSource(options);
   const open = src.indexOf('<script type="text/babel"');
   if (open < 0) throw new Error("source/index.html has no portal script in it.");
   const start = src.indexOf(">", open) + 1;

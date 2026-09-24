@@ -8,7 +8,7 @@
  * generated now, so it cannot.
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { portalSource } from "./source.mjs";
+import { portalSource, readVessel } from "./source.mjs";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -26,14 +26,19 @@ const BANNER = `<!--
 
 /** Returns the built preview. Writes it to preview.html unless write is false. */
 export function buildPreview({ write = true, quiet = false } = {}) {
-  const src = portalSource();
+  const vessel = readVessel();
+  const src = portalSource({ vessel });
 
+  // The title is the vessel file's, so the preview's mark is put on whatever
+  // the page's own title is rather than on a name written here.
   let out = src.replace(
-    "<title>TSV Coolibah - Crew Portal</title>",
-    "<title>TSV Coolibah - Crew Portal (TEST PREVIEW)</title>",
+    "<title>" + vessel.title + "</title>",
+    "<title>" + vessel.title + " (TEST PREVIEW)</title>",
   );
 
-  let shim = readFileSync(SHIM, "utf8").replace(/\n$/, "");
+  // The shim runs outside the page's own script, so the vessel file is written
+  // into it here rather than kept a second time in the shim.
+  let shim = readFileSync(SHIM, "utf8").replace(/\n$/, "").replace("__VESSEL__", JSON.stringify(vessel));
   let note;
   if (existsSync(DATA)) {
     const held = JSON.parse(readFileSync(DATA, "utf8"));

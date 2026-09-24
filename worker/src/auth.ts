@@ -1,4 +1,5 @@
 import { getEnv } from "./env.js";
+import { vessel } from "./vessel.js";
 
 /**
  * Real sign-in, per person.
@@ -146,13 +147,13 @@ async function maybeRaiseAlarm(db: ReturnType<typeof getEnv>["DB"]) {
     try {
       await env.EMAIL.send({
         to: w.email,
-        from: "TSV Coolibah Crew Portal <portal@coolibah-portal.com>",
+        from: vessel.mailFrom,
         subject: "Portal security alarm - suspicious sign-in traffic",
         text:
           `The crew portal has seen ${burst!.n} suspicious sign-in events in the last ${ALERT_WINDOW / 60} minutes.\n\n` +
           `What:\n${what}\n\nFrom where:\n${where}\n\n` +
           `The full record is on the Access Grants page, under Sign-in traffic:\n` +
-          `https://coolibah-portal.com\n\n` +
+          `https://${vessel.domain}\n\n` +
           `Nothing needs doing if this is expected (a crew round of first sign-ins, say). ` +
           `If it isn't, disable any grant in doubt - that signs its devices out on the spot. ` +
           `At most one of these emails is sent an hour.`,
@@ -191,18 +192,18 @@ export async function currentUser(req: Request): Promise<PortalUser | null> {
 
 const PAGE = (inner: string) => `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TSV Coolibah - Crew Portal</title>
+<title>${vessel.title}</title>
 <style>
   body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
     background:#eef2f5; font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
-  form { background:#fff; border:1px solid #d4dbe2; border-top:4px solid #2e6a8e; border-radius:8px;
+  form { background:#fff; border:1px solid #d4dbe2; border-top:4px solid ${vessel.theme.signIn.button}; border-radius:8px;
     padding:34px 30px; width:min(380px, 90vw); text-align:center; }
-  h1 { font-size:20px; color:#16324a; margin:0; letter-spacing:.4px; }
+  h1 { font-size:20px; color:${vessel.theme.signIn.ink}; margin:0; letter-spacing:.4px; }
   .sub { color:#5b6b7a; font-size:12.5px; margin:6px 0 22px; }
   input { font:inherit; font-size:15px; width:100%; box-sizing:border-box; padding:11px 12px;
     border:1px solid #d4dbe2; border-radius:6px; margin-bottom:12px; text-align:center; }
   button { font:inherit; font-size:14.5px; font-weight:600; width:100%; padding:11px; border:0;
-    border-radius:6px; background:#2e6a8e; color:#fff; cursor:pointer; }
+    border-radius:6px; background:${vessel.theme.signIn.button}; color:#fff; cursor:pointer; }
   .note { color:#5b6b7a; font-size:12.5px; margin:14px 0 0; line-height:1.6; }
   .wrong { color:#b03a2e; font-size:13px; margin:0 0 12px; }
 </style></head><body>${inner}</body></html>`;
@@ -217,8 +218,8 @@ const safeNext = (v: unknown) => {
 
 const EMAIL_FORM = (msg?: string, next = "/") =>
   PAGE(`<form method="POST" action="/login">
-  <h1>TSV COOLIBAH</h1>
-  <div class="sub">Crew Portal &middot; United Marine</div>
+  <h1>${VESSEL_HEADING}</h1>
+  <div class="sub">Crew Portal &middot; ${vessel.operator}</div>
   ${msg ? `<p class="wrong">${msg}</p>` : ""}
   <input type="hidden" name="next" value="${next.replace(/"/g, "&quot;")}">
   <input type="email" name="email" placeholder="Your email address" autofocus autocomplete="email" required>
@@ -228,7 +229,7 @@ const EMAIL_FORM = (msg?: string, next = "/") =>
 
 const CODE_FORM = (email: string, msg?: string, next = "/") =>
   PAGE(`<form method="POST" action="/login/verify">
-  <h1>TSV COOLIBAH</h1>
+  <h1>${VESSEL_HEADING}</h1>
   <div class="sub">A code is on its way to<br><b>${email.replace(/</g, "&lt;")}</b></div>
   ${msg ? `<p class="wrong">${msg}</p>` : ""}
   <input type="hidden" name="email" value="${email.replace(/"/g, "&quot;")}">
@@ -237,6 +238,9 @@ const CODE_FORM = (email: string, msg?: string, next = "/") =>
   <button type="submit">Enter the portal</button>
   <p class="note">Nothing arrived after a minute? Check junk mail, then <a href="/login">start again</a>.</p>
 </form>`);
+
+// The vessel's name as the sign-in page's heading: "TSV COOLIBAH".
+const VESSEL_HEADING = `${vessel.name} ${vessel.nameAccent}`.toUpperCase();
 
 const html = (body: string, status = 200) =>
   new Response(body, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
@@ -248,15 +252,15 @@ async function sendCode(email: string, code: string) {
   if (!env.EMAIL) throw new Error("Email sending isn't switched on for this deploy yet.");
   await env.EMAIL.send({
     to: email,
-    from: "TSV Coolibah Crew Portal <portal@coolibah-portal.com>",
+    from: vessel.mailFrom,
     subject: `${code} is your portal sign-in code`,
     text:
-      `Your TSV Coolibah crew portal sign-in code is:\n\n    ${code}\n\n` +
+      `Your ${vessel.name} ${vessel.nameAccent} crew portal sign-in code is:\n\n    ${code}\n\n` +
       `It works for ${CODE_MINUTES} minutes on the device that asked for it.\n` +
       `If you didn't ask for a code, you can ignore this email.`,
     html:
-      `<div style="font-family:sans-serif;max-width:420px"><h2 style="color:#16324a">TSV Coolibah &middot; Crew Portal</h2>` +
-      `<p>Your sign-in code is:</p><p style="font-size:32px;letter-spacing:6px;font-weight:700;color:#2e6a8e">${code}</p>` +
+      `<div style="font-family:sans-serif;max-width:420px"><h2 style="color:${vessel.theme.signIn.ink}">${vessel.name} ${vessel.nameAccent} &middot; Crew Portal</h2>` +
+      `<p>Your sign-in code is:</p><p style="font-size:32px;letter-spacing:6px;font-weight:700;color:${vessel.theme.signIn.button}">${code}</p>` +
       `<p style="color:#5b6b7a;font-size:13px">It works for ${CODE_MINUTES} minutes on the device that asked for it. ` +
       `If you didn't ask for a code, ignore this email.</p></div>`,
   });
@@ -283,7 +287,7 @@ async function handleRequestCode(req: Request): Promise<Response> {
         .prepare(
           "INSERT INTO users (id, email, name, role, disabled, created_at, created_by) VALUES (?1, ?2, ?3, 'it', 0, ?4, 'bootstrap')",
         )
-        .bind(crypto.randomUUID(), email, "Matthew Jones", now())
+        .bind(crypto.randomUUID(), email, vessel.it.name, now())
         .run();
       user = { id: "seeded", disabled: 0 };
     }

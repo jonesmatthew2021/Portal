@@ -156,7 +156,7 @@ function CrewListFormPage({ people }) {
       // of the document — the form's own Save editable copy keeps the choices,
       // never the script. A copy already carrying saved work is left alone.
       const boot = {
-        fields: { partnership: "UNI", vessel: "Coolibah", changedate: sw.flyOut },
+        fields: { partnership: VESSEL.portways.partnership, vessel: VESSEL.portways.vessel, changedate: sw.flyOut },
         fill,
       };
       const bootScript = "\n<scr" + "ipt>\n"

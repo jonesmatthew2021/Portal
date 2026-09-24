@@ -5,6 +5,9 @@
 (() => {
   const SNAPSHOT = __SNAPSHOT__;
   const FILE_ROWS = __FILE_ROWS__;
+  // The vessel file, written in by the build: the shim sits outside the
+  // page's own script and cannot see the page's VESSEL.
+  const VESSEL = __VESSEL__;
   // When preview.html sits in the archive folder, the real documents sit right
   // next to it under documents/ — so a file's link can point straight at the
   // copy on disk and open in a new tab, exactly as it would on the live portal.
@@ -59,7 +62,7 @@
   const uuid = () =>
     crypto.randomUUID ? crypto.randomUUID() : "prev-" + Math.random().toString(36).slice(2) + Date.now();
 
-  const todayISO = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Australia/Perth" }).format(new Date());
+  const todayISO = () => new Intl.DateTimeFormat("en-CA", { timeZone: VESSEL.timezone }).format(new Date());
 
   /* Flags on the preview's address put it in a state the live portal
      would only reach on a bad day, so the lines for that day can be looked

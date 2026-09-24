@@ -15,6 +15,7 @@
 import { Buffer } from "node:buffer";
 import { getStore } from "../compat/blobs.js";
 import { getEnv } from "../env.js";
+import { vessel } from "../vessel.js";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
@@ -214,12 +215,11 @@ export const matrixCheckKey = (trainingId: string, skillsId: string, validityId:
 
 export const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
-// The vessel and everyone filing for it are on Western Australian time, so "today"
-// — which is what an expiry is measured against — is the day it is there rather
-// than whatever UTC has reached. en-CA formats as YYYY-MM-DD.
-const VESSEL_TZ = "Australia/Perth";
+// The vessel and everyone filing for it are on the vessel's own time (the vessel
+// file), so "today" — which is what an expiry is measured against — is the day
+// it is there rather than whatever UTC has reached. en-CA formats as YYYY-MM-DD.
 export const todayThere = () =>
-  new Intl.DateTimeFormat("en-CA", { timeZone: VESSEL_TZ }).format(new Date());
+  new Intl.DateTimeFormat("en-CA", { timeZone: vessel.timezone }).format(new Date());
 
 export const ext = (name: string) => (name.split(".").pop() || "").toLowerCase();
 

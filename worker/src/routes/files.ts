@@ -3,6 +3,7 @@ import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
 import { getEnv } from "../env.js";
+import { vessel } from "../vessel.js";
 import { imageToPdf, imagesToPdf } from "../lib/pdf-wrap.js";
 import { certHome } from "../db/cert-home.js";
 import {
@@ -111,13 +112,12 @@ function field(form: FormData, name: string) {
   return typeof v === "string" && v.trim() !== "" ? v.trim() : null;
 }
 
-// The vessel and everyone filing for it are on Western Australian time, so the
-// day a file was added is that day rather than whatever UTC had reached.
-const VESSEL_TZ = "Australia/Perth";
-
+// The vessel and everyone filing for it are on the vessel's own time (the vessel
+// file), so the day a file was added is that day rather than whatever UTC had
+// reached.
 function todayThere() {
   // en-CA gives YYYY-MM-DD, which is the shape the portal stores and displays.
-  return new Intl.DateTimeFormat("en-CA", { timeZone: VESSEL_TZ }).format(new Date());
+  return new Intl.DateTimeFormat("en-CA", { timeZone: vessel.timezone }).format(new Date());
 }
 
 // The date the portal shows against a file. The uploader's own browser sends the

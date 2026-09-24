@@ -16,13 +16,13 @@ function AccessGrantsPage() {
   const myRole = SESSION_USER.role;
 
   // The company address a muster name almost certainly has: first name, dot,
-  // surname, all lowercase — "Cornelius James KEOGH" becomes
-  // cornelius.keogh@unitedmarine.au. Editable before granting, for the
-  // exceptions.
+  // surname, all lowercase, at the operator's domain (the vessel file) —
+  // "Alan James SMITH" becomes alan.smith@ that domain. Editable before
+  // granting, for the exceptions.
   const guessEmail = (name) => {
     const parts = String(name || "").trim().toLowerCase().split(/\s+/).map((p) => p.replace(/[^a-z-]/g, ""));
     if (parts.length < 2 || !parts[0] || !parts[parts.length - 1]) return "";
-    return `${parts[0]}.${parts[parts.length - 1]}@unitedmarine.au`;
+    return `${parts[0]}.${parts[parts.length - 1]}@${VESSEL.emailDomainGuess}`;
   };
 
   // All crew without a grant yet — everyone on the crew matrix plus anyone

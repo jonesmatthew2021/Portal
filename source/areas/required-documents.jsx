@@ -75,7 +75,7 @@ function RequiredDocuments() {
       key: "certificate-sheet",
       title: "OPMS spreadsheet",
       noun: "crew certificates spreadsheet",
-      blurb: "This spread sheet is populated weekly from Portways and is the our crews records held by OPMS, call PK if you need it.",
+      blurb: `This spread sheet is populated weekly from Portways and is the our crews records held by OPMS, call ${VESSEL.contacts.opms} if you need it.`,
       required: true,
       record: certSheet || null,
       upload: (record) => (

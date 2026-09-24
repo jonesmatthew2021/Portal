@@ -34,7 +34,8 @@ import worker, { hourWaits, hourDeadline, syncLastAnswer, SETTLE_MS } from "../s
 import { graphBudget } from "../src/files/store.js";
 import { writeZip, readZip, partOf, partText, datedWorkbookName } from "../../source/shared/workbook.js";
 import { asKnownPerson, crewRegister } from "../../source/shared/names.js";
-import { perthNow, backupDue, backupName, namesToDrop, folderAllowed, nightlyBackup } from "../src/lib/backup.js";
+import { backupDue, backupName, namesToDrop, folderAllowed, nightlyBackup } from "../src/lib/backup.js";
+import { vessel, vesselNow } from "../src/vessel.js";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -2703,15 +2704,17 @@ test("a phone photo the model cannot read is still taken off again when the phon
 });
 
 /* ------------------------------------------------------------------------ *
- * The nightly backup's rules: Perth decides the day, a backup is owed once
+ * The nightly backup's rules: the vessel's clock decides the day, a backup is owed once
  * a day after the hour, the file is named for its day, a month of dailies
  * and a year of monthlies are kept by name alone, and a folder the portal
  * files into is refused.
  * ------------------------------------------------------------------------ */
-test("Perth decides the backup's day and hour", () => {
-  assert.deepEqual(perthNow(Date.parse("2026-09-24T15:59:00Z")), { day: "2026-09-24", hour: 23 });
-  assert.deepEqual(perthNow(Date.parse("2026-09-24T16:00:00Z")), { day: "2026-09-25", hour: 0 });
-  assert.deepEqual(perthNow(Date.parse("2026-09-23T18:10:00Z")), { day: "2026-09-24", hour: 2 }, "ten past two in the morning, Perth");
+test("the vessel's clock decides the backup's day and hour", () => {
+  // The vessel file says Australia/Perth, eight hours ahead of UTC.
+  assert.equal(vessel.timezone, "Australia/Perth");
+  assert.deepEqual(vesselNow(Date.parse("2026-09-24T15:59:00Z")), { day: "2026-09-24", hour: 23 });
+  assert.deepEqual(vesselNow(Date.parse("2026-09-24T16:00:00Z")), { day: "2026-09-25", hour: 0 });
+  assert.deepEqual(vesselNow(Date.parse("2026-09-23T18:10:00Z")), { day: "2026-09-24", hour: 2 }, "ten past two in the morning where the vessel is");
 });
 
 test("a backup is owed after the hour, once a day, and again every hour until it lands", () => {
@@ -2802,7 +2805,7 @@ test("a folder the portal files into is refused, against the real map in wrangle
  * ------------------------------------------------------------------------ */
 const BACKUP_FOLDER = "United Operations Team/Backups";
 const backupKey = (day: string) => `library/${BACKUP_FOLDER}/Crew Portal backup ${day}.json`;
-/** Perth 02:10 on 24 Sep 2026, and 01:10. */
+/** 02:10 on 24 Sep 2026 where the vessel is, and 01:10. */
 const TEN_PAST_TWO = Date.parse("2026-09-23T18:10:00Z");
 const TEN_PAST_ONE = Date.parse("2026-09-23T17:10:00Z");
 /** Evans's portal with the backup folder in the library and a user on the books. */
@@ -2841,7 +2844,7 @@ test("at ten past two the hour writes the backup into the owner's folder, whole,
   assert.notEqual(portal.state.data, before, "and the round moved the document on afterwards");
   const file = JSON.parse(text!);
   assert.deepEqual(Object.keys(file), ["portal", "backupVersion", "at", "perthDay", "rev", "counts", "document", "documents", "users", "readings", "fauna"]);
-  assert.equal(file.portal, "coolibah");
+  assert.equal(file.portal, vessel.slug, "marked with the vessel file's slug");
   assert.equal(file.backupVersion, 1);
   assert.equal(file.perthDay, "2026-09-24");
   assert.equal(file.at, "2026-09-23T18:10:00.000Z");
@@ -3004,7 +3007,7 @@ test("after the backup lands, a month of dailies and a year of monthlies remain,
  * the other parts only when asked, bound and batched.
  * ------------------------------------------------------------------------ */
 const aBackup = (over: Record<string, unknown> = {}) => ({
-  portal: "coolibah", backupVersion: 1, at: "2026-09-22T18:10:00.000Z", perthDay: "2026-09-23", rev: 7,
+  portal: vessel.slug, backupVersion: 1, at: "2026-09-22T18:10:00.000Z", perthDay: "2026-09-23", rev: 7,
   counts: { documents: 0, users: 0, readings: 0, fauna: 0 },
   document: JSON.stringify({ quals: { cols: [["QL-01", "Master", "Qualifications"]], rows: [["EVANS, Brenton", "Master", "", ["2029-01-01"]]] }, people: [{ name: "EVANS, Brenton", aliases: [] }] }),
   documents: [], users: [], readings: {}, fauna: [],
@@ -3040,11 +3043,11 @@ test("crew cannot put a backup back", async () => {
   assert.equal(portal.state.rev, 1, "nothing written");
 });
 
-test("a file that is not a Coolibah backup is refused whole, and nothing is written", async () => {
+test("a file that is not this vessel's backup is refused whole, and nothing is written", async () => {
   const { portal } = await oneManPortal();
   const wrong = await putBack(aBackup({ portal: "someone-else" }));
   assert.equal(wrong.status, 400);
-  assert.match(((await wrong.json()) as { error: string }).error, /isn't a Coolibah backup/);
+  assert.match(((await wrong.json()) as { error: string }).error, new RegExp("isn't a " + vessel.shortName + " backup"));
   const version = await putBack(aBackup({ backupVersion: 2 }));
   assert.equal(version.status, 400);
   const noDoc = await putBack(aBackup({ document: undefined }));

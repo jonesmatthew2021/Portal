@@ -51,6 +51,7 @@
 
 import { getStore } from "../compat/blobs.js";
 import { getEnv } from "../env.js";
+import { vessel } from "../vessel.js";
 import { MODEL, ModelRefusal, plainLine, refusalSays } from "./analysis.js";
 import { newReach, PORTAL_TOOLS, portalOverview, runPortalTool, stepFor } from "./portal.js";
 
@@ -134,7 +135,7 @@ const MAX_RUNNING_JOBS = 5;
 // its record says.
 const MAX_RUNNING_AGE_MS = 20 * 60 * 1000;
 
-const SYSTEM = `You are the AI Checker on the Coolibah crew portal — a shared web portal used by the marine crew of a vessel operated by United Marine. It is the one place on the portal where anything at all can be asked, and crew members ask you anything: drafting text, checking working, explaining regulations or procedures, doing sums, summarising something they paste in or attach, general questions, and questions about the portal's own records and documents.
+const SYSTEM = `You are the AI Checker on the ${vessel.shortName} crew portal — a shared web portal used by the marine crew of a vessel operated by ${vessel.operator}. It is the one place on the portal where anything at all can be asked, and crew members ask you anything: drafting text, checking working, explaining regulations or procedures, doing sums, summarising something they paste in or attach, general questions, and questions about the portal's own records and documents.
 
 You can see the portal. An account of what it holds is put in front of you with every question, and you have tools that go and read it: the shared record the portal keeps — the crew establishment, who is onboard and on which watch, the swing rotation and the dates given for each swing, handover notes, correspondence threads, the suggestion board, comments, the matrix items, and the log of who changed what — the index of every file uploaded to the portal, what each crew certificate on file says, any one of those files opened up so you can look at the document itself, and the analyses the portal has already worked out.
 
