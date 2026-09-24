@@ -1917,6 +1917,12 @@ const is = (got, want, what) => {
     bodyStart();
     await me.done;
     is(await w.caches.keys(), [], "…and the answer that lived through it is not kept: B's /api/me is dropped too");
+    /* Looked at on the handle keep() was writing to, not only on the
+       store's list: a forget dooms the old cache, so its keys are gone
+       either way, and only the handle can say whether B's answer was
+       put after the forget or dropped before anything ran. */
+    const onHandle = cache.store.has("/api/me") ? (await cache.store.get("/api/me").clone().json()).email : null;
+    is(onHandle, "a@example.com", "…B's answer never reached the cache: the forget's deletes are the last word");
   }
   {
     // A first-ever install, no earlier cache: only the build's own files

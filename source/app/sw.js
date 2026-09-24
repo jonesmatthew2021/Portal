@@ -93,7 +93,10 @@ async function keep(cache, kind, key, answer, began) {
     // the new person's and is the one thing that must survive it.
     // forgetKept bumps the era first, so began meets it; a forget from
     // anywhere else during its deletes still bumps past and drops it.
-    if (anotherPerson(kept, live)) { began = era + 1; await forgetKept(cache); }
+    // Looked at once more here: the reads above were awaits, and a forget
+    // that landed during them must not be swallowed by the era this keep
+    // is about to claim as its own.
+    if (anotherPerson(kept, live)) { if (outOfDate()) return; began = era + 1; await forgetKept(cache); }
   }
   if (outOfDate()) return;
   await cache.put(key, copy);
