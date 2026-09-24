@@ -69,8 +69,11 @@ export default async (req: Request, actor: PortalUser): Promise<Response> => {
   const lease = await takeLease(actor.name || actor.email || "a rename");
   if (!lease) {
     // Names the holder - the hour or a person's round - and promises no
-    // time: the same sentence every writer of the workbook answers with.
-    return Response.json({ error: writingTheWorkbook(await leaseHolder()) }, { status: 409 });
+    // time: the same sentence every writer of the workbook answers with,
+    // and the holder's name beside it, so the page can hold its buttons
+    // down under that name at once.
+    const holder = await leaseHolder();
+    return Response.json({ error: writingTheWorkbook(holder), by: holder }, { status: 409 });
   }
   const changed = () => Response.json({ error: "That document has changed; reload and try again." }, { status: 409 });
   try {

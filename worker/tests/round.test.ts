@@ -2047,7 +2047,9 @@ test("the office's own file is never renamed, and nothing is renamed while the h
   setEnv({ DB: heldDb, FILES: bucket, FILE_STORE: "r2" } as never);
   const held = await renameTo("tm1", "20260924 - CREW QUALIFICATION EXPIRY.xlsx");
   assert.equal(held.status, 409);
-  assert.equal(((await held.json()) as { error: string }).error, "The round on the hour is writing the workbook; try again when it has finished.", "names the holder, promises no time");
+  const heldSaid = (await held.json()) as { error: string; by: string };
+  assert.equal(heldSaid.error, "The round on the hour is writing the workbook; try again when it has finished.", "names the holder, promises no time");
+  assert.equal(heldSaid.by, "the round on the hour", "and says who beside it, for the page's buttons");
   assert.deepEqual(bucket.keys(), [theirs], "nothing moved either time");
   assert.deepEqual(writes(heldDb), [], "nothing on the books changed");
   assert.deepEqual(leaseWrites(heldDb), [], "and the hour's lease was not touched");
@@ -2203,7 +2205,9 @@ test("Import from SharePoint over the portal's own dated copy parks it flat, and
   const before = portal.db.asked.length;
   const refused = await importFrom(loose);
   assert.equal(refused.status, 409, "refused while the lease stands");
-  assert.equal(((await refused.json()) as { error: string }).error, "The round on the hour is writing the workbook; try again when it has finished.", "names the holder, promises no time");
+  const refusedSaid = (await refused.json()) as { error: string; by: string };
+  assert.equal(refusedSaid.error, "The round on the hour is writing the workbook; try again when it has finished.", "names the holder, promises no time");
+  assert.equal(refusedSaid.by, "the round on the hour", "and says who beside it, for the page's buttons");
   assert.equal(portal.rows.find((r) => r.id === "tm1")!.removedAt, null, "nothing stepped down");
   assert.ok(!portal.db.asked.slice(before).some((a) => /^(UPDATE|INSERT)/.test(a.sql)), "nothing written at all");
   assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).by, "the round on the hour", "the hour's lease is untouched");

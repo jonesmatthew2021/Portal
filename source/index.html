@@ -11984,6 +11984,11 @@ function UpdateDocumentation() {
         body: JSON.stringify({ by: asked ? "Update portal" : "the round on the hour" }) });
       let r = await ask();
       if (r.status === 409) {
+        // Refused for the lease: the answer names who holds it, so the
+        // buttons go down under that name now rather than under the
+        // hour's until the next look (as runMatrixRound's 409 branch does).
+        const refusal = await r.json().catch(() => ({}));
+        setRoundRunning(true, typeof refusal.by === "string" ? refusal.by : "");
         setStep("Waiting for the round on the hour");
         await waitForRound(undefined, setRoundRunning);
         setStep("Reading the SharePoint folders");
