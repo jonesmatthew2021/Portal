@@ -124,9 +124,21 @@ export const graphWaits = {
  *  each where Graph names none. */
 const GRAPH_RETRIES = 3;
 const GRAPH_BACKOFF_MS = [1000, 2000, 4000];
-/** The longest a Retry-After is honoured for: a request has minutes, not
- *  the hour Graph can ask for. */
+/** The longest a Retry-After is honoured for where no budget is set (a
+ *  page's request): a request has minutes, not the hour Graph can ask
+ *  for. Under a budget the budget is the cap, and the wait is honoured in
+ *  full - asking again before the time Graph named is itself a throttling
+ *  offence, and lengthens the window. */
 const RETRY_AFTER_CAP_S = 60;
+
+/** When the waits have to stop: a time (Date.now() terms) no wait may run
+ *  past, or 0 for none. The hour sets it for its whole run (scheduled() in
+ *  index.ts), so the sync, the reading's file gets and the round's
+ *  workbook write all give up rather than wait past the hour's deadline -
+ *  three throttled calls at a minute's Retry-After each were nine minutes
+ *  of sleeping, with the hour's record still unwritten behind them. A
+ *  page's request sets none. */
+export const graphBudget = { until: 0 };
 
 /* One call to Graph, tried again where Graph itself says to.
  *
@@ -137,20 +149,34 @@ const RETRY_AFTER_CAP_S = 60;
  * after the wait Graph names (Retry-After, in seconds) or a short one of
  * its own, up to three more times. A call still refused after that throws
  * with the status in the sentence, so the survey fails out loud (502, the
- * error on last-run) and nothing is taken off the books over it. */
+ * error on last-run) and nothing is taken off the books over it. So does
+ * a call whose next wait would run past the budget: it says so at once
+ * and sleeps nothing. */
 async function graph(path: string, init: RequestInit = {}): Promise<Response> {
-  const token = await graphToken();
+  const what = `${(init.method || "GET").toUpperCase()} ${decodeURIComponent(path)}`;
   for (let tries = 1; ; tries++) {
+    // Asked for on every try: it is cached, so the happy path costs
+    // nothing, and a token in its last minute cannot run out during a
+    // long wait and turn the next try into a 401.
+    const token = await graphToken();
     const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
       ...init,
       headers: { Authorization: `Bearer ${token}`, ...(init.headers || {}) },
     });
     if (res.status !== 429 && res.status < 500) return res;
+    // The refusal's body is never read; let go of it rather than hold the
+    // stream open across the wait.
+    await res.body?.cancel().catch(() => {});
     if (tries > GRAPH_RETRIES) {
-      throw new Error(`SharePoint answered ${res.status} ${tries} times for ${(init.method || "GET").toUpperCase()} ${decodeURIComponent(path)}`);
+      throw new Error(`SharePoint answered ${res.status} ${tries} times for ${what}`);
     }
     const asked = Number(res.headers.get("Retry-After"));
-    const wait = asked > 0 ? Math.min(asked, RETRY_AFTER_CAP_S) * 1000 : GRAPH_BACKOFF_MS[tries - 1];
+    const wait = asked > 0
+      ? (graphBudget.until ? asked : Math.min(asked, RETRY_AFTER_CAP_S)) * 1000
+      : GRAPH_BACKOFF_MS[tries - 1];
+    if (graphBudget.until && Date.now() + wait > graphBudget.until) {
+      throw new Error(`SharePoint answered ${res.status} ${tries} time${tries === 1 ? "" : "s"} for ${what} and there is no time left to ask again`);
+    }
     await graphWaits.sleep(wait);
   }
 }

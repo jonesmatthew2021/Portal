@@ -1,7 +1,7 @@
 import { setEnv, type PortalEnv } from "./env.js";
 import { gate, logLoginEvent } from "./auth.js";
 import { allowed, crewStateBody, denied } from "./authz.js";
-import { fileStore } from "./files/store.js";
+import { fileStore, graphBudget } from "./files/store.js";
 import { ensureDocumentColumns } from "./db/documents.js";
 import users from "./routes/users.js";
 import traffic from "./routes/traffic.js";
@@ -244,9 +244,18 @@ export default {
       await written({ roundSkipped: "another round is still running" });
       return;
     }
+    const deadline = hourDeadline(t0, Date.now());
+    // The library's driver gives up on any wait that would run past the
+    // hour's settling time, for everything the hour asks of it: three
+    // throttled calls at a minute's Retry-After each were nine minutes of
+    // sleeping, past the deadline and the platform's cut, with no record
+    // written. Cleared whatever happens, so a page's request after this
+    // in the same isolate waits on its own terms.
+    graphBudget.until = deadline - SETTLE_MS;
     try {
-      await written(await theHour(env, lease, hourDeadline(t0, Date.now()), outcome, written));
+      await written(await theHour(env, lease, deadline, outcome, written));
     } finally {
+      graphBudget.until = 0;
       try {
         await dropLease(lease.token);
       } catch (e) {
@@ -271,6 +280,10 @@ export const hourWaits = {
  *  the three that are left. */
 export const hourDeadline = (tick: number, leaseAt: number) =>
   Math.min(leaseAt + 9 * 60 * 1000, tick + 12 * 60 * 1000);
+/** How long before the deadline the reading loops stop starting batches
+ *  and the library's waits stop, so the round always has room to run
+ *  after them. */
+export const SETTLE_MS = 2.5 * 60 * 1000;
 
 /**
  * The hour's work under its lease: the sync, the reading, the round. What
@@ -287,7 +300,7 @@ async function theHour(
   // so the round always has room to run after them; the round itself is
   // checked against the deadline.
   const timeLeft = () => Date.now() < deadline;
-  const loopsLeft = () => Date.now() < deadline - 2.5 * 60 * 1000;
+  const loopsLeft = () => Date.now() < deadline - SETTLE_MS;
   /* The other budget is calls: one invocation may make about a thousand
      (every fetch to the model or the library, every database statement),
      and an hour that spends them all on reading leaves none for the round
@@ -303,6 +316,13 @@ async function theHour(
   const MAX_EXTRACT_BATCHES = 20;
   const MAX_REFILE_CALLS = 1;
   const REFILE_SLICE = 40;
+
+  // The hour on the record before anything is asked of the library: an
+  // invocation the platform cuts off inside the sync - a throttled
+  // library, a slow walk - would otherwise leave no line for this hour
+  // at all, and the page would show last hour's with no error, which is
+  // the worst way to fail. Updated below as the hour learns more.
+  await written({ roundSkipped: "round not yet run" });
 
   let mirroredThisHour = 0;
   try {
@@ -333,10 +353,15 @@ async function theHour(
     console.error("the crew matrix could not be read for the hour:", e);
   }
 
-  // The hour so far, on the record before the reading spends anything: if
-  // the reading runs the budget dry, the page still sees this hour and the
-  // word that the round did not get to run, never last hour's line.
-  await written(round.roundSkipped || round.roundError ? round : { roundSkipped: "round not yet run" });
+  // The hour so far, on the record again before the reading spends
+  // anything, where there is something new to say: the sync's failure, or
+  // the round's word that it will not run. If the reading then runs the
+  // budget dry, the page still sees this hour and why, never last hour's
+  // line. A clean sync with a matrix to run leaves the first record as it
+  // stands.
+  if (round.roundSkipped || round.roundError || outcome.syncError) {
+    await written(round.roundSkipped || round.roundError ? round : { roundSkipped: "round not yet run" });
+  }
 
   // The skills matrix's Equivalence sheet, before the refile: it says which
   // column a certificate belongs in, and so what the file is renamed to.

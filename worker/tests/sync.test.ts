@@ -22,7 +22,7 @@ import assert from "node:assert/strict";
 import { setEnv } from "../src/env.js";
 import { todayThere } from "../src/lib/analysis.js";
 import sync, { runSync, heldBackLine } from "../src/routes/sync.js";
-import { graphWaits } from "../src/files/store.js";
+import { graphWaits, graphBudget } from "../src/files/store.js";
 import { fakeBucket, portalDb, graphLibrary, sharepointEnv, wranglerVars, keptRow, type FakeFile } from "./helpers.js";
 
 /* The library's real folders (wrangler.toml): "opms/" is OPMS Documents,
@@ -118,6 +118,57 @@ test("Graph: four 503s in a row fail the survey - 502, the error on last-run wit
     assert.equal(portal.rows[0].removedAt, null, "the row is still live");
     assert.equal(portal.rows.length, 1, "and nothing was registered");
   } finally {
+    waits.restore();
+    graph.restore();
+  }
+});
+
+test("Graph, under the hour's budget: a wait that would run past it is not waited - the survey fails at once, sleeping nothing, and says so", async () => {
+  const portal = booksOf([certRow("c1", "opms/Brenton - OPMS/master.pdf")]);
+  const graph = libraryOf(portal, [{ path: `${BRENTON}/master.pdf`, size: 6 }]);
+  const waits = recordedWaits();
+  try {
+    // Five seconds left in the hour; Graph asks for a minute.
+    graphBudget.until = Date.now() + 5000;
+    graph.fault({ status: 429, retryAfter: 60 }, (folder) => folder === OPMS);
+    const res = await post("hourly schedule");
+    assert.equal(res.status, 502);
+    const said = (await res.json()) as { error: string };
+    assert.equal(said.error, "SharePoint answered 429 1 time for GET /drives/d1/root:/United Operations Team/OPMS Documents:/children?$top=200 and there is no time left to ask again");
+    assert.deepEqual(waits.sleeps, [], "nothing slept");
+    assert.deepEqual(graph.listings, [{ folder: OPMS, skip: 0 }], "asked once, never again");
+    assert.equal(lastRun(portal).error, said.error, "the same sentence on the record");
+    assert.equal(portal.rows[0].removedAt, null, "the row is still live");
+    assert.deepEqual(graph.made, [], "no folder was made");
+    assert.deepEqual([...graph.posts(), ...graph.puts()], [], "nothing was written to the library");
+  } finally {
+    graphBudget.until = 0;
+    waits.restore();
+    graph.restore();
+  }
+});
+
+test("Graph: with time in hand the minute Graph names is waited in full under a budget, and capped at a minute without one", async () => {
+  const portal = booksOf([]);
+  const graph = libraryOf(portal, [{ path: `${BRENTON}/master.pdf`, size: 6 }]);
+  const waits = recordedWaits();
+  try {
+    // Ten minutes in hand, Graph asks for ninety seconds: honoured, since
+    // asking again sooner is itself a throttling offence.
+    graphBudget.until = Date.now() + 10 * 60 * 1000;
+    graph.fault({ status: 429, retryAfter: 90 }, (folder) => folder === OPMS);
+    await runSync("hourly schedule");
+    assert.deepEqual(waits.sleeps, [90000], "the ninety seconds Graph named");
+    assert.equal(lastRun(portal).registered, 1);
+    // A page's request has no budget and no hour to spend: a minute at most.
+    graphBudget.until = 0;
+    waits.sleeps.length = 0;
+    graph.fault({ status: 429, retryAfter: 90 }, (folder) => folder === OPMS);
+    await runSync("Import new files");
+    assert.deepEqual(waits.sleeps, [60000], "a minute, not the ninety");
+    assert.equal(lastRun(portal).error, null);
+  } finally {
+    graphBudget.until = 0;
     waits.restore();
     graph.restore();
   }

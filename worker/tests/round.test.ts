@@ -31,6 +31,7 @@ import files from "../src/routes/files.js";
 import renameFile from "../src/routes/rename-file.js";
 import importSingle from "../src/routes/import-single.js";
 import worker, { hourWaits, hourDeadline, syncLastAnswer } from "../src/index.js";
+import { graphBudget } from "../src/files/store.js";
 import { writeZip, readZip, partOf, partText, datedWorkbookName } from "../../source/shared/workbook.js";
 import { asKnownPerson, crewRegister } from "../../source/shared/names.js";
 import { perthNow, backupDue, backupName, namesToDrop, folderAllowed, nightlyBackup } from "../src/lib/backup.js";
@@ -1028,6 +1029,36 @@ test("the hour runs the sync and the round under one lease, taken once and run o
   assert.equal(JSON.parse(portal.blobs.get("sync|last-hourly")!).roundSkipped, "another round is still running");
   assert.ok(!portal.db.asked.slice(before).some((a) => /portal_state|FROM documents/.test(a.sql)), "nothing was read or written past the lease");
   assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).by, "Update portal", "the page's lease is untouched");
+});
+
+test("the hour is on the record, and the library's waits under its budget, before the sync asks the library anything", async () => {
+  /* An invocation the platform cuts off inside the sync must still leave
+     this hour's line. So at the sync's first read of the books the record
+     is already written, saying the round has not run yet, and the driver's
+     budget is already set to the hour's settling time. */
+  const { portal, bucket } = await oneManPortal();
+  const env = { DB: portal.db, FILES: bucket, FILE_STORE: "r2" };
+  const seen: { record: unknown; budget: number; now: number } | { record: null } = { record: null };
+  const restore = beforeStatement(portal.db, (sql) => /^select .+ from "documents"$/.test(sql), async () => {
+    Object.assign(seen, { record: JSON.parse(portal.blobs.get("sync|last-hourly") || "null"), budget: graphBudget.until, now: Date.now() });
+  });
+  const tick = Date.now();
+  try {
+    await worker.scheduled({} as never, env as never);
+  } finally {
+    restore();
+  }
+  assert.ok(seen.record, "the sync's first read found the hour already on the record");
+  const first = seen as { record: { roundSkipped: string; syncError: null; at: number }; budget: number; now: number };
+  assert.equal(first.record.roundSkipped, "round not yet run");
+  assert.equal(first.record.syncError, null);
+  assert.ok(first.record.at >= tick, "this hour, not last hour's line");
+  // Nine minutes from the lease less the two and a half the round keeps.
+  assert.ok(first.budget >= first.now + 6 * 60 * 1000 && first.budget <= first.now + 6.5 * 60 * 1000, "the driver's budget is the hour's settling time: " + (first.budget - first.now));
+  assert.equal(graphBudget.until, 0, "and cleared when the hour is done");
+  const hourly = JSON.parse(portal.blobs.get("sync|last-hourly")!);
+  assert.equal(hourly.applied, 1, "the hour went on to run the round");
+  assert.equal(hourly.roundSkipped, null);
 });
 
 test("a lease that runs out while the hour is waiting is taken on a later try", async () => {
