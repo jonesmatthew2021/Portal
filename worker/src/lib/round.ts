@@ -5,7 +5,7 @@ import {
 } from "../../../source/shared/workbook.js";
 import { compareMatrix } from "../routes/analyse.js";
 import { readDocument, saveDocument, type SharedDocument } from "./shared-state.js";
-import { matrixReadingKey, matrixStore, todayThere, type Matrix } from "./analysis.js";
+import { EQUIV_KEY, matrixReadingKey, matrixStore, todayThere, type Matrix } from "./analysis.js";
 import { getStore } from "../compat/blobs.js";
 import { fileStore, legacyRemovedKeyFor, removedKeyFor } from "../db/documents.js";
 import { liveRowsOf, replaceSingleFile } from "../db/single-file.js";
@@ -153,7 +153,7 @@ const HISTORY_LIMIT = 500;
  * a reason to stop: without rules the dates come from what the certificates
  * print, which is what they always meant.
  */
-async function keepValidityRules(): Promise<string | null> {
+export async function keepValidityRules(): Promise<string | null> {
   const [skills] = await liveRowsOf("skills-matrix");
   if (!skills) return null;
   const key = matrixReadingKey("validity", skills.id);
@@ -183,6 +183,89 @@ async function keepValidityRules(): Promise<string | null> {
   const reading = { readable: true, at: new Date().toISOString(), by: "read from the sheet", periods };
   await matrixStore().setJSON(key, { which: "validity", id: skills.id, filename: skills.filename, reading });
   return null;
+}
+
+/** Whether expiry rules are held for the skills matrix on file. */
+export async function validityRulesHeld(): Promise<boolean> {
+  const [skills] = await liveRowsOf("skills-matrix");
+  if (!skills) return false;
+  return !!(await matrixStore().get(matrixReadingKey("validity", skills.id), { type: "json" }));
+}
+
+/**
+ * The skills matrix's Equivalence sheet, read off the live skills matrix
+ * and kept under the same key and in the same shape the page's
+ * "equivalences" action writes (storeEquivalences in source/index.html
+ * is the parse this follows, line for line). Kept against the skills
+ * matrix it was read from: written when nothing is held, or what is held
+ * came from another skills matrix or from the page (which does not say
+ * which); left alone otherwise, so an hour costs one look.
+ *
+ * Read before the hour's refile, not after: the sheet says which column a
+ * certificate belongs in, and a certificate the sheet re-homes is renamed
+ * under that column the same hour it is read, not the next.
+ *
+ * Nothing here throws. What goes wrong is a problem to report.
+ */
+export async function keepEquivalences(): Promise<{ rows: number; written: boolean; problem: string | null }> {
+  try {
+    const [skills] = await liveRowsOf("skills-matrix");
+    if (!skills) return { rows: 0, written: false, problem: null };
+    const held = (await matrixStore().get(EQUIV_KEY, { type: "json" })) as { rows?: unknown[]; skillsId?: string } | null;
+    if (held && held.skillsId === skills.id) {
+      return { rows: Array.isArray(held.rows) ? held.rows.length : 0, written: false, problem: null };
+    }
+    if (!/\.(xlsx|xlsm)$/i.test(skills.filename)) {
+      return { rows: 0, written: false, problem: `${skills.filename} is not a workbook, so the Equivalence sheet could not be read off it.` };
+    }
+    const bytes = await fileStore().get(skills.blobKey, { type: "arrayBuffer" });
+    if (!bytes) return { rows: 0, written: false, problem: `${skills.filename} has no bytes on file, so the Equivalence sheet could not be read off it.` };
+    const entries = readZip(bytes);
+    const sheets = listSheets(
+      await partText(partOf(entries, "xl/workbook.xml")),
+      await partText(partOf(entries, "xl/_rels/workbook.xml.rels")),
+    );
+    const sheet = sheets.find((s) => /equivalen/i.test(s.name));
+    if (!sheet) return { rows: 0, written: false, problem: `${skills.filename} has no Equivalence sheet.` };
+    const grid = await readSheetRows(entries, sheet.path);
+
+    // The matrix's columns: what is accepted must land on one of them.
+    const cur = await readDocument();
+    const cols = ((cur?.doc.quals as Quals | null)?.cols || []) as string[][];
+    const colCodes = new Set(cols.map((c) => String(c[0]).trim().toUpperCase()));
+    const part = (cell: unknown) => {
+      const m = String(cell || "").replace(/\s+/g, " ").trim().match(/^([A-Za-z]{2,4}-\d+[A-Za-z]?)\s+(.+)$/);
+      return m ? { code: m[1].toUpperCase(), title: m[2].trim() } : null;
+    };
+    /* The sheet answers two different questions with the same two columns.
+       Where what is accepted is a certificate by name - "QLE-03 Master
+       <500GT" - it is telling the portal which column that certificate
+       belongs in. Where what is accepted is a matrix column in its own
+       right - "QL-15 is met by QL-14" - it is telling it that holding the
+       one answers for the other, which the page reads elsewhere (coversFrom)
+       and this leaves alone. */
+    const seen = new Set<string>();
+    const parsed: { held: string; code: string }[] = [];
+    for (const r of grid) {
+      const wanted = part(r[1]);
+      const held = part(r[2]);
+      if (!wanted || !held) continue;
+      if (!colCodes.has(wanted.code)) continue; // must land on a matrix column
+      if (colCodes.has(held.code)) continue;   // a column answering for a column: not this table's
+      if (seen.has(held.code)) continue;        // the first row is the most senior column
+      seen.add(held.code);
+      parsed.push({ held: held.title, code: wanted.code });
+    }
+    // The same trimming the "equivalences" action gives the page's rows.
+    const rows = parsed
+      .map((r) => ({ held: r.held.replace(/\s+/g, " ").trim().slice(0, 200), code: r.code.trim().toUpperCase().slice(0, 12) }))
+      .filter((r) => !!r.held && /^[A-Z]{2,4}-\d+[A-Z]?$/.test(r.code))
+      .slice(0, 400);
+    await matrixStore().setJSON(EQUIV_KEY, { rows, at: new Date().toISOString(), skillsId: skills.id });
+    return { rows: rows.length, written: true, problem: null };
+  } catch (e) {
+    return { rows: 0, written: false, problem: `The Equivalence sheet could not be read off the skills matrix. ${said(e)}` };
+  }
 }
 
 export async function runMatrixRound(opts: {

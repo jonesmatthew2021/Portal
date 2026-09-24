@@ -23,7 +23,7 @@ import readOne from "./routes/read-one.js";
 import clearR2 from "./routes/clear-r2.js";
 import importSingle from "./routes/import-single.js";
 import fauna, { ensureTable as ensureFaunaTable, settleLog as settleFaunaLog } from "./routes/fauna.js";
-import { runMatrixRound, roundRunning, takeLease, dropLease, type Lease } from "./lib/round.js";
+import { runMatrixRound, roundRunning, takeLease, dropLease, keepEquivalences, type Lease } from "./lib/round.js";
 import { readDocument } from "./lib/shared-state.js";
 import { crewRowsOnly } from "../../source/shared/names.js";
 
@@ -289,6 +289,14 @@ async function theHour(
   // the reading runs the budget dry, the page still sees this hour and the
   // word that the round did not get to run, never last hour's line.
   await written(round.roundSkipped || round.roundError ? round : { roundSkipped: "round not yet run" });
+
+  // The skills matrix's Equivalence sheet, before the refile: it says which
+  // column a certificate belongs in, and so what the file is renamed to.
+  // One look on an hour that already holds it.
+  if (codes.length) {
+    const eq = await keepEquivalences();
+    if (eq.problem) console.error("the Equivalence sheet was not kept:", eq.problem);
+  }
 
   if (env.ANTHROPIC_API_KEY) {
     try {

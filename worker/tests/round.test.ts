@@ -18,7 +18,7 @@ import analyse, { compareMatrix, refile } from "../src/routes/analyse.js";
 import { KeptInPlace, ensureDocumentColumns, forgetDocumentColumns, purgeDocument, relocateToRemovedBlob, removeDocument, restoreDocument } from "../src/db/documents.js";
 import { replaceSingleFile } from "../src/db/single-file.js";
 import { saveDocument } from "../src/lib/shared-state.js";
-import { runMatrixRound, roundRunning, takeLease, dropLease } from "../src/lib/round.js";
+import { runMatrixRound, roundRunning, takeLease, dropLease, keepEquivalences } from "../src/lib/round.js";
 import { todayThere } from "../src/lib/analysis.js";
 import sync, { apply, outranks, sheetOrder, survey } from "../src/routes/sync.js";
 import files from "../src/routes/files.js";
@@ -646,6 +646,16 @@ function portalDb(doc: Record<string, unknown>, rows: Record<string, unknown>[],
     if (/SELECT key, value FROM blobs WHERE store = \?1/.test(sql)) {
       return { results: [...blobs.entries()].filter(([k]) => k.startsWith(args[0] + "|")).map(([k, value]) => ({ key: k.slice(k.indexOf("|") + 1), value })) };
     }
+    // The reading store's listing, which the certificate reading opens with.
+    if (/SELECT key FROM blobs WHERE store = \?1 AND key LIKE/.test(sql)) {
+      return { results: [...blobs.keys()].filter((k) => k.startsWith(args[0] + "|" + args[1])).map((k) => ({ key: k.slice(k.indexOf("|") + 1) })) };
+    }
+    // The refile's label: whose certificate a row is.
+    if (/^UPDATE documents SET person = \?2 WHERE id = \?1/.test(sql)) {
+      const r = rows.find((x) => x.id === args[0]);
+      if (r) r.person = args[1];
+      return { changes: r ? 1 : 0 };
+    }
     if (/^INSERT INTO blobs/.test(sql)) {
       const k = args[0] + "|" + args[1];
       // The insert-if-absent: a row already there is left alone, and the
@@ -676,14 +686,39 @@ function portalDb(doc: Record<string, unknown>, rows: Record<string, unknown>[],
   return { db, state, blobs, etags, doc: () => JSON.parse(state.data), rows };
 }
 
+/* A skills matrix whose Equivalence sheet says a "Master <500GT" ticket
+   belongs in the QL-17 column - which is not what the ticket's own reading
+   says (QL-01), so a certificate filed by the sheet lands somewhere
+   different from one filed without it. */
+const skillsWorkbook = () => writeZip([
+  zipPart("[Content_Types].xml", `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/></Types>`),
+  zipPart("xl/workbook.xml", `<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Skills" sheetId="1" r:id="rId1"/><sheet name="Equivalence" sheetId="2" r:id="rId2"/></sheets></workbook>`),
+  zipPart("xl/_rels/workbook.xml.rels", `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/></Relationships>`),
+  zipPart("xl/sharedStrings.xml", `<?xml version="1.0"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="0" uniqueCount="0"></sst>`),
+  zipPart("xl/worksheets/sheet1.xml", `<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Skills</t></is></c></row></sheetData></worksheet>`),
+  zipPart("xl/worksheets/sheet2.xml", `<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>
+<row r="1"><c r="B1" t="inlineStr"><is><t>Requirement</t></is></c><c r="C1" t="inlineStr"><is><t>Accepted</t></is></c></row>
+<row r="2"><c r="B2" t="inlineStr"><is><t>QL-17  Medical</t></is></c><c r="C2" t="inlineStr"><is><t>QLE-03 Master <500GT</t></is></c></row>
+<row r="3"><c r="B3" t="inlineStr"><is><t>QL-17 Medical</t></is></c><c r="C3" t="inlineStr"><is><t>QLE-03 Master <500GT again</t></is></c></row>
+<row r="4"><c r="B4" t="inlineStr"><is><t>QL-99 Not a column</t></is></c><c r="C4" t="inlineStr"><is><t>QLE-04 Something</t></is></c></row>
+<row r="5"><c r="B5" t="inlineStr"><is><t>QL-17 Medical</t></is></c><c r="C5" t="inlineStr"><is><t>QL-01 Master</t></is></c></row>
+</sheetData></worksheet>`),
+]);
+const skillsKey = "opms/skills/SKILLS MATRIX.xlsx";
+
 const oneManPortal = async (over: {
   orphanSeen?: Record<string, string>; filledFromCert?: Record<string, boolean>;
   /** The workbook as the office's own file, adopted from the folder. */
   theirs?: boolean;
+  /** A skills matrix on file too, with the Equivalence sheet above. */
+  skills?: boolean;
+  /** The ticket's code as the office typed it (null: left to the reading). */
+  qualCode?: string | null;
 } = {}) => {
   const tmKey = over.theirs ? "opms/CREW QUALIFICATION EXPIRY.xlsx" : "opms/20260901 - CREW QUALIFICATION EXPIRY.xlsx";
-  const bucket = fakeBucket({ "opms/Brenton - OPMS/master.pdf": "a scan" });
+  const bucket = fakeBucket({ "opms/Brenton - OPMS/master.pdf": "a scan" }, ["opms", "removed", "opms/Brenton - OPMS", "opms/skills"]);
   await bucket.put(tmKey, await smallWorkbook().arrayBuffer());
+  if (over.skills) await bucket.put(skillsKey, await skillsWorkbook().arrayBuffer());
   bucket.made.length = 0;
   const portal = portalDb(
     {
@@ -697,8 +732,10 @@ const oneManPortal = async (over: {
       history: [],
     },
     [
-      { ...billysTicket, id: "c2", person: "bRENTON", checksum: "evans-master", blobKey: "opms/Brenton - OPMS/master.pdf", sizeBytes: 6 },
+      { ...billysTicket, id: "c2", person: "bRENTON", checksum: "evans-master", blobKey: "opms/Brenton - OPMS/master.pdf", sizeBytes: 6,
+        qualCode: over.qualCode === undefined ? billysTicket.qualCode : over.qualCode },
       { ...liveRow("tm1", tmKey, over.theirs ? 1 : 0), sizeBytes: 5000 },
+      ...(over.skills ? [{ ...liveRow("sk1", skillsKey, 1), category: "skills-matrix", sizeBytes: 4000 }] : []),
     ],
     { "r1/evans-master.json": { ...reading, holderName: "Brenton Evans", expiresOn: "2031-05-26" } },
   );
@@ -1230,6 +1267,61 @@ test("a lease that runs out while the hour is waiting is taken on a later try", 
   const lease = JSON.parse(portal.blobs.get("sync|round-lease")!);
   assert.equal(lease.by, "the round on the hour", "under the hour's own lease");
   assert.equal(lease.until, 0, "run out at the end");
+});
+
+/* ------------------------------------------------------------------------ *
+ * The skills matrix's Equivalence sheet, kept by the worker itself. It says
+ * which column a certificate belongs in, and so what the file is renamed
+ * to - so it is read before the refile, and a certificate the sheet
+ * re-homes takes its name the first hour, not the next.
+ * ------------------------------------------------------------------------ */
+const equivalenceWrites = (db: { asked: Asked[] }) =>
+  db.asked.filter((a) => /^(INSERT INTO|UPDATE) blobs/.test(a.sql) && a.args[1] === "equivalences.json");
+
+test("the Equivalence sheet is read off the skills matrix once, and a re-homed certificate is renamed the first hour", async () => {
+  const { portal, bucket } = await oneManPortal({ skills: true, qualCode: null });
+  // A key so the hour runs its reading and refile; every certificate is
+  // already read, so the model is never asked.
+  const env = { DB: portal.db, FILES: bucket, FILE_STORE: "r2", ANTHROPIC_API_KEY: "k" };
+  await worker.scheduled({} as never, env as never);
+
+  const kept = JSON.parse(portal.blobs.get("matrix-readings|equivalences.json")!);
+  assert.deepEqual(kept.rows, [{ held: "Master <500GT", code: "QL-17" }],
+    "one row: the first for a held code wins, a wanted code off the matrix is dropped, a column answering for a column is not this table's");
+  assert.equal(kept.skillsId, "sk1", "kept against the skills matrix it was read from");
+  assert.equal(equivalenceWrites(portal.db).length, 1);
+
+  const ticket = portal.rows.find((r) => r.id === "c2")!;
+  assert.equal(ticket.filename, "EVANS, Brenton - QL-17 Medical.pdf", "renamed under the column the sheet gives it, this hour");
+  assert.equal(ticket.blobKey, "opms/Brenton - OPMS/EVANS, Brenton - QL-17 Medical.pdf", "in the folder it was in");
+  assert.ok(bucket.text("opms/Brenton - OPMS/EVANS, Brenton - QL-17 Medical.pdf"), "the file moved with it");
+  assert.equal(bucket.text("opms/Brenton - OPMS/master.pdf"), null);
+  const hourly = JSON.parse(portal.blobs.get("sync|last-hourly")!);
+  assert.equal(hourly.refiled, 2, "the label and the rename");
+  assert.equal(hourly.readError, null);
+
+  // The next hour finds it held for this skills matrix and reads nothing.
+  await worker.scheduled({} as never, env as never);
+  assert.equal(equivalenceWrites(portal.db).length, 1, "not written again");
+  assert.deepEqual(JSON.parse(portal.blobs.get("matrix-readings|equivalences.json")!).rows, kept.rows);
+});
+
+test("equivalences the page stored, with no skills matrix named, are read again off the sheet and kept against it", async () => {
+  const { portal } = await oneManPortal({ skills: true });
+  portal.blobs.set("matrix-readings|equivalences.json", JSON.stringify({ rows: [{ held: "Something else", code: "QL-01" }], at: "2026-09-01T00:00:00Z" }));
+  const first = await keepEquivalences();
+  assert.equal(first.written, true);
+  assert.equal(first.rows, 1);
+  assert.equal(first.problem, null);
+  const again = await keepEquivalences();
+  assert.equal(again.written, false, "held for this skills matrix already");
+  assert.equal(again.rows, 1);
+  assert.equal(equivalenceWrites(portal.db).length, 1);
+
+  // No skills matrix on file: nothing to read, nothing to say.
+  const bare = await oneManPortal();
+  assert.deepEqual(await keepEquivalences(), { rows: 0, written: false, problem: null });
+  assert.equal(bare.portal.blobs.has("matrix-readings|equivalences.json"), false);
 });
 
 /* ------------------------------------------------------------------------ *
