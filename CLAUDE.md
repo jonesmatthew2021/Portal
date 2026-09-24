@@ -115,6 +115,11 @@ modules. Edit that code there and only there.
   workbook: the hour holds it around its sync, reading and round, and
   `POST /api/sync`, the workbook upload and the round take the same one for
   their turn or answer 409. Anything new that writes the workbook takes it.
+  The round can also be started from the page with `POST /api/round`
+  (`routes/round.ts`; progress under `round-progress`, read back by
+  `GET /api/round/progress`): the page reads and refiles first, and
+  `POST /api/round/prepare` has the server keep the Equivalence sheet and
+  the expiry rules before it does.
   An open admin tab runs the round only when the server has not
   (`shouldTabRound`), and a save that lands on the hour's merges the log and
   the round's notes (`mergeSaved`) rather than writing over them - each
