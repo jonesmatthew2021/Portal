@@ -56,7 +56,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, saveTryAgainIn, settledKeys, missesInARow };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -619,6 +619,91 @@ const is = (got, want, what) => {
   const afterHours = lib.missesInARow(lib.missesInARow(0, false, null), true, null);
   is(afterHours, 1, "a miss while only watching the hour, then one wanting miss hours later, is one miss, not two");
   is(ask({ last: null, unanswered: afterHours }), false, "…so the tab waits for the next ask rather than round off one bad second");
+}
+
+/* ---- the round from the page: what the server's answer means, which
+        progress record is ours and when it says the round was cut off,
+        when the pull after it may go, and the done panel's lines ---- */
+{
+  const busy = "The round on the hour is writing the workbook; try again when it has finished.";
+  is(lib.roundAnswerPhase(200, { applied: 1 }, "Matthew"), "done", "a 200 is the outcome");
+  is(lib.roundAnswerPhase(409, { error: busy, by: "the round on the hour" }, "Matthew"), "waiting", "the hour holding the lease is waited for");
+  is(lib.roundAnswerPhase(409, { error: "Another round is writing the workbook; try again when it has finished.", by: null }, "Matthew"), "waiting", "a 409 that names nobody is waited for too");
+  is(lib.roundAnswerPhase(409, { error: "Kachin is writing the workbook; try again when it has finished.", by: "Kachin" }, "Matthew"),
+    "failed:Somebody else is running it: Kachin. Try again when it has finished.", "a person holding the lease is named, not waited for");
+  is(lib.roundAnswerPhase(409, { error: "Matthew is writing the workbook; try again when it has finished.", by: "Matthew" }, "Matthew"),
+    "failed:A round you started is still running", "…and the same name is a round this person started");
+  is(lib.roundAnswerPhase(502, { error: "the library refused the write" }, "Matthew"), "failed:the library refused the write", "any other answer fails with the server's words");
+  is(lib.roundAnswerPhase(503, {}, "Matthew"), "failed:The round couldn't be run (503).", "…or with the status when it has none");
+  is(lib.roundAnswerPhase(500, null, "Matthew"), "failed:The round couldn't be run (500).", "…and a body that could not be read is no body");
+
+  const mine = { pct: 60, word: "Saving the matrix", done: false, by: "Matthew", runId: "run-1", running: true, holder: "Matthew" };
+  is(lib.progressAccept(mine, "run-1"), { pct: 60, word: "Saving the matrix" }, "a record carrying this round's runId, under its own lease, is where it has got to");
+  is(lib.progressAccept({ ...mine, runId: "run-0" }, "run-1"), "ignore", "another round's record is left alone");
+  is(lib.progressAccept({ pct: 0, word: "No round has run yet", done: true, running: false, holder: null }, "run-1"), "ignore", "…and so is the word that none has run");
+  is(lib.progressAccept(null, "run-1"), "ignore", "…and no record at all");
+  is(lib.progressAccept({ ...mine, running: false, holder: null }, "run-1"), "cut-off", "ours, not done, nobody holding the lease: the round was cut off");
+  is(lib.progressAccept({ ...mine, holder: "the round on the hour" }, "run-1"), "cut-off", "ours, not done, the lease held under another name: the hour took it after ours died");
+  is(lib.progressAccept({ ...mine, at: 0 }, "run-1"), { pct: 60, word: "Saving the matrix" }, "never by the age of the last word: the workbook step can outlast any of them");
+  is(lib.progressAccept({ ...mine, pct: 100, word: "Done", done: true, running: false, holder: null }, "run-1"), { pct: 100, word: "Done" }, "a done record is done whoever holds the lease now");
+  is(lib.progressAccept({ ...mine, pct: "75.4" }, "run-1", true), { pct: 75, word: "Saving the matrix" }, "running handed in outranks the record's own, and the figure is a whole number");
+  is(lib.progressAccept(mine, "run-1", false), "cut-off", "…so a caller who knows the lease is free calls it cut off");
+
+  is(lib.pullNowStep({ dirty: 0, saving: false, waitedMs: 0 }), "pull", "nothing unsaved and no save in the air: pull now");
+  is(lib.pullNowStep({ dirty: 2, saving: false, waitedMs: 1000 }), "wait", "something unsaved: wait");
+  is(lib.pullNowStep({ dirty: 0, saving: true, waitedMs: 1000 }), "wait", "a save in the air: wait");
+  is(lib.pullNowStep({ dirty: 1, saving: true, waitedMs: 20000 }), "pull-late", "twenty seconds of that: pull anyway, and say the matrix follows");
+  is(lib.pullNowStep({ dirty: 0, saving: false, waitedMs: 30000 }), "pull", "clear at last, however long it took: a plain pull");
+
+  const full = {
+    at: "2026-09-24T10:00:00.000Z", applied: 2, cleared: 1, settled: 3, written: 3,
+    workbook: "20260924 - CREW QUALIFICATION EXPIRY.xlsx", workbookId: "tm9", leftAsTyped: 3, held: null,
+    roundError: null, roundSkipped: null, workbookProblem: null, validityProblem: null, equivalenceProblem: null,
+    changes: [
+      { person: "EVANS, Brenton", code: "QL-01", title: "Master", from: "", to: "2031-05-26" },
+      { person: "ROSE, Matthew", code: "QL-17", title: "Medical", from: "2027-01-30", to: "2029-01-30" },
+      { person: "COOK, Sam", code: "QL-17", title: "Medical", from: "2028-02-02", to: "" },
+    ],
+    summary: { certificates: 12, read: 12, unread: 0, compared: 12, discrepancies: 0, derived: 1, validitySheet: "SKILLS MATRIX.xlsx" },
+    refiled: 1, prepareProblem: null, note: null,
+  };
+  is(lib.doneEyebrow(full), "Matrix updated", "dates moved: the matrix was updated");
+  is(lib.doneWindowLines(full).map((l) => l.text), [
+    "12 of 12 certificates on file were read.",
+    "2 dates written",
+    "1 cleared: the certificate behind it is no longer in the library",
+    "1 refiled",
+    "1 worked out from SKILLS MATRIX.xlsx",
+    "20260924 - CREW QUALIFICATION EXPIRY.xlsx · 3 cells",
+    "3 cells left as typed",
+  ], "the done panel says the counts, the workbook and nothing else");
+  const lines = lib.doneWindowLines(full);
+  is(lines[1].changes, true, "the dates-written line is where the from → to list hangs");
+  is(lines[5].tone, "link", "the workbook line is a link…");
+  is(lines[5].href, "/api/files/tm9", "…to the filed workbook");
+  is(lines[6].tone, "muted", "cells left as typed are said quietly");
+  is(lib.doneWindowLines(full).some((l) => /left differences|no certificate behind/.test(l.text)), false, "no line about differences left: it never counted anything true");
+
+  const idle = { ...full, applied: 0, cleared: 0, settled: 0, written: null, workbook: null, workbookId: null, leftAsTyped: 0,
+    changes: [], summary: { ...full.summary, derived: 0 }, refiled: 0 };
+  is(lib.doneEyebrow(idle), "Matrix already up to date", "nothing moved: already up to date");
+  is(lib.doneWindowLines(idle).map((l) => l.text), ["12 of 12 certificates on file were read."], "with nothing to do, the read count is the whole panel");
+  is(lib.doneWindowLines({ ...idle, written: 0 }).map((l) => l.text),
+    ["12 of 12 certificates on file were read.", "The spreadsheet already had every date"], "a workbook step that found every date in place says so");
+  is(lib.doneWindowLines({ ...idle, summary: { ...idle.summary, certificates: 1, read: 1 } })[0].text, "1 of 1 certificate on file was read.", "one certificate reads as one");
+
+  const trouble = { ...idle, held: "1 certificate is still unread, so nothing was cleared", workbookProblem: "The workbook is too big to rewrite here", roundSkipped: "The workbook is too big to rewrite here",
+    equivalenceProblem: "No Equivalence sheet on SKILLS MATRIX.xlsx", prepareProblem: "No Equivalence sheet on SKILLS MATRIX.xlsx", note: lib.PULL_LATE_NOTE };
+  is(lib.doneWindowLines(trouble).map((l) => [l.tone, l.text]), [
+    ["plain", "12 of 12 certificates on file were read."],
+    ["problem", "1 certificate is still unread, so nothing was cleared"],
+    ["problem", "No Equivalence sheet on SKILLS MATRIX.xlsx"],
+    ["problem", "The workbook is too big to rewrite here"],
+    ["muted", "the matrix on screen follows once this tab's own change has saved"],
+  ], "each problem once, in orange, and the late-pull note last");
+  is(lib.doneEyebrow({ noItems: true }), "Nothing on the matrix yet", "no items on the matrix: nothing to read against");
+  is(lib.doneWindowLines({ noItems: true }), [], "…and no lines under it");
+  is(lib.doneWindowLines(null), [], "no outcome, no lines");
 }
 
 /* ---- the copy spliced into the page answers exactly as the module does ---- */

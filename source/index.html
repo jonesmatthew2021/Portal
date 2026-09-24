@@ -545,6 +545,101 @@ async function waitForRound(onWait, saw) {
 // What a button that writes the workbook says, held down, while the hour has it.
 const ROUND_BUSY = "The round on the hour is writing the workbook";
 
+/* ---- the round from the page: its decisions as plain rules ---------------
+   The round itself runs on the server (POST /api/round, the same code the
+   hour runs); the page reads the new certificates and refiles first, then
+   starts it and watches, and never applies a date itself. The decisions the
+   runner (runMatrixRound in the provider) makes on the way are rules of
+   their own here, so each is proved outright in tools/client-rules.test.mjs
+   without a browser. */
+
+/* What the runner does with the server's answer to POST /api/round. A 409
+   is somebody holding the lease: the hour, which is waited for (and a 409
+   that names nobody is read the same way), or a person, who is named and
+   not waited for. `by` is the name this round was sent under, so a round
+   under the same name is one this person started themselves. */
+function roundAnswerPhase(status, body, by) {
+  const b = body && typeof body === "object" ? body : {};
+  if (status === 200) return "done";
+  if (status === 409) {
+    const holder = typeof b.by === "string" ? b.by.trim() : "";
+    if (!holder || holder === "the round on the hour") return "waiting";
+    if (holder === String(by || "").trim()) return "failed:A round you started is still running";
+    return `failed:Somebody else is running it: ${holder}. Try again when it has finished.`;
+  }
+  return "failed:" + (b.error || `The round couldn't be run (${status}).`);
+}
+
+/* What a look at GET /api/round/progress is worth to the runner. Only a
+   record carrying this round's runId is ours; any other is an older
+   round's, or somebody else's, and is left alone. A record of ours that is
+   not done while nobody holds the lease, or while the lease is held under
+   another name than the record's, is a round that was cut off: the
+   platform cancels a request whose browser has gone, and the hour can take
+   a lapsed lease within fifteen seconds. Never by the age of the last
+   word - the workbook step can outlast any of them. */
+function progressAccept(record, runId, running) {
+  const r = record && typeof record === "object" ? record : null;
+  if (!r || !runId || r.runId !== runId) return "ignore";
+  const pct = Math.max(0, Math.min(100, Math.round(Number(r.pct) || 0)));
+  const word = String(r.word || "");
+  if (r.done) return { pct, word };
+  const live = running === undefined ? !!r.running : !!running;
+  const holder = r.holder == null ? null : String(r.holder);
+  if (!live || (holder !== null && r.by && holder !== String(r.by))) return "cut-off";
+  return { pct, word };
+}
+
+/* When the pull after the round may go. A pull leaves the document alone
+   while this tab holds anything unsaved or has a save in the air, so the
+   runner waits for both to clear - up to twenty seconds, after which it
+   pulls anyway and says the matrix on screen follows once the save lands. */
+const PULL_NOW_CEILING_MS = 20000;
+const PULL_LATE_NOTE = "the matrix on screen follows once this tab's own change has saved";
+function pullNowStep({ dirty, saving, waitedMs }) {
+  if (!dirty && !saving) return "pull";
+  return waitedMs >= PULL_NOW_CEILING_MS ? "pull-late" : "wait";
+}
+
+/* The done panel, off the round's outcome: the eyebrow, and the lines
+   under it - the counts, the workbook and any one-line problem, nothing
+   else. Each line carries a tone for the window (plain, muted, problem,
+   link); a link line carries where it goes. */
+function doneEyebrow(o) {
+  if (!o || o.noItems) return "Nothing on the matrix yet";
+  return (o.applied || 0) > 0 || (o.cleared || 0) > 0 ? "Matrix updated" : "Matrix already up to date";
+}
+function doneWindowLines(o) {
+  const out = [];
+  if (!o || o.noItems) return out;
+  const some = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const s = o.summary || {};
+  const certificates = s.certificates || 0;
+  out.push({ text: `${s.read || 0} of ${some(certificates, "certificate", "certificates")} on file ${certificates === 1 ? "was" : "were"} read.`, tone: "plain" });
+  if ((o.applied || 0) > 0) out.push({ text: `${some(o.applied, "date", "dates")} written`, tone: "plain", changes: true });
+  if ((o.cleared || 0) > 0) {
+    out.push({ text: `${o.cleared} cleared: the certificate behind ${o.cleared === 1 ? "it" : "them"} is no longer in the library`, tone: "plain" });
+  }
+  if ((o.refiled || 0) > 0) out.push({ text: `${o.refiled} refiled`, tone: "plain" });
+  if ((s.derived || 0) > 0) out.push({ text: `${s.derived} worked out from ${s.validitySheet || "the skills matrix"}`, tone: "plain" });
+  if (o.workbook) {
+    out.push({ text: `${o.workbook} · ${some(o.written || 0, "cell", "cells")}`, tone: "link",
+      href: o.workbookId ? `/api/files/${o.workbookId}` : null, download: o.workbook });
+  } else if (o.written === 0) {
+    out.push({ text: "The spreadsheet already had every date", tone: "plain" });
+  }
+  if ((o.leftAsTyped || 0) > 0) out.push({ text: `${some(o.leftAsTyped, "cell", "cells")} left as typed`, tone: "muted" });
+  const said = new Set();
+  [o.held, o.validityProblem, o.equivalenceProblem, o.workbookProblem, o.roundSkipped, o.roundError, o.prepareProblem].forEach((p) => {
+    const text = p == null ? "" : String(p).trim();
+    if (!text || said.has(text)) return;
+    said.add(text);
+    out.push({ text, tone: "problem" });
+  });
+  if (o.note) out.push({ text: String(o.note), tone: "muted" });
+  return out;
+}
+
 // The crew certificates spreadsheet is one of those documents.
 const uploadCertificateSheet = (file, fields, decide = "ask") =>
   uploadSingleDocument(file, "certificate-sheet", fields, decide);
@@ -16468,14 +16563,24 @@ function CoolibahPortal({ role, onSignOut }) {
   // until the page was reloaded — on a phone, where the portal is left open in a
   // tab for weeks, that could be days late. It now refreshes on the same footing
   // as everything else, and again the moment the phone comes back to it.
+  /* The two polls, reachable from the round runner below: a round that has
+     just landed on the server wants the files and the document pulled now,
+     not on the next tick. Each hands back the pull in flight when one is,
+     so a caller waits for the very pull that is running rather than being
+     told nothing happened. */
+  const pullFilesRef = useRef(null);
+  const pullStateRef = useRef(null);
   React.useEffect(() => {
     let alive = true;
-    let busy = false;
+    let inFlight = null;
     let seen = null;
 
-    const pullFiles = async () => {
-      if (busy) return;
-      busy = true;
+    const pullFiles = () => {
+      if (inFlight) return inFlight;
+      inFlight = pullFilesOnce().finally(() => { inFlight = null; });
+      return inFlight;
+    };
+    const pullFilesOnce = async () => {
       try {
         const items = await fetchStoredFiles();
         if (!alive) return;
@@ -16497,15 +16602,14 @@ function CoolibahPortal({ role, onSignOut }) {
         setStore((s) => withStoredFiles(s, items));
       } catch (e) {
         if (alive) setFiles({ state: "error", msg: e.message });
-      } finally {
-        busy = false;
       }
     };
 
+    pullFilesRef.current = pullFiles;
     pullFiles();
     const id = setInterval(pullFiles, FILES_POLL_MS);
     const stopWatching = onWake(pullFiles);
-    return () => { alive = false; clearInterval(id); stopWatching(); };
+    return () => { alive = false; pullFilesRef.current = null; clearInterval(id); stopWatching(); };
   }, []);
 
   // The matrix as this tab last loaded or saved it. A save that lands on
@@ -16533,12 +16637,16 @@ function CoolibahPortal({ role, onSignOut }) {
   // Load once, then keep checking for other people's changes.
   React.useEffect(() => {
     let alive = true;
-    let busy = false;
+    let inFlight = null;
 
-    const pull = async () => {
-      // A poll and a wake-up can land together. One at a time is enough.
-      if (busy) return;
-      busy = true;
+    // A poll and a wake-up can land together. One at a time is enough: a
+    // second ask while one is running is handed the one running.
+    const pull = () => {
+      if (inFlight) return inFlight;
+      inFlight = pullOnce().finally(() => { inFlight = null; });
+      return inFlight;
+    };
+    const pullOnce = async () => {
       try {
         const { rev: serverRev, data } = await loadState();
         if (!alive) return;
@@ -16566,8 +16674,6 @@ function CoolibahPortal({ role, onSignOut }) {
         if (alive) setSync({ state: "ok", at: new Date().toISOString().slice(11, 16) });
       } catch (e) {
         if (alive) setSync({ state: "error", msg: e.message });
-      } finally {
-        busy = false;
       }
       // Anything changed before the first load finished was held back rather
       // than saved on top of nothing. Let it go up now.
@@ -16577,10 +16683,11 @@ function CoolibahPortal({ role, onSignOut }) {
       }
     };
 
+    pullStateRef.current = pull;
     pull();
     const id = setInterval(pull, POLL_MS);
     const stopWatching = onWake(pull);
-    return () => { alive = false; clearInterval(id); stopWatching(); };
+    return () => { alive = false; pullStateRef.current = null; clearInterval(id); stopWatching(); };
   }, []);
 
   // Push local changes up, shortly after they stop coming.
@@ -16898,6 +17005,240 @@ function CoolibahPortal({ role, onSignOut }) {
       const queued = matrixAutoState.current.queued;
       matrixAutoState.current.queued = null;
       if (queued) runMatrixAuto(queued);
+    }
+  };
+
+  // ---- the round, started from the page --------------------------------------
+  //
+  // One runner behind every Update matrix button, the certificate upload and
+  // Update portal. The page does what only a page can - reads the new
+  // certificates (the extract loop spends model credit and cannot fit one
+  // request) and refiles them - and then starts the server's round (POST
+  // /api/round), the same code the hour runs, under the same lease. The
+  // server is the one writer: it puts the dates on the shared document and
+  // into the office's workbook, and this tab pulls the document back rather
+  // than applying anything itself. It lives here so any screen can start it,
+  // it carries on when the admin moves to another tab, and it is watched
+  // from the one window (UpdateMatrixRun) wherever they are.
+  //
+  // matrixRun: null | { phase, origin, by, read, total, filed, toFile, pct,
+  //   word, outcome, message } - phase is "reading", "filing", "starting"
+  //   (the server's round, with its pct and word), "waiting" (for the hour
+  //   to let go of the lease), "done" (with the outcome) or "failed".
+  const [matrixRun, setMatrixRun] = useState(null);
+  const clearMatrixRun = () => setMatrixRun(null);
+
+  // What the run reads is what is on the page at the moment it reads it, not
+  // at the moment it was set going several renders earlier.
+  const matrixRunInputs = useRef(null);
+  matrixRunInputs.current = { quals, skillsMatrix };
+
+  // One run at a time. A start landing mid-run is remembered and run once
+  // the current one finishes, because a run that started before it can't
+  // have counted what it was started for.
+  const matrixRunState = useRef({ running: false, queued: null });
+
+  /* The document pulled now, once this tab has nothing unsaved and no save
+     in the air (a pull leaves the document alone while it has), so the
+     matrix on screen is the row the round just saved. Waits up to twenty
+     seconds for that, then pulls anyway and says so - see pullNowStep. */
+  const pullNow = async () => {
+    const t0 = Date.now();
+    let late = false;
+    for (;;) {
+      const step = pullNowStep({ dirty: dirty.current.size, saving: saving.current, waitedMs: Date.now() - t0 });
+      if (step === "pull") break;
+      if (step === "pull-late") { late = true; break; }
+      await new Promise((ok) => setTimeout(ok, 250));
+    }
+    if (pullStateRef.current) await pullStateRef.current();
+    return late;
+  };
+
+  const runMatrixRound = async (input = {}) => {
+    if (matrixRunState.current.running) {
+      matrixRunState.current.queued = { ...(matrixRunState.current.queued || {}), ...input };
+      return null;
+    }
+    matrixRunState.current.running = true;
+
+    const origin = input.origin || "button";
+    const by = String(input.by || role || "").trim() || "the page";
+    const base = { origin, by, read: 0, total: 0, filed: 0, toFile: 0, pct: 0, word: "" };
+    let progress = { read: 0, total: 0 };
+    const moved = [];
+    let prepareProblem = null;
+    // The round's own progress, read every second and a half; the request
+    // is let go of when the record says the round was cut off.
+    let poll = null;
+    let cutOff = false;
+    let cutOffSeen = 0;
+    const stopPoll = () => { if (poll) clearInterval(poll); poll = null; };
+    const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    let last = null;
+    const show = (next) => { last = next; setMatrixRun(next); };
+
+    try {
+      const QUALS = matrixRunInputs.current.quals || { cols: [], rows: [] };
+      /* The crew matrix having no items on it is not a fault; it is a portal
+         that has just been started again. Said plainly rather than thrown
+         out as an error about the items not being included. */
+      if (!(QUALS.cols || []).length) {
+        show({ ...base, phase: "done", outcome: { noItems: true } });
+        return last;
+      }
+
+      show({ ...base, phase: "reading" });
+
+      /* The skills matrix read again on every round - the same read Update
+         portal makes - so the requirements the certification screens hold
+         follow a new skills matrix without anybody opening a page for it.
+         It failing is not worth losing the round over. */
+      const skills = matrixRunInputs.current.skillsMatrix;
+      if (skills && skills.url) {
+        try {
+          const read = await readSkillsMatrix(skills, QUALS.cols || []);
+          if (read) setSkillsRequirements(read);
+        } catch (e) { /* the list the portal already holds stands */ }
+      }
+
+      /* The rules the round reads by - the Equivalence sheet and the expiry
+         rules off the skills matrix - kept on the server before the page
+         reads and refiles, so a certificate the sheet re-homes is renamed on
+         this press rather than the one after. Its problem, if any, is said
+         on the done panel; it is not a reason to stop. */
+      try {
+        const r = await fetch("/api/round/prepare", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+        const out = await r.json().catch(() => ({}));
+        prepareProblem = r.ok ? (out.problem || null) : (out.error || `The rules couldn't be kept (${r.status}).`);
+      } catch (e) {
+        prepareProblem = e.message || String(e);
+      }
+
+      // Every certificate not read yet. Readings are kept as they are made,
+      // so this costs the new uploads only.
+      progress = await readCertificates({
+        quals: QUALS, fresh: false,
+        onPhase: (p) => { progress = { read: p.read, total: p.total }; show({ ...base, ...p, phase: "reading" }); },
+      });
+
+      // Certificates filed under the wrong person are moved before the round
+      // compares, or they would be held against the wrong row. A slice at a
+      // time: the window keeps count, and no single request is asked to
+      // move more files than it can finish. What a pass couldn't reach is
+      // left for the next press or the hour. Failing is not worth losing
+      // the round over.
+      show({ ...base, ...progress, phase: "filing" });
+      try {
+        let filed = 0;
+        for (let pass = 0; pass < 200; pass++) {
+          const r = await analyse({ action: "refile", names: (QUALS.rows || []).map((row) => row[0]), limit: 40 });
+          const got = r.moved || [];
+          got.forEach((m) => moved.push(m));
+          filed += got.length;
+          const left = Number(r.remaining) || 0;
+          show({ ...base, ...progress, phase: "filing", filed, toFile: filed + left });
+          if (!left || !got.length) break;
+        }
+      } catch (e) {
+        // Whatever was filed stands; the rest is picked up next time.
+      }
+      if (moved.length) {
+        refileCertificates(moved);
+        // The server's round does not know about the page's refile, so the
+        // line in the log is the page's to write.
+        log("Admin", `Refiled ${moved.length} certificate${moved.length === 1 ? "" : "s"}`,
+          moved.map((m) => `${m.filename} → ${m.to}`).join(", "));
+      }
+
+      // The server's round, watched by the runId this page sends: only a
+      // progress record carrying it is this round's (progressAccept).
+      const runId = crypto.randomUUID();
+      show({ ...base, ...progress, phase: "starting", pct: 0, word: "Starting" });
+      poll = setInterval(async () => {
+        let rec = null;
+        try {
+          const r = await fetch("/api/round/progress", { cache: "no-store" });
+          if (r.ok) rec = await r.json();
+        } catch (e) { return; }
+        if (!poll) return;
+        const got = progressAccept(rec, runId);
+        if (got === "ignore") return;
+        if (got === "cut-off") {
+          // Twice running, three seconds apart: the server reads the record
+          // before the lease, so a round finishing between the two reads
+          // looks cut off for one look and is not.
+          if (++cutOffSeen < 2) return;
+          cutOff = true;
+          stopPoll();
+          if (ctrl) ctrl.abort();
+          return;
+        }
+        cutOffSeen = 0;
+        setMatrixRun((m) => (m && m.phase === "starting" ? { ...m, pct: got.pct, word: got.word } : m));
+      }, 1500);
+
+      const post = () => fetch("/api/round", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ by, runId }), ...(ctrl ? { signal: ctrl.signal } : {}),
+      });
+      let r = await post();
+      let body = await r.json().catch(() => ({}));
+      let answer = roundAnswerPhase(r.status, body, by);
+      if (answer === "waiting") {
+        // The hour holds the lease: wait for it to let go, then once more.
+        show({ ...base, ...progress, phase: "waiting" });
+        await waitForRound(undefined, setRoundRunning);
+        show({ ...base, ...progress, phase: "starting", pct: 0, word: "Starting" });
+        r = await post();
+        body = await r.json().catch(() => ({}));
+        answer = roundAnswerPhase(r.status, body, by);
+        if (answer === "waiting") answer = "failed:" + (body.error || ROUND_BUSY);
+      }
+      if (answer !== "done") {
+        // A person's round: the buttons that write the workbook stay down
+        // until the hourly tick finds the lease free again.
+        if (r.status === 409) setRoundRunning(true);
+        throw new Error(answer.slice("failed:".length));
+      }
+      stopPoll();
+      setRoundRunning(false);
+      const outcome = body || {};
+      show({ ...base, ...progress, phase: "starting", pct: 100, word: "Done" });
+
+      // The round saved the document and filed the workbook. This tab reads
+      // both back rather than applying anything itself: the files first, so
+      // trainingMatrix is the new row, then the document.
+      if (pullFilesRef.current) await pullFilesRef.current().catch(() => {});
+      const late = await pullNow();
+      await refreshCertDates();
+
+      // The swing report reads when the matrix was last brought up to the
+      // certificates from here (matrixFresh), so the round's stamp goes on.
+      setCertAnalysis({
+        at: outcome.at, by, model: "round", items: [], notes: [], summary: outcome.summary || {}, verdicts: {},
+        generated: {
+          at: outcome.at, by, filename: outcome.workbook || null, applied: outcome.applied || 0, dismissed: 0,
+          fileId: outcome.workbookId || null, failed: outcome.workbookProblem || outcome.roundError || null,
+        },
+      });
+
+      show({
+        ...base, ...progress, phase: "done",
+        outcome: { ...outcome, refiled: moved.length, moved, prepareProblem, note: late ? PULL_LATE_NOTE : null },
+      });
+      return last;
+    } catch (e) {
+      // Whatever was filed is filed either way, and every reading is kept.
+      const message = cutOff ? "The round was cut off; press again" : (e && e.message) || String(e);
+      show({ ...base, ...progress, phase: "failed", message });
+      return last;
+    } finally {
+      stopPoll();
+      matrixRunState.current.running = false;
+      const queued = matrixRunState.current.queued;
+      matrixRunState.current.queued = null;
+      if (queued) runMatrixRound(queued);
     }
   };
 
@@ -17398,7 +17739,7 @@ function CoolibahPortal({ role, onSignOut }) {
   };
 
   const ctx = { role, admin, session: SESSION, pending, roundRunning, setRoundRunning, removeCrew, renameCrew, setCrewRank, people, setPeople,
-    notPeople, setNotPeople, certRoot, setCertRoot, writeCrewToWorkbooks, lastDocUpdate, setLastDocUpdate, folderNames, setFolderNames, filledFromCert, setFilledFromCert, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto };
+    notPeople, setNotPeople, certRoot, setCertRoot, writeCrewToWorkbooks, lastDocUpdate, setLastDocUpdate, folderNames, setFolderNames, filledFromCert, setFilledFromCert, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto, matrixRun, runMatrixRound, clearMatrixRun };
 
   return (
     <Ctx.Provider value={ctx}>
