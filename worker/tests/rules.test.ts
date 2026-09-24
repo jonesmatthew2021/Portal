@@ -851,8 +851,17 @@ test("covers: the ECDIS column is the STCW endorsement, never a type-specific Fu
   assert.deepEqual(codesCovered({ endorsements: [{ text: "ECDIS Type-Specific (FMD series)", until: null }] }, "QL-01"), []);
   assert.deepEqual(codesCovered({ endorsements: [{ text: "ECDIS", until: null }] }, "QL-01"), [],
     "the bare word says nothing about which ECDIS it is");
+  /* AMSA prints an officer who has NOT done generic ECDIS training with a
+     limitation against his II/1 or II/2 line (the STCW.7/Circ.18 wording,
+     which MO71 s 9(2)(a) is the reason for). Listed as printed, that line
+     carries both "II/2" and "ECDIS", and it means the opposite of the
+     endorsement: it must fill nothing. */
+  assert.deepEqual(codesCovered({ endorsements: [{ text: "II/2 - Limitation: not valid for service on ships fitted with ECDIS", until: null }] }, "QL-01"), [],
+    "a limitation saying he is not ECDIS trained is the opposite of the endorsement");
+  assert.deepEqual(codesCovered({ endorsements: [{ text: "II/1 (without ECDIS)", until: null }] }, "QL-01"), []);
   const row = vessel.covers.find((c) => c.code === "QL-13")!;
   assert.match(String(row.unless), /furuno/i, "the vessel file's row names the type-specific words it excludes");
+  assert.match(String(row.unless), /not valid/i, "and the limitation wording");
 });
 
 test("covers: the fast rescue craft column takes the endorsement's own printed date where AMSA printed one", () => {

@@ -187,7 +187,7 @@
     {
       "code": "QL-13",
       "when": "generic\\s+ecdis|ecdis[\\s-]+trained|\\bii/[12]\\b.*\\becdis\\b|\\becdis\\b.*\\bii/[12]\\b",
-      "unless": "type[\\s-]*specific|furuno|\\bfmd\\b",
+      "unless": "type[\\s-]*specific|furuno|\\bfmd\\b|not valid|without ecdis|no ecdis|non[\\s-]*ecdis",
       "perpetual": true,
       "why": "MO70 s 37(3) table item 8: the ECDIS endorsement ('certificate of proficiency as ECDIS trained', printed inside the II/1 or II/2 line) never expires, so the column takes the certificate's own printed date. The office's 5 years is wrong by law. A type-specific Furuno FMD course is VS-02, not this endorsement, so a line naming it fills nothing here."
     },
