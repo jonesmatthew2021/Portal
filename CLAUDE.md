@@ -159,6 +159,24 @@ on any line that still names this one.
   save under a name of its own, on a wiped database too; the file index,
   users, readings and fauna only when named, and the readings only into the
   four stores the backup writes).
+- **Certificate-expiry reminders are weekly, and off until switched on.**
+  The setting is the document's `reminders` (`{ on, days, weekday, hour }`,
+  defaults off, 90, Monday, 07:00 - `REMINDER_DEFAULTS`, read through
+  `reminderSetting`, only a plain `true` is on), switched on Access Grants.
+  `worker/src/lib/reminders.ts` (`weeklyReminders`) runs from `scheduled()`
+  beside the backup, before the lease, taking none and asking nothing of
+  the library: the tick at ten past the set hour on the set weekday (the
+  vessel's weekday, `vesselNow`) sends each crew grant their own list and
+  every management and IT grant a summary by person, from
+  `vessel.mailFrom`. A crew grant's name reaches a matrix row only through
+  the crew register, and a name it cannot put to exactly one person, or a
+  one-word name, is sent nothing. The rules are
+  `source/shared/reminders.js`. One record, `last-reminder` in the sync
+  store, claimed for the day against the version read before any email
+  goes, so nothing is ever sent twice; one line on the SharePoint page. The
+  red band's 90 days is one number, `RED_DAYS` in `source/shared/bands.js`,
+  with the day count (`daysUntil`) the page and the reminders both use; a
+  test holds the reminders' default window to it.
 - **One round.** Every Update matrix button starts the server's round
   (`POST /api/round`, `runMatrixRound` in `source/index.html`); the page
   reads new certificates and refiles first, and never applies dates itself
