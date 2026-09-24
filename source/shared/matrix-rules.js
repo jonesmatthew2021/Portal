@@ -134,9 +134,8 @@ export function readExpiryRules(rows) {
  * The certificates' answer, laid over the crew matrix. The only place it is
  * done.
  *
- * There were three on the page: the automatic run after an upload, Update
- * matrix (then called Generate latest training matrix), and Update the
- * spreadsheet. Each read the same certificates
+ * There were three on the page: the automatic run after an upload, and the
+ * matrix button under two earlier names. Each read the same certificates
  * and then picked its own list out of the answer - two filtered the analysis's
  * items on slightly different conditions, the third used the server's settled
  * list - so the three could write different dates from the same evidence, and
@@ -423,8 +422,8 @@ function mergeKeys(base, mine, theirs) {
 
 /**
  * The note of which cells the portal filled from a certificate, three copies
- * to one. The round on the hour writes it, and so does Update the
- * spreadsheet in a tab; whichever saves second must keep the other's keys.
+ * to one. The round on the hour writes it, and so does the round from the
+ * page; whichever saves second must keep the other's keys.
  * @param {Record<string, boolean> | null | undefined} base
  * @param {Record<string, boolean> | null | undefined} mine
  * @param {Record<string, boolean> | null | undefined} theirs

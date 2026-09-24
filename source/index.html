@@ -506,9 +506,12 @@ async function uploadSingleDocument(file, category, fields, decide = "ask") {
   if (r.status === 409 && data && data.overwrite) return data;    // { overwrite, existing }
   if (!r.ok) {
     const err = new Error((data && data.error) || `Upload failed (${r.status}). Nothing was saved.`);
-    // The status rides with it: a 409 is the hour holding the workbook,
-    // which is waited for rather than given up on.
+    // The status rides with it: a 409 is somebody holding the workbook,
+    // which is waited for rather than given up on - and the holder's name
+    // (`by`, as every writer of the workbook answers it) rides with it too,
+    // so the buttons go down under that name from the first refusal.
     err.status = r.status;
+    err.by = data && typeof data.by === "string" ? data.by : "";
     throw err;
   }
   return data;                                                    // { record, replaced } or { skipped }
@@ -675,19 +678,43 @@ function matrixLastMoved(matrixUpdated, trainingMatrix) {
    on the portal. No certificate is read and no date moves; what comes out
    of it is the line in the log and the stamp the swing report reads. */
 
+/* Whether there is anything to file. latestMatrixFile hands the workbook's
+   own bytes back when no cell on it moved, and the server files whatever
+   it is sent - a new dated row, the live copy parked - so the page decides
+   first: a file with a cell changed, or one built from nothing, is sent;
+   the same bytes again are not. */
+function fileSpreadsheetSend(report) {
+  return report && (report.rebuilt || report.written > 0) ? "send" : "same";
+}
+
 /* What to do with a refused upload. The replace takes the server's lease,
-   so a 409 is somebody writing the workbook: waited for once, and the
-   server's own sentence shown the second time. Anything else is the error
-   it is. */
-function fileSpreadsheetStep(err, waited) {
-  return err && err.status === 409 && !waited ? "wait" : "fail";
+   so a 409 is somebody writing the workbook: waited for. Anything else is
+   the error it is. */
+function fileSpreadsheetStep(err) {
+  return err && err.status === 409 ? "wait" : "fail";
+}
+
+/* The send, with its one wait: `send` is tried, a 409 is waited out
+   (`wait` is given the refusal, which names the holder) and the send goes
+   once more. Its refusal the second time, or any other error, is thrown
+   as it is, so the server's own sentence is what gets shown. */
+async function fileSpreadsheetAttempt(send, wait) {
+  try {
+    return await send();
+  } catch (e) {
+    if (fileSpreadsheetStep(e) !== "wait") throw e;
+    await wait(e);
+    return await send();
+  }
 }
 
 /* What to say once it is filed: the line in the log, and the patch on
-   certAnalysis that keeps `generated` - the stamp the swing report reads
-   "matrix fresh" from - a filing, as it always was. A workbook built from
-   nothing has no count of cells changed worth giving. */
-function fileSpreadsheetOutcome(report, record, by, at) {
+   certAnalysis's `generated` - the file, who filed it and that nothing
+   failed. Its `at` is left as it was: that is when the matrix was last
+   brought up to the certificates, which the swing report reads "matrix
+   fresh" from, and only the round reads a certificate. A workbook built
+   from nothing has no count of cells changed worth giving. */
+function fileSpreadsheetOutcome(report, record, by) {
   const written = (report && report.written) || 0;
   const filename = (record && record.filename) || "";
   const detail = report && report.rebuilt
@@ -695,9 +722,28 @@ function fileSpreadsheetOutcome(report, record, by, at) {
     : `${filename} · ${written} ${written === 1 ? "cell" : "cells"} changed`;
   const patch = (prev) => ({
     ...(prev || {}),
-    generated: { ...((prev && prev.generated) || {}), at, by, filename, fileId: (record && record.id) || null, failed: null },
+    generated: {
+      ...((prev && prev.generated) || {}),
+      at: (prev && prev.generated && prev.generated.at) || null,
+      by, filename, fileId: (record && record.id) || null, failed: null,
+    },
   });
   return { detail, patch };
+}
+
+/* Whether the matrix was current with the certificates on file: the
+   round's stamp (certAnalysis.generated.at) falls on or after the day the
+   newest certificate was uploaded, by the vessel's calendar. No stamp is
+   never fresh; no certificate on file is always fresh. */
+function matrixFreshAt(generatedAt, latestCert) {
+  return !!generatedAt && (!latestCert || vesselDay(generatedAt) >= latestCert.slice(0, 10));
+}
+
+/* The day a moment falls on by the vessel's calendar, as YYYY-MM-DD; "" for
+   a moment that is not one. */
+function vesselDay(iso) {
+  const d = new Date(iso);
+  return isNaN(d) ? "" : new Intl.DateTimeFormat("en-CA", { timeZone: VESSEL_TZ }).format(d);
 }
 
 /* The done panel, off the round's outcome: the eyebrow, and the lines
@@ -8429,16 +8475,19 @@ function filedUnderSuffix(wanted, actual) {
  * it, for anybody - the file is handed to a new tab as well as to the
  * downloads, so the browser opens it with whatever reads spreadsheets on
  * the machine. File the matrix spreadsheet, admin only, files it on the
- * portal in place of the one there, and the swing report's "matrix fresh"
- * is stamped by the filing as it always was. Neither reads a certificate
- * or moves a date: that is Update matrix's, and the round's. The replace
- * takes the server's lease, so the filing stands down while a round has it
- * (roundBusyTitle) and waits once for a 409 (fileSpreadsheetStep).
+ * portal in place of the one there - when there is something new to file
+ * (fileSpreadsheetSend): the same bytes again are said, not filed. Neither
+ * reads a certificate or moves a date: that is Update matrix's, and the
+ * round's, and so the swing report's "matrix fresh" stamp is the round's
+ * and the filing leaves it be (fileSpreadsheetOutcome). The replace takes
+ * the server's lease, so the filing stands down while a round has it
+ * (roundBusyTitle) and waits once for a 409 (fileSpreadsheetAttempt),
+ * saying so on the button while it does.
  */
 function MatrixSpreadsheet({ variant = "quiet" }) {
   const { admin, role, quals: QUALS, certSheet, setCertSheet, setCertAnalysis, log,
     roundRunning, roundHolder, setRoundRunning } = usePortal();
-  const [busy, setBusy] = useState("");     // "" | "download" | "file"
+  const [busy, setBusy] = useState("");     // "" | "download" | "file" | "wait"
   const [err, setErr] = useState("");
   const [notes, setNotes] = useState([]);   // workbookNotes, or the one line a rebuilt download gets
   const [filed, setFiled] = useState(null); // the record filed, for the link under the row
@@ -8476,23 +8525,22 @@ function MatrixSpreadsheet({ variant = "quiet" }) {
     try {
       const on = todayISO();
       const { file: built, report } = await latestMatrixFile(QUALS, on, certSheet);
-      const send = () => uploadCertificateSheet(built, { uploadedBy: role, filedOn: on, session: SESSION }, "replace");
-      let res;
-      try {
-        res = await send();
-      } catch (e) {
-        if (fileSpreadsheetStep(e, false) !== "wait") throw e;
-        // Somebody is writing the workbook: the buttons go down under
-        // their name while this waits, and the send goes once more.
-        setRoundRunning(true);
-        await waitForRound(undefined, setRoundRunning);
-        res = await send();
-      }
-      if (!res.record) {
-        // Byte-for-byte the same file is already there.
+      if (fileSpreadsheetSend(report) === "same") {
+        // Nothing on the matrix has moved since the workbook was filed:
+        // these are the bytes already there, so nothing is sent.
         setNotes([{ text: "It is the same file as the one already on the portal, so nothing was filed again.", warn: true }]);
       } else {
-        const said = fileSpreadsheetOutcome(report, res.record, role, new Date().toISOString());
+        const send = () => uploadCertificateSheet(built, { uploadedBy: role, filedOn: on, session: SESSION }, "replace");
+        // Somebody is writing the workbook: the buttons go down under
+        // their name, this one says it is waiting, and the send goes
+        // once more when the lease is free.
+        const res = await fileSpreadsheetAttempt(send, async (refusal) => {
+          setBusy("wait");
+          setRoundRunning(true, refusal.by);
+          await waitForRound(undefined, setRoundRunning);
+          setBusy("file");
+        });
+        const said = fileSpreadsheetOutcome(report, res.record, role);
         setCertSheet(res.record);
         setCertAnalysis(said.patch);
         log("Admin", "Filed the matrix spreadsheet", said.detail);
@@ -8514,7 +8562,7 @@ function MatrixSpreadsheet({ variant = "quiet" }) {
       {admin && (
         <Button variant={variant} onClick={file} disabled={!!busy || roundRunning}
           title={!busy && roundRunning ? roundBusyTitle(roundHolder) : undefined}>
-          {busy === "file" ? "Filing…" : "File the matrix spreadsheet"}
+          {busy === "wait" ? "Waiting for the workbook…" : busy === "file" ? "Filing…" : "File the matrix spreadsheet"}
         </Button>
       )}
       {/* The lines under the row take the whole of the next line of it. */}
@@ -13075,13 +13123,10 @@ function GenerateSwingCompliance({ results, here, setAt }) {
   // Whether the matrix was current with the certificates on file when asked —
   // the same reading the shift allocation check makes, but said on the report
   // rather than blocking it: an answer with its caveat written on beats none.
-  const localDay = (iso) => {
-    const d = new Date(iso);
-    return isNaN(d) ? "" : new Intl.DateTimeFormat("en-CA", { timeZone: VESSEL_TZ }).format(d);
-  };
+  // The stamp is the round's; filing the matrix spreadsheet leaves it be.
   const latestCert = (certificates || []).reduce((m, c) => (c.uploaded && c.uploaded > m ? c.uploaded : m), "");
   const generatedAt = (certAnalysis && certAnalysis.generated && certAnalysis.generated.at) || "";
-  const matrixFresh = !!generatedAt && (!latestCert || localDay(generatedAt) >= latestCert.slice(0, 10));
+  const matrixFresh = matrixFreshAt(generatedAt, latestCert);
 
   const generate = () => {
     const item = (x) => ({
@@ -13318,7 +13363,7 @@ function GenerateSwingCompliance({ results, here, setAt }) {
             <div style={{ fontFamily: T.body, fontSize: 12.5, lineHeight: 1.6, marginTop: 7,
               color: r.matrix.fresh ? T.muted : T.bOrange }}>
               {r.matrix.fresh
-                ? `The matrix was up to date with the certificates on file when this was generated${r.matrix.generatedAt ? ` (matrix generated ${fmtDate(localDay(r.matrix.generatedAt))})` : ""}.`
+                ? `The matrix was up to date with the certificates on file when this was generated${r.matrix.generatedAt ? ` (matrix generated ${fmtDate(vesselDay(r.matrix.generatedAt))})` : ""}.`
                 : r.matrix.generatedAt
                   ? "A certificate newer than the last matrix generation is on file — generate the latest training matrix on the Crew Matrix page and press the button again for the surest answer."
                   : "The training matrix has not been generated from the certificates on file yet — this report reads the matrix spreadsheets as they stand."}

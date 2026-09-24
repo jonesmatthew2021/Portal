@@ -56,7 +56,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetStep, fileSpreadsheetOutcome };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -725,33 +725,89 @@ const is = (got, want, what) => {
   is(lib.matrixLastMoved("", { uploaded: "2026-09-20T03:00:00.000Z" }), "2026-09-20", "no stamp yet: the workbook's day stands in");
   is(lib.matrixLastMoved("", null), "", "neither: nothing, and no nudge");
 
-  /* Filing the matrix spreadsheet: a refusal for the lease is waited for once. */
-  is(lib.fileSpreadsheetStep({ status: 409 }, false), "wait", "409 the first time: somebody is writing the workbook, wait for them");
-  is(lib.fileSpreadsheetStep({ status: 409 }, true), "fail", "409 again after the wait: the server's sentence is shown");
-  is(lib.fileSpreadsheetStep({ status: 502 }, false), "fail", "any other refusal is the error it is");
-  is(lib.fileSpreadsheetStep(new Error("no network"), false), "fail", "…and so is a request that never got there");
-  is(lib.fileSpreadsheetStep(null, false), "fail", "nothing thrown is nothing to wait for");
+  /* Filing the matrix spreadsheet: only when there is something new to file. */
+  is(lib.fileSpreadsheetSend({ written: 0, rebuilt: "" }), "same", "no cell moved and the workbook's own bytes came back: nothing to file");
+  is(lib.fileSpreadsheetSend({ written: 3, rebuilt: "" }), "send", "cells changed: filed");
+  is(lib.fileSpreadsheetSend({ written: 0, rebuilt: "No spreadsheet is filed on the portal yet, so this one was built from the matrix." }), "send", "built from nothing: filed, there is nothing on the portal to be the same as");
+  is(lib.fileSpreadsheetSend(null), "same", "no report at all is nothing to file");
 
-  /* What to say once it is filed, and the stamp the swing report reads. */
+  /* …and a refusal for the lease is waited for once. */
+  is(lib.fileSpreadsheetStep({ status: 409 }), "wait", "409: somebody is writing the workbook, wait for them");
+  is(lib.fileSpreadsheetStep({ status: 502 }), "fail", "any other refusal is the error it is");
+  is(lib.fileSpreadsheetStep(new Error("no network")), "fail", "…and so is a request that never got there");
+  is(lib.fileSpreadsheetStep(null), "fail", "nothing thrown is nothing to wait for");
+  {
+    const refused = (status, by) => Object.assign(new Error(by ? `${by} is writing the workbook; try again when it has finished.` : `Upload failed (${status}).`), { status, by: by || "" });
+    const sends = (...answers) => {
+      const calls = [];
+      const send = async () => { const a = answers[calls.length]; calls.push(1); if (a instanceof Error) throw a; return a; };
+      return { send, calls };
+    };
+    const waits = () => { const seen = []; return { wait: async (e) => { seen.push(e.by); }, seen }; };
+
+    let s = sends({ record: { id: "cs9" } });
+    let w = waits();
+    is(await lib.fileSpreadsheetAttempt(s.send, w.wait), { record: { id: "cs9" } }, "sent first time: the record");
+    is([s.calls.length, w.seen], [1, []], "…one send, no wait");
+
+    s = sends(refused(409, "the round on the hour"), { record: { id: "cs9" } });
+    w = waits();
+    is(await lib.fileSpreadsheetAttempt(s.send, w.wait), { record: { id: "cs9" } }, "409 then filed: the record");
+    is([s.calls.length, w.seen], [2, ["the round on the hour"]], "…two sends, one wait, told who held the lease");
+
+    s = sends(refused(409, "the round on the hour"), refused(409, "Kachin"));
+    w = waits();
+    let thrown = null;
+    try { await lib.fileSpreadsheetAttempt(s.send, w.wait); } catch (e) { thrown = e; }
+    is([s.calls.length, w.seen], [2, ["the round on the hour"]], "409 twice: exactly one wait, then no more");
+    is(thrown && thrown.message, "Kachin is writing the workbook; try again when it has finished.", "…and the second refusal is the one surfaced, the server's own sentence");
+
+    s = sends(refused(502));
+    w = waits();
+    thrown = null;
+    try { await lib.fileSpreadsheetAttempt(s.send, w.wait); } catch (e) { thrown = e; }
+    is([s.calls.length, w.seen, thrown && thrown.status], [1, [], 502], "any other refusal: no wait, no second send, the error as it is");
+  }
+
+  /* What to say once it is filed, and the stamp the swing report reads:
+     the round's, which the filing leaves be. */
   {
     const record = { id: "cs9", filename: "20260924 - CREW QUALIFICATION EXPIRY (portal).xlsx", url: "/api/files/cs9" };
-    const at = "2026-09-24T10:00:00.000Z";
-    const said = lib.fileSpreadsheetOutcome({ written: 3, rebuilt: "" }, record, "Matthew", at);
+    const said = lib.fileSpreadsheetOutcome({ written: 3, rebuilt: "" }, record, "Matthew");
     is(said.detail, "20260924 - CREW QUALIFICATION EXPIRY (portal).xlsx · 3 cells changed", "the log line: the file and the cells changed");
-    is(lib.fileSpreadsheetOutcome({ written: 1, rebuilt: "" }, record, "Matthew", at).detail,
+    is(lib.fileSpreadsheetOutcome({ written: 1, rebuilt: "" }, record, "Matthew").detail,
       "20260924 - CREW QUALIFICATION EXPIRY (portal).xlsx · 1 cell changed", "one cell, singular");
-    is(lib.fileSpreadsheetOutcome({ written: 0, rebuilt: "No spreadsheet is filed on the portal yet, so this one was built from the matrix." }, record, "Matthew", at).detail,
+    is(lib.fileSpreadsheetOutcome({ written: 0, rebuilt: "No spreadsheet is filed on the portal yet, so this one was built from the matrix." }, record, "Matthew").detail,
       "20260924 - CREW QUALIFICATION EXPIRY (portal).xlsx · built from the matrix", "built from nothing: no count of cells");
+    const roundAt = "2026-09-20T00:00:00.000Z";
     const prev = {
-      at: "2026-09-20T00:00:00.000Z", by: "Kachin", model: "round", items: [], notes: [], summary: { read: 4 }, verdicts: {},
-      generated: { at: "2026-09-20T00:00:00.000Z", by: "Kachin", filename: "old.xlsx", applied: 2, dismissed: 0, fileId: "tm1", failed: "it broke" },
+      at: roundAt, by: "Kachin", model: "round", items: [], notes: [], summary: { read: 4 }, verdicts: {},
+      generated: { at: roundAt, by: "Kachin", filename: "old.xlsx", applied: 2, dismissed: 0, fileId: "tm1", failed: "it broke" },
     };
     is(said.patch(prev), {
       ...prev,
-      generated: { at, by: "Matthew", filename: record.filename, applied: 2, dismissed: 0, fileId: "cs9", failed: null },
-    }, "the stamp the swing report reads is the filing's; the reading's own fields, and the round's count, stand");
-    is(said.patch(null), { generated: { at, by: "Matthew", filename: record.filename, fileId: "cs9", failed: null } },
-      "no reading held yet: the stamp alone");
+      generated: { at: roundAt, by: "Matthew", filename: record.filename, applied: 2, dismissed: 0, fileId: "cs9", failed: null },
+    }, "the file, who filed it and that nothing failed are the filing's; the stamp the swing report reads stays the round's, and so do the reading's own fields and the round's count");
+    is(said.patch(null), { generated: { at: null, by: "Matthew", filename: record.filename, fileId: "cs9", failed: null } },
+      "no round yet: no stamp, whoever filed");
+
+    /* The swing report's "matrix fresh": the round's stamp against the
+       newest certificate's upload day, by the vessel's calendar. */
+    const certToday = "2026-09-24T01:00:00.000Z";
+    is(lib.matrixFreshAt("2026-09-24T02:00:00.000Z", certToday), true, "a round after the newest certificate: the matrix is current");
+    is(lib.matrixFreshAt("2026-09-23T02:00:00.000Z", certToday), false, "a certificate uploaded since the round: it is not");
+    is(lib.matrixFreshAt("2026-09-23T17:00:00.000Z", certToday), true, "…by the vessel's day: 17:00 UTC on the 23rd is the 24th in Perth");
+    is(lib.matrixFreshAt("", certToday), false, "no round yet: not current");
+    is(lib.matrixFreshAt("2026-09-24T02:00:00.000Z", ""), true, "no certificate on file: nothing to be behind");
+    // After a round stamps today, the report says current - and a filing
+    // of the spreadsheet after that changes nothing either way.
+    const afterRound = { generated: { at: "2026-09-24T02:00:00.000Z", by: "Matthew", filename: "20260924 - CREW QUALIFICATION EXPIRY.xlsx", applied: 1, dismissed: 0, fileId: "tm9", failed: null } };
+    is(lib.matrixFreshAt(afterRound.generated.at, certToday), true, "after a round: current");
+    is(lib.matrixFreshAt(said.patch(afterRound).generated.at, certToday), true, "…and still current after the spreadsheet is filed");
+    // A certificate uploaded today and read by no round yet: filing the
+    // spreadsheet does not make the matrix current with it.
+    const stale = { generated: { at: "2026-09-23T02:00:00.000Z", by: "Matthew", filename: "old.xlsx", applied: 1, dismissed: 0, fileId: "tm8", failed: null } };
+    is(lib.matrixFreshAt(said.patch(stale).generated.at, certToday), false, "a filing reads no certificate, so it cannot make the matrix current with one");
   }
 
   const full = {
