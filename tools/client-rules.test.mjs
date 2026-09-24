@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, showPicker };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, showPicker };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -422,6 +422,25 @@ const is = (got, want, what) => {
   is(e0 && e0.status, 0, "a save that never got there (offline) carries a status of 0");
   is(e0 && e0.message, "Failed to fetch", "…and the browser's own words");
   is(lib.saveTryAgainIn(e0), 15000, "…and is tried again in fifteen seconds");
+  /* A load that failed carries whether an answer came and the stamp on it,
+     read before the status, so the pull can end offline mode on a live
+     failure (the link is up, the server in trouble) and not on a kept one
+     (offlineAfterPull). Before this the stamp was read after the status,
+     and only a live 200 brought the portal back online. */
+  const headers = (o) => ({ get: (k) => (k in o ? o[k] : null) });
+  const STAMP = "2026-09-24T06:32:00.000Z";
+  const loadFailed = async (p) => { try { await p.loadState(); return null; } catch (e) { return e; } };
+  const live503 = await loadFailed(pageWith(async () => ({ ok: false, status: 503, headers: headers({}) })));
+  is(live503 && live503.answered, true, "a load the server fell over on says an answer came");
+  is(live503 && live503.fetchedAt, null, "…a live one, with no stamp");
+  is(live503 && live503.message, "Couldn't load the portal (503)", "…with the status in its words for the badge");
+  is(lib.offlineAfterPull(STAMP, live503.answered, live503.fetchedAt), null, "…and a live 503 ends offline mode");
+  const kept500 = await loadFailed(pageWith(async () => ({ ok: false, status: 500, headers: headers({ [lib.FETCHED_AT_HEADER]: STAMP }) })));
+  is(kept500 && kept500.fetchedAt, STAMP, "a failed answer that carries the stamp is a kept one");
+  is(lib.offlineAfterPull(STAMP, kept500.answered, kept500.fetchedAt), STAMP, "…and does not end offline mode");
+  const down = await loadFailed(pageWith(async () => { throw new TypeError("Failed to fetch"); }));
+  is(down && down.answered, undefined, "a load that never got there says no answer came");
+  is(lib.offlineAfterPull(STAMP, !!down.answered, null), STAMP, "…and leaves the portal as it was");
   /* A connection that drops while the answer is coming down fails the
      body read, not the fetch: the save has landed, the tab does not know
      its new rev, and the browser calls that a TypeError too. It is tried
@@ -1126,8 +1145,18 @@ const is = (got, want, what) => {
        for the four API answers - a slow link that answers in ten seconds
        is a link, and a kept copy handed back then would put a connected
        portal into offline mode, read only. */
-    is(networkWait("page"), NETWORK_WAIT_MS, name + ": the page waits NETWORK_WAIT_MS for the network to start answering");
-    is(networkWait("api"), API_WAIT_MS, name + ": an API answer waits API_WAIT_MS");
+    is(networkWait("page", "/"), NETWORK_WAIT_MS, name + ": the page waits NETWORK_WAIT_MS for the network to start answering");
+    is(networkWait("api", "/api/state"), API_WAIT_MS, name + ": the document waits API_WAIT_MS");
+    is(networkWait("api", "/api/files"), API_WAIT_MS, name + ": …the file listing too");
+    is(networkWait("api", "/api/sync/last"), API_WAIT_MS, name + ": …and the hour's word");
+    /* /api/me is the exception: the page boots on it and its kept copy is
+       always the person signed in on this device (the worker forgets it on
+       a 401 and on somebody else signing in), so the long wait buys
+       nothing and cost thirty seconds of "Signing you in..." on a link
+       that is connected but answers nothing. */
+    is(networkWait("api", "/api/me"), NETWORK_WAIT_MS, name + ": /api/me waits only NETWORK_WAIT_MS - the boot waits on it, and its kept copy is always this person");
+    is(networkWait("api", ORIGIN + "/api/me"), NETWORK_WAIT_MS, name + ": …by its full address too");
+    is(networkWait("api"), API_WAIT_MS, name + ": an API answer with no address named waits the long way");
     is(NETWORK_WAIT_MS, 4000, name + ": …four seconds for the page");
     is(API_WAIT_MS, 30000, name + ": …thirty for the document, so a slow link is never taken for a dead one");
     /* When everything kept must go: the sign-in is over. */
@@ -1205,7 +1234,7 @@ const is = (got, want, what) => {
       skipWaiting: async () => {}, clients: { claim: async () => {} } };
     let fetchFake = async () => { throw new TypeError("no network in this test"); };
     const sw = serviceWorkerSource("testbuild", ["/vendor/react.production.min.js"]);
-    const run = new Function("self", "caches", "fetch", "setTimeout", sw + NL + ";return { networkFirst, keep, stamped, NAME };");
+    const run = new Function("self", "caches", "fetch", "setTimeout", sw + NL + ";return { networkFirst, cacheFirst, keep, stamped, NAME };");
     const w = run(self, caches, (...a) => fetchFake(...a), setTimeoutFake);
     return { ...w, caches, cacheOf, listeners, advance, setFetch: (f) => { fetchFake = f; }, now: () => now };
   };
@@ -1364,6 +1393,62 @@ const is = (got, want, what) => {
     is([...mine.store.keys()], ["/api/me"], "an earlier cache kept for somebody else brings nothing across");
     is((await (await mine.match("/api/me")).json()).email, "b@example.com", "…and this build's own /api/me stands");
   }
+  {
+    // The phone's storage gone (full, or corrupted): caches.open rejects.
+    // The cache failing must never fail the request - the page still gets
+    // the live answer, plain, with the link up.
+    const w = world();
+    w.caches.open = async () => { throw new DOMException("storage is full", "QuotaExceededError"); };
+    w.setFetch(() => Promise.resolve(json({ rev: 9 })));
+    const ev = event("/api/state");
+    const answered = await w.networkFirst(ev, "api");
+    is(answered && (await answered.json()).rev, 9, "with the cache refusing to open, a poll still gets the live answer");
+    is(stampOf(answered), null, "…the live one, unstamped");
+    const page = await w.networkFirst(event("/"), "page");
+    is(page && page.status, 200, "…and so does the page");
+    const vendor = await w.cacheFirst(event("/vendor/react.production.min.js"));
+    is(vendor && vendor.status, 200, "…and a vendor file, straight from the network");
+    is(w.now(), 0, "…none of them waited on the cache");
+  }
+  {
+    // The cache opens but cannot be read from: with the link off, the
+    // request fails the way it always did, not on the cache's error.
+    const w = world();
+    const cache = w.cacheOf(w.NAME);
+    cache.match = async () => { throw new DOMException("cannot read", "UnknownError"); };
+    w.setFetch(() => Promise.reject(new TypeError("Failed to fetch")));
+    let failed = null;
+    await w.networkFirst(event("/api/state"), "api").catch((e) => { failed = e; });
+    is(failed instanceof TypeError, true, "a kept copy that cannot be read hands the page the network's own failure");
+    w.setFetch(() => Promise.resolve(new Response("react", { status: 200 })));
+    const vendor = await w.cacheFirst(event("/vendor/react.production.min.js"));
+    is(await vendor.text(), "react", "…and a vendor file comes from the network");
+  }
+  {
+    // A link that is connected but answers nothing (a satellite dish at
+    // sea): the boot waits on /api/me, whose kept copy is always this
+    // person, so it is answered from the copy after NETWORK_WAIT_MS -
+    // while /api/state, which decides offline mode, still waits the full
+    // API_WAIT_MS for the live answer.
+    const w = world();
+    const cache = w.cacheOf(w.NAME);
+    cache.store.set("/api/me", await w.stamped(json({ email: "a@example.com" })));
+    cache.store.set("/api/state", await w.stamped(json({ rev: 8 })));
+    w.setFetch(() => new Promise(() => {}));
+    let me = null, state = null;
+    w.networkFirst(event("/api/me"), "api").then((a) => { me = a; });
+    w.networkFirst(event("/api/state"), "api").then((a) => { state = a; });
+    await settle();   // the worker sets its timers once the cache is open
+    await w.advance(offline.NETWORK_WAIT_MS - 1);
+    is(me, null, "/api/me is not the kept copy before NETWORK_WAIT_MS");
+    await w.advance(1);
+    is(me && !!stampOf(me), true, "…and is the kept copy at NETWORK_WAIT_MS: the boot goes on");
+    is(state, null, "…while /api/state is still waiting for the live answer");
+    await w.advance(offline.API_WAIT_MS - offline.NETWORK_WAIT_MS - 1);
+    is(state, null, "…not before API_WAIT_MS");
+    await w.advance(1);
+    is(state && !!stampOf(state), true, "…and the kept document at API_WAIT_MS");
+  }
 }
 
 /* ---- the page offline: the badge's line, the lock, the picker ---- */
@@ -1373,7 +1458,19 @@ const is = (got, want, what) => {
      name picker may stand in for the sign-in. The last one is the bug
      that started this: a link that was down used to fall through to the
      honour-system picker on the live site. */
-  const { offlineLine, controlsLocked, showPicker, VESSEL } = lib;
+  const { offlineLine, controlsLocked, offlineAfterPull, showPicker, VESSEL } = lib;
+  /* What a poll of /api/state decides. A live answer of any status ends
+     offline mode: a 500 is a server in trouble on a link that is up, and
+     the badge says Not saving with the reason, as it always did. Before
+     this a link that came back to a worker mid-deploy kept "Offline" on
+     the badge and every edit refused until the first 200. */
+  const STAMP = "2026-09-24T06:32:00.000Z";
+  is(offlineAfterPull(null, true, null), null, "a live answer, online, stays online");
+  is(offlineAfterPull(null, true, STAMP), STAMP, "a kept copy puts the portal offline as at its stamp");
+  is(offlineAfterPull(STAMP, true, null), null, "a live answer ends offline mode, 200 or not: the rule is not shown the status");
+  is(offlineAfterPull(STAMP, true, STAMP), STAMP, "a kept copy, good or failed, does not: nothing live has been heard");
+  is(offlineAfterPull(STAMP, false, null), STAMP, "no answer at all (the link down, nothing kept) changes nothing");
+  is(offlineAfterPull(null, false, null), null, "…online or offline");
   is(VESSEL.timezone, "Australia/Perth", "the line is read in the vessel's own time (the test's cases are in it)");
   // 06:32 UTC is 14:32 in the vessel's time.
   is(offlineLine("2026-09-24T06:32:00.000Z", Date.parse("2026-09-24T09:00:00.000Z")),

@@ -7,7 +7,7 @@
    /api/state, /api/files, /api/sync/last), each stamped with the time it
    was fetched so the page can say how old what it shows is. Network first,
    always: the copy is used only when the network fails or has not started
-   answering in networkWait(kind), and every good answer replaces the copy -
+   answering in networkWait(kind, key), and every good answer replaces the copy -
    so a deploy is picked up the moment the link is up, and a stale page is
    never preferred to a live one. Nothing else is ever kept: file bytes,
    the CDN scripts, the fauna app and every write go straight to the
@@ -142,28 +142,46 @@ self.addEventListener("message", (event) => {
    portal would be shown its kept copy and go read only. The copy is kept
    in the background, so a good answer refreshes it even when the wait was
    lost and the next look is current. */
+/* This build's cache, or null when the phone will not give one: storage
+   full or corrupted, caches.open rejecting. Then there is nothing to read
+   from or keep in, and the request goes to the network plain. The cache
+   failing must never fail the request: before this, a phone whose storage
+   had gone showed "Couldn't reach the portal" with the link up, on every
+   navigation and every poll, until the worker was unregistered. The
+   reads below are guarded the same way, as the keeps already were. */
+async function openCache() {
+  try {
+    return await caches.open(NAME);
+  } catch (e) {
+    return null;
+  }
+}
+
 async function networkFirst(event, kind) {
   const key = cacheKey(event.request.url);
-  const cache = await caches.open(NAME);
+  const cache = await openCache();
+  if (!cache) return fetch(event.request);
   const fromNetwork = fetch(event.request);
   // The clone is taken the moment the answer is in, before the page has
   // started reading the body: this handler was set first, so it runs first.
   event.waitUntil(fromNetwork.then((answer) => keep(cache, kind, key, answer.clone())).catch(() => {}));
-  const wait = new Promise((done) => setTimeout(() => done(null), networkWait(kind)));
+  const wait = new Promise((done) => setTimeout(() => done(null), networkWait(kind, key)));
   const answer = await Promise.race([fromNetwork.catch(() => null), wait]);
   if (answer) return answer;
-  const kept = await cache.match(key);
+  const kept = await cache.match(key).catch(() => null);
   if (kept) return kept;
   return fromNetwork;
 }
 
 /* The kept copy first: a build's React and fonts never change under it. */
 async function cacheFirst(event) {
-  const cache = await caches.open(NAME);
-  const kept = await cache.match(event.request);
+  const cache = await openCache();
+  if (!cache) return fetch(event.request);
+  const kept = await cache.match(event.request).catch(() => null);
   if (kept) return kept;
   const answer = await fetch(event.request);
-  if (keepable("vendor", answer.status, answer.headers)) await cache.put(event.request, answer.clone());
+  // A copy that cannot be kept (storage full) is still the live file.
+  if (keepable("vendor", answer.status, answer.headers)) await cache.put(event.request, answer.clone()).catch(() => {});
   return answer;
 }
 

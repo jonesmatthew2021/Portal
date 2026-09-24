@@ -238,11 +238,18 @@ on any line that still names this one.
   the page, the vendor scripts and fonts, `/api/me`, `/api/state`,
   `/api/files` and `/api/sync/last`, each stamped with when it was fetched.
   Network first, always - a kept copy is used only when the network fails or
-  has not started answering (`networkWait`: four seconds for the page,
-  thirty for the four answers, because a slow link that answers in ten is a
-  link and a kept copy handed back then would put a connected portal into
-  offline mode), and the race is on the headers, never on the copy being
-  kept - the body streams to the page at the link's own speed. Every good
+  has not started answering (`networkWait`: four seconds for the page and
+  for `/api/me`, which the boot waits on and whose kept copy is always the
+  person signed in on this device; thirty for the other three answers,
+  because a slow link that answers in ten is a link and a kept copy handed
+  back then would put a connected portal into offline mode - `/api/state`
+  decides that), and the race is on the headers, never on the copy being
+  kept - the body streams to the page at the link's own speed. A cache the
+  phone will not give (`openCache` null) means the request goes to the
+  network plain: the cache failing never fails the page. A live answer of
+  any status ends offline mode and a kept one never does
+  (`offlineAfterPull`): a 500 on a link that is up is Not saving with the
+  reason, not Offline. Every good
   answer replaces the copy, so a deploy is picked up the moment the link is
   up and a stale page is never preferred. Offline the page is read only,
   with one line on the badge ("Offline - showing the portal as at ...",

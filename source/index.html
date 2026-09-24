@@ -315,6 +315,19 @@ function offlineLine(stampISO, now = Date.now()) {
  *  workbook. The buttons that write the workbook are held down under both;
  *  every other control that writes is held down under the first. */
 const controlsLocked = (offlineAt, roundRunning) => !!offlineAt || !!roundRunning;
+/** What the offline mark is after a poll of /api/state. An answer decides
+ *  it, whatever its status: a kept copy's stamp puts the portal offline as
+ *  at that stamp, and a live answer brings it back - a 500 from the server
+ *  is a link that is up and a server in trouble, and the badge says Not
+ *  saving with the reason, as it always did. Before this only a live 200
+ *  ended offline mode, so a link that came back to a worker mid-deploy
+ *  kept the portal read only under "Offline" for as long as that lasted.
+ *  No answer at all (the link down, nothing kept) leaves the mark as it
+ *  was.
+ *  @param {string|null} was  the mark before the poll
+ *  @param {boolean} answered  whether an answer came, good or not
+ *  @param {string|null} fetchedAt  the stamp on that answer, null if live */
+const offlineAfterPull = (was, answered, fetchedAt) => (answered ? fetchedAt || null : was);
 /** Whether the honour-system name picker may stand in for the sign-in:
  *  only under the preview's shim (which sets the flag), and only when
  *  /api/me could not say who this is. On the live site the picker never
@@ -326,10 +339,17 @@ const showPicker = (shimFlag, meFailed) => !!shimFlag && !!meFailed;
 // no-store makes every poll a real one.
 async function loadState() {
   const r = await fetch(STATE_API, { cache: "no-store" });
-  if (!r.ok) throw new Error(`Couldn't load the portal (${r.status})`);
   // A copy the service worker kept carries the time it was fetched; a
-  // live answer carries nothing, and fetchedAt is null.
+  // live answer carries nothing, and fetchedAt is null. Read before the
+  // status: a failed answer carries it too, so the pull can tell a live
+  // failure (the link is up) from a kept one (offlineAfterPull).
   const fetchedAt = isCachedAnswer(r.headers);
+  if (!r.ok) {
+    const e = new Error(`Couldn't load the portal (${r.status})`);
+    e.answered = true;
+    e.fetchedAt = fetchedAt;
+    throw e;
+  }
   return { ...(await r.json()), fetchedAt };  // { rev, data, fetchedAt }
 }
 
@@ -5297,7 +5317,7 @@ function Portal({ role, onSignOut }) {
         if (!alive) return;
         // A kept copy puts the portal offline, as at the copy's stamp; a
         // live answer brings it back. Nothing else decides this.
-        setOfflineAt((was) => (was === (fetchedAt || null) ? was : fetchedAt || null));
+        setOfflineAt((was) => offlineAfterPull(was, true, fetchedAt));
         // A slice changed before the first load lands was changed on the
         // page's own empty start: online it goes up and is merged over the
         // server's copy within seconds, and the copy comes down with it.
@@ -5330,6 +5350,11 @@ function Portal({ role, onSignOut }) {
         if (alive) setSync({ state: "ok", at: new Date().toISOString().slice(11, 16) });
       } catch (e) {
         if (alive) setSync({ state: "error", msg: e.message });
+        // A failed answer still decides offline mode: a live one, whatever
+        // its status, means the link is up and the badge says Not saving
+        // with the reason; a kept one keeps the portal offline; no answer
+        // at all changes nothing (offlineAfterPull).
+        if (alive) setOfflineAt((was) => offlineAfterPull(was, !!(e && e.answered), e && e.fetchedAt ? e.fetchedAt : null));
       }
       // Anything changed before the first load finished was held back rather
       // than saved on top of nothing. Let it go up now.

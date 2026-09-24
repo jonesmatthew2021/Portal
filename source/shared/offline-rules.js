@@ -43,12 +43,26 @@ export const NETWORK_WAIT_MS = 4000;
  *  long is treated as down; a link that is off outright fails at once. */
 export const API_WAIT_MS = 30000;
 
-/** How long a request of each kind waits for the network to start
- *  answering before the kept copy stands in.
- *  @param {"page"|"api"} kind
+/** How long a request waits for the network to start answering before
+ *  the kept copy stands in: NETWORK_WAIT_MS for the page and for /api/me,
+ *  API_WAIT_MS for the other three kept answers.
+ *
+ *  /api/me is short for the same reason the page is. The page boots on it
+ *  - nothing shows until it answers - and its kept copy is always the
+ *  person signed in on this device: the worker forgets it on a 401 and
+ *  when somebody else signs in, so handing it back early can never boot
+ *  the portal as the wrong person. The long wait buys /api/me nothing,
+ *  and on a link that is connected but answers nothing (a satellite dish
+ *  at sea) it cost thirty seconds of "Signing you in..." before the
+ *  document's own wait even started. It is /api/state that decides
+ *  offline mode, and that one still waits the full API_WAIT_MS.
+ *  @param {"page"|"api"|"vendor"} kind
+ *  @param {string} [key]  the address, as cacheKey gives it or in full
  *  @returns {number} milliseconds */
-export function networkWait(kind) {
-  return kind === "page" ? NETWORK_WAIT_MS : API_WAIT_MS;
+export function networkWait(kind, key) {
+  if (kind === "page") return NETWORK_WAIT_MS;
+  const path = typeof key === "string" && key ? cacheKey(key) : "";
+  return path === "/api/me" ? NETWORK_WAIT_MS : API_WAIT_MS;
 }
 
 /** The word the page sends the service worker to clear everything it
