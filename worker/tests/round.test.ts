@@ -23,6 +23,7 @@ import { KeptInPlace, ensureDocumentColumns, forgetDocumentColumns, purgeDocumen
 import { replaceSingleFile } from "../src/db/single-file.js";
 import { saveDocument } from "../src/lib/shared-state.js";
 import { runMatrixRound, roundRunning, leaseHolder, takeLease, dropLease, renewLease, keepEquivalences } from "../src/lib/round.js";
+import { readMatrixOnce, startMatrixReadJob, runMatrixReadJob, readMatrixReadJob } from "../src/lib/matrix.js";
 import { todayThere } from "../src/lib/analysis.js";
 import sync, { apply, outranks, sheetOrder, survey } from "../src/routes/sync.js";
 import roundRoute, { BUDGET_MS, LEASE_FOR_MS, progressAnswer } from "../src/routes/round.js";
@@ -2828,6 +2829,59 @@ test("an error on the stream itself is sorted like a status, and a reading it cu
     key.restore();
   }
   assert.deepEqual(readingWrites(account.portal.db), []);
+});
+
+/** Evans's portal with both matrices on file and the model switched on,
+ *  for the long readers. */
+const matrixPortal = async () => {
+  const made = await oneManPortal({ skills: true });
+  setEnv({ DB: made.portal.db, FILES: made.bucket, FILE_STORE: "r2", ANTHROPIC_API_KEY: "k", ANTHROPIC_BASE_URL: "https://model.test" } as never);
+  return made;
+};
+// Half a training matrix reading: one person finished, the next key begun.
+const HALF_A_READING = '{"people":[{"name":"Brenton Evans","problems":[]}],"no';
+
+test("a long reading the model cut partway keeps what came, and says it was cut short; a certificate cut the same way is no reading", async () => {
+  // The training matrix: the model overloaded on the stream after half an
+  // answer. What was finished is kept, with the note over it, as it was
+  // before refusals on the stream were sorted like a status.
+  const { portal } = await matrixPortal();
+  const busy = modelAnswers(() => ({ status: 200, body: cutStream("overloaded_error", HALF_A_READING) }));
+  try {
+    const out = (await readMatrixOnce("training", "Name | QL-01\nEVANS, Brenton | 2030-01-17", true)) as { cached: boolean; reading: { people?: unknown[]; notes?: string[] } };
+    assert.equal(out.cached, false);
+    assert.deepEqual(out.reading.people, [{ name: "Brenton Evans", problems: [] }], "what was finished before the cut is kept");
+    assert.match(String(out.reading.notes?.[0]), /cut short/, "and the reading says so");
+  } finally {
+    busy.restore();
+  }
+  assert.ok(portal.blobs.has("matrix-readings|m2/training-tm1.json"), "held like any other reading");
+
+  // The same stream put to a certificate: nothing is stored.
+  const cut = await unreadPortal(1);
+  const again = modelAnswers(() => ({ status: 200, body: cutStream("overloaded_error", HALF_A_READING) }));
+  try {
+    const out = (await (await extract([["QL-01", "Master"]], 4)).json()) as { extracted: number; stopped: unknown };
+    assert.equal(out.extracted, 0);
+    assert.deepEqual(out.stopped, { kind: "busy", line: READING_UNAVAILABLE });
+  } finally {
+    again.restore();
+  }
+  assert.deepEqual(readingWrites(cut.portal.db), [], "a certificate reading cut by the model is no reading");
+});
+
+test("a matrix reading refused for credit finishes its job with the one out-of-credit line", async () => {
+  await matrixPortal();
+  const model = modelAnswers(() => ({ status: 400, body: CREDIT_BODY }));
+  try {
+    const job = await startMatrixReadJob({ which: "training", text: "Name | QL-01", force: true });
+    await runMatrixReadJob(job.id);
+    const done = await readMatrixReadJob(job.id);
+    assert.equal(done?.state, "error");
+    assert.equal(done?.error, OUT_OF_CREDIT, "the shared sentence, not the API's JSON");
+  } finally {
+    model.restore();
+  }
 });
 
 test("a spend limit that wears a 429 is not asked again: the hour makes one call a certificate and stops", async () => {

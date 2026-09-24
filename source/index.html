@@ -11954,9 +11954,13 @@ function missesInARow(before, wants, last) {
    put certificates to the model (readTried): one that stood down for a
    held lease, could not start, or had nothing to read says nothing about
    the account, and would otherwise take the line down while it is still
-   out of credit. */
+   out of credit. Only the account's three lines come down this way: an
+   hour that read says nothing about a library that could not be reached,
+   a round refused for the lease or a save that never landed, so every
+   other line stays until the button is pressed again, as it always did. */
 function badgeShouldClear(err, errAt, last) {
   if (!err) return false;
+  if (![OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM].includes(err)) return false;
   const h = last && last.hourly;
   if (!h || h.at == null) return false;
   const at = typeof h.at === "number" ? h.at : Date.parse(h.at);

@@ -325,7 +325,7 @@ export const str = (v: unknown) => (typeof v === "string" && v.trim() !== "" ? v
  * Only the words of the answer are gathered. The model's thinking arrives on the
  * same stream and is no part of what was asked for.
  */
-async function readStream(res: Response) {
+async function readStream(res: Response, keepPartial: boolean) {
   const reader = res.body?.getReader();
   if (!reader) throw new Error("The model answered with nothing at all.");
 
@@ -389,12 +389,16 @@ async function readStream(res: Response) {
     broke = true;
   }
 
-  // A refusal from the model is the end of the reading whatever had come
-  // down the wire before it: a reading cut by the model's own no is not a
-  // reading, and stored as one it would stand as the truth about the
-  // certificate. The connection going, or the time running out, is
-  // different - what had arrived by then is kept.
-  if (refused instanceof ModelRefusal) throw refused;
+  // A refusal from the model is the end of a certificate reading whatever
+  // had come down the wire before it: a reading cut by the model's own no
+  // is not a reading, and stored as one it would stand as the truth about
+  // the certificate. The long readers - the matrices, OPMS, the shift sheet
+  // - ask to keep what came (keepPartial): every finding written before the
+  // model was cut off was worked out in full, the screen says the answer
+  // was cut short, and minutes of work are not thrown away over an
+  // overloaded event at the end. The connection going, or the time running
+  // out, is kept the same way for everyone.
+  if (refused instanceof ModelRefusal && !(keepPartial && text)) throw refused;
   if (!text && refused) throw refused;
   return { text, stop, broke: broke || !!refused };
 }
@@ -525,9 +529,10 @@ export function refusalSays(e: ModelRefusal): string | null {
  * rather than repeated per caller.
  *
  * `truncated` says the answer stopped before the model had finished writing it —
- * out of room, or out of time. What comes back with it is what had been written
- * by then, which is worth showing with a line saying so: the alternative is
- * throwing away a run of several minutes over its last, half-written line.
+ * out of room, or out of time, or (with `keepPartial`) the model's own refusal
+ * partway. What comes back with it is what had been written by then, which is
+ * worth showing with a line saying so: the alternative is throwing away a run
+ * of several minutes over its last, half-written line.
  */
 export async function askJson(opts: {
   system: string;
@@ -535,6 +540,10 @@ export async function askJson(opts: {
   maxTokens: number;
   effort: "low" | "medium" | "high";
   timeoutMs?: number;
+  /** Keep an answer the model's own refusal cut partway, as `truncated`,
+   *  rather than throwing it away. Off by default: a certificate reading
+   *  cut by a refusal is no reading. */
+  keepPartial?: boolean;
 }): Promise<{ json: Record<string, unknown>; truncated: boolean }> {
   const key = getEnv().ANTHROPIC_API_KEY;
   const base = getEnv().ANTHROPIC_BASE_URL;
@@ -591,7 +600,7 @@ export async function askJson(opts: {
       throw new ModelRefusal(res.status, detail);
     }
 
-    const { text, stop, broke } = await readStream(res);
+    const { text, stop, broke } = await readStream(res, opts.keepPartial === true);
     const stopped = stop === "max_tokens" || broke;
     // A whole answer first. Where it stopped partway, what had been written by
     // then is closed off and kept rather than lost.

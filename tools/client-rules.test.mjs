@@ -866,19 +866,28 @@ const is = (got, want, what) => {
 {
   const up = 1_000_000;
   const clean = { hourly: { at: up + 60_000, readError: null, readTried: true, roundSkipped: null } };
-  is(lib.badgeShouldClear("Out of credit", up, clean), true, "a later hour that read with no reading error takes the line down");
+  is(lib.badgeShouldClear(lib.OUT_OF_CREDIT, up, clean), true, "a later hour that read with no reading error takes the line down");
   is(lib.badgeShouldClear("", up, clean), false, "no line, nothing to take down");
-  is(lib.badgeShouldClear("Out of credit", up, { hourly: { at: up - 1, readError: null, readTried: true } }), false, "an hour that began before the line went up says nothing about it");
-  is(lib.badgeShouldClear("Out of credit", up, { hourly: { at: up + 60_000, readError: "Out of credit", readTried: true } }), false, "an hour still out of credit leaves it up");
-  is(lib.badgeShouldClear("Out of credit", up, { hourly: { at: up + 60_000, readError: null, readTried: false, roundSkipped: "round not yet run" } }), false, "the hour's early record, written before its reading, does not count");
-  is(lib.badgeShouldClear("Out of credit", up, { hourly: { at: up + 60_000, readError: null, readTried: true, readStopped: "Reading unavailable" } }), true, "a busy model is an aside, not a reason to keep the line up");
+  is(lib.badgeShouldClear(lib.OUT_OF_CREDIT, up, { hourly: { at: up - 1, readError: null, readTried: true } }), false, "an hour that began before the line went up says nothing about it");
+  is(lib.badgeShouldClear(lib.OUT_OF_CREDIT, up, { hourly: { at: up + 60_000, readError: lib.OUT_OF_CREDIT, readTried: true } }), false, "an hour still out of credit leaves it up");
+  is(lib.badgeShouldClear(lib.OUT_OF_CREDIT, up, { hourly: { at: up + 60_000, readError: null, readTried: false, roundSkipped: "round not yet run" } }), false, "the hour's early record, written before its reading, does not count");
+  is(lib.badgeShouldClear(lib.OUT_OF_CREDIT, up, { hourly: { at: up + 60_000, readError: null, readTried: true, readStopped: "Reading unavailable" } }), true, "a busy model is an aside, not a reason to keep the line up");
   // Hours that never put a certificate to the model say nothing about the account.
-  is(lib.badgeShouldClear("Out of credit", up, { hourly: { at: up + 60_000, readError: null, readTried: false, roundSkipped: "another round is still running" } }), false, "an hour that stood down for somebody's lease leaves it up");
-  is(lib.badgeShouldClear("Out of credit", up, { hourly: { at: up + 60_000, readError: null, readTried: false, roundError: "the hour could not start: D1 is away" } }), false, "an hour that could not start leaves it up");
-  is(lib.badgeShouldClear("Out of credit", up, { hourly: { at: up + 60_000, readError: null, readTried: false, roundSkipped: "the crew matrix has no items" } }), false, "an hour with nothing to read leaves it up");
-  is(lib.badgeShouldClear("Out of credit", up, { hourly: { at: up + 60_000, readError: null } }), false, "a record that does not say whether it read leaves it up");
-  is(lib.badgeShouldClear("Out of credit", up, null), false, "no answer, no change");
-  is(lib.badgeShouldClear("Out of credit", up, { hourly: null }), false, "no hour yet, no change");
+  is(lib.badgeShouldClear(lib.OUT_OF_CREDIT, up, { hourly: { at: up + 60_000, readError: null, readTried: false, roundSkipped: "another round is still running" } }), false, "an hour that stood down for somebody's lease leaves it up");
+  is(lib.badgeShouldClear(lib.OUT_OF_CREDIT, up, { hourly: { at: up + 60_000, readError: null, readTried: false, roundError: "the hour could not start: D1 is away" } }), false, "an hour that could not start leaves it up");
+  is(lib.badgeShouldClear(lib.OUT_OF_CREDIT, up, { hourly: { at: up + 60_000, readError: null, readTried: false, roundSkipped: "the crew matrix has no items" } }), false, "an hour with nothing to read leaves it up");
+  is(lib.badgeShouldClear(lib.OUT_OF_CREDIT, up, { hourly: { at: up + 60_000, readError: null } }), false, "a record that does not say whether it read leaves it up");
+  is(lib.badgeShouldClear(lib.OUT_OF_CREDIT, up, null), false, "no answer, no change");
+  is(lib.badgeShouldClear(lib.OUT_OF_CREDIT, up, { hourly: null }), false, "no hour yet, no change");
+  // Only the account's three lines come down by themselves. An hour that
+  // read says nothing about a library that could not be reached, a round
+  // refused for the lease or a save that never landed: those stay until
+  // the button is pressed again.
+  is(lib.badgeShouldClear("The import failed (502): SharePoint sign-in failed", up, clean), false, "a library that could not be reached is not the account: the line stays");
+  is(lib.badgeShouldClear("Failed to fetch", up, clean), false, "nor is a portal that could not be reached");
+  is(lib.badgeShouldClear("Another round is running", up, clean), false, "nor is a round refused for the lease");
+  is(lib.badgeShouldClear(lib.READING_UNAVAILABLE, up, clean), true, "a busy model's line comes down once an hour reads clean");
+  is(lib.badgeShouldClear(lib.KEY_PROBLEM, up, clean), true, "so does the key's");
 }
 
 /* ---- the crew phone after an upload the model could not read ---- */

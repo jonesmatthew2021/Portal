@@ -23,6 +23,8 @@ import {
   askJson,
   blankish,
   contentFor,
+  ModelRefusal,
+  plainLine,
   isDate,
   isHeld,
   isNotHeld,
@@ -385,6 +387,8 @@ How to weigh it:
     system: OPMS_SYSTEM,
     content: [block, { type: "text", text: instruction }],
     maxTokens: MAX_ANSWER_TOKENS,
+    // An answer the model cut partway is kept and said to be cut short.
+    keepPartial: true,
     effort: "medium",
     timeoutMs: OPMS_TIMEOUT_MS,
   });
@@ -590,7 +594,9 @@ export async function runOpmsJob(id: string) {
     );
     await finish({ state: "done", cached, result: held });
   } catch (e) {
-    const error = e instanceof Error ? e.message : String(e);
+    // The account's refusals in their one short sentence, the same as
+    // everywhere else; anything else as it stands.
+    const error = e instanceof ModelRefusal ? plainLine(e) : e instanceof Error ? e.message : String(e);
     const missing = e instanceof OpmsMissing ? e.missing : undefined;
     await finish({ state: "error", error, missing });
   }

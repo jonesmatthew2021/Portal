@@ -32,6 +32,8 @@ import { liveSingleFileRow, singleFileCategory } from "../db/documents.js";
 import {
   askJson,
   contentFor,
+  ModelRefusal,
+  plainLine,
   MATRIX_VERSION,
   matrixCheckKey,
   matrixReadingKey,
@@ -302,6 +304,8 @@ not lapsing, say so with neverExpires rather than inventing a period for it.`;
     system: MATRIX_SYSTEM,
     content: [block, { type: "text", text: instruction }],
     maxTokens: MAX_ANSWER_TOKENS,
+    // An answer the model cut partway is kept and said to be cut short.
+    keepPartial: true,
     effort: "low",
     timeoutMs: MATRIX_READ_TIMEOUT_MS,
   });
@@ -435,6 +439,8 @@ against the record rather than a person's breach.`
     system: MATRIX_SYSTEM,
     content: [{ type: "text", text: instruction }],
     maxTokens: MAX_ANSWER_TOKENS,
+    // An answer the model cut partway is kept and said to be cut short.
+    keepPartial: true,
     effort: "medium",
     timeoutMs: MATRIX_CHECK_TIMEOUT_MS,
   });
@@ -611,7 +617,9 @@ export async function runMatrixReadJob(id: string) {
     const result = await readMatrixOnce(input.which, input.text, input.force === true);
     await finish({ state: "done", cached: (result as { cached: boolean }).cached, result });
   } catch (e) {
-    const error = e instanceof Error ? e.message : String(e);
+    // The account's refusals in their one short sentence, the same as
+    // everywhere else; anything else as it stands.
+    const error = e instanceof ModelRefusal ? plainLine(e) : e instanceof Error ? e.message : String(e);
     const missing = e instanceof MatrixMissing ? e.missing : undefined;
     await finish({ state: "error", error, missing });
   }
@@ -693,7 +701,9 @@ export async function runMatrixCheckJob(id: string) {
     const result = await checkMatricesOnce(input.force === true);
     await finish({ state: "done", cached: (result as { cached: boolean }).cached, result });
   } catch (e) {
-    const error = e instanceof Error ? e.message : String(e);
+    // The account's refusals in their one short sentence, the same as
+    // everywhere else; anything else as it stands.
+    const error = e instanceof ModelRefusal ? plainLine(e) : e instanceof Error ? e.message : String(e);
     const missing = e instanceof MatrixMissing ? e.missing : undefined;
     const unread = e instanceof MatrixUnread ? e.unread : undefined;
     await finish({ state: "error", error, missing, unread });
