@@ -873,6 +873,14 @@ export async function certificateStanding() {
 
   for (const { row, reading } of readings) {
     if (!reading || !reading.readable || !row.person || !row.person.trim()) continue;
+    /* A paper that stands in for a certificate is not the certificate. Its
+       date is the day the cover runs out, not the day the certificate
+       expires, so it never fills a cell, never joins the contest for one and
+       never stands as the foreign certificate behind a recognition. The
+       cover is worked out separately and shown as a cover
+       (source/shared/evidence.js, and `covers` below); the round refuses it
+       the same way, or the grid and the round would disagree. */
+    if (reading.evidenceKind) continue;
     const code = codeFor(row, reading, eqTable);
     if (!code || !code.trim()) continue;
     // AMSA recognises only the classes MO70 s 7(2)(b) lists, which leave out

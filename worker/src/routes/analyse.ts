@@ -955,6 +955,27 @@ export async function compareMatrix(
       }
     }
 
+    /* A paper that stands in for a certificate is not the certificate.
+       An AMSA extension letter, a lodged-renewal receipt, a temporary
+       crewing permit, a final assessor's declaration and an issue letter
+       each carry a man for a while (MO70 s 15(3)-(4), MO505 s 7(3),
+       MO504 s 16(2), MO505 ss 22-24, MO505 s 12(2)) - but none of them is
+       the certificate, and the day the cover runs out is not the day the
+       certificate expires. So the paper never reaches a cell, never joins
+       the contest for one and never stands as the foreign certificate
+       behind a recognition. What it does carry is worked out separately
+       (source/shared/evidence.js) and shown as a cover, in amber, saying
+       what carries him. */
+    if (reading.evidenceKind) {
+      notes.push({
+        kind: "no-code",
+        person: row.person,
+        detail: `Read as ${reading.evidenceKind}, which stands in for a certificate rather than being one, so it fills no cell.`,
+        certificate: link,
+      });
+      continue;
+    }
+
     /* Two columns AMSA may not recognise into at all: MO70 s 7(2)(b) allows
        recognition of the competency, rating, cook-adjacent and GMDSS classes
        only, and neither the certificate of safety training nor the marine

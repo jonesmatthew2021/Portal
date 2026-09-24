@@ -4629,3 +4629,36 @@ test("evidence: a portal with no such paper on file walks the readings once and 
   const out = await certificateStanding();
   assert.deepEqual(out.covers, [], "which is every hour until somebody files one");
 });
+
+test("evidence: the letter's own date never lands in the cell, on the round or on the page", async () => {
+  /* The paper is not the certificate. AMSA's letter carries the man to the
+     day the cover runs out; the certificate still expired on the day printed
+     on it, and that is the day the matrix and the office's workbook must
+     say. A letter read as the certificate would put a green date on a cell
+     the law has already stopped covering. */
+  const certs = [
+    { row: { id: "coc", qualCode: "QL-01" }, reading: {
+      ...evansCoC, endorsements: [], units: [], expiresOn: "2026-06-01",
+      evidenceKind: null, isRecognition: false,
+    } },
+    { row: { id: "letter", qualCode: "QL-01" }, reading: {
+      ...evansCoC, certificateTitle: "Extension of certificate", endorsements: [], units: [],
+      issuedOn: "2026-06-01", expiresOn: "2026-12-01", evidenceKind: "extension", isRecognition: false,
+    } },
+  ];
+  setEnv({ DB: coversDb(certs), FILE_STORE: "r2" } as never);
+  const out = await compareMatrix(coversMatrix, null, evansOnly);
+  assert.deepEqual(out.settled, [{ person: "EVANS, Brenton", code: "QL-01", value: "2026-06-01" }],
+    "the certificate's own printed expiry, not the letter's");
+  assert.deepEqual(out.claimed, ["EVANS, BRENTON::QL-01"], "and the letter claims no cell of its own");
+  assert.equal(out.items.find((i) => i.code === "QL-01")!.certificate!.id, "coc");
+  assert.equal(out.notes.some((n) => /stands in for a certificate/.test(n.detail)), true,
+    "the account of the run says what the letter is");
+
+  setEnv({ DB: coversDb(certs), FILE_STORE: "r2" } as never);
+  const page = await certificateStanding();
+  assert.deepEqual(page.dates.map((d) => [d.code, d.expires, d.fileId]), [["QL-01", "2026-06-01", "coc"]],
+    "the page's cell agrees with the round: one date, off the certificate itself");
+  assert.deepEqual(page.covers.map((c) => [c.code, c.kind, c.fileId]), [["QL-01", "extension", "letter"]],
+    "and the letter reaches the page only as a cover");
+});
