@@ -170,10 +170,22 @@ on any line that still names this one.
   every management and IT grant a summary by person, from
   `vessel.mailFrom`. A crew grant's name reaches a matrix row only through
   the crew register, and a name it cannot put to exactly one person, or a
-  one-word name, is sent nothing. The rules are
+  one-word name, is sent nothing. A crew email is held to the register
+  strictly at both ends (`remStrictRegister`: one of the person's own
+  spellings letter for letter, or exactly their words): the grant's name,
+  and the matrix row each item came from (`from` on the item), so a row
+  the register only loosely takes for him ("EVANS, R.", "EVANS, Brenton
+  James") is in the summary and never in his inbox. The rules are
   `source/shared/reminders.js`. One record, `last-reminder` in the sync
-  store, claimed for the day against the version read before any email
-  goes, so nothing is ever sent twice; one line on the SharePoint page. The
+  store, claimed for the set day against the version read before any email
+  goes, so nothing is ever sent twice; one line on the SharePoint page.
+  Never two weeks' sends less than seven days apart, whatever the weekday
+  is moved to (`reminderOwed`); a set day whose every tick was missed is
+  sent the next day, as that set day, only where last week's went. The
+  sends stop starting a minute in (`reminderLimits`) and name whoever was
+  not reached, so they never eat the round's hour. The reminders read the
+  document every hour before the lease; the lease test allows that one
+  read and nothing else of the books. The
   red band's 90 days is one number, `RED_DAYS` in `source/shared/bands.js`,
   with the day count (`daysUntil`) the page and the reminders both use; a
   test holds the reminders' default window to it.
