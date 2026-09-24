@@ -16,6 +16,8 @@ import assert from "node:assert/strict";
 import { setEnv } from "../src/env.js";
 import analyse, { compareMatrix, extract, refile } from "../src/routes/analyse.js";
 import readOne from "../src/routes/read-one.js";
+import restoreFile from "../src/routes/restore-file.js";
+import { MAX_BYTES } from "../src/lib/shared-state.js";
 import { OUT_OF_CREDIT, READING_UNAVAILABLE } from "../src/lib/analysis.js";
 import { KeptInPlace, ensureDocumentColumns, forgetDocumentColumns, purgeDocument, relocateToRemovedBlob, removeDocument, restoreDocument } from "../src/db/documents.js";
 import { replaceSingleFile } from "../src/db/single-file.js";
@@ -663,6 +665,11 @@ function portalDb(doc: Record<string, unknown>, rows: Record<string, unknown>[],
       const r = rows.find((x) => x.id === args[0]);
       if (r) r.person = args[1];
       return { changes: r ? 1 : 0 };
+    }
+    // The restore's rows, bound and batched.
+    if (/^INSERT OR REPLACE INTO blobs/.test(sql)) {
+      blobs.set(args[0] + "|" + args[1], String(args[2])); etags.set(args[0] + "|" + args[1], String(args[4]));
+      return { changes: 1 };
     }
     if (/^INSERT INTO blobs/.test(sql)) {
       const k = args[0] + "|" + args[1];
@@ -3042,6 +3049,121 @@ test("after the backup lands, a month of dailies and a year of monthlies remain,
   assert.deepEqual(left, ["2025-07-01", "2025-09-01", "2026-08-01", "2026-08-17", "2026-08-25", "2026-09-24"],
     "30 days back stays, 31 to 37 go, the monthlies stay but the one 13 months back; a file older than the week's window is never touched, since nothing is listed");
   assert.deepEqual(bucket.made, [], "no folder was made");
+});
+
+/* ------------------------------------------------------------------------ *
+ * A backup put back: the document as a save under a name of its own, and
+ * the other parts only when asked, bound and batched.
+ * ------------------------------------------------------------------------ */
+const aBackup = (over: Record<string, unknown> = {}) => ({
+  portal: "coolibah", backupVersion: 1, at: "2026-09-22T18:10:00.000Z", perthDay: "2026-09-23", rev: 7,
+  counts: { documents: 0, users: 0, readings: 0, fauna: 0 },
+  document: JSON.stringify({ quals: { cols: [["QL-01", "Master", "Qualifications"]], rows: [["EVANS, Brenton", "Master", "", ["2029-01-01"]]] }, people: [{ name: "EVANS, Brenton", aliases: [] }] }),
+  documents: [], users: [], readings: {}, fauna: [],
+  ...over,
+});
+const putBack = (body: unknown, who = manager, query = "") => restoreFile(
+  new Request("http://portal/api/state/restore-file" + query, { method: "POST", headers: { "content-type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body) }),
+  who,
+);
+const historyRows = (db: { asked: Asked[] }) => db.asked.filter((a) => /^INSERT INTO portal_state_history/.test(a.sql));
+
+test("management puts a backup's document back as a save of its own, and the rest is said to be left alone", async () => {
+  const { portal } = await oneManPortal();
+  const res = await putBack(aBackup());
+  const out = (await res.json()) as { rev: number; from: string; restored: string[]; notRestored: string[]; error?: string };
+  assert.equal(res.status, 200, out.error || "");
+  assert.equal(out.rev, 2, "rev 1 to 2: a save on top, so every open tab reloads");
+  assert.equal(out.from, "2026-09-23");
+  assert.deepEqual(out.restored, ["document"]);
+  assert.deepEqual(out.notRestored, ["documents", "users", "readings", "fauna"], "it says what it did not touch");
+  assert.equal(portal.state.rev, 2);
+  assert.deepEqual(portal.doc().quals.rows, [["EVANS, Brenton", "Master", "", ["2029-01-01"]]], "the backup's document stands");
+  const rows = historyRows(portal.db);
+  assert.equal(rows.length, 1, "one history row");
+  assert.equal(rows[0].args[4], "Matthew Jones restored the backup of 2026-09-23", "under a name of its own, so the minute's coalescing cannot fold it into an earlier save");
+  assert.ok(!portal.db.asked.some((a) => /INSERT OR REPLACE/.test(a.sql)), "no other table was written");
+});
+
+test("crew cannot put a backup back", async () => {
+  const { portal } = await oneManPortal();
+  const res = await putBack(aBackup(), { id: "u2", role: "crew", name: "Deckhand", email: "d@portal" } as never);
+  assert.equal(res.status, 403);
+  assert.equal(portal.state.rev, 1, "nothing written");
+});
+
+test("a file that is not a Coolibah backup is refused whole, and nothing is written", async () => {
+  const { portal } = await oneManPortal();
+  const wrong = await putBack(aBackup({ portal: "someone-else" }));
+  assert.equal(wrong.status, 400);
+  assert.match(((await wrong.json()) as { error: string }).error, /isn't a Coolibah backup/);
+  const version = await putBack(aBackup({ backupVersion: 2 }));
+  assert.equal(version.status, 400);
+  const noDoc = await putBack(aBackup({ document: undefined }));
+  assert.equal(noDoc.status, 400);
+  const notJson = await putBack("{not json");
+  assert.equal(notJson.status, 400);
+  const unknownPart = await putBack(aBackup({ what: ["sessions"] }));
+  assert.equal(unknownPart.status, 400, "a part the portal does not keep in a backup cannot be asked for");
+  assert.equal(portal.state.rev, 1, "nothing written");
+  assert.ok(!portal.db.asked.some((a) => /^UPDATE portal_state|INSERT OR REPLACE/.test(a.sql)), "no write of any kind");
+});
+
+test("a document over what the database holds is refused as too large", async () => {
+  const { portal } = await oneManPortal();
+  const res = await putBack(aBackup({ document: JSON.stringify({ pad: "x".repeat(MAX_BYTES) }) }));
+  assert.equal(res.status, 413);
+  assert.equal(portal.state.rev, 1, "nothing written");
+});
+
+test("asked for the readings, they go in bound and eighty at a time", async () => {
+  const { portal } = await oneManPortal();
+  const readings: Record<string, unknown> = {};
+  for (let i = 0; i < 200; i++) readings[`r1/sum-${i}.json`] = { ...reading, holderName: "Person " + i };
+  const batches: number[] = [];
+  const realBatch = portal.db.batch.bind(portal.db);
+  portal.db.batch = async (stmts) => { batches.push(stmts.length); return realBatch(stmts); };
+  const res = await putBack(aBackup({ readings: { "certificate-readings": readings, "matrix-readings": { "equivalences.json": { note: "not JSON as stored", text: "{broken" } } } }), manager, "?what=readings");
+  const out = (await res.json()) as { restored: string[]; notRestored: string[]; rows: Record<string, number>; error?: string };
+  assert.equal(res.status, 200, out.error || "");
+  assert.deepEqual(out.restored, ["document", "readings"]);
+  assert.deepEqual(out.notRestored, ["documents", "users", "fauna"]);
+  assert.equal(out.rows.readings, 201);
+  // The first batch is the history's own (the row and the trim); the rest are the readings.
+  assert.deepEqual(batches.slice(1), [80, 80, 41], "eighty at a time through the database's own batch");
+  const writes = portal.db.asked.filter((a) => /^INSERT OR REPLACE INTO blobs/.test(a.sql));
+  assert.equal(writes.length, 201);
+  assert.ok(writes.every((a) => a.sql === "INSERT OR REPLACE INTO blobs (store, key, value, updated_at, etag) VALUES (?1, ?2, ?3, ?4, ?5)"), "every value bound, none in the SQL");
+  assert.equal(JSON.parse(portal.blobs.get("certificate-readings|r1/sum-7.json")!).holderName, "Person 7");
+  assert.equal(portal.blobs.get("matrix-readings|equivalences.json"), "{broken", "a value the backup kept as text goes back as that text");
+  assert.equal(portal.state.rev, 2, "and the document went in first");
+});
+
+test("asked for the file index and the users, only the portal's own columns are written, by name from the portal's list", async () => {
+  const { portal } = await oneManPortal();
+  const written: Asked[] = [];
+  const realBatch = portal.db.batch.bind(portal.db);
+  const plain = portal.db.prepare;
+  // The fake knows nothing of these statements; they are caught on the way in.
+  portal.db.prepare = (sql: string) => {
+    if (!/^INSERT OR REPLACE INTO (documents|users)/.test(sql)) return plain(sql);
+    const s = { bind: (...args: unknown[]) => ({ ...s, run: async () => { written.push({ sql, args }); return { results: [], meta: { changes: 1 } }; } }), run: async () => ({ results: [], meta: { changes: 1 } }) };
+    return s as never;
+  };
+  portal.db.batch = async (stmts) => realBatch(stmts);
+  const res = await putBack(aBackup({
+    documents: [{ id: "d9", category: "certificate", blob_key: "opms/X/y.pdf", filename: "y.pdf", size_bytes: 5, created_at: 3, evil: "DROP TABLE", removed_at: null }],
+    users: [{ id: "u9", email: "x@portal", name: "X", role: "crew", disabled: 0, created_at: 1, password: "never a column" }],
+    what: ["documents", "users"],
+  }));
+  const out = (await res.json()) as { rows: Record<string, number>; error?: string };
+  assert.equal(res.status, 200, out.error || "");
+  assert.deepEqual(out.rows, { documents: 1, users: 1 });
+  assert.deepEqual(written.map((w) => w.sql), [
+    "INSERT OR REPLACE INTO documents (id, category, blob_key, filename, size_bytes, created_at, removed_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+    "INSERT OR REPLACE INTO users (id, email, name, role, disabled, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+  ], "the columns the portal knows, in the portal's order; nothing the file made up");
+  assert.deepEqual(written[0].args, ["d9", "certificate", "opms/X/y.pdf", "y.pdf", 5, 3, null]);
 });
 
 test("a dated sheet beats an undated one whatever the alphabet says", () => {

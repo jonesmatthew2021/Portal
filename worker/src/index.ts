@@ -10,6 +10,7 @@ import rename from "./routes/rename.js";
 import renameFile from "./routes/rename-file.js";
 import state from "./routes/state.js";
 import { history, restore } from "./routes/history.js";
+import restoreFile from "./routes/restore-file.js";
 import files from "./routes/files.js";
 import file from "./routes/file.js";
 import analyse, { extract, refile } from "./routes/analyse.js";
@@ -95,6 +96,8 @@ export default {
       // The last 200 saves, and putting one of them back.
       if (path === "/api/state/history") return await history(req, user!);
       if (path === "/api/state/restore") return await restore(req, user!);
+      // A nightly backup put back, from a terminal (routes/restore-file.ts).
+      if (path === "/api/state/restore-file") return await restoreFile(req, user!);
       if (path === "/api/files" && req.method === "POST" && user && user.role === "crew") {
         // Crew may file certificates and nothing else through this door.
         const form = await req.clone().formData().catch(() => null);
