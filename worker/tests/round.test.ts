@@ -708,15 +708,24 @@ const oneManPortal = async (over: {
 
 test("the round puts a certificate's date on the matrix and writes the office's workbook", async () => {
   const { portal, bucket, tmKey } = await oneManPortal();
-  const out = await runMatrixRound({ by: "the round on the hour", timeLeft: () => true, mirroredThisHour: 0 });
+  const said: number[] = [];
+  const out = await runMatrixRound({ by: "the round on the hour", timeLeft: () => true, mirroredThisHour: 0, say: (pct) => { said.push(pct); } });
   assert.equal(out.roundError, null, "no error");
   assert.equal(out.roundSkipped, null, "nothing skipped");
+  assert.equal(out.workbookProblem, null);
   assert.equal(out.applied, 1, "one date applied");
   assert.equal(out.cleared, 0);
   assert.equal(out.written, 1, "one cell written into the workbook");
   const named = datedWorkbookName("20260901 - CREW QUALIFICATION EXPIRY.xlsx", todayThere());
   assert.equal(out.workbook, named, "filed under today's date");
   assert.equal(out.leftAsTyped, 0);
+  assert.deepEqual(said, [20, 30, 60, 75], "the round says where it has got to, in order");
+  assert.ok(/^\d{4}-\d{2}-\d{2}T/.test(out.at), "it says when it began");
+  assert.deepEqual(out.changes, [{ person: "EVANS, Brenton", code: "QL-01", title: "Master", from: "", to: "2031-05-26" }], "the cell it moved");
+  assert.equal(out.summary?.certificates, 1);
+  assert.equal(out.summary?.read, 1);
+  assert.equal(out.summary?.unread, 0);
+  assert.equal(out.summary?.validitySheet, null);
 
   const doc = portal.doc();
   assert.equal(doc.quals.rows[0][3][0], "2031-05-26", "the matrix carries the certificate's date");
@@ -733,6 +742,7 @@ test("the round puts a certificate's date on the matrix and writes the office's 
   assert.deepEqual(bucket.made, [], "no folder was made");
   const rowsNow = portal.rows.filter((r) => r.category === "training-matrix");
   assert.deepEqual(rowsNow.map((r) => [r.filename, !!r.removedAt]), [["20260901 - CREW QUALIFICATION EXPIRY.xlsx", true], [named, false]]);
+  assert.equal(out.workbookId, rowsNow[1].id, "the outcome names the new workbook's row");
   assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).until, 0, "the lease is run out at the end");
   assert.equal(await roundRunning(), false);
 
@@ -747,7 +757,34 @@ test("the round puts a certificate's date on the matrix and writes the office's 
   assert.equal(again.applied, 0);
   assert.equal(again.written, null, "no workbook step on an idle hour");
   assert.equal(again.roundError, null);
+  assert.deepEqual(again.changes, [], "nothing moved");
+  assert.equal(again.workbookId, null);
   assert.equal(portal.state.rev, 3, "an idle hour bumps no revision");
+});
+
+test("a workbook too big to rewrite on the server is a problem with the workbook, not a skipped round", async () => {
+  /* The matrix still takes the date; the workbook is owed it, and the
+     reason is said where the page can tell it from an hour that merely
+     ran out of time - no hour will make a 7 MB file smaller. */
+  const { portal, bucket, tmKey } = await oneManPortal();
+  const tm = portal.rows.find((r) => r.id === "tm1")!;
+  tm.sizeBytes = 7 * 1024 * 1024;
+  const out = await runMatrixRound({ by: "the round on the hour", timeLeft: () => true, mirroredThisHour: 0 });
+  assert.equal(out.roundError, null);
+  assert.equal(out.roundSkipped, null, "the round itself ran");
+  assert.match(out.workbookProblem || "", /too big/);
+  assert.ok(!/press Update/.test(out.workbookProblem || ""), "no instruction to press a button");
+  assert.equal(out.applied, 1, "the matrix took the date");
+  assert.equal(out.workbook, null);
+  assert.equal(out.workbookId, null);
+  assert.deepEqual(portal.doc().workbookPending, ["EVANS, BRENTON|QL-01"], "the cell is owed to the workbook");
+  assert.ok(bucket.text(tmKey), "the workbook on file is where it was");
+
+  // A workbook that is not one: the same kind of answer.
+  tm.sizeBytes = 5000; tm.filename = "CREW QUALIFICATION EXPIRY.pdf";
+  const again = await runMatrixRound({ by: "the round on the hour", timeLeft: () => true, mirroredThisHour: 0 });
+  assert.match(again.workbookProblem || "", /not a workbook/);
+  assert.equal(again.roundSkipped, null);
 });
 
 test("an hour in which files went off the books holds the clearing", async () => {

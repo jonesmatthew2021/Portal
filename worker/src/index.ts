@@ -167,7 +167,12 @@ export default {
     const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
     const written = async (round: Record<string, unknown>) => {
       try {
-        await recordHourly({ at: t0, durationMs: Date.now() - t0, ...outcome, ...round });
+        // The round's own `at` is when it began, an ISO string; the record's
+        // is the hour's start, and stays so. The cells it moved and its
+        // comparison count are answered to a page that asked for the round,
+        // not kept on the hour's line.
+        const { changes: _changes, summary: _summary, ...forRecord } = round;
+        await recordHourly({ ...outcome, ...forRecord, at: t0, durationMs: Date.now() - t0 });
       } catch (e) {
         console.error("hourly outcome not written:", e);
       }

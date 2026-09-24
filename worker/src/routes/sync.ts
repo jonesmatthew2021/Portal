@@ -376,6 +376,9 @@ export const lastSync = () => getStore("sync").get("last-run", { type: "json" })
 export type HourlyRecord = {
   at: number;
   durationMs: number;
+  /** Who ran it: absent for the hour itself, the person's name when the
+   *  round was started from the page (routes/round.ts). */
+  by?: string;
   read: number;
   refiled: number;
   syncError: string | null;
@@ -386,10 +389,12 @@ export type HourlyRecord = {
   settled?: number;
   written?: number | null;
   workbook?: string | null;
+  workbookId?: string | null;
   leftAsTyped?: number;
   held?: string | null;
   roundError?: string | null;
   roundSkipped?: string | null;
+  workbookProblem?: string | null;
   validityProblem?: string | null;
 };
 export const recordHourly = (r: HourlyRecord) => getStore("sync").setJSON("last-hourly", r);

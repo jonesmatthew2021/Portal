@@ -31,17 +31,37 @@ import { liveRowsOf, replaceSingleFile } from "../db/single-file.js";
  * replaceSingleFile, whose order of work is fixed for exactly that reason.
  */
 export type RoundOutcome = {
+  /** When the round began, as an ISO timestamp. */
+  at: string;
   applied: number;
   cleared: number;
   settled: number;
   written: number | null;
   workbook: string | null;
+  /** The training-matrix row the workbook was filed as, when one was written. */
+  workbookId: string | null;
   leftAsTyped: number;
   held: string | null;
   roundError: string | null;
+  /** Why the round, or its workbook step, did not run this time for a reason
+   *  that passes: out of time, the lease held, nothing on the matrix. */
   roundSkipped: string | null;
+  /** Why the workbook cannot be written by the server at all - not a
+   *  workbook, too big to rewrite here, no bytes on file. Another hour will
+   *  not better it; the page's own button can. */
+  workbookProblem: string | null;
   validityProblem: string | null;
+  /** The cells the round moved on the matrix, as the last save tried them;
+   *  capped, because a page reads them back and a first round over a bare
+   *  matrix moves hundreds. */
+  changes: { person: string; code: string; title: string; from: string; to: string }[];
+  /** The comparison's own count of what it held against the matrix. */
+  summary: {
+    certificates: number; read: number; unread: number; compared: number;
+    discrepancies: number; derived: number; validitySheet: string | null;
+  } | null;
 };
+const CHANGES_CAP = 500;
 
 /* Two writers of the one workbook is how a file gets lost. One lease in the
    sync store says who is writing: the worker's hour takes it around the
@@ -173,12 +193,21 @@ export async function runMatrixRound(opts: {
    *  one around the sync, the reading and the round together). Without
    *  one the round takes a lease for itself and gives it back at the end. */
   lease?: Lease;
+  /** Where the round has got to, for a page holding a request open on it:
+   *  a percentage and a word. The hour passes nothing and says nothing. */
+  say?: (pct: number, word: string) => void | Promise<void>;
 }): Promise<RoundOutcome> {
   const out: RoundOutcome = {
-    applied: 0, cleared: 0, settled: 0, written: null, workbook: null, leftAsTyped: 0,
-    held: null, roundError: null, roundSkipped: null, validityProblem: null,
+    at: new Date().toISOString(),
+    applied: 0, cleared: 0, settled: 0, written: null, workbook: null, workbookId: null, leftAsTyped: 0,
+    held: null, roundError: null, roundSkipped: null, workbookProblem: null, validityProblem: null,
+    changes: [], summary: null,
   };
   const skip = (why: string) => { out.roundSkipped = why; return out; };
+  // A progress writer that fails must not fail the round.
+  const say = async (pct: number, word: string) => {
+    try { if (opts.say) await opts.say(pct, word); } catch (e) { console.error("round progress not said:", e); }
+  };
 
   let own: Lease | null = null;
   try {
@@ -194,6 +223,7 @@ export async function runMatrixRound(opts: {
     if (!quals || !(quals.cols || []).length || !(quals.rows || []).length) return skip("the crew matrix has no items");
 
     // (b) the expiry rules, where none are held for the skills matrix on file.
+    await say(20, "Reading the expiry rules off the skills matrix");
     try {
       out.validityProblem = await keepValidityRules();
     } catch (e) {
@@ -202,11 +232,17 @@ export async function runMatrixRound(opts: {
 
     // (c) the certificates against the matrix.
     if (!opts.timeLeft()) return skip("out of time before comparing; the next hour carries on");
+    await say(30, "Holding the certificates against the crew matrix");
     const res = await compareMatrix(
       { cols: quals.cols, rows: quals.rows } as Matrix,
       null,
       asKnownPerson(cur.doc.people),
     );
+    const s = res.summary;
+    out.summary = {
+      certificates: s.certificates, read: s.read, unread: s.unread, compared: s.compared,
+      discrepancies: s.discrepancies, derived: s.derived, validitySheet: s.validitySheet,
+    };
 
     // (d) clearing is held for an hour in which files went off the books:
     // the sync just wrote certificates off, and a cell whose certificate
@@ -226,6 +262,7 @@ export async function runMatrixRound(opts: {
     // Cells an earlier hour put on the matrix that never reached the
     // workbook - read from the same fresh copy the change is worked out on.
     let owedBefore: string[] = [];
+    await say(60, "Saving the crew matrix");
     const saved = await saveDocument((doc) => {
       owedBefore = owedCells(doc);
       const nameOf = asKnownPerson(doc.people);
@@ -246,6 +283,7 @@ export async function runMatrixRound(opts: {
       out.applied = done.applied.filter((a) => a.to !== "").length;
       out.cleared = done.applied.filter((a) => a.to === "").length;
       out.settled = done.only.size;
+      out.changes = done.applied.slice(0, CHANGES_CAP);
       changedKeys = new Set(done.applied.map((a) => `${as(a.person).trim().toUpperCase()}|${a.code}`));
 
       // An idle hour writes nothing: no revision bump, no history copy.
@@ -268,7 +306,7 @@ export async function runMatrixRound(opts: {
       }
       return doc;
     }, opts.by);
-    if (!saved.changed) { out.applied = 0; out.cleared = 0; }
+    if (!saved.changed) { out.applied = 0; out.cleared = 0; out.changes = []; }
 
     /* (f) the office's workbook - when a cell moved this hour, or one moved
        in an earlier hour and never reached it.
@@ -285,6 +323,7 @@ export async function runMatrixRound(opts: {
     let landed = false;
     try {
       if (!opts.timeLeft()) return skip("out of time before the workbook; the next hour writes it");
+      await say(75, "Writing the training matrix workbook");
       landed = await writeWorkbook(opts, out, owed);
       return out;
     } finally {
@@ -336,9 +375,11 @@ async function rememberOwed(by: string, owed: Set<string>) {
  * (and any still owed from before) and any it finds blank, then filed
  * under today's date through replaceSingleFile - which also decides the
  * address it lands on, taking the next suffix where the wanted name is the
- * office's file or a removed copy's. Every reason not to is said in
- * roundSkipped rather than thrown; the matrix is already saved by now, and
- * the page's own button can always write the workbook from it.
+ * office's file or a removed copy's. Every reason not to is said rather
+ * than thrown - in roundSkipped where another hour may do better, in
+ * workbookProblem where none will (the file itself is not one the server
+ * can rewrite); the matrix is already saved by now, and the page's own
+ * button can always write the workbook from it.
  *
  * Answers whether the workbook now carries every cell it was owed: yes
  * when it was written, and yes when there was nothing to write because it
@@ -350,11 +391,11 @@ async function writeWorkbook(
   const [tm] = await liveRowsOf("training-matrix");
   if (!tm) { out.roundSkipped = "no training matrix on file"; return false; }
   if (!/\.(xlsx|xlsm)$/i.test(tm.filename)) {
-    out.roundSkipped = `${tm.filename} is not a workbook the server can write; press Update the spreadsheet in a tab`;
+    out.workbookProblem = `${tm.filename} is not a workbook the server can write`;
     return false;
   }
   if (tm.sizeBytes > MAX_WORKBOOK_BYTES) {
-    out.roundSkipped = `${tm.filename} is ${(tm.sizeBytes / (1024 * 1024)).toFixed(1)} MB, too big to rewrite on the server; press Update the spreadsheet in a tab`;
+    out.workbookProblem = `${tm.filename} is ${(tm.sizeBytes / (1024 * 1024)).toFixed(1)} MB, too big to rewrite on the server`;
     return false;
   }
 
@@ -368,7 +409,7 @@ async function writeWorkbook(
       const found = await store.get(parked, { type: "arrayBuffer" });
       if (found) { await store.set(tm.blobKey, found); bytes = found; break; }
     }
-    if (!bytes) { out.roundSkipped = "the workbook on file has no bytes"; return false; }
+    if (!bytes) { out.workbookProblem = "the workbook on file has no bytes"; return false; }
   }
 
   const today = todayThere();
@@ -399,6 +440,7 @@ async function writeWorkbook(
   });
   out.written = report.written;
   out.workbook = row.filename;
+  out.workbookId = row.id;
 
   // The workbook is written: the line in the log, and nothing owed to it
   // any more, in the one save.
