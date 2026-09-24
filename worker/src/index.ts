@@ -182,7 +182,7 @@ export default {
     // Whatever happens below is written down: the counts on a good hour,
     // the error on a bad one. A round that fails in silence is how the
     // matrix once sat empty for three hours with nobody told.
-    const outcome = { read: 0, refiled: 0, syncError: null as string | null, readError: null as string | null };
+    const outcome = { read: 0, refiled: 0, syncError: null as string | null, readError: null as string | null, readStopped: null as string | null };
     const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
     const written = async (round: Record<string, unknown>) => {
       try {
@@ -266,7 +266,7 @@ export const hourDeadline = (tick: number, leaseAt: number) =>
  */
 async function theHour(
   env: PortalEnv, lease: Lease, deadline: number,
-  outcome: { read: number; refiled: number; syncError: string | null; readError: string | null },
+  outcome: { read: number; refiled: number; syncError: string | null; readError: string | null; readStopped: string | null },
   written: (round: Record<string, unknown>) => Promise<void>,
 ): Promise<Record<string, unknown>> {
   const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -344,8 +344,19 @@ async function theHour(
         while (loopsLeft() && batches++ < MAX_EXTRACT_BATCHES) {
           const out = (await (await extract(codes, 4)).json()) as {
             remaining: number; attempted: number; extracted: number;
+            stopped: { kind: string; line: string } | null;
           };
           outcome.read += out.extracted;
+          // The first answer about the account ends the reading for the
+          // hour: no credit or a refused key is for a person to fix and
+          // goes on the record in red; a busy model or the rate is an
+          // aside, and the next hour simply tries again. Nothing is kept
+          // about it between hours. The refile and the round still run.
+          if (out.stopped) {
+            if (out.stopped.kind === "credit" || out.stopped.kind === "key") outcome.readError = out.stopped.line;
+            else outcome.readStopped = out.stopped.line;
+            break;
+          }
           if (out.remaining <= 0 || out.attempted === 0) break;
           if (out.extracted === 0 && ++stalled >= 2) break;
         }

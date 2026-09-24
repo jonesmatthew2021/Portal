@@ -78,7 +78,7 @@ function SharePointPage() {
     const bad = [h.syncError, h.readError, h.roundError].filter(Boolean).join("; ");
     if (bad) return { bad: true, text: opening + " failed: " + bad };
     // The record says a workbook problem on roundSkipped too, for the open tab; said once here.
-    const aside = [...new Set([h.roundSkipped, h.workbookProblem, h.held, h.validityProblem, h.equivalenceProblem].filter(Boolean))].join("; ");
+    const aside = [...new Set([h.roundSkipped, h.workbookProblem, h.held, h.validityProblem, h.equivalenceProblem, h.readStopped].filter(Boolean))].join("; ");
     // A round run from the page did its reading and refiling before it came, so those counts are the hour's alone.
     const parts = [
       ...(fromPage ? [] : [h.read + " certificate" + (h.read === 1 ? "" : "s") + " read", h.refiled + " refiled"]),

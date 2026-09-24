@@ -382,7 +382,13 @@ export type HourlyRecord = {
   read: number;
   refiled: number;
   syncError: string | null;
+  /** Why the reading cannot go on until a person acts: the account is out
+   *  of credit, or its key was refused. Shown in red. */
   readError: string | null;
+  /** Why the reading stopped early this hour on its own account - the
+   *  model busy or over its rate - and will try again next hour. An aside,
+   *  not an error. */
+  readStopped?: string | null;
   // The round's own outcome (lib/round.ts), spread in when it ran.
   applied?: number;
   cleared?: number;

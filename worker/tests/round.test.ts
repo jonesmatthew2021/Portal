@@ -2587,6 +2587,56 @@ test("over the rate: the batch stores nothing and says the reading is unavailabl
   assert.deepEqual(readingWrites(portal.db), [], "nothing stored");
 });
 
+test("the hour stops reading on the first credit answer, says so in red, and still runs the round", async () => {
+  const { portal, env } = await unreadPortal(2);
+  const model = modelAnswers(() => ({ status: 400, body: CREDIT_BODY }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    model.restore();
+  }
+  assert.equal(model.calls.length, 2, "one batch of two, and not another call after the answer");
+  const hourly = JSON.parse(portal.blobs.get("sync|last-hourly")!);
+  assert.equal(hourly.readError, OUT_OF_CREDIT);
+  assert.equal(hourly.readStopped, null);
+  assert.equal(hourly.read, 0);
+  assert.equal(hourly.applied, 1, "the round still ran on what had been read before");
+  assert.equal(hourly.roundError, null);
+  assert.deepEqual(readingWrites(portal.db), [], "nothing stored against the certificates");
+  assert.equal(portal.blobs.has("sync|credit"), false, "nothing kept about the credit between hours");
+});
+
+test("a busy model stops the hour's reading as an aside, not an error, and the next hour reads as normal", async () => {
+  const { portal, env } = await unreadPortal(1);
+  const busy = modelAnswers(() => ({ status: 529, body: apiError("overloaded_error", "Overloaded") }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    busy.restore();
+  }
+  let hourly = JSON.parse(portal.blobs.get("sync|last-hourly")!);
+  assert.equal(hourly.readStopped, READING_UNAVAILABLE);
+  assert.equal(hourly.readError, null);
+  assert.equal(hourly.read, 0);
+  assert.equal(hourly.applied, 1, "the round ran");
+  assert.deepEqual(readingWrites(portal.db), [], "nothing stored");
+
+  // Next hour the model answers: the certificate is read with no reset,
+  // and the line is gone from the record.
+  const answers = modelAnswers(() => ({ status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans", certificateTitle: "Master <500GT", expiresOn: "2032-01-01" }) }));
+  try {
+    await quiet(() => worker.scheduled({} as never, env as never));
+  } finally {
+    answers.restore();
+  }
+  assert.equal(answers.calls.length, 1, "the one unread certificate was put to the model");
+  hourly = JSON.parse(portal.blobs.get("sync|last-hourly")!);
+  assert.equal(hourly.readError, null);
+  assert.equal(hourly.readStopped, null);
+  assert.equal(hourly.read, 1);
+  assert.equal(readingWrites(portal.db).length, 1, "its reading is stored now");
+});
+
 const readOneNow = (id: string, discardUnreadable: boolean) => readOne(
   new Request("http://portal/api/certificates/read-one", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, discardUnreadable }) }),
 );
