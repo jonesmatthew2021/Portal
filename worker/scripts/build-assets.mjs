@@ -10,9 +10,10 @@
  */
 
 import { copyFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BRAND_FILES, manifestFor, portalSource, readVessel } from "../../tools/source.mjs";
+import { BRAND_FILES, manifestFor, portalSource, readVessel, serviceWorkerSource } from "../../tools/source.mjs";
 import { createRequire } from "node:module";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -78,6 +79,13 @@ const copyTree = (from, to) => {
   return n;
 };
 const vendorFiles = copyTree(VENDOR, join(ASSETS, "vendor"));
+// The service worker, stamped with this build: a hash of the compiled page
+// and the vendor files it serves, so a deploy that changes any of them is a
+// new worker with a new cache, and one that changes nothing is not.
+const stamp = createHash("md5").update(out);
+for (const name of ["react.production.min.js", "react-dom.production.min.js"]) stamp.update(readFileSync(join(VENDOR, name)));
+const version = stamp.digest("hex");
+writeFileSync(join(ASSETS, "sw.js"), serviceWorkerSource(version));
 // The fauna log — the phone app at /fauna/ — is its own folder, carried over
 // as it is: the page, its rules module, its manifest and icons, and the
 // workbook template the month export is written into. Plain files, nothing
@@ -88,5 +96,5 @@ const faunaFiles = readdirSync(join(REPO, "source", "fauna")).filter((f) => !f.e
 for (const f of faunaFiles) copyFileSync(join(REPO, "source", "fauna", f), join(FAUNA, f));
 
 console.log(
-  `assets built — index.html ${(out.length / 1024 / 1024).toFixed(1)} MB (compiled in ${((Date.now() - t0) / 1000).toFixed(1)}s), crew-list-form.html, app icons, the vendor files (${vendorFiles}) and the fauna log (${faunaFiles.length} files) copied`,
+  `assets built — index.html ${(out.length / 1024 / 1024).toFixed(1)} MB (compiled in ${((Date.now() - t0) / 1000).toFixed(1)}s), sw.js (version ${version.slice(0, 8)}…), crew-list-form.html, app icons, the vendor files (${vendorFiles}) and the fauna log (${faunaFiles.length} files) copied`,
 );

@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -1069,6 +1069,60 @@ const is = (got, want, what) => {
     [example.name + " " + example.nameAccent + " Crew Portal", example.shortName, example.theme.themeColor],
     "the manifest written for a vessel carries that vessel's name, short name and colour");
   is(manifest.icons.map((i) => i.src), ["/icon-192.png", "/icon-512.png"], "…and asks for the icons under the fixed served names");
+}
+
+/* ---- the offline rules: what the service worker keeps ---- */
+{
+  /* The service worker (source/app/sw.js) and the page decide by the same
+     file, source/shared/offline-rules.js: run here as the module the
+     worker has folded in, and again as the page has it spliced in, so
+     neither can drift from the other. What is kept is exactly the page,
+     the vendor files and four GET answers; everything else - every write,
+     file bytes, the CDN scripts, the fauna app, another origin - goes to
+     the network untouched. */
+  const offline = await import(pathToFileURL(join(ROOT, "source", "shared", "offline-rules.js")).href);
+  const ORIGIN = "https://portal.example";
+  for (const [name, rules] of [["the module", offline], ["the page", lib]]) {
+    const { cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER } = rules;
+    is(cacheable("GET", "/", ORIGIN), "page", name + ": the page is kept");
+    is(cacheable("GET", ORIGIN + "/?tab=roster", ORIGIN), "page", name + ": …whatever the query on it");
+    is(cacheable("GET", "/api/me", ORIGIN), "api", name + ": /api/me is kept");
+    is(cacheable("GET", "/api/state", ORIGIN), "api", name + ": /api/state is kept");
+    is(cacheable("GET", "/api/files", ORIGIN), "api", name + ": /api/files is kept");
+    is(cacheable("GET", "/api/sync/last", ORIGIN), "api", name + ": /api/sync/last is kept");
+    is(cacheable("GET", "/vendor/react.production.min.js", ORIGIN), "vendor", name + ": React is kept, copy first");
+    is(cacheable("GET", "/vendor/fonts/ibm-plex-sans-latin-400-normal.woff2", ORIGIN), "vendor", name + ": …and the fonts");
+    is(cacheable("POST", "/api/state", ORIGIN), null, name + ": a save goes straight to the network");
+    is(cacheable("PUT", "/api/state", ORIGIN), null, name + ": …a PUT too");
+    is(cacheable("GET", "/api/files/abc123", ORIGIN), null, name + ": file bytes are never kept");
+    is(cacheable("GET", "/api/files?removed=1", ORIGIN), null, name + ": the removed listing is not the listing");
+    is(cacheable("POST", "/api/round", ORIGIN), null, name + ": the round is never kept");
+    is(cacheable("GET", "/api/round/progress", ORIGIN), null, name + ": nor its progress");
+    is(cacheable("GET", "/api/fauna/export?month=2026-09", ORIGIN), null, name + ": nothing of the fauna log");
+    is(cacheable("GET", "/fauna/", ORIGIN), null, name + ": the fauna app is not kept");
+    is(cacheable("GET", "/login", ORIGIN), null, name + ": the sign-in page is not kept");
+    is(cacheable("GET", "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js", ORIGIN), null, name + ": the spreadsheet reader from the CDN is not kept");
+    is(cacheable("GET", "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js", ORIGIN), null, name + ": nor the PDF maker");
+    is(cacheable("GET", "https://elsewhere.example/api/state", ORIGIN), null, name + ": another origin's /api/state is not this portal's");
+    is(cacheable("GET", "not a url at all", ORIGIN), null, name + ": a bare word is a path under the portal that nothing keeps, not an error");
+    is(cacheName("abc123"), "portal-abc123", name + ": a build's cache is named for its stamp");
+    const headers = (o) => ({ get: (k) => (k in o ? o[k] : null) });
+    is(keepable("page", 200, headers({ "X-Portal-Page": "portal" })), true, name + ": the page is kept when it carries the worker's mark");
+    is(keepable("page", 200, headers({})), false, name + ": …never without it: that is the sign-in form");
+    is(keepable("api", 200, headers({})), true, name + ": a good answer is kept");
+    is(keepable("api", 401, headers({})), false, name + ": a refusal is not");
+    is(keepable("api", 500, headers({})), false, name + ": nor a failure");
+    is(keepable("vendor", 304, headers({})), false, name + ": nor a not-modified");
+    is(isCachedAnswer(headers({ [FETCHED_AT_HEADER]: "2026-09-24T06:32:00.000Z" })), "2026-09-24T06:32:00.000Z", name + ": a kept copy says when it was fetched");
+    is(isCachedAnswer(headers({})), null, name + ": a live answer carries no stamp");
+    is(isCachedAnswer(null), null, name + ": …and no headers at all is no stamp");
+    is(anotherPerson({ email: "a@example.com" }, { email: "b@example.com" }), true, name + ": a different email is a different person");
+    is(anotherPerson({ email: "A@Example.com " }, { email: "a@example.com" }), false, name + ": the same email, however spelt, is the same person");
+    is(anotherPerson(null, { email: "a@example.com" }), false, name + ": nothing kept decides nothing");
+    is(anotherPerson({ email: "a@example.com" }, {}), false, name + ": …nor a live answer with no email");
+  }
+  is(offline.FETCHED_AT_HEADER, lib.FETCHED_AT_HEADER, "the stamp's header is the same word in the worker and the page");
+  is(offline.KEPT_APIS, ["/api/me", "/api/state", "/api/files", "/api/sync/last"], "the four answers kept, and no more");
 }
 
 if (failed) {

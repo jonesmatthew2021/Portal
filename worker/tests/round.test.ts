@@ -22,7 +22,7 @@ import { OUT_OF_CREDIT, READING_UNAVAILABLE } from "../src/lib/analysis.js";
 import { KeptInPlace, ensureDocumentColumns, forgetDocumentColumns, purgeDocument, relocateToRemovedBlob, removeDocument, restoreDocument } from "../src/db/documents.js";
 import { replaceSingleFile } from "../src/db/single-file.js";
 import { saveDocument } from "../src/lib/shared-state.js";
-import { runMatrixRound, roundRunning, leaseHolder, takeLease, dropLease, renewLease, keepEquivalences } from "../src/lib/round.js";
+import { runMatrixRound, roundRunning, leaseHolder, takeLease, dropLease, renewLease, keepEquivalences, SETTLE_MS } from "../src/lib/round.js";
 import { readMatrixOnce, startMatrixReadJob, runMatrixReadJob, readMatrixReadJob } from "../src/lib/matrix.js";
 import { todayThere } from "../src/lib/analysis.js";
 import sync, { apply, outranks, sheetOrder, survey } from "../src/routes/sync.js";
@@ -30,7 +30,7 @@ import roundRoute, { BUDGET_MS, LEASE_FOR_MS, progressAnswer } from "../src/rout
 import files from "../src/routes/files.js";
 import renameFile from "../src/routes/rename-file.js";
 import importSingle from "../src/routes/import-single.js";
-import worker, { hourWaits, hourDeadline, syncLastAnswer, SETTLE_MS } from "../src/index.js";
+import worker, { hourWaits, hourDeadline, syncLastAnswer } from "../src/index.js";
 import { graphBudget } from "../src/files/store.js";
 import { writeZip, readZip, partOf, partText, datedWorkbookName } from "../../source/shared/workbook.js";
 import { asKnownPerson, crewRegister } from "../../source/shared/names.js";

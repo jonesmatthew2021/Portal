@@ -84,6 +84,12 @@ const CHANGES_CAP = 500;
    out under them. */
 const LEASE_KEY = "round-lease";
 export const LEASE_MS = 15 * 60 * 1000;
+/** How long before the hour's deadline the reading loops stop starting
+ *  batches and the library's waits stop, so the round always has room to
+ *  run after them. Kept here rather than on the worker's main module: the
+ *  runtime refuses a main module that exports anything but handlers, so
+ *  a number exported from index.ts stopped the worker starting locally. */
+export const SETTLE_MS = 2.5 * 60 * 1000;
 export type Lease = { until: number; by: string; token: string };
 
 /** Whether somebody holds the lease right now - what GET /api/sync/last says. */

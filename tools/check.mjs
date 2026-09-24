@@ -253,8 +253,9 @@ if (!existsSync(rulesTest)) {
   run("The worker's rules answer correctly", () => {
     try {
       // The rules, the shared workbook code as the worker imports it, the
-      // hourly round piece by piece, the SharePoint sync and the fauna log.
-      const out = execFileSync("npx", ["tsx", "--test", "tests/rules.test.ts", "tests/workbook.test.ts", "tests/round.test.ts", "tests/sync.test.ts", "tests/fauna.test.ts"], {
+      // hourly round piece by piece, the SharePoint sync, the fauna log
+      // and the offline reading's public files and headers.
+      const out = execFileSync("npx", ["tsx", "--test", "tests/rules.test.ts", "tests/workbook.test.ts", "tests/round.test.ts", "tests/sync.test.ts", "tests/fauna.test.ts", "tests/offline.test.ts"], {
         cwd: join(ROOT, "worker"), stdio: "pipe", shell: true, timeout: 180000, encoding: "utf8",
       });
       const m = /(?:#|ℹ)\s*pass (\d+)/.exec(out);

@@ -25,9 +25,10 @@ import readOne from "./routes/read-one.js";
 import clearR2 from "./routes/clear-r2.js";
 import importSingle from "./routes/import-single.js";
 import fauna, { ensureTable as ensureFaunaTable, settleLog as settleFaunaLog } from "./routes/fauna.js";
-import { runMatrixRound, roundRunning, leaseHolder, takeLease, dropLease, keepEquivalences, type Lease } from "./lib/round.js";
+import { runMatrixRound, roundRunning, leaseHolder, takeLease, dropLease, keepEquivalences, SETTLE_MS, type Lease } from "./lib/round.js";
 import { readDocument } from "./lib/shared-state.js";
 import { nightlyBackup } from "./lib/backup.js";
+import { withAssetHeaders } from "./lib/offline.js";
 import { crewRowsOnly } from "../../source/shared/names.js";
 import { vessel } from "./vessel.js";
 
@@ -163,7 +164,10 @@ export default {
         return Response.json({ error: `No such endpoint: ${path}` }, { status: 404 });
       }
 
-      return env.ASSETS.fetch(req);
+      // The page and its own files, with what the service worker needs on
+      // them (lib/offline.ts): the worker file never browser-cached, the
+      // page marked as the page.
+      return withAssetHeaders(path, await env.ASSETS.fetch(req));
     } catch (e) {
       // Nothing here should throw — the routes answer their own errors — so
       // this is the plumbing itself failing, said plainly.
@@ -289,10 +293,6 @@ export const hourWaits = {
  *  the three that are left. */
 export const hourDeadline = (tick: number, leaseAt: number) =>
   Math.min(leaseAt + 9 * 60 * 1000, tick + 12 * 60 * 1000);
-/** How long before the deadline the reading loops stop starting batches
- *  and the library's waits stop, so the round always has room to run
- *  after them. */
-export const SETTLE_MS = 2.5 * 60 * 1000;
 
 /**
  * The hour's work under its lease: the sync, the reading, the round. What

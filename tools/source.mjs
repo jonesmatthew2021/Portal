@@ -327,36 +327,60 @@ function withShared(shell) {
     return shell;
   }
 
-  const shared = names.map((n) => {
-    const body = readFileSync(join(SHARED, n), "utf8").replace(/\r\n/g, "\n");
-    // Only a plain "export" in front of a declaration can be folded back into
-    // page code. Anything else would need a bundler, so it is refused here
-    // rather than compiled into a page that breaks on load. The comments are
-    // taken out before looking, so a comment that mentions an import does not
-    // stop the build; the file itself is folded with its comments intact.
-    const noComments = (t) => t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-    const code = noComments(body);
-    if (/^\s*import\b/m.test(code) || /\bexport\s+default\b/.test(code) || /\bexport\s*\{/.test(code)) {
-      throw new Error(
-        "source/shared/" + n + " uses an import, an export default or an export { } — " +
-        "shared files may only put \"export\" in front of a function, const or let.",
-      );
-    }
-    const folded = body.replace(/^export\s+(?=(async\s+)?function\b|const\b|let\b)/gm, "");
-    // Whatever the fold did not take (an export class, an export var) would
-    // reach the page as is and only be found by the compile, with Babel's
-    // message rather than this one.
-    if (/^\s*export\b/m.test(noComments(folded))) {
-      throw new Error(
-        "source/shared/" + n + " has an export the page cannot fold: only export function, " +
-        "export async function, export const and export let are allowed.",
-      );
-    }
-    // A header per file, so a stack trace or a search says which file to open.
-    return "/* ---- source/shared/" + n + " ---- */\n" + folded.replace(/\n+$/, "") + "\n";
-  }).join("\n");
+  const shared = names.map(foldedShared).join("\n");
 
   return shell.slice(0, at) + shared + shell.slice(at + SHARED_MARKER.length);
+}
+
+/** One shared file as plain page code: the "export" taken off each
+ *  declaration, under a header naming the file. */
+function foldedShared(n) {
+  const body = readFileSync(join(SHARED, n), "utf8").replace(/\r\n/g, "\n");
+  // Only a plain "export" in front of a declaration can be folded back into
+  // page code. Anything else would need a bundler, so it is refused here
+  // rather than compiled into a page that breaks on load. The comments are
+  // taken out before looking, so a comment that mentions an import does not
+  // stop the build; the file itself is folded with its comments intact.
+  const noComments = (t) => t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  const code = noComments(body);
+  if (/^\s*import\b/m.test(code) || /\bexport\s+default\b/.test(code) || /\bexport\s*\{/.test(code)) {
+    throw new Error(
+      "source/shared/" + n + " uses an import, an export default or an export { } — " +
+      "shared files may only put \"export\" in front of a function, const or let.",
+    );
+  }
+  const folded = body.replace(/^export\s+(?=(async\s+)?function\b|const\b|let\b)/gm, "");
+  // Whatever the fold did not take (an export class, an export var) would
+  // reach the page as is and only be found by the compile, with Babel's
+  // message rather than this one.
+  if (/^\s*export\b/m.test(noComments(folded))) {
+    throw new Error(
+      "source/shared/" + n + " has an export the page cannot fold: only export function, " +
+      "export async function, export const and export let are allowed.",
+    );
+  }
+  // A header per file, so a stack trace or a search says which file to open.
+  return "/* ---- source/shared/" + n + " ---- */\n" + folded.replace(/\n+$/, "") + "\n";
+}
+
+/* The service worker (source/app/sw.js), as the live site serves it at
+ * /sw.js: the build's stamp written in as its VERSION - so every deploy is
+ * a new worker with a new cache - and source/shared/offline-rules.js folded
+ * in at its marker, exactly as the page has it, so the worker and the page
+ * decide by the same rules. The stamp must be a plain word: it becomes a
+ * string in the worker and the name of its cache. */
+const SW_FILE = join(SOURCE, "app", "sw.js");
+const SW_VERSION_MARK = '"__BUILD_VERSION__"';
+const SW_RULES_MARK = "/* @offline-rules */";
+export function serviceWorkerSource(version) {
+  if (!/^[A-Za-z0-9._-]{4,64}$/.test(String(version))) {
+    throw new Error("the service worker's version must be a plain word (letters, digits, . _ -), not " + JSON.stringify(version));
+  }
+  const sw = asLf(readFileSync(SW_FILE, "utf8"));
+  for (const mark of [SW_VERSION_MARK, SW_RULES_MARK]) {
+    if (sw.split(mark).length !== 2) throw new Error("source/app/sw.js should carry " + mark + " exactly once.");
+  }
+  return sw.replace(SW_VERSION_MARK, JSON.stringify(String(version))).replace(SW_RULES_MARK, foldedShared("offline-rules.js"));
 }
 
 /** Just the JSX, lifted out of the assembled page. */

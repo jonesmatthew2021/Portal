@@ -115,22 +115,18 @@
 <div id="fatal"></div>
 <div id="root"><div id="boot">Loading the portal&hellip;</div></div>
 <script>
-/* The portal was briefly installable, and a service worker left over from then
-   answers from its own cache — which is how a phone can sit on a months-old
-   copy of this page and never see anything new. Unregistering it isn't enough
-   on its own: the caches it filled outlive it, so they go too. Safari throws
-   outright on both of these in private browsing, hence the try. */
+/* The service worker that keeps the last-loaded portal readable when the
+   link drops (source/app/sw.js, served at /sw.js). Network first, always,
+   so a deploy is seen the moment the link is up; each build is a new worker
+   that deletes every cache that is not its own - which is also what became
+   of the worker left over from when the portal was briefly installable,
+   the one that served a months-old page from its cache for months. A page
+   opened straight off disk has nowhere to register, and Safari throws in
+   private browsing, hence the try. */
 (function () {
   try {
-    if ("serviceWorker" in navigator && navigator.serviceWorker.getRegistrations) {
-      navigator.serviceWorker.getRegistrations().then(function (rs) {
-        rs.forEach(function (r) { r.unregister(); });
-      }).catch(function () {});
-    }
-    if (window.caches && caches.keys) {
-      caches.keys().then(function (keys) {
-        keys.forEach(function (k) { caches.delete(k); });
-      }).catch(function () {});
+    if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
+      navigator.serviceWorker.register("/sw.js").catch(function () {});
     }
   } catch (e) {}
 })();
@@ -270,6 +266,18 @@ function onWake(run) {
 const dragHasFiles = (e) => [...((e.dataTransfer && e.dataTransfer.types) || [])].includes("Files");
 window.addEventListener("dragover", (e) => { if (dragHasFiles(e)) e.preventDefault(); });
 window.addEventListener("drop", (e) => { if (dragHasFiles(e)) e.preventDefault(); });
+
+/* Tells the service worker to clear everything it kept for reading offline
+   - the page, the document, the file listing, who was signed in. Said on
+   sign-out, so a signed-out device holds nothing of the crew's; the worker
+   also clears itself on seeing the sign-out address go past, in case this
+   word never arrives. */
+function forgetOffline() {
+  try {
+    const worker = navigator.serviceWorker && navigator.serviceWorker.controller;
+    if (worker) worker.postMessage({ type: FORGET_MESSAGE });
+  } catch (e) {}
+}
 
 // Safari on iOS will happily answer a repeated GET out of its own cache, which
 // leaves a phone polling all day and reading the same stale copy every time.
@@ -6412,7 +6420,7 @@ function App() {
 
   return (
     <Boundary>
-      <Portal role={me.name} onSignOut={() => { window.location.href = "/logout"; }} />
+      <Portal role={me.name} onSignOut={() => { forgetOffline(); window.location.href = "/logout"; }} />
     </Boundary>
   );
 }

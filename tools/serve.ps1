@@ -93,6 +93,9 @@ while ($listener.IsListening) {
     # The live site serves React, React DOM and the fonts at /vendor/; the
     # copies are source/vendor/, so the live path answers from there too.
     if ($rel -like 'vendor/*') { $rel = 'source/' + $rel }
+    # The service worker is a built file (the build stamps its version in),
+    # so the live path answers with the worker's built copy.
+    if ($rel -eq 'sw.js') { $rel = 'worker/assets/sw.js' }
 
     $isFront = ($rel -eq '')
     if ($isFront) {
