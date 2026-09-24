@@ -17,7 +17,7 @@ import { ensureTable as ensureFaunaTable } from "./fauna.js";
  * the file, signed in as management or IT (the cookie from the browser):
  *
  *   curl -X POST https://coolibah-portal.com/api/state/restore-file \
- *     -H "content-type: application/json" -H "cookie: session=<from the browser>" \
+ *     -H "content-type: application/json" -H "cookie: portal_session=<from the browser>" \
  *     --data-binary @"Crew Portal backup 2026-09-24.json"
  *
  * To put the other parts back as well, name them on the address, or as
