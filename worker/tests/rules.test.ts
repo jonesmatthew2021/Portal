@@ -860,6 +860,37 @@ test("covers: the fast rescue craft column takes the endorsement's own printed d
   [{ code: "QL-16", until: "2028-01-01" }], "the earlier of the two, which is the certificate's own expiry");
 });
 
+test("covers: the survival craft endorsement, printed 'other than fast rescue boats', fills nothing", () => {
+  /* AMSA prints the survival craft endorsement as "proficiency in survival
+     craft and rescue boats other than fast rescue boats" (STCW A-VI/2-1;
+     MO70 s 37(3) item 1). The words "fast rescue boats" are on the face of
+     a certificate whose whole point is that the man is NOT fast-rescue-boat
+     qualified, so the row's own exclusion (`unless`) has to win over its
+     pattern, or QL-16 fills off the wrong endorsement. */
+  const survival = "Proficiency in survival craft and rescue boats other than fast rescue boats";
+  assert.deepEqual(codesCovered({ endorsements: [{ text: survival, until: null }] }, "QL-01"), [],
+    "the survival craft endorsement fills no fast rescue craft column");
+  assert.deepEqual(codesCovered({ endorsements: [{ text: "Proficiency in fast rescue boats", until: null }] }, "QL-01"), ["QL-16"],
+    "the fast rescue boat endorsement still does");
+  assert.deepEqual(codesCovered({ endorsements: [
+    { text: "Proficiency in fast rescue boats", until: null },
+    { text: survival, until: "2029-01-01" },
+  ] }, "QL-01"), ["QL-16"], "two lines: the survival craft line fills nothing and the fast rescue line still fills");
+  assert.deepEqual(codesCovered({ endorsements: [{ text: "fast rescue boats (other than fast rescue boats)", until: null }] }, "QL-01"), [],
+    "one line carrying both phrases: the exclusion wins");
+  const row = vessel.covers.find((c) => c.code === "QL-16")!;
+  assert.match(String(row.unless), /other than fast rescue/i, "the vessel file's row carries the exclusion");
+  // An exclusion that does not compile is refused as the file loads, naming
+  // the row - it would otherwise cover nothing and say nothing about it.
+  assert.throws(() => checkVessel({ ...vessel, covers: [{ ...row, unless: "(unclosed" }] }, "a vessel file"),
+    /"covers\[0\].unless" - it must be a pattern that compiles/);
+  assert.throws(() => checkVessel({ ...vessel, covers: [{ ...row, unless: 7 }] }, "a vessel file"),
+    /"covers\[0\].unless" - it must be a pattern that compiles/);
+  assert.deepEqual(coveredCodes(covering({ endorsements: [{ text: "fast rescue boats", until: null }] }),
+    [{ code: "QL-16", when: "fast rescue", unless: "(unclosed" }], vessel.qualColumns, "QL-01"), [],
+    "and the rule itself covers nothing on a row whose exclusion will not compile");
+});
+
 test("covers: no column this vessel's table covers is one that carries no expiry", () => {
   /* A column that carries no expiry (noExpiryCodes) is held or it isn't, and
      a date read off a line on another document says nothing about that. Both

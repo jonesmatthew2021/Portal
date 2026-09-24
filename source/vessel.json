@@ -191,7 +191,8 @@
     {
       "code": "QL-16",
       "when": "(^|[^-])vi/2\\s*(\\(\\s*2\\s*\\)|para\\.?\\s*2)|fast rescue (boat|craft)",
-      "why": "MO70 s 37(3) item 2, s 37(5): the fast rescue boat endorsement runs 5 years from the day the proficiency was issued, so its own printed end date governs where AMSA printed one. STCW VI/2 (1) and A-VI/2 (1-4) are survival craft and fill nothing."
+      "unless": "other than fast rescue",
+      "why": "MO70 s 37(3) item 2, s 37(5): the fast rescue boat endorsement runs 5 years from the day the proficiency was issued, so its own printed end date governs where AMSA printed one. STCW VI/2 (1) and A-VI/2 (1-4) are survival craft and fill nothing - and AMSA prints that endorsement as 'survival craft and rescue boats other than fast rescue boats' (A-VI/2-1; s 37(3) item 1), so a line saying 'other than fast rescue' fills nothing whatever else it says."
     }
   ],
   "certPageNotes": [

@@ -177,7 +177,8 @@
     {
       "code": "QL-16",
       "when": "(^|[^-])vi/2\\s*(\\(\\s*2\\s*\\)|para\\.?\\s*2)|fast rescue (boat|craft)",
-      "why": "MO70 s 37(3) item 2, s 37(5): the fast rescue boat endorsement runs 5 years from the proficiency's issue, so its own printed end date governs."
+      "unless": "other than fast rescue",
+      "why": "MO70 s 37(3) item 2, s 37(5): the fast rescue boat endorsement runs 5 years from the proficiency's issue, so its own printed end date governs. The survival craft endorsement is printed 'other than fast rescue boats' (item 1) and fills nothing."
     }
   ],
   "certPageNotes": ["VS-04 Example e-learning has no expiry date."],

@@ -82,9 +82,11 @@ export type Vessel = {
   vesselFacts: { lengthMetres: number; grossTonnage: number; propulsionKW: number; why: string };
   /** Which column a printed endorsement fills, and the clause it comes from
    *  (source/shared/covers.js reads this table; the model only lists what
-   *  the certificate prints). `perpetual` is an endorsement that never
-   *  expires, whose column takes the certificate's own date. */
-  covers: { code: string; when: string; perpetual?: boolean; why?: string }[];
+   *  the certificate prints). `unless` is a pattern that stops the row on a
+   *  line naming the endorsement only to exclude it ("other than fast rescue
+   *  boats"). `perpetual` is an endorsement that never expires, whose column
+   *  takes the certificate's own date. */
+  covers: { code: string; when: string; unless?: string; perpetual?: boolean; why?: string }[];
   /** What the law wants in hand before a certificate can be renewed, and the
    *  clause it comes from (source/shared/renewals.js reads this table). */
   renewalNeeds: Record<string, { needs: string[]; why: string }>;
@@ -232,6 +234,8 @@ export function checkVessel(value: unknown, from = "source/vessel.json"): Vessel
   v.covers.forEach((c, i) => {
     if (!isObject(c) || !word(c.code) || !word(c.when)) throw wrong(`covers[${i}]`, "a code and a pattern, both strings");
     if (!compiles(c.when)) throw wrong(`covers[${i}].when`, "a pattern that compiles");
+    // The row's exclusion, where it has one: a line it matches fills nothing.
+    if (c.unless !== undefined && !(word(c.unless) && compiles(c.unless))) throw wrong(`covers[${i}].unless`, "a pattern that compiles");
     if (!columnCodes.has(String(c.code).trim().toUpperCase())) throw wrong(`covers[${i}].code`, "one of the codes in qualColumns");
     if (c.perpetual !== undefined && typeof c.perpetual !== "boolean") throw wrong(`covers[${i}].perpetual`, "true or false");
     if (c.why !== undefined && !word(c.why)) throw wrong(`covers[${i}].why`, "the clause it comes from, as a string");

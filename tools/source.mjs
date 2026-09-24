@@ -178,6 +178,8 @@ export function checkVessel(vessel, from = "source/vessel.json") {
   vessel.covers.forEach((c, i) => {
     if (!isObject(c) || !word(c.code) || !word(c.when)) throw wrong("covers[" + i + "]", "a code and a pattern, both strings");
     if (!compiles(c.when)) throw wrong("covers[" + i + "].when", "a pattern that compiles");
+    // The row's exclusion, where it has one: a line it matches fills nothing.
+    if (c.unless !== undefined && !(word(c.unless) && compiles(c.unless))) throw wrong("covers[" + i + "].unless", "a pattern that compiles");
     if (!columnCodes.has(String(c.code).trim().toUpperCase())) throw wrong("covers[" + i + "].code", "one of the codes in qualColumns");
     if (c.perpetual !== undefined && typeof c.perpetual !== "boolean") throw wrong("covers[" + i + "].perpetual", "true or false");
     if (c.why !== undefined && !word(c.why)) throw wrong("covers[" + i + "].why", "the clause it comes from, as a string");

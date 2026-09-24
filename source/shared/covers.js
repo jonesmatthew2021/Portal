@@ -63,12 +63,13 @@
  * @typedef {{ readable?: boolean, expiresOn?: string | null, qualCode?: string | null,
  *   endorsements?: { text?: string | null, until?: string | null }[] | unknown,
  *   units?: string[] | unknown }} CoversReading
- * @typedef {{ code: string, when: string, perpetual?: boolean, why?: string }} CoverRule
+ * @typedef {{ code: string, when: string, unless?: string, perpetual?: boolean, why?: string }} CoverRule
  *   One row of the vessel file's `covers` table: the column a printed
  *   endorsement fills, the pattern that recognises it (read without regard
- *   to case), and whether the endorsement never expires - in which case the
- *   column takes the certificate's own date whatever the document prints
- *   against the endorsement itself.
+ *   to case), an optional pattern that stops the row on a line that names
+ *   the endorsement only to exclude it, and whether the endorsement never
+ *   expires - in which case the column takes the certificate's own date
+ *   whatever the document prints against the endorsement itself.
  * @typedef {{ code: string, until: string | null }} CoveredCell
  */
 
@@ -193,14 +194,23 @@ export function coveredCells(reading, covers, columns, ownCode) {
     if (!rule || typeof rule !== "object") return;
     const code = asCode(rule.code);
     let when;
+    /* The row's exclusion. AMSA prints the survival craft endorsement as
+       "proficiency in survival craft and rescue boats other than fast rescue
+       boats" (STCW A-VI/2-1; MO70 s 37(3) item 1): the words "fast rescue
+       boats" are on the face of a certificate whose point is that the man
+       is NOT fast-rescue-boat qualified. A line the exclusion matches fills
+       nothing, whatever else it says - the exclusion wins. */
+    let notWhen = null;
     try {
       when = new RegExp(String(rule.when), "i");
+      if (rule.unless !== undefined) notWhen = new RegExp(String(rule.unless), "i");
     } catch (e) {
       return;        // a pattern that does not compile covers nothing
     }
     printed.forEach((e) => {
       const text = e && typeof e === "object" ? String(e.text == null ? "" : e.text) : String(e == null ? "" : e);
       if (!text || !when.test(text)) return;
+      if (notWhen && notWhen.test(text)) return;
       const ownDate = e && typeof e === "object" ? day(e.until) : null;
       /* The earlier of the two dates, never the endorsement's on its own.
          An endorsement exists only as a line on a certificate that is in
