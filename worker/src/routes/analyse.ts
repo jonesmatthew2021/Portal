@@ -9,7 +9,8 @@ import {
 import { imageToPdf } from "../lib/pdf-wrap.js";
 import { readDocument } from "../lib/shared-state.js";
 import { asKnownPerson, crewRegister } from "../../../source/shared/names.js";
-import { isMsicCard, msicCodeIn, newestCard, openToCertificates, particularsFor, particularsKeyOf, ticketCodesIn } from "../../../source/shared/particulars.js";
+import { isMsicCard, msicAsWritten, msicCodeIn, newestCard, openToCertificates, particularsFor, particularsKeyOf, ticketCodesIn } from "../../../source/shared/particulars.js";
+import { unitColumnsIn } from "../../../source/shared/covers.js";
 import { vessel } from "../vessel.js";
 import { getEnv } from "../env.js";
 import {
@@ -1372,7 +1373,7 @@ function particularsInput(certs: Row[], held: Map<string, Reading>, eqTable: Awa
 }
 
 // ---------------------------------------------------------------------------
-// Topping up readings made before the particulars were asked for
+// Topping up readings made before the keys they are missing were asked for
 // ---------------------------------------------------------------------------
 
 /** How many certificates one man's date of birth may be looked for on. */
@@ -1380,11 +1381,57 @@ const DOB_TRIES = 3;
 /** How many certificates are read at once. */
 const TOP_UP_AT_ONCE = 4;
 
+/** The near-coastal cards, found by the "NC" in their titles on the vessel
+ *  file rather than by a list written here. Their printed conditions matter:
+ *  a colour-vision-deficient deck holder's card says daylight only
+ *  (MO505 s 13(d)-(e)), and the card must print its conditions (s 12(1)). */
+function nearCoastalCards(cols: string[][]): string[] {
+  return (Array.isArray(cols) ? cols : [])
+    .filter((c) => Array.isArray(c) && /\bNC\b/.test(String(c[1] || "")))
+    .map((c) => String(c[0]).trim().toUpperCase());
+}
+
 /**
- * The readings made before the reading asked for the document's number and
- * the holder's date of birth, topped up - a few an hour, never the whole
- * crew read again (that is $15-25 of Matthew's credit, and READING_VERSION
- * is left alone for exactly that reason).
+ * What a second look at a certificate adds to the reading already held:
+ * only the keys the held reading has not got.
+ *
+ * Nothing that is already there is touched, so a second look can never move
+ * a date, a code or a number the matrix is standing on - and a certificate
+ * read again for one key (its endorsements, say) does not have another key's
+ * answer overwritten by a scan the model made less of this time.
+ *
+ * `particulars` is set where this look was asked for the MSIC number or the
+ * date of birth. Those two are then written whether or not they were there:
+ * the pass asks about a card whose first look could not read the name, whose
+ * number therefore went down as null, and the whole point of paying for that
+ * look is the number this one can read.
+ *
+ * `gives` is false where the second look found the document in another man's
+ * name: then every key goes in empty. It is not his document, nothing of it
+ * is written down, and the empty keys mean it is never paid for again.
+ */
+function keysAdded(again: Reading, held: Reading, gives: boolean, particulars: boolean): Partial<Reading> {
+  const out: Record<string, unknown> = {};
+  const put = (key: keyof Reading, value: unknown, none: unknown, always = false) => {
+    if (always || !(key in held)) out[key] = gives ? value : none;
+  };
+  put("documentNumber", again.documentNumber ?? null, null, particulars);
+  put("holderBirthDate", again.holderBirthDate ?? null, null, particulars);
+  put("endorsements", again.endorsements ?? [], []);
+  put("units", again.units ?? [], []);
+  put("isRecognition", again.isRecognition === true, false);
+  put("recognises", again.recognises ?? null, null);
+  put("assessedOn", again.assessedOn ?? null, null);
+  put("conditions", again.conditions ?? null, null);
+  put("evidenceKind", again.evidenceKind ?? null, null);
+  return out as Partial<Reading>;
+}
+
+/**
+ * The readings made before the question asked what it asks now, topped up -
+ * a few an hour, never the whole crew read again (that is $15-25 of
+ * Matthew's credit, and READING_VERSION is left alone for exactly that
+ * reason).
  *
  * For each man on the register whose box is empty or still the
  * certificates' own (openToCertificates), read the way the rule itself
@@ -1410,14 +1457,31 @@ const TOP_UP_AT_ONCE = 4;
  * not in another man's name are asked about - one in another man's name
  * could give him nothing.
  *
- * What a re-read gives is added to the reading already held - the two new
- * keys, the mark, and the holder's name where the first look had none and
- * the second found his - and nothing else, so a second look can never move
- * a date or a code on the matrix, nor the certificate to another man (the
- * refile goes by the printed name). A second look that finds another man's
- * name gives nothing: the keys go in null, so it is not asked again. A
- * second look that could not read the scan leaves the first reading
- * standing, with the keys null.
+ * Then the keys that came after those two, on the certificates that can
+ * answer for them - one look each, because the one question asks for all of
+ * them at once, and only where the key would change what the portal can say:
+ *  - endorsements and units: a certificate of competency or proficiency (the
+ *    vessel file's tickets), or a training statement's column (a title with
+ *    a unit code in it). Those are what can cover another column
+ *    (source/shared/covers.js).
+ *  - a recognition and the foreign certificate behind it: a document whose
+ *    title carries the word recognition.
+ *  - the assessment's own date and the printed conditions: the medical
+ *    (certStated) and the near-coastal cards, which are the documents the
+ *    law has those two on (MO76 s 16(1); MO505 s 12(1), s 13(d)-(e)).
+ *  - the alternative evidence: no certificate is read for it on its own - it
+ *    rides along with whatever is being read for another key.
+ * A certificate a man's particulars already claim this hour is not read
+ * twice: one look writes every key it is missing.
+ *
+ * What a re-read gives is added to the reading already held - the keys it
+ * has not got, the mark, and the holder's name where the first look had none
+ * and the second found his - and nothing else, so a second look can never
+ * move a date or a code on the matrix, nor the certificate to another man
+ * (the refile goes by the printed name). A second look that finds another
+ * man's name gives nothing: the keys go in empty, so it is not asked again.
+ * A second look that could not read the scan leaves the first reading
+ * standing, with the keys empty.
  *
  * Stops on the first answer about the model's account, as the reading
  * does, and stores nothing for it. Never more than `cap` reads, and none
@@ -1436,6 +1500,15 @@ export async function topUpParticulars(
   const msic = msicCodeIn(vessel.qualColumns);
   const medical = new Set(Object.keys(vessel.certStated).map((c) => c.trim().toUpperCase()));
   const ticketCodes = new Set(ticketCodesIn(vessel.qualColumns));
+  /* Which certificates can answer for the keys that came after the
+     particulars. The tickets are the vessel file's own list of the
+     certificates of competency and proficiency - the documents AMSA prints
+     endorsements on (MO70 s 8, s 34(1)); the training statements are the
+     columns whose titles carry a unit code; the cards are the near-coastal
+     ones, which print their conditions. */
+  const endorsedKinds = new Set(Object.keys(vessel.tickets).map((c) => c.trim().toUpperCase()));
+  const unitKinds = new Set(unitColumnsIn(vessel.qualColumns));
+  const ncCards = new Set(nearCoastalCards(vessel.qualColumns));
 
   const certs = await liveCertificates();
   const held = await allReadings();
@@ -1468,10 +1541,17 @@ export async function topUpParticulars(
     return out;
   };
 
-  // Each man's jobs: a list read in turn until the rule's answer moves,
-  // with the man it is for, so what a second look reads is held against him.
-  const jobs: { me: string; certs: Cert[]; wants: "msic" | "dob" }[] = [];
+  /* The jobs: a list of certificates read in turn, with the man they are
+     for, so what a second look reads is held against him. A man's
+     particulars are a list read until the rule's answer moves (`wants`);
+     a certificate read for the keys that came after them is a list of one,
+     with nothing to wait for. The particulars are pushed first, so the
+     hour's cap is theirs before the back-fill's. */
+  const jobs: { me: string; certs: Cert[]; wants: "msic" | "dob" | null }[] = [];
   const asked = new Set<string>();
+  /** Every certificate that could answer for a key it has not got, with the
+   *  man it is filed under, gathered as each man's are worked out. */
+  const missing: { me: string; cert: Cert }[] = [];
   for (const p of people) {
     const me = p && p.name ? register.nameOf(p.name) : null;
     if (!me || !particularsKeyOf(p)) continue;
@@ -1489,11 +1569,18 @@ export async function topUpParticulars(
       // The rule reads only cards printed in his name: of those, the newest
       // without the number key is read again for it.
       const named = newestCard(cards.filter((c) => c.reading.holderName && !("documentNumber" in c.reading)));
+      /* Unless a card that already carries a number is newer still: the rule
+         reads the newest card in his name, so that card is already its
+         answer and a look at the older one could only be paid for and thrown
+         away. (The box can be empty and the answer be there all the same -
+         the round fills the boxes after this pass, not before it.) */
+      const have = newestCard(cards.filter((c) => c.reading.holderName && msicAsWritten(c.reading.documentNumber)));
+      const answered = !!have && !!named && newestCard([have, named]) === have;
       // His newest card, where the first look could not name it and no
       // second look has been paid for: looked at once so its name is known.
       const top = newestCard(cards);
       const nameless = top && !top.reading.holderName && !top.reading.particularsAsked ? top : null;
-      const list = fresh(cardsInOrder([nameless, named].filter((c): c is Cert => !!c)));
+      const list = fresh(cardsInOrder([nameless, answered ? null : named].filter((c): c is Cert => !!c)));
       if (list.length) {
         jobs.push({ me, certs: list, wants: "msic" });
         list.forEach((c) => asked.add(readingKey(c.row)));
@@ -1515,10 +1602,29 @@ export async function topUpParticulars(
         list.forEach((c) => asked.add(readingKey(c.row)));
       }
     }
+    /* And his certificates whose reading was made before the rest of the
+       question was asked. Only the documents that can answer for the key,
+       so nothing is paid for a card that was never going to say it. */
+    mine.forEach((c) => {
+      const r = c.reading;
+      const covers = (endorsedKinds.has(c.code) || unitKinds.has(c.code)) && !("endorsements" in r);
+      const recognition = !("isRecognition" in r) && /\brecognition\b/i.test(String(r.certificateTitle || ""));
+      const conditions = (medical.has(c.code) || ncCards.has(c.code)) && !("assessedOn" in r);
+      if (covers || recognition || conditions) missing.push({ me, cert: c });
+    });
+  }
+  // One look per certificate, whatever it is missing: the question asks for
+  // every key at once, so a certificate a man's particulars already claim
+  // this hour is not read a second time for these.
+  for (const { me, cert } of missing) {
+    const key = readingKey(cert.row);
+    if (asked.has(key)) continue;
+    asked.add(key);
+    jobs.push({ me, certs: [cert], wants: null });
   }
 
   let left = opts.cap;
-  const readOne = async (c: Cert, me: string): Promise<Reading | "halt" | "skip"> => {
+  const readOne = async (c: Cert, me: string, particulars: boolean): Promise<Reading | "halt" | "skip"> => {
     if (out.stopped || !opts.timeLeft()) return "halt";
     let again: Reading;
     try {
@@ -1531,7 +1637,7 @@ export async function topUpParticulars(
         return "halt";
       }
       out.failed++;
-      console.error("a certificate was not read again for its particulars:", c.row.filename, e);
+      console.error("a certificate was not read again for the keys it is missing:", c.row.filename, e);
       return "skip";
     }
     // The second look is held against the man it was asked for: the first
@@ -1546,8 +1652,7 @@ export async function topUpParticulars(
     const topped: Reading = {
       ...c.reading,
       holderName: c.reading.holderName ?? (his ? holder : null),
-      documentNumber: gives ? again.documentNumber ?? null : null,
-      holderBirthDate: gives ? again.holderBirthDate ?? null : null,
+      ...keysAdded(again, c.reading, gives, particulars),
       particularsAsked: true,
     };
     try {
@@ -1557,7 +1662,7 @@ export async function topUpParticulars(
       // others go on - one store fault must not end the pass while the
       // rest are still reading.
       out.failed++;
-      console.error("a certificate read again for its particulars was not kept:", c.row.filename, e);
+      console.error("a certificate read again was not kept:", c.row.filename, e);
       return "skip";
     }
     out.read++;
@@ -1569,17 +1674,19 @@ export async function topUpParticulars(
     if (left < job.certs.length) return;
     left -= job.certs.length;
     let used = 0;
-    const before = found(job.me, job.wants);
+    const wants = job.wants;
+    const before = wants ? found(job.me, wants) : null;
     for (const c of job.certs) {
-      const r = await readOne(c, job.me);
+      const r = await readOne(c, job.me, !!wants);
       if (r === "halt") break;
       used++;
       if (r === "skip") continue;
       held.set(readingKey(c.row), r);
       // The rule's answer moved on this read: the rest of his list is not
       // needed. Only the rule's own answer counts - a date it throws out,
-      // or one that only ties with another, leaves the search going.
-      if (found(job.me, job.wants) !== before) break;
+      // or one that only ties with another, leaves the search going. A
+      // certificate read for the keys it is missing has nothing to wait for.
+      if (wants && found(job.me, wants) !== before) break;
     }
     left += job.certs.length - used;
   };
