@@ -212,59 +212,23 @@ export const legacyRemovedKeyFor = (row: { id: string; filename: string }) =>
 // shown before it is sent.
 /**
  * The team's own certificate filing: one "<Name> - OPMS" folder per person in
- * the OPMS Documents folder — Brenton - OPMS, Evan - OPMS and so on. That is
+ * the OPMS Documents folder — Alan - OPMS, Bob - OPMS and so on. That is
  * where the crew's certificates actually live and are kept up to date, so the
  * portal treats those folders as the certificate home: the sync reads them,
  * and uploads and refiles write into them. This table marries the portal's
  * person tokens to the folder names the team already uses — first names
- * mostly, surnames where first names collide (three Matthews, two Michaels),
- * and the nicknames the folders were made with. Anyone not in the table gets
- * "<First name> - OPMS", which is the convention for everyone new.
+ * mostly, surnames where first names collide, and the nicknames the folders
+ * were made with. It is the vessel's data, not the portal's, so it is the
+ * vessel file's (crewFolders); it is read only after Crew Details, which
+ * names a man's folder outright, and before the name worked out from the
+ * folder itself (tokenForOpmsFolder). It goes for good once Crew Details
+ * names every folder still carrying a nickname - a job done by hand on that
+ * page, not here.
  */
 import { canonicalPersonName } from "./person-name.js";
+import { vessel } from "../vessel.js";
 
-export const OPMS_FOLDER_NAMES: Record<string, string> = {
-  "asange-kyle": "Kyle",
-  "athihe-savio": "Savio",
-  "ayers-christopher-james": "Chris",
-  "baterna-eric": "Eric",
-  "bautista-john-leo": "John",
-  "butler-david-robert": "David",
-  "clemones-leon": "Leon",
-  "cook-jack": "Jack",
-  "douglas-michael": "Douglas",
-  "dwyer-matthew": "Dwyer",
-  "english-jake": "Jake",
-  "english-zane": "Zane",
-  "evans-brenton": "Brenton",
-  "evans-dylan": "Dylan",
-  "farmer-evan": "Evan",
-  "hearfield-bradd": "Bradd",
-  "jitender-rohin": "Rohin",
-  "jones-matthew-james": "Jones",
-  "keeley-finn": "Finn",
-  "keogh-cornelius-james": "Con",
-  "kingdon-matthew": "Kingdon",
-  "kumar-preetham": "Pk",
-  "macdonald-justin": "Justin",
-  "macknamara-luke": "Luke",
-  "mata-marlou": "Marlou",
-  "michalzic-travis": "Travis",
-  "miller-jamie": "Jamie",
-  "murugesan-karthik": "Karthik",
-  "orosz-tamas": "Tamas",
-  "ozhoga-andriy": "Andriy",
-  "patwardhan-anand": "Anand",
-  "pejic-anton": "Anton",
-  "rogers-michael": "Rogers",
-  "rubock-zachary": "Zac",
-  "sittiyos-kachin": "Kachin",
-  "stewart-ryan": "Ryan",
-  "tadiaman-mark-jay": "Mark",
-  "tymofeyev-arthur": "Arthur",
-  "witharana-ruwan": "Ruwan",
-  "wright-andrew": "Andrew",
-};
+export const OPMS_FOLDER_NAMES: Record<string, string> = vessel.crewFolders;
 
 /**
  * The person's OPMS folder name: LASTNAME, First.
