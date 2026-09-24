@@ -20,9 +20,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setEnv } from "../src/env.js";
+import { todayThere } from "../src/lib/analysis.js";
 import sync, { runSync, heldBackLine } from "../src/routes/sync.js";
 import { graphWaits } from "../src/files/store.js";
-import { portalDb, graphLibrary, sharepointEnv, wranglerVars, type FakeFile } from "./helpers.js";
+import { fakeBucket, portalDb, graphLibrary, sharepointEnv, wranglerVars, keptRow, type FakeFile } from "./helpers.js";
 
 /* The library's real folders (wrangler.toml): "opms/" is OPMS Documents,
    and a man's certificates sit in a folder of his own inside it. */
@@ -221,4 +222,253 @@ test("Graph, listing cut short: with 400 live the line is 10% - 40 missing mirro
   } finally {
     fortyOne.graph.restore();
   }
+});
+
+/* ------------------------------------------------------------------------ *
+ * The sync's own rules, where the listing does not matter: the R2 bucket
+ * in memory stands in for the library.
+ * ------------------------------------------------------------------------ */
+/** The bucket holding these files, and the env pointed at it and the books. */
+const bucketOf = (portal: ReturnType<typeof portalDb>, seed: Record<string, string>) => {
+  const bucket = fakeBucket(seed, ["opms", "removed", "opms/Brenton - OPMS", "matrices/skills", "roster/shift-allocation"]);
+  setEnv({ DB: portal.db, FILES: bucket, FILE_STORE: "r2" } as never);
+  return bucket;
+};
+const row = (portal: ReturnType<typeof portalDb>, id: string) => portal.rows.find((r) => r.id === id)!;
+/** What the sync wrote on the books - the documents table, by either road. */
+const bookWrites = (portal: ReturnType<typeof portalDb>) =>
+  portal.db.asked.filter((a) => /^(insert into|update|delete from) "documents"/.test(a.sql) || /^(INSERT INTO|UPDATE|DELETE FROM) documents/.test(a.sql));
+
+test("R2: a file new to a crew folder is registered as that man's, by SharePoint sync, filed today", async () => {
+  const portal = booksOf([]);
+  bucketOf(portal, { "opms/Brenton - OPMS/new ticket.pdf": "scan!!" });
+  const out = await runSync("Import new files");
+  assert.deepEqual(out.registered.map((r) => [r.key, r.person]), [["opms/Brenton - OPMS/new ticket.pdf", "EVANS, Brenton"]]);
+  assert.equal(portal.rows.length, 1);
+  const taken = portal.rows[0];
+  assert.deepEqual(
+    [taken.category, taken.bucket, taken.folder, taken.person, taken.uploadedBy, taken.filedOn, taken.filename, taken.sizeBytes, taken.contentType],
+    ["certificate", "evans-brenton", "evans-brenton", "EVANS, Brenton", "SharePoint sync", todayThere(), "new ticket.pdf", 6, "application/pdf"],
+  );
+  assert.deepEqual(out.people, [{ folder: "evans-brenton", name: "EVANS, Brenton" }], "and his folder is on the list of whose folders the office keeps");
+  assert.equal(lastRun(portal).registered, 1);
+});
+
+test("R2: the same name and size under the same man at a new address is the file moved - the row follows it, nothing is taken on twice, nothing is missing", async () => {
+  const portal = booksOf([certRow("c1", "opms/Brenton - OPMS/master.pdf")]);
+  // The office renamed his folder to his name; the file is the same six bytes.
+  bucketOf(portal, { "opms/EVANS, Brenton/master.pdf": "scan!!" });
+  const out = await runSync("Import new files");
+  assert.equal(out.followed, 1, "one file followed");
+  assert.deepEqual(out.registered, [], "not taken on twice");
+  assert.deepEqual(out.missing, [], "and not missing from where it was");
+  assert.equal(row(portal, "c1").blobKey, "opms/EVANS, Brenton/master.pdf", "the row points at the new address");
+  assert.equal(row(portal, "c1").removedAt, null);
+  assert.equal(portal.rows.length, 1);
+});
+
+test("Graph: a row with no size on record and a listing that names none never match - the file is taken on new and the old row goes missing", async () => {
+  const portal = booksOf([certRow("c1", "opms/Brenton - OPMS/master.pdf", { sizeBytes: null })]);
+  // Same name under the same man at a new address, and neither side knows a size.
+  const graph = libraryOf(portal, [{ path: `${OPMS}/EVANS, Brenton/master.pdf` }]);
+  try {
+    const out = await runSync("Import new files");
+    assert.equal(out.followed, 0, "an unknown size is never a match");
+    assert.deepEqual(out.registered.map((r) => r.key), ["opms/EVANS, Brenton/master.pdf"]);
+    assert.deepEqual(out.missing.map((m) => m.id), ["c1"]);
+    assert.equal(out.mirrored, 1);
+    assert.ok(row(portal, "c1").removedAt, "the old row is off the books");
+    assert.equal(portal.rows.find((r) => r.blobKey === "opms/EVANS, Brenton/master.pdf")!.sizeBytes, 0, "the new row records no size as 0");
+  } finally {
+    graph.restore();
+  }
+});
+
+test("R2: a file renamed in the library is taken on under its new name, and its old row goes missing and off the books", async () => {
+  const portal = booksOf([certRow("c1", "opms/Brenton - OPMS/master.pdf")]);
+  bucketOf(portal, { "opms/Brenton - OPMS/Master ticket.pdf": "scan!!" });
+  const out = await runSync("Import new files");
+  assert.deepEqual(out.registered.map((r) => r.key), ["opms/Brenton - OPMS/Master ticket.pdf"]);
+  assert.deepEqual(out.missing.map((m) => m.key), ["opms/Brenton - OPMS/master.pdf"]);
+  assert.equal(out.mirrored, 1);
+  assert.equal(out.followed, 0);
+  assert.ok(row(portal, "c1").removedAt);
+  assert.equal(row(portal, "c1").removedBy, "SharePoint sync");
+  assert.deepEqual([lastRun(portal).registered, lastRun(portal).missing], [1, 1]);
+});
+
+test("R2: missing is a live row under a walked folder whose file is gone - not one the walk never covered, and not a single document its folder still holds", async () => {
+  const portal = booksOf([
+    certRow("c1", "opms/Brenton - OPMS/gone.pdf"),
+    { ...certRow("n1", "uploads/n1"), category: "note", folder: null, person: null },
+    { ...keptRow("sk1", "matrices/skills/SKILLS.xlsx"), category: "skills-matrix", removedAt: null, keptInPlace: null },
+  ]);
+  bucketOf(portal, { "matrices/skills/SKILLS.xlsx": "the skills matrix" });
+  const out = await runSync("Import new files");
+  assert.deepEqual(out.missing, [{ id: "c1", key: "opms/Brenton - OPMS/gone.pdf", filename: "gone.pdf", category: "certificate", checksum: "sum-c1" }]);
+  assert.equal(row(portal, "n1").removedAt, null, "a folder the walk never covers says nothing about its files");
+  assert.equal(row(portal, "sk1").removedAt, null, "the skills matrix is in its folder, so it is not missing");
+  assert.deepEqual(out.leftAlone, [], "…and, already on the books, it is nobody's candidate");
+});
+
+test("R2: a row written off whose file the folder still holds comes back - unless it was kept in place, or a live row already holds the address", async () => {
+  const portal = booksOf([
+    certRow("r1", "opms/Brenton - OPMS/back.pdf", { removedAt: 5, removedBy: "SharePoint sync" }),
+    { ...keptRow("r2", "roster/shift-allocation/SHIFT.xlsx"), category: "shift-allocation" },
+    certRow("r3", "opms/Brenton - OPMS/twice.pdf", { removedAt: 5, removedBy: "Matthew" }),
+    certRow("c3", "opms/Brenton - OPMS/twice.pdf", { createdAt: 9 }),
+  ]);
+  bucketOf(portal, {
+    "opms/Brenton - OPMS/back.pdf": "scan!!",
+    "roster/shift-allocation/SHIFT.xlsx": "theirs",
+    "opms/Brenton - OPMS/twice.pdf": "scan!!",
+  });
+  const out = await runSync("Import new files");
+  assert.equal(out.returned, 1, "one row back on the books");
+  assert.deepEqual([row(portal, "r1").removedAt, row(portal, "r1").removedBy], [null, null], "the same row it always was, live again");
+  assert.equal(row(portal, "r2").removedAt, 5, "the office's file kept in place was taken off on purpose, and stays off");
+  assert.equal(row(portal, "r3").removedAt, 5, "one address, one live row: the wiped-and-re-uploaded twin stays off");
+  assert.equal(row(portal, "c3").removedAt, null);
+  assert.deepEqual(out.registered, [], "nothing taken on: the files are all on the books");
+  assert.deepEqual(out.adopted, [], "the office's kept-in-place file is not adopted again either");
+});
+
+test("R2: two live rows on one address - the one with a reading is kept, else the newer, and the other goes back to removed", async () => {
+  const portal = booksOf([
+    certRow("read", "opms/Brenton - OPMS/one.pdf", { readAt: 10, createdAt: 1 }),
+    certRow("unread", "opms/Brenton - OPMS/one.pdf", { createdAt: 9 }),
+    certRow("older", "opms/Brenton - OPMS/two.pdf", { createdAt: 1 }),
+    certRow("newer", "opms/Brenton - OPMS/two.pdf", { createdAt: 5 }),
+  ]);
+  bucketOf(portal, { "opms/Brenton - OPMS/one.pdf": "scan!!", "opms/Brenton - OPMS/two.pdf": "scan!!" });
+  await runSync("Import new files");
+  assert.equal(row(portal, "read").removedAt, null, "the row with a reading stays");
+  assert.ok(row(portal, "unread").removedAt, "its newer twin without one goes");
+  assert.equal(row(portal, "unread").removedBy, "the same file is already on the books");
+  assert.equal(row(portal, "newer").removedAt, null, "with no reading either side, the newer stays");
+  assert.ok(row(portal, "older").removedAt);
+  assert.equal(row(portal, "older").removedBy, "the same file is already on the books");
+});
+
+test("R2: a file gone from the folder comes off the books, and the portal's reading of it goes with it", async () => {
+  const portal = booksOf(
+    [certRow("c1", "opms/Brenton - OPMS/gone.pdf"), certRow("c2", "opms/Brenton - OPMS/here.pdf")],
+    { "r1/sum-c1.json": { version: "r1", readable: true }, "r1/sum-c2.json": { version: "r1", readable: true } },
+  );
+  bucketOf(portal, { "opms/Brenton - OPMS/here.pdf": "scan!!" });
+  const out = await runSync("hourly schedule");
+  assert.equal(out.mirrored, 1);
+  assert.ok(row(portal, "c1").removedAt, "off the books");
+  assert.equal(row(portal, "c1").removedBy, "SharePoint sync");
+  assert.equal(row(portal, "c1").blobKey, "opms/Brenton - OPMS/gone.pdf", "the row still names where the file was: there are no bytes to park");
+  assert.ok(!portal.blobs.has("certificate-readings|r1/sum-c1.json"), "what the portal read off the file is gone with it");
+  assert.ok(portal.blobs.has("certificate-readings|r1/sum-c2.json"), "the other reading is untouched");
+  assert.equal(row(portal, "c2").removedAt, null);
+  assert.deepEqual([lastRun(portal).missing, lastRun(portal).error], [1, null]);
+});
+
+test("R2: a single document the portal has none of, with one candidate in its folder, is adopted as the office's own file", async () => {
+  const portal = booksOf([]);
+  bucketOf(portal, { "matrices/skills/SKILLS MATRIX.xlsx": "the skills matrix" });
+  const out = await runSync("Import new files");
+  assert.deepEqual(out.adopted, [{ category: "skills-matrix", key: "matrices/skills/SKILLS MATRIX.xlsx" }]);
+  assert.deepEqual(out.leftAlone, []);
+  const taken = portal.rows.find((r) => r.category === "skills-matrix")!;
+  assert.deepEqual(
+    [taken.adoptedFromFolder, taken.uploadedBy, taken.filedOn, taken.filename, taken.blobKey],
+    [1, "SharePoint sync", todayThere(), "SKILLS MATRIX.xlsx", "matrices/skills/SKILLS MATRIX.xlsx"],
+    "the office's file: marked so, never to be moved",
+  );
+  assert.equal(lastRun(portal).adopted, 1);
+});
+
+test("R2: two candidates for a single document are left alone, and the why says so", async () => {
+  const portal = booksOf([]);
+  bucketOf(portal, { "matrices/skills/SKILLS.xlsx": "one", "matrices/skills/SKILLS (2).xlsx": "two" });
+  const out = await runSync("Import new files");
+  assert.deepEqual(out.adopted, []);
+  assert.deepEqual(out.leftAlone.map((l) => ({ ...l, found: [...l.found].sort() })), [{
+    category: "skills-matrix", label: "skills matrix",
+    found: ["matrices/skills/SKILLS (2).xlsx", "matrices/skills/SKILLS.xlsx"],
+    why: "more than one candidate — upload the right one through the portal",
+  }]);
+  assert.equal(portal.rows.length, 0, "nothing taken on");
+  assert.equal(lastRun(portal).leftAlone, 1);
+});
+
+test("R2: a candidate beside a live single document is left alone, and the why says a current one is on the portal", async () => {
+  const portal = booksOf([{ ...keptRow("sk1", "matrices/skills/SKILLS.xlsx"), category: "skills-matrix", removedAt: null, keptInPlace: null }]);
+  bucketOf(portal, { "matrices/skills/SKILLS.xlsx": "current", "matrices/skills/SKILLS v2.xlsx": "newer" });
+  const out = await runSync("Import new files");
+  assert.deepEqual(out.adopted, []);
+  assert.deepEqual(out.leftAlone, [{
+    category: "skills-matrix", label: "skills matrix",
+    found: ["matrices/skills/SKILLS v2.xlsx"],
+    why: "a current one is already on the portal — replace it through the portal if this newer file should take over",
+  }]);
+  assert.equal(row(portal, "sk1").removedAt, null, "the live one stands");
+  assert.equal(portal.rows.length, 1);
+});
+
+/* ------------------------------------------------------------------------ *
+ * The route itself.
+ * ------------------------------------------------------------------------ */
+test("R2, the route: GET is the survey only - it writes nothing, takes no lease and leaves no record", async () => {
+  const portal = booksOf([certRow("c1", "opms/Brenton - OPMS/gone.pdf")]);
+  bucketOf(portal, { "opms/Brenton - OPMS/new.pdf": "scan!!" });
+  const res = await sync(new Request("http://portal/api/sync"));
+  assert.equal(res.status, 200);
+  const out = (await res.json()) as { newCertificates: { key: string }[]; missing: { id: string }[]; note: string };
+  assert.deepEqual(out.newCertificates.map((c) => c.key), ["opms/Brenton - OPMS/new.pdf"], "it says what it would take on");
+  assert.deepEqual(out.missing.map((m) => m.id), ["c1"], "and what is gone");
+  assert.equal(out.note, "Survey only — POST /api/sync to take these onto the portal's books.");
+  assert.deepEqual(bookWrites(portal), [], "nothing written on the books");
+  assert.equal(row(portal, "c1").removedAt, null);
+  assert.equal(portal.rows.length, 1);
+  assert.equal(portal.blobs.get("sync|last-run"), undefined, "no record: nothing was applied");
+  assert.equal(portal.blobs.get("sync|round-lease"), undefined, "no lease: nothing was written");
+});
+
+test("the route: anything but GET and POST is 405", async () => {
+  const portal = booksOf([]);
+  bucketOf(portal, {});
+  for (const method of ["PUT", "DELETE", "PATCH"]) {
+    const res = await sync(new Request("http://portal/api/sync", { method }));
+    assert.equal(res.status, 405, method);
+  }
+  assert.deepEqual(portal.db.asked, [], "the database was not even asked");
+});
+
+test("R2, the route: a survey that falls over is 502 with the error, and last-run carries it with zero counts", async () => {
+  const portal = booksOf([certRow("c1", "opms/Brenton - OPMS/master.pdf")]);
+  bucketOf(portal, { "opms/Brenton - OPMS/master.pdf": "scan!!" });
+  const prepare = portal.db.prepare;
+  portal.db.prepare = (sql: string) => {
+    if (/^select .+ from "documents"$/.test(sql)) throw new Error("D1 is having a bad morning");
+    return prepare(sql);
+  };
+  const res = await post("Update portal");
+  assert.equal(res.status, 502);
+  assert.deepEqual(await res.json(), { error: "D1 is having a bad morning" });
+  const record = lastRun(portal);
+  assert.deepEqual(
+    { ...record, at: 0 },
+    { at: 0, by: "Update portal", registered: 0, adopted: 0, strays: 0, missing: 0, leftAlone: 0, error: "D1 is having a bad morning" },
+  );
+  assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).until, 0, "the lease was given back");
+});
+
+test("R2, the route: a good run's record carries the counts, who asked, when, and no error", async () => {
+  const portal = booksOf([certRow("c1", "opms/Brenton - OPMS/gone.pdf")]);
+  bucketOf(portal, { "opms/Brenton - OPMS/new.pdf": "scan!!", "matrices/skills/A.xlsx": "a", "matrices/skills/B.xlsx": "b" });
+  const before = Date.now();
+  const res = await post("Import new files");
+  assert.equal(res.status, 200);
+  const record = lastRun(portal);
+  assert.ok(record.at >= before && record.at <= Date.now(), "stamped when it began");
+  assert.deepEqual(
+    { ...record, at: 0 },
+    { at: 0, by: "Import new files", registered: 1, adopted: 0, strays: 0, missing: 1, leftAlone: 1, error: null },
+  );
+  assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).until, 0, "the lease was given back");
 });
