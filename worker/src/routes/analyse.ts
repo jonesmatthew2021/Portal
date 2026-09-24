@@ -1737,6 +1737,19 @@ export async function topUpParticulars(
     || String(b.row.filedOn || "").localeCompare(String(a.row.filedOn || ""))
     || a.at - b.at;
 
+  /** Whether a certificate could answer for a key its reading has not got -
+   *  the endorsements and units a ticket or a training statement prints, the
+   *  recognition keys where the title carries the word, the examination date
+   *  and conditions a medical or a near-coastal card prints. Only those, so
+   *  nothing is paid for a document that was never going to say it. */
+  const wantsMore = (c: Cert) => {
+    const r = c.reading;
+    const covers = (endorsedKinds.has(c.code) || unitKinds.has(c.code)) && !("endorsements" in r);
+    const recognition = !("isRecognition" in r) && /\brecognition\b/i.test(String(r.certificateTitle || ""));
+    const conditions = (medical.has(c.code) || ncCards.has(c.code)) && !("assessedOn" in r);
+    return covers || recognition || conditions;
+  };
+
   // What the rule finds for him off the readings as they stand: `held` is
   // brought up to date as this pass tops readings up, so the same question
   // asked after each read says whether the read gave the rule its answer.
@@ -1819,13 +1832,25 @@ export async function topUpParticulars(
     /* And his certificates whose reading was made before the rest of the
        question was asked. Only the documents that can answer for the key,
        so nothing is paid for a card that was never going to say it. */
-    mine.forEach((c) => {
-      const r = c.reading;
-      const covers = (endorsedKinds.has(c.code) || unitKinds.has(c.code)) && !("endorsements" in r);
-      const recognition = !("isRecognition" in r) && /\brecognition\b/i.test(String(r.certificateTitle || ""));
-      const conditions = (medical.has(c.code) || ncCards.has(c.code)) && !("assessedOn" in r);
-      if (covers || recognition || conditions) missing.push({ me, cert: c });
-    });
+    mine.forEach((c) => { if (wantsMore(c)) missing.push({ me, cert: c }); });
+  }
+
+  /* And the certificates no folder places. A scan parked under a name the
+     register does not know - a loose one under "Other", or a folder wording
+     no alias covers - is in nobody's list above, so its reading would stay
+     as it was made for good and the covers, recognition and conditions rules
+     would go on saying nothing about it. Where the document's own name is a
+     man the register DOES know, it gets the same one look, under him, inside
+     the same cap. Nothing is moved and no date is touched: this pass only
+     adds the keys a reading is missing. */
+  for (const [at, row] of certs.entries()) {
+    if (row.person && register.nameOf(row.person)) continue;
+    const reading = held.get(readingKey(row));
+    if (!reading || reading.readable === false) continue;
+    const me = reading.holderName ? register.nameOf(reading.holderName) : null;
+    if (!me) continue;
+    const cert: Cert = { row, reading, code: String(codeFor(row, reading, eqTable) || "").trim().toUpperCase(), at };
+    if (wantsMore(cert)) missing.push({ me, cert });
   }
   // One look per certificate, whatever it is missing: the question asks for
   // every key at once, so a certificate a man's particulars already claim

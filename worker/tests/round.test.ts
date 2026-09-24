@@ -4814,3 +4814,32 @@ test("covers: a covered date that beats a certificate of its own says which cert
     [["coc", "QL-01", "2031-05-26"], ["own", "QL-13", "2028-01-01"]],
     "and its row still says it is an ECDIS certificate expiring 2028");
 });
+
+test("a certificate no folder places is still topped up, under the man its own face names", async () => {
+  /* A scan parked under a name the crew register does not know - a loose one
+     under "Other" - was in nobody's list, so its reading stayed as it was
+     made for good and the covers, recognition and conditions rules went on
+     saying nothing about it. Where the document's own name is a man the
+     register does know, it gets the same one look, under him, inside the same
+     cap. */
+  const codes = vessel.qualColumns.map((c) => [c[0], c[1]] as [string, string]);
+  const { portal } = await particularsPortal({ model: true, people: [{ ...EVANS_P, dob: "1980-01-01" }], certs: [
+    { id: "o1", checksum: "loose-ticket", code: "QL-02", person: "Other",
+      reading: oldReading({ qualCode: "QL-02" }) },
+    { id: "s1", checksum: "stranger", code: "QL-02", person: "Other",
+      reading: oldReading({ qualCode: "QL-02", holderName: "Somebody Else" }) },
+  ] });
+  const model = modelByFile(() => ({ status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans" }) }));
+  let out;
+  try {
+    out = await quiet(() => topUpParticulars(codes, { cap: 20, timeLeft: () => true }));
+  } finally {
+    model.restore();
+  }
+  const asked = filesAsked(model);
+  assert.equal(asked.includes("loose-ticket.pdf"), true, "the loose ticket is looked at once, under the man it names");
+  assert.equal(asked.includes("stranger.pdf"), false, "and one naming nobody the register knows is not paid for");
+  const kept = JSON.parse(portal.blobs.get("certificate-readings|r1/loose-ticket.json")!);
+  assert.deepEqual(kept.endorsements, [], "the keys it was missing are added");
+  assert.equal(out!.read >= 1, true);
+});
