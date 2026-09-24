@@ -86,17 +86,21 @@ function marineOrderLines(row, cols, dates, needs, person, todayISO, rules) {
     out.push({ code: b.code, text: `${row[0]} — ${b.code} cannot be renewed: ${parts.join(", ")}` });
   });
 
-  /* A document the office filed under one column that the model read as
-     something else (source/shared/filed-as.js): the filed column took the
-     date, and the filing is said whatever the band, because a wrong filing
-     is a wrong filing whether or not the seat needs the column. */
-  const me = String(row[0] || "").trim().toUpperCase();
-  ((dates && dates.filedAs) || []).forEach((f) => {
-    if (String(f.person || "").trim().toUpperCase() !== me) return;
-    out.push({ code: f.code, text: filedAsLine(row[0], f.code, f.title, f.readsAs) });
-  });
-
   return out;
+}
+
+/* A document the office filed under one column that the model read as
+   something else (source/shared/filed-as.js): the filed column took the
+   date, and the filing is said whatever the band, because a wrong filing
+   is a wrong filing whether or not the seat needs the column. Not one of
+   the orders' lines - it is about the filing, not the law - so it has its
+   own heading and is not counted among them. Pure, so the rule tests can
+   hold it. */
+function filedAsLines(row, dates) {
+  const me = String(row[0] || "").trim().toUpperCase();
+  return ((dates && dates.filedAs) || [])
+    .filter((f) => String(f.person || "").trim().toUpperCase() === me)
+    .map((f) => ({ code: f.code, text: filedAsLine(row[0], f.code, f.title, f.readsAs) }));
 }
 
 /* On file, not on the matrix: the documents the server found no column for
@@ -211,6 +215,14 @@ function CertChecker({ query }) {
   const orders = ordersAll.filter((x) => hits(x.row[0] + " " + x.row[1]));
   const ordersCount = orders.reduce((n, x) => n + x.lines.length, 0);
 
+  // The filings the model read as something else, by man, under their own heading.
+  const filedAll = useMemo(
+    () => QUALS.rows.map((row) => ({ row, lines: filedAsLines(row, certDates) })).filter((x) => x.lines.length),
+    [QUALS, certDates],
+  );
+  const filed = filedAll.filter((x) => hits(x.row[0] + " " + x.row[1]));
+  const filedCount = filed.reduce((n, x) => n + x.lines.length, 0);
+
   // The documents no column places, narrowed by the same box.
   const onFile = useMemo(() => notOnMatrixLines(certDates), [certDates]).filter((l) => hits(l.person));
 
@@ -309,6 +321,29 @@ function CertChecker({ query }) {
           </div>
           {orders.map(({ row, lines }) => (
             <div key={"mo-" + row[0] + row[2]} style={{ marginBottom: 10, breakInside: "avoid" }}>
+              {lines.map((l, i) => (
+                <div key={l.code + i} style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap",
+                  padding: "4px 0 4px 4px", borderBottom: `1px solid ${T.rule}` }}>
+                  <span style={{ fontFamily: T.mono, fontSize: 10, color: T.accent, minWidth: 46 }}>{l.code}</span>
+                  <span style={{ fontFamily: T.body, fontSize: 13, color: T.text, flex: 1, minWidth: 240 }}>{l.text}</span>
+                  <CertCell url={certLinkFor(certDates, certificates, row[0], l.code)}
+                    person={row[0]} code={l.code} title={l.code} />
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* The filings the model read as something else: the heading and the
+          lines, the one sentence each (filedAsLine), nothing else. */}
+      {filedCount > 0 && (
+        <div id="filed-as-lines" style={{ marginBottom: 26 }}>
+          <div style={{ borderTop: `2px solid ${T.accent}`, paddingTop: 9, marginBottom: 11 }}>
+            <Eyebrow color={T.text}>Filed as — {filedCount}</Eyebrow>
+          </div>
+          {filed.map(({ row, lines }) => (
+            <div key={"fa-" + row[0] + row[2]} style={{ marginBottom: 10, breakInside: "avoid" }}>
               {lines.map((l, i) => (
                 <div key={l.code + i} style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap",
                   padding: "4px 0 4px 4px", borderBottom: `1px solid ${T.rule}` }}>

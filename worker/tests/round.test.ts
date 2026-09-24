@@ -168,7 +168,7 @@ test("a removed copy is parked flat under removed/, and no folder is made", asyn
 function documentsDb(rows: (ReturnType<typeof liveRow> | ReturnType<typeof keptRow>)[]) {
   const asked: Asked[] = [];
   const db = fakeDb((sql, args) => {
-    if (/PRAGMA table_info/.test(sql)) return { results: [{ name: "adopted_from_folder" }, { name: "kept_in_place" }, { name: "evidence_kind" }] };
+    if (/PRAGMA table_info/.test(sql)) return { results: [{ name: "adopted_from_folder" }, { name: "kept_in_place" }, { name: "evidence_kind" }, { name: "named_by_portal" }] };
     if (/FROM documents WHERE category = \?1 AND removed_at IS NULL/.test(sql)) return { results: rows.filter((r) => r.category === args[0] && !r.removedAt) };
     if (/SELECT id, removed_at AS removedAt, kept_in_place AS keptInPlace FROM documents WHERE blob_key = \?1/.test(sql)) {
       return { results: rows.filter((r) => r.blobKey === args[0]).map((r) => ({ id: r.id, removedAt: r.removedAt ?? null, keptInPlace: r.keptInPlace ?? null })) };
@@ -623,6 +623,47 @@ test("filed as: the column in the filename fills the cell where the model gave n
   assert.deepEqual(blind.settled, [], "nothing filled from the name");
   assert.deepEqual(blind.notes.map((n) => n.kind), ["unreadable"], "the unreadable note as before, and no filed-as line");
   assert.deepEqual((await certificateStanding()).dates, []);
+
+  // Printed in another man's name: the wrong man's document is said for
+  // what it is, once, and is not a filing to question as well - the round
+  // and the page say the filed-as line for exactly the documents that fill a cell.
+  portal.blobs.set("certificate-readings|r1/evans-master.json", JSON.stringify({ ...reading, holderName: "Kachin Sittiyos", expiresOn: "2031-05-26", certificateTitle: "Crew Intermediate course", qualCode: null }));
+  const his = await compareMatrix(doc.quals, null, nameOf);
+  assert.deepEqual(his.settled, [], "another man's document fills nothing");
+  assert.deepEqual(his.notes.map((n) => n.kind), ["name-mismatch"], "the name note alone: no filed-as line in the round");
+  const hisPage = await certificateStanding();
+  assert.deepEqual(hisPage.filedAs, [], "and none on the page");
+  assert.deepEqual(hisPage.notOnMatrix, [], "nor is it listed as his document the matrix lacks a column for");
+
+  // A name the portal wrote itself is the model's guess, not a filing: the
+  // sheet and the model decide, and there is no filing to question.
+  portal.rows.find((r) => r.id === "c2")!.namedByPortal = 1;
+  portal.blobs.set("certificate-readings|r1/evans-master.json", JSON.stringify({ ...reading, holderName: "Brenton Evans", expiresOn: "2031-05-26", certificateTitle: "Crew Intermediate course", qualCode: null }));
+  const own = await compareMatrix(doc.quals, null, nameOf);
+  assert.deepEqual(own.settled, [], "the portal's own name fills nothing where the model gave no code");
+  assert.deepEqual(own.notes.map((n) => n.kind), ["no-code"], "read as nothing on the matrix, as before the filing rule");
+  assert.deepEqual((await certificateStanding()).filedAs, []);
+});
+
+test("filed as: the hour puts a filed column that never lapses on the matrix as held, and in the office's workbook", async () => {
+  /* The live case: five "VS-04 Helm CONNECT" files the model read as the
+     Crew Intermediate course. VS-04 carries no expiry on this vessel, so
+     the filed column is held - "Y" - on the matrix and in the workbook. */
+  const { portal, bucket } = await oneManPortal({ filedAs: "VS-04" });
+  const env = { DB: portal.db, FILES: bucket, FILE_STORE: "r2" };
+  await worker.scheduled({} as never, env as never);
+  const hourly = JSON.parse(portal.blobs.get("sync|last-hourly")!);
+  assert.equal(hourly.roundError, null);
+  assert.equal(hourly.applied, 1, "one cell applied");
+  assert.equal(hourly.written, 1, "one cell written into the workbook");
+  const doc = portal.doc();
+  assert.deepEqual(doc.quals.rows[0][3], ["", "2030-01-17", "Y", ""], "VS-04 is held; nothing else moved");
+  assert.deepEqual(doc.filledFromCert, { "EVANS, BRENTON::VS-04": true });
+  const named = datedWorkbookName("20260901 - CREW QUALIFICATION EXPIRY.xlsx", todayThere());
+  const written = await (await bucket.get("opms/" + named))!.arrayBuffer();
+  const back = await partText(partOf(readZip(written), "xl/worksheets/sheet1.xml"));
+  assert.ok(/<c r="G3"[^>]*><is><t[^>]*>Y<\/t>/.test(back), "the VS-04 column of the office's row reads Y");
+  assert.ok(!/<c r="H3"/.test(back), "QL-04, filed nowhere, is left blank");
 });
 
 test("filed as: the hour puts the filed column on the matrix and in the office's workbook, and an unchanged hour saves nothing", async () => {
@@ -663,12 +704,18 @@ test("on file, not on the matrix: a readable document with no column anywhere is
     scan("hrw", "licence.pdf", "hrw"),
     scan("blur", "blurry.pdf", "blur"),
     scan("quiz", "MHE quiz.pdf", "quiz"),
+    scan("letter", "extension.pdf", "letter"),
+    scan("his", "kachin.pdf", "his"),
   );
   const read = (over: Record<string, unknown>) => JSON.stringify({ ...reading, holderName: "Brenton Evans", qualCode: null, endorsements: [], units: [], capacities: [], ...over });
   portal.blobs.set("certificate-readings|r1/hs.json", read({ certificateTitle: "MRN Marine Contractor H&S", expiresOn: "2027-01-01" }));
   // A licence that covers a column of this matrix is on the matrix.
   portal.blobs.set("certificate-readings|r1/hrw.json", read({ certificateTitle: "Licence to Perform High Risk Work", expiresOn: "2030-04-01", units: ["DG"] }));
   portal.blobs.set("certificate-readings|r1/blur.json", JSON.stringify({ version: "r1", at: "", model: null, readable: false, reason: "too poor to read" }));
+  // A letter with no code is a letter, not a certificate the matrix lacks a
+  // column for; and a document printed in another man's name is not his.
+  portal.blobs.set("certificate-readings|r1/letter.json", read({ certificateTitle: "Extension of certificate", evidenceKind: "extension", expiresOn: "2026-12-01" }));
+  portal.blobs.set("certificate-readings|r1/his.json", read({ certificateTitle: "MinRes Psychosocial Hazards", holderName: "Kachin Sittiyos", expiresOn: "2027-06-01" }));
   // Unread: nothing to say yet.
   const doc = portal.doc();
   doc.quals.cols.push(["HR-01", "Dogging (DG)", "High risk work"]);
@@ -676,7 +723,7 @@ test("on file, not on the matrix: a readable document with no column anywhere is
   portal.state.data = JSON.stringify(doc);
   const page = await certificateStanding();
   assert.deepEqual(page.notOnMatrix, [{ person: "EVANS, Brenton", title: "MRN Marine Contractor H&S", filename: "MRN Marine Contractor HS.pdf", fileId: "hs" }],
-    "the induction alone: the filed QL-04 ticket, the covering licence, the unreadable scan and the unread quiz are not on the list");
+    "the induction alone: the filed QL-04 ticket, the covering licence, the unreadable scan, the unread quiz, the letter and the other man's document are not on the list");
   assert.deepEqual(page.dates.map((d) => d.code).sort(), ["HR-01", "QL-04"]);
   // A reading with no printed title lists the file by its name.
   portal.blobs.set("certificate-readings|r1/hs.json", read({ certificateTitle: null, expiresOn: "2027-01-01" }));
@@ -1305,6 +1352,7 @@ test("the Equivalence sheet is read off the skills matrix once, and a re-homed c
   const ticket = portal.rows.find((r) => r.id === "c2")!;
   assert.equal(ticket.filename, "EVANS, Brenton - QL-17 Medical.pdf", "renamed under the column the sheet gives it, this hour");
   assert.equal(ticket.blobKey, "opms/Brenton - OPMS/EVANS, Brenton - QL-17 Medical.pdf", "in the folder it was in");
+  assert.equal(ticket.namedByPortal, 1, "marked as the portal's own name, so its code is never read back as the office's filing");
   assert.ok(bucket.text("opms/Brenton - OPMS/EVANS, Brenton - QL-17 Medical.pdf"), "the file moved with it");
   assert.equal(bucket.text("opms/Brenton - OPMS/master.pdf"), null);
   const hourly = JSON.parse(portal.blobs.get("sync|last-hourly")!);
@@ -2484,7 +2532,7 @@ test("a fresh database with no documents table is let through, not altered", asy
   });
   setEnv({ DB: late } as never);
   await ensureDocumentColumns();
-  assert.equal(late.asked.filter((a) => /ALTER TABLE/.test(a.sql)).length, 3, "all three columns were tried, and none stopped the request");
+  assert.equal(late.asked.filter((a) => /ALTER TABLE/.test(a.sql)).length, 4, "all four columns were tried, and none stopped the request");
   forgetDocumentColumns();
 });
 

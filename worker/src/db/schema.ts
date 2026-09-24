@@ -103,6 +103,13 @@ export const documents = sqliteTable(
        beside qualCode, which is then the column the paper is about. Null is
        a certificate. Added lazily the same way. */
     evidenceKind: text("evidence_kind"),
+
+    /* 1 where the portal itself named the file from the model's guess
+       (canonicaliseCertificate). The code in such a name is not the
+       office's word, so the filed-column rule skips it. Null is a name the
+       office wrote, or one the portal wrote before this column existed.
+       Added lazily the same way. */
+    namedByPortal: integer("named_by_portal"),
   },
   (t) => [
     index("documents_category_idx").on(t.category, t.bucket),

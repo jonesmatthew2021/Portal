@@ -154,6 +154,15 @@ test("filed as: hand tag, then the filename's column, then the sheet, then the m
   const sheeted = reading({ certificateTitle: "Watchkeeper Deck", qualCode: "QL-13" });
   assert.equal(codeFor({ filename: "ROGERS - QL-04 Master <45m NC.pdf" }, sheeted, SHEET, FILED_COLS), "QL-04", "the filed column beats the sheet too");
   assert.equal(codeFor({ filename: "ROGERS - watchkeeper.pdf" }, sheeted, SHEET, FILED_COLS), "QL-04", "and the sheet still beats the model where nothing was filed");
+  /* A name the portal wrote itself (the refile, from the model's guess) is
+     not the office's word: read back as a filing it would outrank the sheet
+     whose job is to correct that guess, for ever. The row says who named
+     the file, and only the office's name is a filing. */
+  assert.equal(codeFor({ filename: "ROGERS - QL-13 ECDIS.pdf", namedByPortal: 1 }, sheeted, SHEET, FILED_COLS), "QL-04",
+    "the portal's own name is skipped: the sheet moves the certificate");
+  assert.equal(codeFor({ filename: "ROGERS - QL-13 ECDIS.pdf", namedByPortal: null }, sheeted, SHEET, FILED_COLS), "QL-13",
+    "the same name written by the office is the office's word");
+  assert.equal(codeFor({ qualCode: "QL-01", filename: "ROGERS - QL-13 ECDIS.pdf", namedByPortal: 1 }, sheeted, SHEET, FILED_COLS), "QL-01", "a hand tag still comes first");
 });
 
 test("filed as: where the filed column and the reading disagree, the disagreement is said - and only then", () => {
@@ -171,6 +180,14 @@ test("filed as: where the filed column and the reading disagree, the disagreemen
   const untitled = reading({ certificateTitle: null, qualCode: "QL-13" });
   assert.deepEqual(filedAsFor({ filename: "ROGERS - QL-04 x.pdf" }, untitled, SHEET, FILED_COLS),
     { code: "QL-04", title: "Master <45m NC", readsAs: "ECDIS" }, "no printed title: the column the model named");
+  // The model agreed, however unsure: the line is for a document read as something else.
+  const unsure = reading({ certificateTitle: "Master <45m NC", qualCode: "QL-04", codeConfidence: "low" });
+  assert.equal(filedAsFor({ filename: "ROGERS - QL-04 Master <45m NC.pdf" }, unsure, SHEET, FILED_COLS), null, "the same code at low confidence is agreement");
+  assert.equal(codeFor({ filename: "ROGERS - QL-04 Master <45m NC.pdf" }, unsure, SHEET, FILED_COLS), "QL-04", "and the cell is filled all the same");
+  const titled = reading({ certificateTitle: "master <45m nc", qualCode: null });
+  assert.equal(filedAsFor({ filename: "ROGERS - QL-04 Master <45m NC.pdf" }, titled, SHEET, FILED_COLS), null, "the column's own title printed on the document is agreement too");
+  // A name the portal wrote is no filing, so there is no filing to question.
+  assert.equal(filedAsFor({ filename: "ROGERS - QL-04 Master <45m NC.pdf", namedByPortal: 1 }, ecdis, SHEET, FILED_COLS), null, "the portal's own name: nothing to say");
   assert.equal(filedAsLine("ROGERS, Michael", "QL-04", "Master <45m NC", "STCW Watchkeeper Deck"),
     "ROGERS, Michael — QL-04: filed as Master <45m NC, reads as STCW Watchkeeper Deck", "the one line, as Needs attention says it");
   assert.equal(filedAsLine("SMITH, Alan", "VS-04", "Helm CONNECT", null),
@@ -1065,7 +1082,10 @@ test("covers: a high risk work licence's printed classes fill the dogging and cr
      merely carries the letters - a dangerous goods awareness course listed
      as a unit, "Class DG" - is not a licence class, and used to fill HR-01
      with that document's expiry. */
-  assert.deepEqual(codesCovered(licence(["C6, DG, LF, RB, WP"]), null), [], "the classes on one line are not one class");
+  assert.deepEqual(codesCovered(licence(["C6, DG, LF, RB, WP"]), null), ["HR-01"],
+    "the classes listed on one line, as the readings made before the question asked for each alone list them, are read as tokens");
+  assert.deepEqual(codesCovered(licence(["DG; CV"]), null), ["HR-01", "HR-02"], "however the line is punctuated");
+  assert.deepEqual(codesCovered(licence(["C6, DG, and forklift"]), null), [], "one word of prose makes the whole line a phrase");
   assert.deepEqual(codesCovered(licence(["Class DG"]), null), [], "a phrase carrying the code is not the code");
   assert.deepEqual(codesCovered(licence(["Dangerous Goods (DG) awareness"]), null), [], "nor is a course title that brackets it");
   assert.deepEqual(codesCovered(licence([" DG "]), null), ["HR-01"], "the code alone, trimmed");

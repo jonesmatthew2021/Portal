@@ -530,29 +530,42 @@ on any line that still names this one.
   - **The column a certificate is filed under is the office's word**
     (`source/shared/filed-as.js`; Matthew, 25 Sep 2026: "every file needs to
     go into the matrix"). A document reaches the portal filed under a column
-    two ways - the upload page's hand tag, or the code in its filename
-    ("<PERSON> - <CODE> <Title>.<ext>", the refile's own naming and the
-    office's) - and both count: hand tag, then the filename's code, then the
-    Equivalence sheet, then the model's confident guess (`codeFor` in
-    `worker/src/lib/analysis.ts`, handed the live matrix's columns by every
-    caller, so the round and the page's cells place a document the same
-    way). The filename's code is a filing only as a whole token and only for
-    a column of the live matrix (`filedCodeIn`); anything else is a name.
-    Where the filed column and the reading disagree the filed column still
-    takes the date and **Needs attention says so**, for management, in one
-    line - "<person> — <code>: filed as <column>, reads as <title>"
-    (`filedAsFor`, `filedAsLine`; the round's report carries the same
-    sentence as a `filed-as` note) - so a wrong filing is visible rather than
-    silently accepted; where the model gave the same column, no line. **An
-    unreadable document fills nothing from its name**: a filename is not
-    evidence that a paper exists. And the documents no column places at all -
-    read, readable, no hand tag, no code in the name, nothing the sheet or the
-    model could place, covering nothing - are listed under Needs attention as
-    **On file, not on the matrix — n**, one line each, "<person> — <title or
-    filename>", by person (`notOnMatrix` from `certificateStanding`,
-    `notOnMatrixLines` on the page). Whether any of them becomes a column is
-    the office's decision; the portal adds no column of its own. The preview
-    shows both under `?filedas=1`.
+    two ways - the upload page's hand tag, or the code in a filename the
+    office wrote ("<PERSON> - <CODE> <Title>.<ext>") - and both count: hand
+    tag, then the filename's code, then the Equivalence sheet, then the
+    model's confident guess (`codeFor` in `worker/src/lib/analysis.ts`,
+    handed the live matrix's columns by every caller, so the round and the
+    page's cells place a document the same way). The filename's code is a
+    filing only as a whole token and only for a column of the live matrix
+    (`filedCodeIn`); anything else is a name. **A name the portal wrote is
+    not the office's word**: the refile and the upload's read name a file
+    from the model's guess through `codeFor`, and read back as a filing that
+    guess would outrank the sheet whose job is to correct it, for ever. So
+    every rename the portal makes marks the row (`documents.named_by_portal`,
+    set in `canonicaliseCertificate`), and `codeFor`/`filedAsFor` skip the
+    filename of a marked row - the sheet and the model decide as before. Files
+    the portal named before 25 Sep 2026 carry no mark and cannot be told from
+    the office's: they are read as the office's until a hand tag or a rename
+    says otherwise. Where the filed column and the reading disagree the filed
+    column still takes the date and **Needs attention says so**, for
+    management, in one line - "<person> — <code>: filed as <column>, reads as
+    <title>" (`filedAsFor`, `filedAsLine`; under its own heading **Filed as —
+    n**, never counted among the Marine Orders; the round's report carries
+    the same sentence as a `filed-as` note, said for exactly the documents
+    that fill a cell, so the round and the page never differ on it) - so a
+    wrong filing is visible rather than silently accepted; where the model
+    gave the same column (however sure it was) or the document prints the
+    column's own title, no line. **An unreadable document fills nothing from
+    its name**: a filename is not evidence that a paper exists. And the
+    documents no column places at all - read, readable, his own (not a paper
+    standing in for a certificate, not printed in another man's name), no
+    hand tag, no code in the name, nothing the sheet or the model could
+    place, covering nothing - are listed under Needs attention as **On file,
+    not on the matrix — n**, one line each, "<person> — <title or filename>",
+    by person (`notOnMatrix` from `certificateStanding`, `notOnMatrixLines`
+    on the page). Whether any of them becomes a column is the office's
+    decision; the portal adds no column of its own. The preview shows both
+    under `?filedas=1`.
 
   A green cell means "not expired" and nothing more: suspension and
   cancellation are invisible on a document and only AMSA can confirm them

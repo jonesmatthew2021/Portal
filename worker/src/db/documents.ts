@@ -26,7 +26,7 @@ export function ensureDocumentColumns() {
       // stop a request over - the route will say what is missing.
       if (!cols.length) return;
       const have = new Set(cols.map((c) => c.name));
-      for (const [col, type] of [["adopted_from_folder", "INTEGER"], ["kept_in_place", "INTEGER"], ["evidence_kind", "TEXT"]]) {
+      for (const [col, type] of [["adopted_from_folder", "INTEGER"], ["kept_in_place", "INTEGER"], ["evidence_kind", "TEXT"], ["named_by_portal", "INTEGER"]]) {
         if (have.has(col)) continue;
         try {
           await d1.prepare(`ALTER TABLE documents ADD COLUMN ${col} ${type}`).run();
@@ -549,6 +549,12 @@ export async function purgeDocument(row: DocumentRow) {
  * bytes are wrapped as a PDF where they are a photo the wrapper can carry;
  * anything else keeps its own format behind the same name. A name already
  * right is left alone.
+ *
+ * A row renamed here is marked namedByPortal: the code in the new name came
+ * from the model (through codeFor), not from the office, so the filed-column
+ * rule must not read it back as the office's word - or the model's first
+ * guess would outrank the Equivalence sheet for ever after. A name already
+ * right is left unmarked: it may be the office's own.
  */
 export async function canonicaliseCertificate(
   row: DocumentRow,
@@ -586,6 +592,9 @@ export async function canonicaliseCertificate(
   }
   return await renamed(row, want, bytes, contentType);
 
+  /** The name without its extension. */
+  function base(name: string) { return name.replace(/\.[^.]+$/, ""); }
+
   async function renamed(r: DocumentRow, name: string, data: ArrayBuffer, type: string | null) {
     const filename = await freeCertName(r.folder!, name, r.filename);
     const to = `${blobFolder(r.blobKey)}/${filename}`;
@@ -600,7 +609,12 @@ export async function canonicaliseCertificate(
     if (to !== r.blobKey) await fileStore().delete(r.blobKey);
     const [updated] = await db
       .update(documents)
-      .set({ blobKey: to, filename, contentType: type, sizeBytes: data.byteLength })
+      .set({
+        blobKey: to, filename, contentType: type, sizeBytes: data.byteLength,
+        // Only a name the portal actually changed is the portal's: a photo
+        // wrapped as a PDF under the office's own name keeps the office's word.
+        ...(base(filename) !== base(r.filename) ? { namedByPortal: 1 } : {}),
+      })
       .where(eq(documents.id, r.id))
       .returning();
     return updated;

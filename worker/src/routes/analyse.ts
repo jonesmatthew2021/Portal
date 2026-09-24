@@ -957,21 +957,6 @@ export async function compareMatrix(
     // (source/shared/filed-as.js). The model's code is only used where
     // neither said, and only when it was sure.
     const code = codeFor(row, reading, eqTable, cols);
-    /* Where the filed column and the reading disagree the filed column still
-       takes the date, and the disagreement is said - once here for the
-       round's report, and on Needs attention by the page's cells
-       (certificateStanding), in the one sentence. Said before the checks
-       below so a filing that fails them (the wrong man's name on it) is
-       still seen; a paper is not a certificate and is not said. */
-    const disagreed = paperKind(row, reading) ? null : filedAsFor(row, reading, eqTable, cols);
-    if (disagreed) {
-      notes.push({
-        kind: "filed-as",
-        person: row.person,
-        detail: filedAsLine(as(row.person || ""), disagreed.code, disagreed.title, disagreed.readsAs),
-        certificate: link,
-      });
-    }
 
     // The model's own guess, remembered where the equivalence page overruled
     // it - the cell that guess once filled may still be sitting on the matrix.
@@ -1075,6 +1060,24 @@ export async function compareMatrix(
         certificate: link,
       });
       continue;
+    }
+
+    /* Where the filed column and the reading disagree the filed column still
+       takes the date, and the disagreement is said - once here for the
+       round's report, and on Needs attention by the page's cells
+       (certificateStanding), in the one sentence. Said at this point, past
+       every check above, so the round and the page say it for exactly the
+       documents that fill a cell: a paper, a document under a man not on
+       the matrix or printed in another man's name is already noted for
+       what it is, and is not a filing to question as well. */
+    const disagreed = filedAsFor(row, reading, eqTable, cols);
+    if (disagreed) {
+      notes.push({
+        kind: "filed-as",
+        person: row.person,
+        detail: filedAsLine(as(row.person || ""), disagreed.code, disagreed.title, disagreed.readsAs),
+        certificate: link,
+      });
     }
 
     // An empty code is a document with no column of its own: it covers only.

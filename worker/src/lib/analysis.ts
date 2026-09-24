@@ -742,7 +742,8 @@ export async function liveCertificates(): Promise<Row[]> {
               read_code AS readCode, read_expires AS readExpires, read_issued AS readIssued,
               read_issuer AS readIssuer, read_title AS readTitle,
               created_at AS createdAt, removed_at AS removedAt,
-              removed_by AS removedBy, evidence_kind AS evidenceKind
+              removed_by AS removedBy, evidence_kind AS evidenceKind,
+              named_by_portal AS namedByPortal
        FROM documents WHERE category = 'certificate' AND removed_at IS NULL
        ORDER BY created_at DESC`,
     )
@@ -826,18 +827,32 @@ export function equivalentCode(title: string | null | undefined, table: Equivale
  * the live matrix's columns), then the equivalence page's say over the
  * model's guess — that guess is exactly what the page corrects. Every caller
  * that can hand the columns in does, so the round and the page's cells
- * place a document the same way. */
+ * place a document the same way.
+ *
+ * A name the portal wrote itself (namedByPortal, set by the refile and the
+ * upload's read when they rename a file "<PERSON> - <CODE> <Title>") is not
+ * the office's word: its code is the model's guess written down, and read
+ * back as a filing it would outrank the sheet whose job is to correct that
+ * guess. Such a name is skipped; the sheet and the model decide as before. */
 export function codeFor(
-  row: { qualCode?: string | null; filename?: string | null },
+  row: { qualCode?: string | null; filename?: string | null; namedByPortal?: number | null },
   reading: Reading | null,
   table: Equivalence[],
   columns?: unknown,
 ): string | null {
   if (row.qualCode) return row.qualCode;
-  const filed = columns ? filedCodeIn(row.filename, columns) : null;
+  const filed = filedColumnOf(row, columns);
   if (filed) return filed;
   if (!reading) return null;
   return readingSays(reading, table);
+}
+
+/** The column the office filed a document under by its name, or null: the
+ *  filename's code where the office wrote the name, never where the portal
+ *  did. The one test, so codeFor and filedAsFor cannot disagree about it. */
+function filedColumnOf(row: { filename?: string | null; namedByPortal?: number | null }, columns: unknown): string | null {
+  if (!columns || row.namedByPortal) return null;
+  return filedCodeIn(row.filename, columns);
 }
 
 /** What the reading alone makes of a document: the equivalence page's say,
@@ -865,32 +880,38 @@ function readingSays(reading: Reading, table: Equivalence[]): string | null {
  * the document - or null where there is nothing to say.
  *
  * Nothing to say where somebody tagged the row by hand (the person's word,
- * not a filing to question), where the name carries no live column, where
- * the document could not be read (a filename is not evidence that a paper
- * exists, and the unreadable is listed on its own), or where the reading
- * gave the same column. `readsAs` is the title printed on the document, or
- * the title of the column the reading named where it printed none.
+ * not a filing to question), where the name carries no live column or the
+ * portal wrote the name (codeFor), where the document could not be read (a
+ * filename is not evidence that a paper exists, and the unreadable is
+ * listed on its own), or where the reading agreed: the sheet or the model
+ * gave the same column - the model's own code counts as agreement however
+ * sure it was, since the line is for a document read as something ELSE -
+ * or the title printed on the document is the column's own title.
+ * `readsAs` is the title printed on the document, or the title of the
+ * column the reading named where it printed none.
  *
  * Said once here so the round's note and the page's line (Needs attention)
  * are the one sentence, through filedAsLine in source/shared/filed-as.js.
  */
 export function filedAsFor(
-  row: { qualCode?: string | null; filename?: string | null },
+  row: { qualCode?: string | null; filename?: string | null; namedByPortal?: number | null },
   reading: Reading | null,
   table: Equivalence[],
   columns: unknown,
 ): { code: string; title: string; readsAs: string | null } | null {
   if (row.qualCode || !reading || reading.readable === false) return null;
-  const filed = filedCodeIn(row.filename, columns);
+  const filed = filedColumnOf(row, columns);
   if (!filed) return null;
   const said = String(readingSays(reading, table) || "").trim().toUpperCase();
-  if (said === filed) return null;
+  const guessed = String(reading.qualCode || "").trim().toUpperCase();
+  if (said === filed || guessed === filed) return null;
   const cols = (Array.isArray(columns) ? columns : []) as unknown[][];
   const titleOf = (code: string) => {
     const col = cols.find((c) => Array.isArray(c) && String(c[0] || "").trim().toUpperCase() === code);
     return col ? String(col[1] || "").trim() : "";
   };
   const printed = String(reading.certificateTitle || "").trim();
+  if (printed && printed.toUpperCase() === titleOf(filed).toUpperCase()) return null;
   return { code: filed, title: titleOf(filed), readsAs: printed || (said ? titleOf(said) || said : null) };
 }
 
@@ -984,15 +1005,9 @@ export async function certificateStanding() {
        typedOver). */
     const code = named && named.trim() ? named : null;
     const asDated = typed ? { ...reading, expiresOn: typed } : reading;
-    if (!code && !coveredCells(asDated, vessel.covers, vessel.qualColumns, null).some((c) => !!c.until)) {
-      // Nothing places it and it covers nothing: on file, not on the matrix.
-      notOnMatrix.push({
-        person: register.nameOf(row.person) || row.person,
-        title: (reading.certificateTitle || "").trim() || row.filename,
-        filename: row.filename, fileId: row.id,
-      });
-      continue;
-    }
+    // Whether anything on the matrix places it: a column of its own, or a
+    // column it covers.
+    const placed = !!code || coveredCells(asDated, vessel.covers, vessel.qualColumns, null).some((c) => !!c.until);
     if (paperKind(row, reading)) continue;
     // AMSA recognises only the classes MO70 s 7(2)(b) lists, which leave out
     // the certificate of safety training and the marine cook certificate.
@@ -1003,6 +1018,18 @@ export async function certificateStanding() {
     // Printed in another man's name: his folder, not his certificate. The
     // round refuses the same document (the rule is in source/shared/names.js).
     if (nameIsSomebodyElse(reading.holderName, row.person, person)) continue;
+    if (!placed) {
+      /* Nothing places it and it covers nothing: on file, not on the matrix.
+         Decided after the paper and the name checks, so a letter is not
+         listed as a certificate the matrix lacks a column for, and another
+         man's document is not listed under this man - the answer to those
+         is "it is a letter" and "it is not his", not "no column". */
+      notOnMatrix.push({
+        person, title: (reading.certificateTitle || "").trim() || row.filename,
+        filename: row.filename, fileId: row.id,
+      });
+      continue;
+    }
     if (!code) { coverOnly.push({ row, reading: asDated, person: person.trim().toUpperCase() }); continue; }
     const disagreed = filedAsFor(row, reading, eqTable, cols);
     if (disagreed) filedAs.push({ person: person.trim().toUpperCase(), ...disagreed, fileId: row.id });

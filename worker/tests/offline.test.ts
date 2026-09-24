@@ -170,7 +170,7 @@ function signedInPortal(doc: Record<string, unknown>, user: Grant) {
   const state = { data: JSON.stringify(doc), rev: 3 };
   const db = fakeDb((sql, args) => {
     if (/FROM sessions s/.test(sql)) return { results: [user] };
-    if (/PRAGMA table_info/.test(sql)) return { results: [{ name: "adopted_from_folder" }, { name: "kept_in_place" }, { name: "evidence_kind" }] };
+    if (/PRAGMA table_info/.test(sql)) return { results: [{ name: "adopted_from_folder" }, { name: "kept_in_place" }, { name: "evidence_kind" }, { name: "named_by_portal" }] };
     if (/SELECT data, rev FROM portal_state/.test(sql)) return { results: [{ ...state }] };
     if (/SELECT data FROM portal_state/.test(sql)) return { results: [{ data: state.data }] };
     if (/UPDATE portal_state SET data/.test(sql)) {

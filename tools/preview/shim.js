@@ -211,15 +211,17 @@
       dates.push(entry("QL-01", { expires: dayOff(-15), issued: dayOff(-1800) }));
       covers.push({ person, code: "QL-01", kind: "extension", until: dayOff(45), fileId: null });
     }
-    /* ?filedas=1: his Chief Mate cell filled from a file the office named
-       for QL-02 that the model read as a course, and two of the scans on
-       file - his and the next man's - as documents no column places. */
+    /* ?filedas=1: his Master <100m NC cell filled from a file the office
+       named for QL-03 that the model read as a course - QL-03 because no
+       other flag answers for that cell, so all the flags can be on at once -
+       and two of the scans on file - his and the next man's - as documents
+       no column places. */
     const filedAs = [];
     const notOnMatrix = [];
     if (ordersFlag.filedAs) {
       const scans = mem.rows.filter((r) => r.category === "certificate" && !r.removedAt);
-      dates.push(entry("QL-02", { expires: dayOff(700), issued: dayOff(-1100), fileId: scans[0] ? scans[0].id : null }));
-      filedAs.push({ person, code: "QL-02", title: "Chief Mate", readsAs: "Crew Intermediate course", fileId: scans[0] ? scans[0].id : null });
+      dates.push(entry("QL-03", { expires: dayOff(700), issued: dayOff(-1100), fileId: scans[0] ? scans[0].id : null }));
+      filedAs.push({ person, code: "QL-03", title: "Master <100m NC", readsAs: "Crew Intermediate course", fileId: scans[0] ? scans[0].id : null });
       const other = (mem.data.people || []).find((p) => p && p.name && p !== ordersMan.person);
       notOnMatrix.push(
         { person, title: "MRN Marine Contractor H&S", filename: "contractor-hs.pdf", fileId: scans[1] ? scans[1].id : null },

@@ -95,6 +95,10 @@ export function toRecord(row: Row) {
       /* What paper the person said it was when they filed it, beside the
          column it is about (qualCode); null is a certificate. */
       evidenceKind: row.evidenceKind ?? null,
+      /* Whether the portal wrote the file's name itself. The page reads a
+         column off a name only where the office wrote it, the way the
+         round does (codeFor in lib/analysis.ts). */
+      namedByPortal: !!row.namedByPortal,
       by: row.uploadedBy,
       uploaded: row.filedOn,
     };
@@ -478,7 +482,7 @@ export default async (req: Request) => {
               d.filed_on AS filedOn, d.session_id AS sessionId, d.person, d.folder,
               d.qual_code AS qualCode, d.expires_on AS expiresOn, d.checksum,
               d.read_code AS readCode, d.read_title AS readTitle,
-              d.evidence_kind AS evidenceKind,
+              d.evidence_kind AS evidenceKind, d.named_by_portal AS namedByPortal,
               d.removed_at AS removedAt, d.removed_by AS removedBy,
               d.kept_in_place AS keptInPlace,
               json_extract(b.value, '$.issuedOn') AS readIssued,

@@ -274,7 +274,10 @@ function UploadCertificates() {
   // A scan filed before codes were recorded still names its code in the file
   // name — "DWYER_ Matthew - QL-18 Provide First Aid" — so where the record
   // carries none, the name is read for a column of the matrix the one way
-  // the round reads it (filedCodeIn, source/shared/filed-as.js).
+  // the round reads it (filedCodeIn, source/shared/filed-as.js). Here it is
+  // only which column the file sits under on this page, so a name the
+  // portal wrote is read too; whose word that code is, is the round's
+  // question (codeFor in the worker), not this list's.
   const codeOf = (c) => {
     if (c.qualCode) return c.qualCode;
     return filedCodeIn(c.filename, QUALS.cols) || "";

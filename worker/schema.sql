@@ -84,7 +84,15 @@ CREATE TABLE IF NOT EXISTS documents (
   -- which is then the column the paper is about. NULL is a certificate.
   -- Added 25 Sep 2026; the worker adds it itself to an existing table
   -- (ensureDocumentColumns in src/db/documents.ts).
-  evidence_kind TEXT
+  evidence_kind TEXT,
+  -- 1 where the portal itself named the file ("<PERSON> - <CODE> <Title>",
+  -- canonicaliseCertificate in src/db/documents.ts) from the model's guess.
+  -- The code in such a name is the model's word, not the office's, so it
+  -- is not the filed column (codeFor in src/lib/analysis.ts) and the
+  -- Equivalence sheet can still move the certificate. NULL is a name the
+  -- office wrote - or one the portal wrote before 25 Sep 2026, which cannot
+  -- be told apart. The worker adds the column itself to an existing table.
+  named_by_portal INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS documents_category_idx ON documents (category, bucket);

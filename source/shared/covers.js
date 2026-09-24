@@ -218,16 +218,20 @@ export function coveredCells(reading, covers, columns, ownCode) {
   };
 
   const printed = Array.isArray(reading.endorsements) ? reading.endorsements : [];
-  /* The classes a licence prints, one entry each: the question asks for
-     each class code alone, and an entry counts as a class only when the
-     whole entry, trimmed, IS a code. The entries used to be split into
-     words, so a course the model listed as a unit - "Dangerous Goods (DG)
-     awareness", "Class DG" - handed its DG to the dogging column with that
-     course's expiry. A phrase is not a licence class, whatever letters it
-     carries. */
+  /* The classes a licence prints: an entry counts only when it IS a code -
+     "DG" - or a list of nothing but codes as WorkSafe prints them on one
+     line, "C6, DG, LF, RB, WP" (the readings made before the question asked
+     for each class alone list them so, and they are never read again). The
+     entries used to be split into words, so a course the model listed as a
+     unit - "Dangerous Goods (DG) awareness", "Class DG" - handed its DG to
+     the dogging column with that course's expiry. A phrase is not a licence
+     class, whatever letters it carries, and one word of prose in a list
+     makes the whole entry a phrase. */
   const unitTokens = (Array.isArray(reading.units) ? reading.units : [])
-    .map((u) => String(u == null ? "" : u).trim().toUpperCase())
-    .filter((t) => CLASS_CODE.test(t));
+    .flatMap((u) => {
+      const parts = String(u == null ? "" : u).toUpperCase().split(/\s*[,;/]\s*/).map((p) => p.trim()).filter(Boolean);
+      return parts.length && parts.every((p) => CLASS_CODE.test(p)) ? parts : [];
+    });
   (Array.isArray(covers) ? covers : []).forEach((rule) => {
     if (!rule || typeof rule !== "object") return;
     const code = asCode(rule.code);

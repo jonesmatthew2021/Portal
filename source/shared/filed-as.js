@@ -11,12 +11,19 @@
  * empty.
  *
  * A certificate reaches the portal filed under a column in one of two ways:
- * the upload page's chosen column (a hand tag), or the portal's own naming
- * on the sync's refile - "<PERSON> - <CODE> <Title>.<ext>" - where the code
- * in the filename is a column of the live matrix. The filename's code is the
- * filed column, one rank below a hand tag:
+ * the upload page's chosen column (a hand tag), or a name the office wrote
+ * in the portal's own shape - "<PERSON> - <CODE> <Title>.<ext>" - where the
+ * code in the filename is a column of the live matrix. The filename's code
+ * is the filed column, one rank below a hand tag:
  *
  *     hand tag > filed column (filename) > Equivalence sheet > the model
+ *
+ * A name the portal wrote itself on the refile is not the office's word: its
+ * code is the model's guess written down, and the row says so
+ * (`namedByPortal`, set where the portal renames a file). Such a name is no
+ * filing, so the Equivalence sheet can still move the certificate. Names
+ * the portal wrote before that mark existed (25 Sep 2026) cannot be told
+ * from the office's and are read as the office's.
  *
  * Where the filed column and the model's reading disagree, the filed column
  * still gets the certificate's date and Needs attention says so in one line
