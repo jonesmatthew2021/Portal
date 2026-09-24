@@ -27,3 +27,21 @@ export const AMBER_DAYS = 180;
 export function daysUntil(iso, today) {
   return Math.round((new Date(iso).getTime() - new Date(today).getTime()) / 86400000);
 }
+
+/**
+ * Whether a printed expiry has been reached.
+ *
+ * A certificate is held only while it is not suspended, not cancelled, and
+ * its expiry date "has not been reached" (MO70 s 5(a)(iii)). So the day
+ * printed on it is the FIRST day it counts for nothing, not the last day it
+ * counts, and a man whose ticket runs out today does not hold it today.
+ * `daysUntil` is a plain day count and answers 0 on that day, which read as
+ * "still in hand" everywhere it was tested against zero; this is the rule,
+ * and every list that decides whether somebody holds something reads it
+ * through here.
+ * @param {string} iso YYYY-MM-DD, the date printed on the certificate
+ * @param {string} today YYYY-MM-DD
+ */
+export function hasExpired(iso, today) {
+  return daysUntil(iso, today) <= 0;
+}

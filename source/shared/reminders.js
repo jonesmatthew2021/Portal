@@ -340,12 +340,15 @@ export function reminderDate(iso) {
 const remPlural = (/** @type {number} */ n, /** @type {string} */ word) => n + " " + word + (n === 1 ? "" : "s");
 
 /** One item as a line: "QL-17 AMSA Medical — expires 12 Oct 2026 (18 days)",
- *  "… — expires today (12 Oct 2026)", "… — expired 3 days ago (21 Sep 2026)".
+ *  "… — expired today (12 Oct 2026)", "… — expired 3 days ago (21 Sep 2026)".
  * @param {Expiring} it */
 export function reminderItemLine(it) {
   const what = it.title ? it.code + " " + it.title : it.code;
   const when = reminderDate(it.date);
-  if (it.daysLeft === 0) return what + " — expires today (" + when + ")";
+  /* Nought days left is a certificate that has gone: the day printed on it
+     is the day it stops counting (MO70 s 5(a)(iii)). "Expires today" told
+     the office a man could sail on it that day, and he cannot. */
+  if (it.daysLeft === 0) return what + " — expired today (" + when + ")";
   if (it.daysLeft < 0) return what + " — expired " + remPlural(-it.daysLeft, "day") + " ago (" + when + ")";
   return what + " — expires " + when + " (" + remPlural(it.daysLeft, "day") + ")";
 }

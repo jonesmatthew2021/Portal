@@ -32,7 +32,9 @@ function CertChecker({ query }) {
   const gapsFor = (row) =>
     QUALS.cols.map((c, i) => ({ code: c[0], title: c[1], group: c[2], value: row[3][i], band: bandFor(row[3][i]) }))
       .filter((x) => x.band && (
-        (x.band.date && daysTo(x.band.date) < 0) || x.band.key === "not" || x.band.key === "unknown"));
+        // The day printed on it is the day it stops counting (MO70 s 5(a)(iii)),
+        // so a certificate running out today is on this list today.
+        (x.band.date && hasExpired(x.band.date, TODAY)) || x.band.key === "not" || x.band.key === "unknown"));
 
   const kindOf = (x) => (x.band.date ? "expired" : x.band.key === "not" ? "missing" : "unknown");
 

@@ -324,7 +324,7 @@ function CrewReport({ onClose }) {
   const soonOf = (items) => items.filter((x) => x.band.date && daysTo(x.band.date) <= RED_DAYS);
   const total = crew.reduce((n, a) => n + a.items.length, 0);
   const due = crew.reduce((n, a) => n + soonOf(a.items).length, 0);
-  const expired = crew.reduce((n, a) => n + a.items.filter((i) => i.band.date && daysTo(i.band.date) < 0).length, 0);
+  const expired = crew.reduce((n, a) => n + a.items.filter((i) => i.band.date && hasExpired(i.band.date, TODAY)).length, 0);
 
   const heading = "Crew Report - every item on the matrix";
   const standfirst = `${VESSEL.name} ${VESSEL.nameAccent} · as at ${fmtDate(TODAY)} · ${crew.length} crew · ${total} items · ${due} due within ${RED_DAYS} days${expired ? ` · ${expired} already expired` : ""}`;
@@ -489,8 +489,9 @@ function MatrixPerson({ row, onClose }) {
   const scansFor = (code) => files.filter((f) => f.qualCode === code);
 
   const dated = (test) => items.filter((x) => x.band.date && test(daysTo(x.band.date)));
-  const expired = dated((d) => d < 0);
-  const soon = dated((d) => d >= 0 && d <= RED_DAYS);
+  // Nought days left has gone: MO70 s 5(a)(iii).
+  const expired = dated((d) => d <= 0);
+  const soon = dated((d) => d > 0 && d <= RED_DAYS);
   const later = dated((d) => d > RED_DAYS && d <= AMBER_DAYS);
   const notHeld = items.filter((x) => x.band.key === "not");
   const unconfirmed = items.filter((x) => x.band.key === "unknown");

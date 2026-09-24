@@ -19,7 +19,7 @@ import { canonicalPersonName } from "../src/db/person-name.js";
 import { setEnv } from "../src/env.js";
 import { vessel, checkVessel, vesselNow } from "../src/vessel.js";
 import { crewRowsOnly, crewRegister, nameLetters, registerWords } from "../../source/shared/names.js";
-import { RED_DAYS, daysUntil } from "../../source/shared/bands.js";
+import { RED_DAYS, daysUntil, hasExpired } from "../../source/shared/bands.js";
 import * as reminders from "../../source/shared/reminders.js";
 import { particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, ticketCodesIn, isMsicCard, openToCertificates } from "../../source/shared/particulars.js";
 import { coveredCells, coveredCodes, unitCodesIn, unitColumnsIn } from "../../source/shared/covers.js";
@@ -610,14 +610,14 @@ test("the emails say the list in plain words, and nothing else but the portal's 
   const it = (daysLeft: number, date: string) => ({ person: "SITTIYOS, Kachin", code: "QL-17", title: "AMSA Medical", date, daysLeft, from: ["SITTIYOS, Kachin"] });
   assert.equal(reminders.reminderItemLine(it(18, "2026-10-12")), "QL-17 AMSA Medical — expires 12 Oct 2026 (18 days)");
   assert.equal(reminders.reminderItemLine(it(1, "2026-09-25")), "QL-17 AMSA Medical — expires 25 Sep 2026 (1 day)");
-  assert.equal(reminders.reminderItemLine(it(0, "2026-09-24")), "QL-17 AMSA Medical — expires today (24 Sep 2026)");
+  assert.equal(reminders.reminderItemLine(it(0, "2026-09-24")), "QL-17 AMSA Medical — expired today (24 Sep 2026)");
   assert.equal(reminders.reminderItemLine(it(-3, "2026-09-21")), "QL-17 AMSA Medical — expired 3 days ago (21 Sep 2026)");
   const ship = `${vessel.name} ${vessel.nameAccent}`;
   const own = reminders.reminderText(vessel, "SITTIYOS, Kachin", items.filter((i) => i.person === "SITTIYOS, Kachin"), REMINDER_TODAY, 90);
   assert.equal(own.subject, `Your certificates expiring within 90 days - ${ship}`);
   assert.equal(own.text,
     `Your certificates on the ${ship} crew matrix (SITTIYOS, Kachin) that have expired or expire within 90 days, as at 28 Sep 2026:\n\n` +
-    "QL-17 AMSA Medical — expires today (28 Sep 2026)\n" +
+    "QL-17 AMSA Medical — expired today (28 Sep 2026)\n" +
     "QL-01 Master — expires 27 Dec 2026 (90 days)\n\n" +
     `https://${vessel.domain}\n`);
   assert.match(own.html, /<li[^>]*>QL-01 Master — expires 27 Dec 2026 \(90 days\)<\/li>/);
@@ -626,7 +626,7 @@ test("the emails say the list in plain words, and nothing else but the portal's 
   assert.equal(summary.text,
     `Crew certificates on the ${ship} crew matrix that have expired or expire within 90 days, as at 28 Sep 2026 - 3 items, 2 people:\n\n` +
     "EVANS, Brenton\n  QL-17 AMSA Medical — expired 3 days ago (25 Sep 2026)\n\n" +
-    "SITTIYOS, Kachin\n  QL-17 AMSA Medical — expires today (28 Sep 2026)\n  QL-01 Master — expires 27 Dec 2026 (90 days)\n\n" +
+    "SITTIYOS, Kachin\n  QL-17 AMSA Medical — expired today (28 Sep 2026)\n  QL-01 Master — expires 27 Dec 2026 (90 days)\n\n" +
     `https://${vessel.domain}\n`);
   // A name is written into the html as text, never as markup.
   const odd = reminders.reminderText(vessel, "<b>O'NEIL</b>, Pat", [{ ...it(5, "2026-10-03"), title: "A & B" }], REMINDER_TODAY, 90);
@@ -1280,4 +1280,23 @@ test("recognition: the safety training and cook columns are never filled by one"
   assert.equal(recognitionFills("QL-01", barred), true);
   assert.equal(recognitionFills("QL-14", barred), true, "a recognition of GMDSS is the one on file today and still fills it");
   assert.equal(recognitionFills("QL-12", null), true, "no list, no bar - the vessel file decides, not the code");
+});
+
+test("the expiry day itself is the day a certificate stops counting (MO70 s 5(a)(iii))", () => {
+  /* A certificate is held only while it is not suspended, not cancelled, and
+     its expiry date "has not been reached". So the printed day is the first
+     day it counts for nothing - not the last day it counts. daysUntil is a
+     plain day count and answers 0 on that day; hasExpired is the rule that
+     reads it, and every list that decides whether a man holds something
+     reads it through that. */
+  assert.equal(daysUntil("2026-09-25", "2026-09-25"), 0, "daysUntil is a day count and says nothing about the rule");
+  assert.equal(hasExpired("2026-09-25", "2026-09-25"), true, "the day printed on it, and it has gone");
+  assert.equal(hasExpired("2026-09-24", "2026-09-25"), true, "yesterday, and it has gone");
+  assert.equal(hasExpired("2026-09-26", "2026-09-25"), false, "tomorrow, and it is still in hand today");
+  // And the words the office reads say the same: "expires today" told them a
+  // man could sail on a certificate that had already stopped counting.
+  assert.equal(
+    reminders.reminderItemLine({ person: "SITTIYOS, Kachin", code: "QL-17", title: "AMSA Medical", date: "2026-09-24", daysLeft: 0, from: [] }),
+    "QL-17 AMSA Medical — expired today (24 Sep 2026)",
+  );
 });

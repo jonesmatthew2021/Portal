@@ -194,7 +194,8 @@ function standing(iso: string | null | undefined) {
   const n = daysAway(iso);
   if (n === null) return iso;
   if (n < 0) return `${iso} — EXPIRED ${-n} ${-n === 1 ? "day" : "days"} ago`;
-  if (n === 0) return `${iso} — expires today`;
+  // The day printed on it is the day it stops counting (MO70 s 5(a)(iii)).
+  if (n === 0) return `${iso} — EXPIRED today`;
   if (n <= RED_DAYS) return `${iso} — ${n} ${n === 1 ? "day" : "days"} left`;
   return `${iso} — current`;
 }

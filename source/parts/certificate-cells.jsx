@@ -426,6 +426,9 @@ function bandLabel(band) {
   if (band.key === "covered") return band.text;
   if (!band.date) return band.text;
   const d = daysTo(band.date);
+  // Nought days left is a certificate that has gone, not one with a day in
+  // it: the printed day is the day it stops counting (MO70 s 5(a)(iii)).
+  if (d === 0) return "Expired today";
   return d < 0 ? `Expired ${Math.abs(d)} days ago` : `${d} days`;
 }
 
