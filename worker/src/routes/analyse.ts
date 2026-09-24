@@ -33,6 +33,8 @@ import {
   mediaFor,
   MODEL,
   ModelRefusal,
+  plainLine,
+  type RefusalKind,
   neverLapses,
   READING_VERSION,
   readingKey,
@@ -237,11 +239,11 @@ async function askModel(row: Row, bytes: ArrayBuffer, codes: [string, string][])
   return reading;
 }
 
-/** Read up to `limit` certificates that have no reading yet. */
 /** One certificate read now — the same checks and the same question the
- * batch read puts, for a file that has just been filed. A refusal from the
- * model is written down as unreadable; a busy model throws, to be tried
- * again. */
+ * batch read puts, for a file that has just been filed. A document the
+ * model turned away is written down as unreadable; anything about the
+ * account - no credit, the rate, a busy model, the key - throws, to be
+ * tried again once the account is in order. */
 export async function readCertificate(row: Row, codes: [string, string][]): Promise<Reading> {
   const unreadable = (reason: string) =>
     ({ version: READING_VERSION, at: new Date().toISOString(), model: null, readable: false, reason }) as Reading;
@@ -255,7 +257,7 @@ export async function readCertificate(row: Row, codes: [string, string][]): Prom
   try {
     return await askModel(row, bytes, codes);
   } catch (e) {
-    if (e instanceof ModelRefusal && e.status === 400) {
+    if (e instanceof ModelRefusal && e.kind === "document") {
       const said = refusalSays(e);
       return unreadable(`The model turned this file away${said ? `: ${said}` : " as one it can't read."}`);
     }
@@ -263,21 +265,25 @@ export async function readCertificate(row: Row, codes: [string, string][]): Prom
   }
 }
 
-/**
- * Whether a refusal is about the account paying for the reading rather than
- * the document being read.
- *
- * These are all temporary in the way that matters: the same file sent again
- * once the account is in order reads perfectly well. Remembering them as
- * unreadable would be remembering a fact about a credit card as a fact about a
- * crew member's certificate.
- */
-function aboutTheAccount(said: string | null) {
-  return /credit balance|billing|quota|payment|insufficient funds|spend limit|rate limit|overloaded|capacity/i.test(
-    said || "",
-  );
+/** Why a batch could not go on: the account is out of credit or its key
+ *  refused (nothing will read until a person acts), or every certificate
+ *  it tried met a model that was busy or over its rate (the next hour
+ *  tries again). Null where the batch got through, or failed for reasons
+ *  of the documents' own. */
+export type ReadStopped = { kind: RefusalKind; line: string } | null;
+
+export function stoppedBy(
+  failures: { kind: RefusalKind | null; error: string }[], extracted: number,
+): ReadStopped {
+  const hard = failures.find((f) => f.kind === "credit") || failures.find((f) => f.kind === "key");
+  if (hard) return { kind: hard.kind!, line: hard.error };
+  if (extracted === 0 && failures.length && failures.every((f) => f.kind === "rate" || f.kind === "busy")) {
+    return { kind: failures[0].kind!, line: failures[0].error };
+  }
+  return null;
 }
 
+/** Read up to `limit` certificates that have no reading yet. */
 export async function extract(codes: [string, string][], limit: number) {
   const certs = await liveCertificates();
   const store = readingStore();
@@ -290,7 +296,7 @@ export async function extract(codes: [string, string][], limit: number) {
   const outstanding = certs.filter((row) => !done.has(readingKey(row)));
   const batch = outstanding.slice(0, limit);
 
-  const failures: { filename: string; person: string | null; error: string }[] = [];
+  const failures: { filename: string; person: string | null; error: string; kind: RefusalKind | null }[] = [];
 
   await Promise.all(
     batch.map(async (row) => {
@@ -331,26 +337,25 @@ export async function extract(codes: [string, string][], limit: number) {
 
         await store.setJSON(readingKey(row), await askModel(row, bytes, codes));
       } catch (e) {
-        // A 400 is the model turning the document itself away — a corrupted or
+        // The model turning the document itself away - a corrupted or
         // password-protected file gets the same refusal every time it is sent,
         // and a certificate that can never be read would otherwise sit at the
         // front of every batch and stop the reading from ever finishing. It is
         // written down as unreadable, with the refusal and what to do about it,
         // and the next batch moves on to the certificates behind it.
-        /* A 400 that is about the account rather than the document.
+        /* Only that, though: a refusal sorted as about the document (its
+         * kind, decided once in lib/analysis.ts), and nothing else.
          *
-         * "Your credit balance is too low to access the Anthropic API" comes
+         * "Your credit balance is too low to access the Anthropic API" came
          * back as a 400, the same status the model uses to turn away a
-         * corrupted or password-protected file. Read as a refusal of the
-         * document it gets written down as unreadable for good - and then
-         * topping the account up fixes nothing, because every one of those
-         * certificates is remembered as already read and never tried again.
-         *
-         * It happened: 791 certificates of a crew's paperwork put beyond reach
-         * by a billing message, each one filed as though the scan itself were
-         * corrupt. Nothing is written down for these now, so they queue up
-         * again the moment there is credit to read them with. */
-        if (e instanceof ModelRefusal && e.status === 400 && !aboutTheAccount(refusalSays(e))) {
+         * corrupted file. Read by its status it was written down as
+         * unreadable for good - and then topping the account up fixed
+         * nothing, because every one of those certificates was remembered
+         * as already read and never tried again. It happened: 791
+         * certificates of a crew's paperwork put beyond reach by a billing
+         * message. Nothing is written down for anything about the account,
+         * so those queue up again the moment there is credit to read them. */
+        if (e instanceof ModelRefusal && e.kind === "document") {
           const said = refusalSays(e);
           try {
             await store.setJSON(readingKey(row), {
@@ -367,17 +372,21 @@ export async function extract(codes: [string, string][], limit: number) {
           }
         }
         // Nothing is written: a certificate that failed because the model was
-        // busy has to be tried again, not remembered as unreadable for good.
+        // busy, or the account short, has to be tried again, not remembered
+        // as unreadable for good. The failure is said in the one short
+        // sentence for its kind.
         failures.push({
           filename: row.filename,
           person: row.person,
-          error: e instanceof Error ? e.message : String(e),
+          error: e instanceof ModelRefusal ? plainLine(e) : e instanceof Error ? e.message : String(e),
+          kind: e instanceof ModelRefusal ? e.kind : null,
         });
       }
     }),
   );
 
   const read = certs.length - outstanding.length + (batch.length - failures.length);
+  const extracted = batch.length - failures.length;
 
   return Response.json({
     total: certs.length,
@@ -386,8 +395,11 @@ export async function extract(codes: [string, string][], limit: number) {
     // What this call got through, so the portal can tell a batch that read
     // nothing at all from one that is simply not finished yet.
     attempted: batch.length,
-    extracted: batch.length - failures.length,
+    extracted,
     failures,
+    // Why the reading cannot go on, where it cannot: the hour stops on it
+    // and the page shows its line.
+    stopped: stoppedBy(failures, extracted),
   });
 }
 

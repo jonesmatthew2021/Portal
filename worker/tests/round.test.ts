@@ -14,7 +14,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setEnv } from "../src/env.js";
-import analyse, { compareMatrix, refile } from "../src/routes/analyse.js";
+import analyse, { compareMatrix, extract, refile } from "../src/routes/analyse.js";
+import readOne from "../src/routes/read-one.js";
+import { OUT_OF_CREDIT, READING_UNAVAILABLE } from "../src/lib/analysis.js";
 import { KeptInPlace, ensureDocumentColumns, forgetDocumentColumns, purgeDocument, relocateToRemovedBlob, removeDocument, restoreDocument } from "../src/db/documents.js";
 import { replaceSingleFile } from "../src/db/single-file.js";
 import { saveDocument } from "../src/lib/shared-state.js";
@@ -2488,6 +2490,143 @@ test("a fresh database with no documents table is let through, not altered", asy
  * Which qualification expiry sheet is the newer: the date on the front,
  * then the library's modified time, and never the alphabet.
  * ------------------------------------------------------------------------ */
+/* ------------------------------------------------------------------------ *
+ * The model's account, not the scan: a refusal about credit, the rate, a
+ * busy model or the key stores nothing against the certificate, so it is
+ * read the moment the account is in order. Only a document the model
+ * turned away is written down as unreadable.
+ * ------------------------------------------------------------------------ */
+
+/** The model, answered by hand: every POST to /v1/messages gets what
+ *  `answer` says for it, and is written down. */
+function modelAnswers(answer: (n: number) => { status: number; body: string }) {
+  const calls: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (!url.endsWith("/v1/messages")) return realFetch(input, init);
+    calls.push(String(init?.body || ""));
+    const { status, body } = answer(calls.length);
+    return new Response(body, { status, headers: { "content-type": status === 200 ? "text/event-stream" : "application/json" } });
+  }) as typeof fetch;
+  return { calls, restore: () => { globalThis.fetch = realFetch; } };
+}
+const apiError = (type: string, message: string) => JSON.stringify({ type: "error", error: { type, message } });
+const CREDIT_BODY = apiError("invalid_request_error", "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.");
+const BAD_PDF_BODY = apiError("invalid_request_error", "messages.0.content.0.pdf.source.base64.data: The PDF specified was not valid.");
+const RATE_BODY = apiError("rate_limit_error", "This request would exceed the rate limit of 50 requests per minute.");
+/** A whole reading, streamed the way the model streams it. */
+const readingStream = (reading: Record<string, unknown>) =>
+  `data: ${JSON.stringify({ type: "content_block_delta", delta: { type: "text_delta", text: JSON.stringify(reading) } })}\n\n` +
+  `data: ${JSON.stringify({ type: "message_delta", delta: { stop_reason: "end_turn" } })}\n\n`;
+
+/** Evans's portal with `n` certificates on the books that have no reading
+ *  yet, and the model switched on. */
+const unreadPortal = async (n = 1, over: Parameters<typeof oneManPortal>[0] = {}) => {
+  const made = await oneManPortal(over);
+  for (let i = 1; i <= n; i++) {
+    const key = `opms/Brenton - OPMS/unread-${i}.pdf`;
+    await made.bucket.put(key, bytesOf("a scan nobody has read"));
+    made.portal.rows.push({ ...billysTicket, id: `u${i}`, person: "EVANS, Brenton", checksum: `unread-${i}`, blobKey: key, filename: `unread-${i}.pdf`, sizeBytes: 22, qualCode: null });
+  }
+  made.bucket.made.length = 0;
+  const env = { DB: made.portal.db, FILES: made.bucket, FILE_STORE: "r2", ANTHROPIC_API_KEY: "k", ANTHROPIC_BASE_URL: "https://model.test" };
+  setEnv(env as never);
+  return { ...made, env };
+};
+const readingWrites = (db: { asked: Asked[] }) =>
+  db.asked.filter((a) => /^INSERT INTO blobs/.test(a.sql) && a.args[0] === "certificate-readings");
+const quiet = async <T>(work: () => Promise<T>) => {
+  const realError = console.error;
+  console.error = () => {};
+  try { return await work(); } finally { console.error = realError; }
+};
+
+test("out of credit: the batch stores nothing, and says why in one line", async () => {
+  const { portal } = await unreadPortal(2);
+  const model = modelAnswers(() => ({ status: 400, body: CREDIT_BODY }));
+  try {
+    const out = (await (await extract([["QL-01", "Master"]], 4)).json()) as { extracted: number; attempted: number; stopped: { kind: string; line: string } | null; failures: { error: string; kind: string }[] };
+    assert.equal(out.attempted, 2);
+    assert.equal(out.extracted, 0);
+    assert.deepEqual(out.stopped, { kind: "credit", line: OUT_OF_CREDIT });
+    assert.deepEqual(out.failures.map((f) => [f.kind, f.error]), [["credit", OUT_OF_CREDIT], ["credit", OUT_OF_CREDIT]]);
+  } finally {
+    model.restore();
+  }
+  assert.deepEqual(readingWrites(portal.db), [], "no reading was stored: the certificates queue again after a top-up");
+});
+
+test("a PDF the model turns away is stored as unreadable, with the plain reason, and stops nothing", async () => {
+  const { portal } = await unreadPortal(1);
+  const model = modelAnswers(() => ({ status: 400, body: BAD_PDF_BODY }));
+  try {
+    const out = (await (await extract([["QL-01", "Master"]], 4)).json()) as { extracted: number; stopped: unknown; failures: unknown[] };
+    assert.equal(out.extracted, 1, "an unreadable reading counts as read: the batch moves on");
+    assert.equal(out.stopped, null);
+    assert.deepEqual(out.failures, []);
+  } finally {
+    model.restore();
+  }
+  assert.equal(readingWrites(portal.db).length, 1, "one reading stored");
+  const stored = JSON.parse(portal.blobs.get("certificate-readings|r1/unread-1.json")!);
+  assert.equal(stored.readable, false);
+  assert.match(stored.reason, /^The model turned this file away: The PDF specified was not valid\./, "the field prefix is off the reason");
+});
+
+test("over the rate: the batch stores nothing and says the reading is unavailable", async () => {
+  const { portal } = await unreadPortal(1);
+  const model = modelAnswers(() => ({ status: 429, body: RATE_BODY }));
+  try {
+    const out = (await (await extract([["QL-01", "Master"]], 4)).json()) as { extracted: number; stopped: unknown };
+    assert.equal(out.extracted, 0);
+    assert.deepEqual(out.stopped, { kind: "rate", line: READING_UNAVAILABLE });
+  } finally {
+    model.restore();
+  }
+  assert.deepEqual(readingWrites(portal.db), [], "nothing stored");
+});
+
+const readOneNow = (id: string, discardUnreadable: boolean) => readOne(
+  new Request("http://portal/api/certificates/read-one", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, discardUnreadable }) }),
+);
+
+test("a phone photo met by an empty account stays on the books, and the phone hears the one line", async () => {
+  const { portal, bucket } = await unreadPortal(1);
+  const model = modelAnswers(() => ({ status: 400, body: CREDIT_BODY }));
+  try {
+    const res = await readOneNow("u1", true);
+    assert.equal(res.status, 502);
+    assert.deepEqual(await res.json(), { error: OUT_OF_CREDIT, kind: "credit" });
+  } finally {
+    model.restore();
+  }
+  assert.deepEqual(readingWrites(portal.db), [], "no reading stored");
+  const row = portal.rows.find((r) => r.id === "u1")!;
+  assert.equal(row.removedAt, null, "not discarded: the photo is read on the hour once there is credit");
+  assert.equal(bucket.text("opms/Brenton - OPMS/unread-1.pdf"), "a scan nobody has read", "and the file is where it was");
+});
+
+test("a phone photo the model cannot read is still taken off again when the phone asked for that", async () => {
+  const { portal, bucket } = await unreadPortal(1);
+  const model = modelAnswers(() => ({ status: 400, body: BAD_PDF_BODY }));
+  try {
+    const res = await quiet(() => readOneNow("u1", true));
+    const said = await res.text();
+    assert.equal(res.status, 200, said);
+    const out = JSON.parse(said) as { discarded: boolean; readable: boolean };
+    assert.equal(out.discarded, true);
+    assert.equal(out.readable, false);
+  } finally {
+    model.restore();
+  }
+  const row = portal.rows.find((r) => r.id === "u1")!;
+  assert.ok(row.removedAt, "off the books");
+  assert.equal(row.removedBy, "not clear — retake");
+  assert.equal(bucket.text("opms/Brenton - OPMS/unread-1.pdf"), null, "the photo is parked, not left live");
+  assert.deepEqual(bucket.made, [], "no folder was made");
+});
+
 test("a dated sheet beats an undated one whatever the alphabet says", () => {
   const dated = { key: "opms/20260901 - CREW QUALIFICATION EXPIRY.xlsx", modified: "2026-09-01T00:00:00Z" };
   const undated = { key: "opms/CREW QUALIFICATION EXPIRY.xlsx", modified: "2026-08-01T00:00:00Z" };

@@ -3,7 +3,7 @@ import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
 import { canonicaliseCertificate, refileCertificate, relocateToRemovedBlob } from "../db/documents.js";
 import { holderOnMatrix, readCertificate } from "./analyse.js";
-import { codeFor, equivalences, readingKey, readingStore, type Reading } from "../lib/analysis.js";
+import { codeFor, equivalences, ModelRefusal, plainLine, readingKey, readingStore, type Reading } from "../lib/analysis.js";
 import { imageToPdf } from "../lib/pdf-wrap.js";
 import { getEnv } from "../env.js";
 
@@ -46,8 +46,16 @@ export default async (req: Request): Promise<Response> => {
     try {
       reading = await readCertificate(row, codes);
     } catch (e) {
+      // Nothing about the account - no credit, the rate, a busy model, the
+      // key - is stored against the certificate, and none of it reaches
+      // the discard below: the file stays on the books, to be read on the
+      // hour once the account is in order, and the phone is told which in
+      // one short sentence.
       return Response.json(
-        { error: e instanceof Error ? e.message : String(e) },
+        {
+          error: e instanceof ModelRefusal ? plainLine(e) : e instanceof Error ? e.message : String(e),
+          kind: e instanceof ModelRefusal ? e.kind : null,
+        },
         { status: 502 },
       );
     }
