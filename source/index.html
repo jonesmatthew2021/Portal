@@ -365,6 +365,62 @@ const showPicker = (shimFlag, meFailed) => !!shimFlag && !!meFailed;
  *  @param {string|null} meFetchedAt  the stamp on the boot's /api/me, null if live
  *  @param {boolean} controlled  whether a worker controlled the page at boot */
 const keepIdentityAfterControl = (meFetchedAt, controlled) => !meFetchedAt && !controlled;
+/** Whether a page left uncontrolled while the worker is already active
+ *  should reload itself once to come under it. After a hard reload
+ *  (shift-reload, or a reload from the browser's own offline error page)
+ *  the browser leaves the page outside the worker: controllerchange
+ *  never fires, every fetch of that page session goes past the worker,
+ *  nothing kept is refreshed for as long as the tab stays open, and a
+ *  sign-out from it has no controller to tell. Once only: a page that
+ *  has already tried is never reloaded again, whatever the reason it
+ *  did not take.
+ *  @param {boolean} controlled  whether a worker controls the page now
+ *  @param {boolean} workerActive  whether the registration has an active worker
+ *  @param {boolean} alreadyTried  whether this page session has reloaded for this before */
+const reloadToBeControlled = (controlled, workerActive, alreadyTried) => !controlled && !!workerActive && !alreadyTried;
+/* How long an uncontrolled page gives the worker to claim it before
+   reloading itself (reloadToBeControlled). A first-ever install's ready
+   settles while its activate is still running, with clients.claim() a
+   moment away; without this the page reloaded on every first visit. */
+const CLAIM_GRACE_MS = 2000;
+/* Gives the service worker its first kept /api/me and its first kept
+   page. Whether the boot's /api/me went through the worker is decided by
+   whether a worker controlled the page when that request was SENT
+   (controlledAtBoot), never by looking afterwards: a worker that took
+   control while /api/me was on the wire is in place by the time the
+   answer is in, and judged then it looked like one that had answered it
+   - nothing was armed, controllerchange had already fired, and the page
+   never asked again that session, so a phone opened once at the wharf
+   and reopened at sea had no /api/me kept. The listener goes on at once
+   (not after ready, which the change can beat), and a worker already in
+   control is asked now; asking twice is harmless. The page is asked for
+   too: the install keeps only the build's own files, since the page is
+   somebody's and an install cannot know whose cookie it holds.
+   A page that ready finds uncontrolled with the worker active is
+   reloaded once (reclaim: tried, mark, reload, wait), after a moment for
+   the claim to land.
+   @param {ServiceWorkerContainer|null} sw  navigator.serviceWorker
+   @param {typeof fetch} fetchFn
+   @param {boolean} controlledAtBoot  whether a worker controlled the page when /api/me was sent
+   @param {string|null} meFetchedAt  the stamp on the boot's /api/me, null if live
+   @param {{ tried(): boolean, mark(): void, reload(): void, wait(fn: () => void): void }} [reclaim]
+   @returns {boolean} whether the re-ask was armed */
+function keepIdentityOnceControlled(sw, fetchFn, controlledAtBoot, meFetchedAt, reclaim) {
+  if (!sw || !keepIdentityAfterControl(meFetchedAt, controlledAtBoot)) return false;
+  const reask = () => {
+    fetchFn("/api/me", { cache: "no-store" }).catch(() => {});
+    fetchFn("/", { cache: "no-store" }).catch(() => {});
+  };
+  const once = () => { sw.removeEventListener("controllerchange", once); reask(); };
+  sw.addEventListener("controllerchange", once);
+  if (sw.controller) { once(); return true; }
+  if (reclaim && sw.ready) {
+    Promise.resolve(sw.ready).then((reg) => reclaim.wait(() => {
+      if (reloadToBeControlled(!!sw.controller, !!(reg && reg.active), reclaim.tried())) { reclaim.mark(); reclaim.reload(); }
+    })).catch(() => {});
+  }
+  return true;
+}
 /** Whether the person the page booted as is still only a kept copy's word
  *  while the document is live: /api/me came stamped (the link said nothing
  *  for NETWORK_WAIT_MS at boot, or the worker's copy stood in) and the poll
@@ -6608,6 +6664,12 @@ function App() {
   React.useEffect(() => {
     (async () => {
       try {
+        // Whether a worker stands in front of this page is sampled before
+        // /api/me is sent: that is what decides whether the answer goes
+        // through it (keepIdentityOnceControlled).
+        let sw = null;
+        try { sw = navigator.serviceWorker || null; } catch (e) {}
+        const controlledAtBoot = !!(sw && sw.controller);
         const r = await fetch("/api/me");
         // A sign-in that is over (expired, or taken away) is over offline
         // too: what the service worker kept goes before the sign-in page.
@@ -6618,16 +6680,18 @@ function App() {
         // A kept copy's word is trusted only until the document comes
         // live (identityUnproven, proveIdentity).
         SESSION_ME_FETCHED_AT = isCachedAnswer(r.headers);
-        // The first worker's kept /api/me comes from this page, not its
-        // install (keepIdentityAfterControl): asked again once the worker
-        // controls the page, the answer goes through it and is kept.
+        // The first worker's kept /api/me and kept page come from this
+        // page, not its install: asked again once the worker controls the
+        // page, the answers go through it and are kept.
         try {
-          const sw = navigator.serviceWorker;
-          if (sw && keepIdentityAfterControl(SESSION_ME_FETCHED_AT, !!sw.controller)) {
-            sw.ready.then(() => sw.addEventListener("controllerchange", () => {
-              fetch("/api/me", { cache: "no-store" }).catch(() => {});
-            }, { once: true })).catch(() => {});
-          }
+          keepIdentityOnceControlled(sw, fetch, controlledAtBoot, SESSION_ME_FETCHED_AT, {
+            // Storage that throws (private browsing) counts as tried: a
+            // page that cannot remember reloading must not reload at all.
+            tried: () => { try { return !!sessionStorage.getItem("um-reclaimed"); } catch (e) { return true; } },
+            mark: () => { try { sessionStorage.setItem("um-reclaimed", "1"); } catch (e) {} },
+            reload: () => window.location.reload(),
+            wait: (fn) => setTimeout(fn, CLAIM_GRACE_MS),
+          });
         } catch (e) {}
         setMe(who);
       } catch (e) {

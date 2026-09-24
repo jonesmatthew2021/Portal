@@ -260,21 +260,29 @@ on any line that still names this one.
   sign-in form served where the page should be - clears the kept copies
   (`forgetsOn`), so a revoked device reads nothing offline, and a live 401
   on the poll sends the tab to the sign-in page the way the boot does
-  (`signInOverAfterPull`); a sign-in submitted on this device clears the
-  kept copies before the new person's page loads - the worker answers
-  `POST /login/verify` and `/logout` itself, after the deletes
-  (`forgetsBefore`), so a slow link can never boot the portal as the last
-  person; a live `/api/me` for somebody else clears them too; a
-  new build carries the kept answers across only from an earlier
-  `portal-*` cache and only for the same person (`earlierPortalCache`),
-  and the install never asks who is signed in - it fetches only the page
-  and the vendor files (the browser finds a deploy on the sign-in POST and
-  on the sign-out, and an install asking then was told the last person,
-  on a cookie not yet replaced or revoked, and kept them where nothing
-  forgot them); the first worker's kept `/api/me` is the page's to give
-  (`keepIdentityAfterControl`: a page booted live with no worker in front
-  of it asks `/api/me` again once the worker takes control, and that
-  answer is kept the ordinary way); a kept identity is trusted only
+  (`signInOverAfterPull`); a sign-out and a sign-in forget what is kept
+  before the request goes and again after the server answers, and a copy
+  fetched before either forget is never kept after it (`era` in `sw.js`:
+  the worker answers `POST /login/verify` and `/logout` itself,
+  `forgetsBefore`, so a slow link can never boot the portal as the last
+  person, and until the 303 is back the cookie is still theirs, so
+  anything answered in that round trip is forgotten again after it); a
+  live `/api/me` for somebody else clears them too; a
+  new build carries the kept answers and the page across only from an
+  earlier `portal-*` cache and only for the same person
+  (`earlierPortalCache`), and the install keeps only the build's own files
+  - the vendor scripts and fonts, never who is signed in nor the page (the
+  browser finds a deploy on the sign-in POST and on the sign-out, and an
+  install fetching then was told the last person, on a cookie not yet
+  replaced or revoked, and kept them where nothing forgot them); the first
+  worker's kept `/api/me` and kept page are the page's to give
+  (`keepIdentityOnceControlled`: a page booted live with no worker in
+  front of it when the boot's `/api/me` was sent - sampled before the
+  send, never after the answer, since the worker can take control while
+  the request is on the wire - asks `/api/me` and `/` again once the
+  worker controls it, at once if it already does, and those answers are
+  kept the ordinary way; a page a hard reload left uncontrolled under an
+  active worker reloads itself once, `reloadToBeControlled`); a kept identity is trusted only
   while the document is kept (`identityUnproven`: the first live
   `/api/state` under a stamped `/api/me` has the page ask `/api/me?live=1`
   once - `proveIdentity` - and reload as whoever the server says, or go to

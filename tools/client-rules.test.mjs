@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, SIGNED_IN_MESSAGE };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -1623,8 +1623,8 @@ const is = (got, want, what) => {
     newBuild.listeners.install(install);
     await install.done;
     is(asked.includes("/api/me"), false, "a build installing over an earlier build's cache, mid sign-in, never asks who is signed in");
-    is(asked.includes("/"), true, "…but still fetches the page for its head start");
-    is(asked.includes("/vendor/react.production.min.js"), true, "…and the vendor files");
+    is(asked.includes("/"), false, "…nor fetches the page, which is somebody's");
+    is(asked.includes("/vendor/react.production.min.js"), true, "…only the vendor files");
     // The 303 with B's cookie comes back, and the new worker takes over.
     signInAnswer(new Response(null, { status: 303, headers: { Location: "/" } }));
     is((await signIn.answer).status, 303, "B's sign-in completes");
@@ -1705,6 +1705,7 @@ const is = (got, want, what) => {
     await activate.done;
     is(newCache.store.has("/api/me"), false, "on taking over, the new cache still holds nobody");
     is(newCache.store.has("/api/state"), false, "…and no document");
+    is(newCache.store.has("/"), false, "…and no page either: the install fetched only the build's own files, so nothing fetched on A's cookie is in the new cache");
     // Offline now, somebody opens the portal on the signed-out device.
     newBuild.setFetch(() => new Promise(() => {}));
     const me = fetchEvent(new Request(ORIGIN + "/api/me"));
@@ -1718,12 +1719,160 @@ const is = (got, want, what) => {
     is(booted, null, "…nor later");
   }
   {
-    // A first-ever install, no earlier cache: the page and the vendor
-    // files are fetched for the head start, and who is signed in is not.
-    // The install cannot know whether the cookie it holds is mid sign-out;
-    // the page, booted live as the cookie's person, asks /api/me again
-    // once this worker takes control (keepIdentityAfterControl), and that
-    // is the first /api/me kept.
+    /* The sign-out race, in one build. A signs out: the worker deletes
+       its cache and sends /logout on, and until the server's 303 comes
+       back the cookie is still A's and the session not yet revoked. Any
+       request the worker answered in that round trip - another tab's
+       navigation to the page, a boot's /api/me, a poll of the document -
+       came back 200 as A, opened the cache again (which re-created the
+       one just deleted) and was kept there, and nothing forgot those
+       copies afterwards: with the link down the portal booted as A on a
+       device A had signed out of. Now the sign-out forgets a second time
+       once the server has answered, and a copy fetched before a forget
+       is never kept after it (era). */
+    const fetchEvent = (request) => ({
+      request, answer: null, done: Promise.resolve(),
+      respondWith(p) { this.answer = p; },
+      waitUntil(p) { this.done = this.done.then(() => p); },
+    });
+    const navigation = (path) => fetchEvent({ url: ORIGIN + path, method: "GET", mode: "navigate" });
+    const w = world();
+    const cache = w.cacheOf(w.NAME);
+    cache.store.set("/api/me", await w.stamped(json({ email: "a@example.com" })));
+    cache.store.set("/api/state", await w.stamped(json({ rev: 8 })));
+    cache.store.set("/", await w.stamped(new Response("<html>", { status: 200, headers: { "X-Portal-Page": "portal" } })));
+    let signOutAnswer;
+    w.setFetch(async (r) => {
+      const path = new URL(typeof r === "string" ? r : r.url, ORIGIN).pathname;
+      if (path === "/logout") return new Promise((res) => { signOutAnswer = res; });
+      if (path === "/") return new Response("<html>", { status: 200, headers: { "X-Portal-Page": "portal" } });
+      if (path === "/api/me") return json({ email: "a@example.com", name: "A", role: "management" });
+      return json({ rev: 9 });
+    });
+    const out = navigation("/logout");
+    w.listeners.fetch(out);
+    await settle();
+    is(await w.caches.keys(), [], "the sign-out has taken the whole cache and sent /logout on");
+    // While the server takes its time, the worker is asked for the page,
+    // for who this is, and for the document - all still under A's cookie.
+    const during = [navigation("/"), fetchEvent(new Request(ORIGIN + "/api/me")), fetchEvent(new Request(ORIGIN + "/api/state"))];
+    for (const ev of during) w.listeners.fetch(ev);
+    for (const ev of during) {
+      is((await ev.answer).status, 200, "a request for " + new URL(ev.request.url).pathname + " during the sign-out's round trip is answered 200, as A");
+      await ev.done;
+    }
+    signOutAnswer(new Response(null, { status: 303, headers: { Location: "/login" } }));
+    is((await out.answer).status, 303, "A's sign-out completes");
+    const keptAfter = (await w.caches.keys()).includes(w.NAME) ? [...w.cacheOf(w.NAME).store.keys()] : [];
+    is(keptAfter.includes("/"), false, "after the 303 the cache holds no page");
+    is(keptAfter.includes("/api/me"), false, "…no /api/me");
+    is(keptAfter.includes("/api/state"), false, "…and no document: what was answered as A during the round trip is forgotten again after it");
+    // The link down now: nothing is answered from a copy.
+    w.setFetch(() => Promise.reject(new TypeError("Failed to fetch")));
+    for (const path of ["/", "/api/me", "/api/state"]) {
+      const ev = path === "/" ? navigation("/") : fetchEvent(new Request(ORIGIN + path));
+      w.listeners.fetch(ev);
+      const answer = await ev.answer.catch(() => null);
+      is(answer, null, "an offline GET of " + path + " on the signed-out device is not answered from a copy");
+    }
+  }
+  {
+    /* A poll of the document already out when the sign-out lands: its
+       answer comes back as A after the cache has gone, and is not kept -
+       no cache comes back for it. */
+    const fetchEvent = (request) => ({
+      request, answer: null, done: Promise.resolve(),
+      respondWith(p) { this.answer = p; },
+      waitUntil(p) { this.done = this.done.then(() => p); },
+    });
+    const w = world();
+    const cache = w.cacheOf(w.NAME);
+    cache.store.set("/api/state", await w.stamped(json({ rev: 8 })));
+    let pollAnswer;
+    w.setFetch(async (r) => {
+      const path = new URL(typeof r === "string" ? r : r.url, ORIGIN).pathname;
+      if (path === "/api/state") return new Promise((res) => { pollAnswer = res; });
+      return new Response(null, { status: 303, headers: { Location: "/login" } });
+    });
+    const poll = fetchEvent(new Request(ORIGIN + "/api/state"));
+    w.listeners.fetch(poll);
+    await settle();
+    const out = fetchEvent({ url: ORIGIN + "/logout", method: "GET", mode: "navigate" });
+    w.listeners.fetch(out);
+    is((await out.answer).status, 303, "the sign-out completes while a poll of the document is still out");
+    pollAnswer(json({ rev: 9 }));
+    is((await poll.answer).status, 200, "the poll's answer lands after the sign-out, as A");
+    await poll.done;
+    is(await w.caches.keys(), [], "…and is not kept: no cache comes back for it");
+    w.setFetch(() => Promise.reject(new TypeError("Failed to fetch")));
+    const offlinePoll = fetchEvent(new Request(ORIGIN + "/api/state"));
+    w.listeners.fetch(offlinePoll);
+    is(await offlinePoll.answer.catch(() => null), null, "…so an offline GET of the document is not answered from a copy");
+  }
+  {
+    /* The sign-in twin. Tab 1 is open as A and polls the document; B
+       posts the code in tab 2. The worker forgets A's copies and sends
+       the code on - and A's poll, sent before that forget, is answered
+       during the round trip, as A, under A's cookie. Kept, it was A's
+       document beside B's /api/me. A copy fetched before a forget is
+       never kept after it; B's boot /api/me, fetched after the 303, is. */
+    const fetchEvent = (request) => ({
+      request, answer: null, done: Promise.resolve(),
+      respondWith(p) { this.answer = p; },
+      waitUntil(p) { this.done = this.done.then(() => p); },
+    });
+    const w = world();
+    const cache = w.cacheOf(w.NAME);
+    cache.store.set("/api/me", await w.stamped(json({ email: "a@example.com" })));
+    cache.store.set("/api/state", await w.stamped(json({ rev: 8 })));
+    cache.store.set("/vendor/react.production.min.js", new Response("react"));
+    const pollAnswers = [];
+    let signInAnswer, cookie = "a";
+    w.setFetch(async (r) => {
+      const path = new URL(typeof r === "string" ? r : r.url, ORIGIN).pathname;
+      if (path === "/api/state") return new Promise((res) => { pollAnswers.push(res); });
+      if (path === "/login/verify") return new Promise((res) => { signInAnswer = res; });
+      if (path === "/api/me") return json({ email: cookie + "@example.com" });
+      return new Response("react", { status: 200 });
+    });
+    // Two polls of A's are out: one answered during B's round trip, one after it.
+    const poll = fetchEvent(new Request(ORIGIN + "/api/state"));
+    const latePoll = fetchEvent(new Request(ORIGIN + "/api/state"));
+    w.listeners.fetch(poll);
+    w.listeners.fetch(latePoll);
+    await settle();
+    const signIn = fetchEvent({ url: ORIGIN + "/login/verify", method: "POST", mode: "navigate" });
+    w.listeners.fetch(signIn);
+    await settle();
+    is([...cache.store.keys()], ["/vendor/react.production.min.js"], "B's sign-in has forgotten A's copies and sent the code on");
+    pollAnswers[0](json({ rev: 9 }));
+    is((await poll.answer).status, 200, "A's poll is answered during B's sign-in round trip");
+    await poll.done;
+    is(cache.store.has("/api/state"), false, "…and A's document is not kept: it was fetched before the forget");
+    cookie = "b";
+    signInAnswer(new Response(null, { status: 303, headers: { Location: "/" } }));
+    is((await signIn.answer).status, 303, "B's sign-in completes");
+    pollAnswers[1](json({ rev: 9 }));
+    is((await latePoll.answer).status, 200, "A's other poll is answered after the 303, still as A - it went out on A's cookie");
+    await latePoll.done;
+    is(cache.store.has("/api/state"), false, "…and is not kept either");
+    // B's page boots and asks /api/me: fetched after the forget, it is B's and is kept.
+    const me = fetchEvent(new Request(ORIGIN + "/api/me"));
+    w.listeners.fetch(me);
+    is((await (await me.answer).json()).email, "b@example.com", "B's boot /api/me is the live answer");
+    await me.done;
+    is((await (await cache.match("/api/me")).json()).email, "b@example.com", "…and is kept: B's, fetched after the forget");
+    is([...cache.store.keys()].sort(), ["/api/me", "/vendor/react.production.min.js"], "…beside nothing of A's");
+  }
+  {
+    // A first-ever install, no earlier cache: only the build's own files
+    // - React, React DOM and the fonts - are fetched for the head start.
+    // Neither who is signed in nor the page: the install cannot know
+    // whether the cookie it holds is mid sign-out, and the page is served
+    // only to somebody signed in. The page, booted live as the cookie's
+    // person, asks /api/me and the page again once this worker takes
+    // control (keepIdentityOnceControlled), and those are the first of
+    // each kept.
     const w = world();
     const asked = [];
     w.setFetch(async (r) => {
@@ -1737,12 +1886,17 @@ const is = (got, want, what) => {
     w.listeners.install(install);
     await install.done;
     is(asked.includes("/api/me"), false, "a first install, with no earlier cache, still never asks who is signed in");
-    is(asked.includes("/"), true, "…but fetches the page for its head start");
-    is(asked.includes("/vendor/react.production.min.js"), true, "…and the vendor files");
-    is([...w.cacheOf(w.NAME).store.keys()].sort(), ["/", "/vendor/react.production.min.js"], "…and keeps exactly those");
-    // The page, controlled now, asks /api/me again: it goes through the
-    // worker and is kept the ordinary way.
+    is(asked.includes("/"), false, "…nor fetches the page: it is somebody's, served only behind their sign-in");
+    is(asked.includes("/vendor/react.production.min.js"), true, "…only the vendor files");
+    is([...w.cacheOf(w.NAME).store.keys()], ["/vendor/react.production.min.js"], "…and keeps exactly those");
+    // The page, controlled now, asks for the page and /api/me again: they
+    // go through the worker and are kept the ordinary way.
     const fetchEvent = (request) => ({ request, answer: null, done: Promise.resolve(), respondWith(p) { this.answer = p; }, waitUntil(p) { this.done = this.done.then(() => p); } });
+    const page = fetchEvent({ url: ORIGIN + "/", method: "GET" });
+    w.listeners.fetch(page);
+    is((await page.answer).status, 200, "the page's own ask of /, through the worker, is the live page");
+    await page.done;
+    is(await (await w.cacheOf(w.NAME).match("/")).text(), "<html>", "…and is the first page kept");
     const me = fetchEvent(new Request(ORIGIN + "/api/me"));
     w.listeners.fetch(me);
     is((await (await me.answer).json()).email, "a@example.com", "the page's own ask of /api/me, through the worker, is the live answer");
@@ -1794,6 +1948,7 @@ const is = (got, want, what) => {
     const oldCache = oldBuild.cacheOf(oldBuild.NAME);
     oldCache.store.set("/api/me", await oldBuild.stamped(json({ email: "b@example.com" })));
     oldCache.store.set("/api/state", await oldBuild.stamped(json({ rev: 8 })));
+    oldCache.store.set("/", await oldBuild.stamped(new Response("<html>old", { status: 200, headers: { "X-Portal-Page": "portal" } })));
     const newBuild = world("newbuild", shared);
     let askedWho = false;
     newBuild.setFetch(async (r) => {
@@ -1811,6 +1966,7 @@ const is = (got, want, what) => {
     is(askedWho, false, "a deploy with the same person signed in asks nobody who that is");
     is((await (await mine.match("/api/me")).json()).email, "b@example.com", "…their /api/me comes across from the earlier build's cache");
     is((await (await mine.match("/api/state")).json()).rev, 8, "…with their document");
+    is(await (await mine.match("/")).text(), "<html>old", "…and the page they last opened, since the install fetched none: the next opening with the link up replaces it");
   }
   {
     // The phone's storage gone at install: caches.open and caches.keys
@@ -1859,7 +2015,7 @@ const is = (got, want, what) => {
      name picker may stand in for the sign-in. The last one is the bug
      that started this: a link that was down used to fall through to the
      honour-system picker on the live site. */
-  const { offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, identityUnproven, keepIdentityAfterControl, SIGNED_IN_MESSAGE, VESSEL } = lib;
+  const { offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, VESSEL } = lib;
   /* What a poll of /api/state decides. A live answer of any status ends
      offline mode: a 500 is a server in trouble on a link that is up, and
      the badge says Not saving with the reason, as it always did. Before
@@ -1902,6 +2058,121 @@ const is = (got, want, what) => {
   is(keepIdentityAfterControl(STAMP, false), false, "a kept boot has nothing live to give");
   is(keepIdentityAfterControl(null, true), false, "a page controlled from the start needs nothing: its boot's /api/me was kept as it came through");
   is(keepIdentityAfterControl(STAMP, true), false, "…nor a kept boot under a worker");
+  /* The hook itself, against a pretend navigator.serviceWorker. Whether
+     the boot's /api/me went through the worker is decided by whether a
+     worker controlled the page when that request was SENT, not when it
+     was answered: judged after the answer, a worker that took control
+     while /api/me was on the wire looked like one that had answered it,
+     no listener was armed, controllerchange had already fired, and the
+     page never asked again that session - a phone opened once at the
+     wharf and reopened at sea had no /api/me kept and got "Couldn't
+     reach the portal". So control is sampled before the send, the
+     listener goes on synchronously, and a worker already in control is
+     re-asked at once. The re-ask fetches the page too: the install keeps
+     only the build's own files, so the page's copy is the page's to give
+     as well. */
+  const pretendWorker = () => {
+    const listening = new Set();
+    let becameReady;
+    const sw = {
+      controller: null,
+      ready: new Promise((r) => { becameReady = r; }),
+      addEventListener: (type, fn) => { if (type === "controllerchange") listening.add(fn); },
+      removeEventListener: (type, fn) => { listening.delete(fn); },
+    };
+    const asks = [];
+    // What the page fetches, and whether a worker stood in front of it then.
+    const fetchFn = (url) => { asks.push({ path: url, throughWorker: !!sw.controller }); return Promise.resolve(new Response("{}")); };
+    const takeControl = () => { sw.controller = { scriptURL: "/sw.js" }; [...listening].forEach((fn) => fn({ type: "controllerchange" })); };
+    const waits = [];
+    const reloads = [];
+    let tried = false;
+    const reclaim = { tried: () => tried, mark: () => { tried = true; }, reload: () => reloads.push(1), wait: (fn) => waits.push(fn) };
+    return { sw, asks, fetchFn, takeControl, activate: () => becameReady({ active: { state: "activated" } }), listening, waits, reloads, reclaim, tried: () => tried };
+  };
+  const throughWorker = (asks) => asks.filter((a) => a.throughWorker).map((a) => a.path).sort();
+  {
+    // Control taken after the boot's answer: the ordinary first install.
+    const p = pretendWorker();
+    is(keepIdentityOnceControlled(p.sw, p.fetchFn, false, null, p.reclaim), true, "a live boot with no worker in front of it arms the re-ask");
+    is(p.listening.size, 1, "…the listener goes on at once, not after ready");
+    is(p.asks, [], "…and nothing is asked until the worker controls the page");
+    p.takeControl();
+    is(throughWorker(p.asks), ["/", "/api/me"], "control taken after the answer: /api/me and the page are asked again, through the worker");
+    is(p.listening.size, 0, "…once");
+  }
+  {
+    // Control taken while the boot's /api/me was on the wire: the answer
+    // bypassed the worker, the controller is set by the time the page
+    // looks, and controllerchange has already fired.
+    const p = pretendWorker();
+    p.takeControl();
+    is(keepIdentityOnceControlled(p.sw, p.fetchFn, false, null, p.reclaim), true, "control taken while the boot request was out: the page still gives the worker its /api/me");
+    is(throughWorker(p.asks), ["/", "/api/me"], "…asked again now, through the worker");
+    is(p.listening.size, 0, "…and nothing left listening");
+  }
+  {
+    // Control taken just after the hook is armed, before anything else
+    // has run: the listener is already on.
+    const p = pretendWorker();
+    keepIdentityOnceControlled(p.sw, p.fetchFn, false, null, p.reclaim);
+    p.takeControl();
+    is(throughWorker(p.asks), ["/", "/api/me"], "control taken just after the hook is armed: asked again, through the worker");
+    is(p.asks.length, 2, "…exactly once each");
+  }
+  {
+    // Nothing to give: a page controlled from the start, a kept boot, no worker at all.
+    const p = pretendWorker();
+    p.takeControl();
+    is(keepIdentityOnceControlled(p.sw, p.fetchFn, true, null, p.reclaim), false, "a page controlled from the start asks nothing again: its boot went through the worker");
+    is(keepIdentityOnceControlled(p.sw, p.fetchFn, false, STAMP, p.reclaim), false, "a kept boot has nothing live to give");
+    is(p.asks, [], "…and neither fetched anything");
+    is(keepIdentityOnceControlled(null, p.fetchFn, false, null, p.reclaim), false, "no worker at all: nothing to do");
+  }
+  /* A hard reload (shift-reload, or a reload from the browser's own
+     offline error page) leaves the page uncontrolled while the worker is
+     already active: controllerchange never fires, every fetch of that
+     page session bypasses the worker, nothing kept is refreshed for as
+     long as the tab stays open, and a sign-out from it cannot post its
+     forget. Such a page reloads itself once to come under the worker. */
+  is(reloadToBeControlled(false, true, false), true, "uncontrolled with the worker already active: reload once to be controlled");
+  is(reloadToBeControlled(true, true, false), false, "controlled: nothing to do");
+  is(reloadToBeControlled(false, false, false), false, "no active worker yet: it will take control by itself");
+  is(reloadToBeControlled(false, true, true), false, "already tried once: never a second time, whatever the reason it did not take");
+  {
+    // The hook after a hard reload: ready resolves with an active worker,
+    // no controllerchange comes, and the page reloads once.
+    const p = pretendWorker();
+    keepIdentityOnceControlled(p.sw, p.fetchFn, false, null, p.reclaim);
+    p.activate();
+    await new Promise((r) => setImmediate(r));
+    is(p.waits.length, 1, "with the worker active and the page not controlled, the page gives the claim a moment");
+    p.waits[0]();
+    is(p.reloads, [1], "…and, still not controlled, reloads once");
+    is(p.tried(), true, "…marking that it has");
+    is(p.asks, [], "…without asking anything: the reloaded page will boot through the worker");
+  }
+  {
+    // The moment passes and the worker has taken control in it: no reload.
+    const p = pretendWorker();
+    keepIdentityOnceControlled(p.sw, p.fetchFn, false, null, p.reclaim);
+    p.activate();
+    await new Promise((r) => setImmediate(r));
+    p.takeControl();
+    p.waits[0]();
+    is(p.reloads, [], "a first install whose worker takes control in the moment given is not reloaded");
+    is(throughWorker(p.asks), ["/", "/api/me"], "…it was re-asked instead");
+  }
+  {
+    // Already tried once: never again.
+    const p = pretendWorker();
+    p.reclaim.mark();
+    keepIdentityOnceControlled(p.sw, p.fetchFn, false, null, p.reclaim);
+    p.activate();
+    await new Promise((r) => setImmediate(r));
+    if (p.waits[0]) p.waits[0]();
+    is(p.reloads, [], "a page that has already reloaded once for this is never reloaded again");
+  }
   is(SIGNED_IN_MESSAGE, "signedIn", "the worker's word to every tab that a sign-in happened on this device");
   is(VESSEL.timezone, "Australia/Perth", "the line is read in the vessel's own time (the test's cases are in it)");
   // 06:32 UTC is 14:32 in the vessel's time.
