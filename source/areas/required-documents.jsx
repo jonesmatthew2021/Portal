@@ -43,11 +43,12 @@ function RequiredDocuments() {
           setters[c.key](rec);
           // The skills matrix carries the validity periods, which feed the
           // crew matrix — they are what turns a certificate's issue date
-          // into the expiry the matrix carries — so replacing it holds the
-          // certificates against the new periods and brings the matrix up to
-          // what they now say. The compliance check reads it afresh on its
-          // own screen.
-          if (c.key === "skills") portal.runMatrixAuto({ validityMatrix: rec, origin: "spreadsheet" });
+          // into the expiry the matrix carries — so replacing it starts the
+          // round, which reads the new sheet's rules on the server (a
+          // replaced sheet has a new id, so it is read fresh) and brings the
+          // matrix up to what they now say. The compliance check reads it
+          // afresh on its own screen.
+          if (c.key === "skills") portal.runMatrixRound({ origin: "spreadsheet-replaced" });
         };
         return (
           <span style={{ display: "inline-flex", gap: 8, flexWrap: "wrap" }}>

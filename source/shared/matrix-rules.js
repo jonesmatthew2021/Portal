@@ -134,8 +134,9 @@ export function readExpiryRules(rows) {
  * The certificates' answer, laid over the crew matrix. The only place it is
  * done.
  *
- * There were three: the automatic run after an upload, Update matrix (then
- * called Generate latest training matrix), and Update the spreadsheet. Each read the same certificates
+ * There were three on the page: the automatic run after an upload, Update
+ * matrix (then called Generate latest training matrix), and Update the
+ * spreadsheet. Each read the same certificates
  * and then picked its own list out of the answer - two filtered the analysis's
  * items on slightly different conditions, the third used the server's settled
  * list - so the three could write different dates from the same evidence, and

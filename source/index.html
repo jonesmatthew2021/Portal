@@ -2273,42 +2273,6 @@ function guidanceRows(XLSX, wb) {
 }
 
 /**
- * The expiry rules off the filed skills matrix, ready to be kept.
- *
- * Shaped the way the rest of the portal already expects periods - a code, a
- * number of months or a note that it never lapses - with the office's own
- * wording carried alongside, so anybody can see what was made of each rule.
- */
-async function expiryRulesFrom(record) {
-  if (!record || !record.url) return { periods: [], problem: "" };
-  const ext = (record.filename || "").split(".").pop().toLowerCase();
-  if (!WORKBOOK_EXTS.includes(ext)) return { periods: [], problem: "" };
-  try {
-    const XLSX = await loadXLSX();
-    const res = await fetch(record.url);
-    if (!res.ok) throw new Error(`It couldn't be downloaded (${res.status}).`);
-    const wb = XLSX.read(await res.arrayBuffer(), { type: "array", cellDates: true });
-    const read = readExpiryRules(guidanceRows(XLSX, wb));
-    if (!read.length) {
-      return { periods: [], problem: `No expiry rules could be found on ${record.filename}.` };
-    }
-    return {
-      periods: read.map((p) => ({
-        code: p.code,
-        item: p.title || "",
-        months: p.months ?? null,
-        neverExpires: !!p.never,
-        statesOwn: !!p.own,
-        validFor: p.said || "",
-      })),
-      problem: "",
-    };
-  } catch (e) {
-    return { periods: [], problem: `${record.filename} couldn't be read for expiry rules. ${e.message || e}` };
-  }
-}
-
-/**
  * The skills matrix read through: what each position must hold, which items
  * the office tracks, how long each one lasts, and what stands in for what.
  *
@@ -2478,55 +2442,6 @@ function coversFrom(XLSX, wb, cols) {
   });
 
   return out;
-}
-
-async function storeEquivalences(record, cols, onRequirements) {
-  try {
-    if (!record || !record.url) return;
-    const XLSX = await loadXLSX();
-    const resp = await fetch(record.url);
-    if (!resp.ok) return;
-    const wb = XLSX.read(await resp.arrayBuffer(), { type: "array" });
-    const sheetName = wb.SheetNames.find((n) => /equivalen/i.test(n));
-    if (!sheetName) return;
-    const grid = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: "" });
-    const colCodes = new Set(cols.map((c) => String(c[0]).trim().toUpperCase()));
-    const part = (cell) => {
-      const m = String(cell || "").replace(/\s+/g, " ").trim().match(/^([A-Za-z]{2,4}-\d+[A-Za-z]?)\s+(.+)$/);
-      return m ? { code: m[1].toUpperCase(), title: m[2].trim() } : null;
-    };
-    const seen = new Set();
-    const rows = [];
-    /* The sheet answers two different questions with the same two columns.
-       Where what is accepted is a certificate by name - "QLE-03 Master
-       <500GT" - it is telling the portal which column that certificate
-       belongs in. Where what is accepted is a matrix column in its own right
-       - "QL-15 is met by QL-14" - it is telling it that holding the one
-       answers for the other, which is a different thing and was being thrown
-       away. Both are kept now. */
-    for (const r of grid) {
-      const wanted = part(r[1]);
-      const held = part(r[2]);
-      if (!wanted || !held) continue;
-      if (!colCodes.has(wanted.code)) continue; // must land on a matrix column
-      if (colCodes.has(held.code)) continue;   // read by coversFrom, below
-      if (seen.has(held.code)) continue;        // the first row is the most senior column
-      seen.add(held.code);
-      rows.push({ held: held.title, code: wanted.code });
-    }
-    if (rows.length) await analyse({ action: "equivalences", rows });
-    if (onRequirements) {
-      const read = skillsRequirementsFrom(XLSX, wb);
-      const positions = (read && read.positions) || null;
-      const items = (read && read.items) || [];
-      const covers = coversFrom(XLSX, wb, cols);
-      if (positions || covers.length || items.length) {
-        onRequirements({ at: todayISO(), positions: positions || [], items, covers });
-      }
-    }
-  } catch (e) {
-    // The equivalence page failing to read must never stop a run.
-  }
 }
 
 function loadXLSX() {
@@ -2882,7 +2797,7 @@ function SingleDocumentUpload({
  * from, because that date is about the spreadsheet rather than about the portal.
  */
 function UpdateSpreadsheet({ label = "Upload or replace the spreadsheet", variant = "quiet" }) {
-  const { certSheet, setCertSheet, setMatrixUpdated, runMatrixAuto } = usePortal();
+  const { certSheet, setCertSheet, setMatrixUpdated } = usePortal();
   return (
     <SingleDocumentUpload
       category="certificate-sheet"
@@ -2891,12 +2806,11 @@ function UpdateSpreadsheet({ label = "Upload or replace the spreadsheet", varian
       blurb="One spreadsheet is kept on the portal - the latest. Uploading a newer one replaces it, and the certification screens read from whichever is on file."
       current={certSheet || null}
       onFiled={(record) => {
+        // The OPMS sheet is read by the screens that read it; replacing it
+        // starts no round - the round compares certificates against the
+        // crew matrix, and never against this sheet.
         setCertSheet(record);
         setMatrixUpdated(todayISO());
-        // The crew matrix follows the new spreadsheet on its own: it is held
-        // against the certificates on file and whatever they settle is written
-        // in — the same run that follows a filing of certificates.
-        runMatrixAuto({ certSheet: record, origin: "spreadsheet" });
       }}
       logAction="Spreadsheet uploaded"
       label={label}
@@ -3185,27 +3099,6 @@ function DateColsHead({ trail = 150, validity = false }) {
       <span style={{ ...head, minWidth: 78, textAlign: "right" }}>Certificate</span>
       <span style={{ minWidth: trail }} />
     </div>
-  );
-}
-
-/* Lives on Required Documents For Upload, beside the crew certificates it
-   works on. One press runs the
-   same AI check the portal runs after an upload: every certificate on file is
-   read (ones already read are answered from the cache, so pressing it again
-   costs nothing), each is refiled under the person named on it, the validity
-   periods matrix is read so a certificate printing an issue date and no expiry
-   still gets the date it runs to, everything is held against the crew matrix
-   and the certificates spreadsheet, and what the certificates settle — the
-   validity dates included — is written into the lists on these screens. */
-function UpdateTableButton() {
-  const { matrixAuto, runMatrixAuto } = usePortal();
-  const running = !!matrixAuto && matrixAuto.phase !== "done" && matrixAuto.phase !== "failed";
-  return (
-    <Button variant="quiet" disabled={running}
-      title="Check every certificate and expiry date against the spreadsheets and bring this list up to date"
-      onClick={() => { if (!running) runMatrixAuto({ origin: "update-table" }); }}>
-      {running ? "Updating…" : "Update certificate list"}
-    </Button>
   );
 }
 
@@ -5901,7 +5794,7 @@ function UploadCertificates() {
   const {
     quals: QUALS, setQuals, certificates, addCertificates, removeCertificate,
     updateCertificate, setMatrixUpdated, log, role, certDates, validityPeriods,
-    matrixAuto: auto, runMatrixAuto, clearMatrixAuto,
+    matrixRun: auto, runMatrixRound, clearMatrixRun,
     people, renameCrew, setCrewRank,
   } = usePortal();
   // The same three columns the certification screens carry, against each filed
@@ -6072,10 +5965,10 @@ function UploadCertificates() {
   const whoseAnswer = useRef(null);
   const [whosePick, setWhosePick] = useState("");
 
-  // The reading that follows a batch runs in the shared auto-update — set going
-  // here, watched from the window over the page (MatrixAutoWindow), and
+  // The round that follows a batch is the shared one (runMatrixRound) — set
+  // going here, watched from the window over the page (UpdateMatrixRun), and
   // reported in the panel below once it lands. `auto` is that run's state:
-  // { phase: "reading" | "filing" | "validity" | "comparing" | "done" | "failed", ... }
+  // { phase: "reading" | "filing" | "starting" | "waiting" | "done" | "failed", ... }
 
   // What is already filed, by folder, so a clash can be shown as files are picked
   // rather than only once they have been sent.
@@ -6252,21 +6145,16 @@ function UploadCertificates() {
    *
    * Filing a certificate used to be the end of it: someone then had to run the
    * reading by hand and answer every difference before the matrix caught up
-   * with what had just been uploaded. So the shared auto-update runs instead —
-   * every certificate is read, each one is moved into the folder of the person
-   * whose name it carries, and the crew matrix is brought up to what the
-   * certificates say. The run itself lives with the portal state
-   * (runMatrixAuto), because replacing the crew certificates spreadsheet or
-   * the validity periods matrix sets the same run going.
+   * with what had just been uploaded. So the shared round runs instead —
+   * every new certificate is read, each one is moved into the folder of the
+   * person whose name it carries, and the server's round puts what they
+   * settle on the crew matrix and into the office's workbook. The run itself
+   * lives with the portal state (runMatrixRound), because every Update
+   * matrix button and Update portal set the same run going.
    *
-   * Only the differences a certificate settles are written. Where the filed
-   * spreadsheet and the matrix disagree and no certificate speaks to it, there is
-   * nothing to take anyone's word for — those are left as they are.
-   *
-   * No file is written here. The training matrix spreadsheet catches up when
-   * Update the spreadsheet at the top of the page is pressed, and the OPMS
-   * spreadsheet is never written by the portal at all — it is OPMS's own
-   * weekly export, read here only to flag where it disagrees.
+   * Only what a certificate settles is written. The OPMS spreadsheet is never
+   * written by the portal at all — it is OPMS's own weekly export, read here
+   * only to flag where it disagrees.
    */
   const fileAll = async () => {
     /* Anything queued will do to start. A file with nobody against it is
@@ -6275,7 +6163,7 @@ function UploadCertificates() {
        folder drop, not before it. */
     if (!queue.length || busy) return;
 
-    setBusy(true); setErr(""); setDone(null); clearMatrixAuto();
+    setBusy(true); setErr(""); setDone(null); clearMatrixRun();
     forRest.current = null; setDupAll(false);
 
     const filed = [], replacedIds = [], results = [];
@@ -6366,7 +6254,7 @@ function UploadCertificates() {
       // when something was actually filed. The button stays disabled through it —
       // sending another batch into the middle of the reading would have it read
       // twice and compared against a matrix that is halfway through changing.
-      await runMatrixAuto({ origin: "certificates" });
+      await runMatrixRound({ origin: "certificates" });
     }
     setBusy(false);
   };
@@ -6824,11 +6712,11 @@ function UploadCertificates() {
         </div>
       )}
 
-      {/* What the reading that follows a batch is doing, and what it changed. It
+      {/* What the round that follows a batch is doing, and what it changed. It
           sits under the filing summary because it happens after it, and because
           it is the part that takes minutes rather than seconds. While it runs it
-          is also watched from the shared window over the page. Runs set going by
-          a spreadsheet report in that window instead, so only a run that
+          is also watched from the shared window over the page. Rounds started
+          elsewhere report in that window instead, so only a round that
           followed a filing is repeated here. */}
       {auto && auto.origin === "certificates" && (
         <div style={{ background: T.panel, border: `1px solid ${T.rule}`,
@@ -6837,9 +6725,9 @@ function UploadCertificates() {
 
           {auto.phase === "failed" ? (
             <>
-              <div style={{ marginBottom: 7 }}><Eyebrow color={T.bOrange}>Filed, but not analysed</Eyebrow></div>
+              <div style={{ marginBottom: 7 }}><Eyebrow color={T.bOrange}>Filed, but the matrix was not updated</Eyebrow></div>
               <div style={{ fontFamily: T.body, fontSize: 14, color: T.text, lineHeight: 1.7 }}>
-                Every certificate above is filed and nothing has been lost. The reading that follows it
+                Every certificate above is filed and nothing has been lost. The round that follows it
                 stopped: {auto.message}
               </div>
               <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.6, marginTop: 8 }}>
@@ -6847,28 +6735,41 @@ function UploadCertificates() {
                 rather than starting over.
               </div>
             </>
-          ) : auto.phase === "done" ? (
+          ) : auto.phase === "done" ? (() => {
+            /* The server's outcome, with the page's own refile alongside. */
+            const o = auto.outcome || {};
+            const s = o.summary || {};
+            const moved = Array.isArray(o.moved) ? o.moved : [];
+            const changes = Array.isArray(o.changes) ? o.changes : [];
+            const applied = o.applied || 0;
+            const eyebrow = o.noItems ? "Nothing on the matrix yet"
+              : `${s.read || 0} of ${s.certificates || 0} certificates read`
+                + (moved.length ? ` · ${moved.length} refiled` : "")
+                + (applied ? ` · ${applied} matrix ${applied === 1 ? "date" : "dates"} updated` : "")
+                + (o.cleared ? ` · ${o.cleared} cleared` : "");
+            return (
             <>
               <div style={{ marginBottom: 7 }}>
-                <Eyebrow color={T.green}>
-                  {auto.read} of {auto.total} certificates read
-                  {auto.moved.length ? ` · ${auto.moved.length} refiled` : ""}
-                  {auto.applied.length ? ` · ${auto.applied.length} matrix ${auto.applied.length === 1 ? "date" : "dates"} updated` : ""}
-                </Eyebrow>
+                <Eyebrow color={T.green}>{eyebrow}</Eyebrow>
               </div>
 
-              <div style={{ fontFamily: T.body, fontSize: 14, color: T.text, lineHeight: 1.7 }}>
-                {auto.applied.length
-                  ? <>The crew matrix has been brought up to what the certificates say. Press Update the
-                      spreadsheet at the top of the page to write the dates into the training matrix
-                      workbook. The OPMS spreadsheet is never written by the portal.</>
-                  : <>Nothing on the matrix disagreed with the certificates, so the matrix is as it was.</>}
-              </div>
+              {/* The counts, the workbook and any one-line problem - the same
+                  lines the window over the page says for every other origin,
+                  less the read count the eyebrow already carries. */}
+              {doneWindowLines(o).slice(1).map((line, i) => (
+                <div key={i} style={{ fontFamily: T.body, fontSize: 13, lineHeight: 1.7,
+                  color: line.tone === "problem" ? T.bOrange : line.tone === "muted" ? T.muted : T.text }}>
+                  {line.tone === "link" && line.href
+                    ? <a href={line.href} download={line.download}
+                        style={{ fontFamily: T.mono, fontSize: 12, color: T.accent, textDecoration: "none" }}>{line.text}</a>
+                    : line.text}
+                </div>
+              ))}
 
-              {auto.moved.length > 0 && (
+              {moved.length > 0 && (
                 <div style={{ marginTop: 10 }}>
                   <div style={{ marginBottom: 5 }}><Eyebrow>Moved into the right folder</Eyebrow></div>
-                  {auto.moved.map((m) => (
+                  {moved.map((m) => (
                     <div key={m.id} style={{ fontFamily: T.body, fontSize: 13, color: T.text,
                       padding: "3px 0", wordBreak: "break-word" }}>
                       {m.filename} <span style={{ color: T.muted }}>· {m.from || "nobody"} → {m.to}</span>
@@ -6877,43 +6778,38 @@ function UploadCertificates() {
                 </div>
               )}
 
-              {auto.applied.length > 0 && (
+              {changes.length > 0 && (
                 <div style={{ marginTop: 10 }}>
                   <div style={{ marginBottom: 5 }}><Eyebrow>Written into the matrix</Eyebrow></div>
                   <div style={{ maxHeight: 190, overflowY: "auto" }}>
-                    {auto.applied.map((a, i) => (
+                    {changes.map((a, i) => (
                       <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 12,
                         flexWrap: "wrap", padding: "4px 0", borderBottom: `1px solid ${T.rule}` }}>
                         <span style={{ fontFamily: T.body, fontSize: 13, color: T.text }}>
                           {a.person} <span style={{ color: T.muted }}>· {a.code} {a.title}</span>
                         </span>
                         <span style={{ fontFamily: T.mono, fontSize: 11, color: T.muted }}>
-                          {valueReads(a.from)} → <span style={{ color: T.green }}>{valueReads(a.to)}</span>
+                          {a.from ? valueReads(a.from) : ""} → <span style={{ color: a.to ? T.green : T.muted }}>{a.to ? valueReads(a.to) : ""}</span>
                         </span>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
-
-              {auto.left > 0 && (
-                <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.6, marginTop: 10 }}>
-                  {auto.left} {auto.left === 1 ? "difference is" : "differences are"} left where no certificate
-                  settles it — the filed spreadsheet and the matrix disagreeing between themselves.
-                </div>
-              )}
             </>
-          ) : (
+            );
+          })() : (
             <>
               <div style={{ marginBottom: 7 }}><Eyebrow color={T.accent}>Reading what was just filed</Eyebrow></div>
               <div style={{ fontFamily: T.body, fontSize: 14, color: T.text, lineHeight: 1.7 }}>
                 {auto.phase === "reading" && (auto.total
                   ? `Reading the certificates — ${auto.read} of ${auto.total} done.`
                   : "Looking for certificates to read...")}
-                {auto.phase === "filing" && "Putting each certificate in the folder of the person named on it..."}
-                {auto.phase === "validity" && "Reading the validity periods off the skills matrix — how long each item stays valid..."}
-                {auto.phase === "comparing" && "Holding what was read against the crew matrix and the spreadsheet on file..."}
-                {auto.phase === "writing" && "Updating the crew matrix..."}
+                {auto.phase === "filing" && (auto.toFile
+                  ? `Putting each certificate in the folder of the person named on it — ${auto.filed} of ${auto.toFile}.`
+                  : "Putting each certificate in the folder of the person named on it...")}
+                {auto.phase === "waiting" && "Waiting for the round on the hour"}
+                {auto.phase === "starting" && (auto.word || "Starting")}
               </div>
               <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.6, marginTop: 8 }}>
                 Leave the page open; each certificate is kept as it is read.
@@ -7173,9 +7069,9 @@ function UploadCertificates() {
 
                     {/* Correcting what this certificate is filed as. Saving writes
                         the date straight into the crew matrix as well, and stamps
-                        the matrix-updated date — press Update the spreadsheet
-                        below once everything has been put right, and the training
-                        matrix spreadsheet catches up in one go. */}
+                        the matrix-updated date — press Update matrix once
+                        everything has been put right, and the round writes the
+                        training matrix spreadsheet in one go. */}
                     {edit && edit.id === c.id && (
                       <div style={{ background: T.deep, border: `1px solid ${T.rule}`, borderRadius: 2,
                         padding: "11px 13px", margin: "2px 0 8px" }}>
@@ -7893,7 +7789,7 @@ function StartAgain() {
     log, admin, quals: QUALS, setQuals, setRosterPlan, setSkillsRequirements,
     setCertAnalysis, setMatrixAnalysis, setMatrixUpdated, setFilledFromCert,
     setRenewalMarks, setOpmsMarks, setOpmsAnalysis, setShiftAnalysis,
-    certificates, clearMatrixAuto,
+    certificates, clearMatrixRun,
   } = usePortal();
   const [asking, setAsking] = useState(false);
   const [done, setDone] = useState(false);
@@ -7917,7 +7813,7 @@ function StartAgain() {
     setRenewalMarks({});
     setOpmsMarks({});
     // Anything still reading gets no say in what the matrix holds afterwards.
-    if (clearMatrixAuto) clearMatrixAuto();
+    if (clearMatrixRun) clearMatrixRun();
     log("Admin", "The portal was started again",
       rows + " crew and " + dated + " dates cleared — nothing was taken out of SharePoint");
     setAsking(false);
@@ -8195,40 +8091,6 @@ function buildMatrixWorkbook(XLSX, quals, at) {
   return new Blob([XLSX.write(wb, { bookType: "xlsx", type: "array" })], { type: XLSX_MIME });
 }
 
-// ---------------------------------------------------------------------------
-// Reading the certificates and bringing the matrix up to date.
-//
-// The same few steps are wanted from two places — the Analyse files screen,
-// where an admin runs them and answers each difference, and the moment a
-// certificate is uploaded, where they run on their own — so they live out here
-// rather than inside either screen.
-// ---------------------------------------------------------------------------
-
-/**
- * The certificates spreadsheet on file, read in the browser.
- *
- * It is the second account of the same dates, so where it disagrees with the
- * matrix and no certificate settles it, that is worth putting up too. A
- * spreadsheet that isn't in the workbook layout the portal reads is not an
- * error — it just means the comparison is against the matrix alone, which is
- * said on screen.
- */
-async function readFiledSheet(certSheet, quals) {
-  if (!certSheet || !certSheet.url) {
-    return { sheet: null, problem: "No certificates spreadsheet is filed on the portal, so the comparison is against the crew matrix alone." };
-  }
-  try {
-    const XLSX = await loadXLSX();
-    const res = await fetch(certSheet.url);
-    if (!res.ok) throw new Error(`The spreadsheet on file couldn't be downloaded (${res.status}).`);
-    const rows = parseWorkbook(XLSX, await res.arrayBuffer(), quals)
-      .map((p) => ({ name: p.name, vals: p.vals }));
-    return { sheet: { filename: certSheet.filename, rows }, problem: "" };
-  } catch (e) {
-    return { sheet: null, problem: `${certSheet.filename} couldn't be read as a crew qualification workbook, so the comparison is against the crew matrix alone. ${e.message || e}` };
-  }
-}
-
 /**
  * Read every certificate on file that hasn't been read yet.
  *
@@ -8269,70 +8131,6 @@ async function readCertificates({ quals, fresh, onPhase = () => {} }) {
 
   return progress;
 }
-
-/**
- * Read every certificate on file, file each one under the person it names, and
- * hold the lot against the matrix and the spreadsheet — with the validity
- * periods matrix read first where one is filed, so a certificate that prints an
- * issue date and no expiry still comes back with the date it runs to.
- */
-async function readEverything({ quals, certSheet, validityMatrix = null, fresh, onPhase = () => {} }) {
-  const progress = await readCertificates({ quals, fresh, onPhase });
-
-  // Now that every certificate has been read, the name printed on each one is
-  // known — so anything filed under the wrong person is moved before it is
-  // compared, or it would be held against the wrong row of the matrix. A folder
-  // move failing is not worth losing the reading over: the comparison still
-  // runs and the mismatch is reported as a note, as it was before.
-  let moved = [];
-  try {
-    onPhase({ phase: "filing", read: progress.read, total: progress.total });
-    const r = await analyse({ action: "refile", names: quals.rows.map((row) => row[0]) });
-    moved = r.moved || [];
-  } catch (e) {
-    moved = [];
-  }
-
-  // The validity periods matrix, read before the comparison so the server holds
-  // a reading of it — that is what turns "issued March 2024, runs two years"
-  // into an expiry date on the spreadsheet. Read once per filed document and
-  // remembered, so this costs nothing after the first run. It failing is not
-  // worth losing the run over: the comparison then works from the dates printed
-  // on the certificates alone, which is what it always did.
-  let validityProblem = "";
-  if (validityMatrix) {
-    try {
-      onPhase({ phase: "validity", read: progress.read, total: progress.total });
-      /* The expiry rules, read off the sheet's own columns rather than guessed
-         at from a truncated dump of the workbook. Sent up already read. */
-      const { periods, problem } = await expiryRulesFrom(validityMatrix);
-      if (problem) validityProblem = problem;
-      if (periods.length) await analyse({ action: "validity-rules", periods });
-    } catch (e) {
-      validityProblem = `The validity periods could not be read off the skills matrix, so expiry dates were taken from the certificates alone. ${e.message || e}`;
-    }
-  }
-
-  onPhase({ phase: "comparing", read: progress.read, total: progress.total });
-  const { sheet, problem } = await readFiledSheet(certSheet, quals);
-  const res = await analyse({ action: "compare", cols: quals.cols, rows: quals.rows, sheet });
-
-  return {
-    res,
-    sheetProblem: [problem, validityProblem].filter(Boolean).join(" "),
-    moved,
-    progress,
-  };
-}
-
-/**
- * Write differences into a copy of the matrix.
- *
- * Nothing is written where the matrix already says it, and a person or an item
- * the matrix doesn't have is skipped rather than invented — the matrix is the
- * roster, and a certificate for someone who has left is not a reason to put them
- * back on it.
- */
 
 /**
  * Three copies of the matrix, brought back to one.
@@ -8498,316 +8296,6 @@ function afterMergedSave(now, merged, carried, inFlight) {
   });
 }
 
-/**
- * Bring the spreadsheet on file up to date and file it back.
- *
- * The workbook that is already on the portal is the one that comes back out of
- * here, with the figures that moved written into it and nothing else disturbed
- * — so the latest matrix and the spreadsheet the next analysis compares against
- * are the same document, and it is still the document the vessel recognises.
- * The download stands whether or not the filing worked, so a failure to file is
- * reported rather than thrown.
- */
-async function fileLatestMatrix(next, role, certSheet) {
-  const on = todayISO();
-  const { file, filename, report } = await latestMatrixFile(next, on, certSheet);
-
-  let filed = null;
-  try {
-    const res = await uploadCertificateSheet(
-      file, { uploadedBy: role, filedOn: on, session: SESSION }, "replace",
-    );
-    filed = res.record
-      ? res.record
-      // Byte-for-byte the same file is already there, which happens when nothing
-      // was marked correct and the matrix hasn't moved since.
-      : { failed: "It is the same file as the one already on the portal, so nothing was filed again." };
-  } catch (e) {
-    filed = { failed: `It couldn't be filed on the portal: ${e.message || String(e)} The download below is still the updated spreadsheet.` };
-  }
-
-  return { filename, file, on, filed, report };
-}
-
-/* ==================================================================== */
-/*  Generating the latest matrix                                        */
-/* ==================================================================== */
-
-/**
- * One button that brings the matrix up to date with the certificates on file.
- *
- * Certificates go up one at a time, and between one review and the next the
- * matrix quietly falls behind the folder of scans sitting underneath it — a
- * ticket renewed in March is on the portal as a PDF and still expired on the
- * grid. This reads every certificate that hasn't been read yet, reads the
- * validity periods matrix where one is filed — so a certificate that prints an
- * issue date and no expiry still comes back with the date it runs to — writes
- * in what the certificates say, and files the spreadsheet that comes out in
- * place of the one on the portal, so the matrix, the spreadsheet and the scans
- * are the same account of the crew.
- *
- * Only what a certificate settles is written. A date the filed spreadsheet
- * disagrees with and no scan covers is not evidence about anything — those are
- * left exactly as they are and put on the certificate review to be answered by
- * hand, which is the one thing this button deliberately doesn't do for you.
- */
-function GenerateLatestMatrix({ variant = "solid", label = "Update matrix" }) {
-  const {
-    quals: QUALS, setQuals, certSheet, setCertSheet, setCertAnalysis,
-    refileCertificates, setMatrixUpdated, validityMatrix, log, role, roundRunning,
-  } = usePortal();
-
-  const [run, setRun] = useState(null);   // null | { phase, read, total } | { phase: "failed", message }
-  const [done, setDone] = useState(null); // what the last run produced
-  const [err, setErr] = useState("");
-  // The run is watched from a window over the page, like every other analysis.
-  // It can be put away — the run carries on, and the line by the button still
-  // says where it is up to.
-  const [hidden, setHidden] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
-  const startedAt = useRef(0);
-
-  const running = !!run && run.phase !== "failed";
-
-  // How far through the run is. Reading the certificates is the length of it —
-  // the filing, the comparison and the building that follow are a call each —
-  // so the bar tracks the reading and stands full for the rest.
-  const pct = !run || run.phase === "failed" ? 0
-    : run.phase === "reading"
-      ? (run.total ? Math.min(100, Math.round((run.read / run.total) * 100)) : 0)
-      : 100;
-
-  // A batch of certificates takes the best part of a minute, so without a clock
-  // of its own the window would sit unchanged long enough to look stuck.
-  React.useEffect(() => {
-    if (!running) return;
-    const tick = () => setElapsed(Math.round((Date.now() - startedAt.current) / 1000));
-    tick();
-    const t = setInterval(tick, 1000);
-    return () => clearInterval(t);
-  }, [running]);
-
-  // Reading the scans is minutes rather than seconds, so the button has to say
-  // where it is up to or it reads as a button that did nothing.
-  const where = !run ? ""
-    : run.phase === "reading"
-      ? run.total
-        ? `Reading the certificates — ${run.read} of ${run.total}.`
-        : "Looking at what is on file."
-    : run.phase === "filing" ? "Filing each certificate under the person named on it."
-    : run.phase === "validity" ? "Reading the validity periods off the skills matrix."
-    : run.phase === "comparing" ? "Holding the certificates against the matrix."
-    : run.phase === "building" ? "Building the spreadsheet."
-    : "Working…";
-
-  const go = async () => {
-    setErr(""); setDone(null); setHidden(false);
-    startedAt.current = Date.now();
-    setRun({ phase: "reading", read: 0, total: 0 });
-    let progress = { read: 0, total: 0 };
-    try {
-      // `fresh: false` — a certificate already read is not read again, so this
-      // costs the new ones only and can be pressed as often as anyone likes.
-      const { res, sheetProblem, moved, progress: got } = await readEverything({
-        quals: QUALS, certSheet, validityMatrix, fresh: false,
-        onPhase: (p) => { setRun(p); progress = { read: p.read, total: p.total }; },
-      });
-      progress = got;
-      if (moved.length) refileCertificates(moved);
-
-      const items = res.items || [];
-      const { next, applied } = applySettled(QUALS, res.settled);
-      /* The questions the certificates answered by themselves, kept apart from
-         the dates that were written: these are lines on the certificate review,
-         marked settled so nobody is asked again. What is left is the open
-         questions. */
-      const answered = items.filter((it) => it.source === "certificate" && it.proposed);
-      const left = items.length - answered.length;
-
-      setRun({ phase: "building", read: progress.read, total: progress.total });
-      const { filename, file, on, filed, report } = await fileLatestMatrix(next, role, certSheet);
-
-      if (filed && filed.id) setCertSheet(filed);
-      if (applied.length) {
-        // Laid over the matrix as it is now, not the copy this run began from
-        // — see runMatrixAuto for the flip that writing the snapshot caused.
-        setQuals((q) => ((q.rows || []).length ? applySettled(q, res.settled).next : q));
-        setMatrixUpdated(on);
-        log("Crew Matrix", "Generated the latest matrix from the certificates",
-          `${applied.length} ${applied.length === 1 ? "date" : "dates"} written in from the certificates on file`);
-      }
-
-      // The reading is worth keeping whichever screen paid for it: what the
-      // certificates settled is answered already, and what is left goes to the
-      // certificate review as the open questions it is.
-      setCertAnalysis({
-        at: res.at,
-        by: role,
-        model: res.model,
-        items,
-        notes: res.notes || [],
-        summary: { ...(res.summary || {}), sheetProblem, refiled: moved.length },
-        verdicts: Object.fromEntries(answered.map((it) => [it.id, "yes"])),
-        generated: {
-          at: new Date().toISOString(),
-          by: role,
-          filename,
-          applied: applied.length,
-          dismissed: 0,
-          fileId: filed && filed.id ? filed.id : null,
-          failed: filed && filed.failed ? filed.failed : "",
-        },
-      });
-
-      setDone({
-        filename, download: URL.createObjectURL(file), applied: applied.length, left,
-        read: progress.read, total: progress.total, on,
-        refiled: moved.length,
-        derived: (res.summary || {}).derived || 0,
-        validitySheet: (res.summary || {}).validitySheet || null,
-        failed: filed && filed.failed ? filed.failed : "",
-        report,
-      });
-      log("Admin", "Generated the latest matrix",
-        `${filename} · ${progress.read} of ${progress.total} certificates read · ${applied.length} ${applied.length === 1 ? "date" : "dates"} changed`);
-      setRun(null);
-    } catch (e) {
-      const message = e.message || String(e);
-      setErr(message);
-      // The window comes back if it had been put away — a run that stopped is
-      // the one thing worth interrupting for. Closing it leaves the same message
-      // under the button.
-      setHidden(false);
-      setRun({ phase: "failed", message });
-    }
-  };
-
-  // The button sits in a row with others until it has something to say, and then
-  // takes the width it needs for the line underneath rather than stretching the
-  // row it is in from the start.
-  const wide = !!(run || err || done);
-
-  return (
-    <div style={{ width: wide ? "100%" : "auto" }}>
-      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <Button variant={variant} onClick={go} disabled={running || roundRunning}
-          title={!running && roundRunning ? ROUND_BUSY : undefined}>
-          {running ? "Updating…" : label}
-        </Button>
-        {running && (
-          <span style={{ fontFamily: T.mono, fontSize: 11.5, color: T.muted }}>{where}</span>
-        )}
-      </div>
-
-      {/* The run is watched from a window over the page, like every other
-          analysis: the figure and the clock both climb while it works. */}
-      {run && !hidden && (
-        <AnalysisWindow
-          eyebrow="Updating the matrix"
-          pct={pct}
-          elapsed={elapsed}
-          failed={run.phase === "failed"}
-          message={run.message}
-          failNote="Every certificate already read was kept, so running it again carries on from there rather than starting over."
-          body={<>
-            {run.phase === "reading" && (run.total
-              ? `${run.read} of ${run.total} certificates read. Only the ones not read before are read now.`
-              : "Looking at what is on file.")}
-            {run.phase === "filing" && `All ${run.total} certificates read. Putting each one in the folder of the person named on it.`}
-            {run.phase === "validity" && "Reading the validity periods off the skills matrix — how long each item stays valid."}
-            {run.phase === "comparing" && "Holding what the certificates say against the matrix."}
-            {run.phase === "building" && "Building the spreadsheet and filing it on the portal."}
-            {run.phase === "clearing" && "Clearing what was read before."}
-          </>}
-          note="Leave the page open. Every certificate reading is kept as it is made, so a run that stops partway picks up where it left off rather than starting over."
-          onHide={() => setHidden(true)}
-          onClose={() => setRun(null)}
-        />
-      )}
-
-      {err && (
-        <div style={{ fontFamily: T.body, fontSize: 13, color: T.bRed, lineHeight: 1.6, marginTop: 8 }}>
-          The matrix couldn't be brought up to date. {err}
-        </div>
-      )}
-
-      {done && (
-        <div style={{ background: T.panel, border: `1px solid ${T.rule}`,
-          borderLeft: `4px solid ${done.applied ? T.accent : T.teal}`, borderRadius: 2,
-          padding: "13px 15px", marginTop: 12 }}>
-          <Eyebrow color={done.applied ? T.accent : T.teal}>
-            {done.applied ? "Matrix updated" : "Matrix already up to date"}
-          </Eyebrow>
-          <div style={{ fontFamily: T.body, fontSize: 14, color: T.text, lineHeight: 1.7, marginTop: 7 }}>
-            {done.read} of {done.total} {done.total === 1 ? "certificate" : "certificates"} on file were read.{" "}
-            {done.applied
-              ? `${done.applied} ${done.applied === 1 ? "date was" : "dates were"} written into the matrix from the certificates behind them.`
-              : "Nothing the certificates say disagrees with the matrix, so nothing was changed."}
-            {done.derived > 0 && ` ${done.derived} ${done.derived === 1 ? "expiry was" : "expiries were"} worked out from ${done.validitySheet || "the validity periods matrix"} — certificates that print an issue date but no expiry.`}
-            {done.refiled > 0 && ` ${done.refiled} ${done.refiled === 1 ? "certificate was" : "certificates were"} filed under the wrong crew member and ${done.refiled === 1 ? "has" : "have"} been moved.`}
-            {done.left > 0 && ` ${done.left} ${done.left === 1 ? "difference has" : "differences have"} no certificate behind them — they are on the Crew Matrix under Needs attention, to be answered by hand.`}
-          </div>
-          <div style={{ marginTop: 9 }}>
-            <a href={done.download} download={done.filename}
-              style={{ fontFamily: T.mono, fontSize: 12, color: T.accent, textDecoration: "none" }}>
-              Download {done.filename}
-            </a>
-          </div>
-          {/* What happened to the workbook itself — updated in place, or
-              rebuilt, and anything on the matrix it had no room for. */}
-          {workbookNotes(done.report).map((note, i) => (
-            <div key={i} style={{ fontFamily: T.body, fontSize: 13, lineHeight: 1.6, marginTop: 8,
-              color: done.report && done.report.rebuilt ? T.bOrange : T.muted }}>
-              {note}
-            </div>
-          ))}
-          {done.failed && (
-            <div style={{ fontFamily: T.body, fontSize: 13, color: T.bOrange, lineHeight: 1.6, marginTop: 8 }}>
-              {done.failed}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * Bring the training matrix spreadsheet up to what the certificates say.
- *
- * The button at the bottom of Required Documents For Upload. It reviews the
- * certificates on file — each one is read once by the model and the reading
- * kept, so only new uploads cost anything — takes the expiry date where the
- * certificate prints one, and where it prints an issue date and no expiry,
- * holds the issue date against the validity periods matrix to work out when it
- * runs to. Those dates are then written into the training matrix workbook on
- * the portal, in place: its colours, formulas, column widths, layout and every
- * other sheet in it stay exactly as they are, and only the cells a certificate
- * settles are touched. Cells no certificate speaks to are left alone entirely.
- *
- * The OPMS spreadsheet is deliberately no part of this. Nothing here reads it
- * and nothing here writes it — it belongs to OPMS and is replaced by their
- * weekly export, not by this button.
- *
- * The workbook itself is the one thing this never gives up on: it is either
- * handed back exactly as it was with only those dates changed, or left alone
- * entirely and the reason put on screen. It never comes back stripped.
- */
-
-/* Renaming the filed copy, and the SharePoint file behind it, in one call.
-   A failure here is worth saying and not worth losing the run over: the
-   workbook itself is written either way, and a stale name is a smaller problem
-   than a spreadsheet that never got updated. */
-async function renameFiledDocument(id, to) {
-  const r = await fetch("/api/rename-file", {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ id, to }),
-  });
-  const out = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(out.error || ("it couldn't be renamed (" + r.status + ")"));
-  return out;
-}
-
 /* Whether the name a document was filed under is the wanted name with a
    " (2)" on it. The replace steps round a name that is taken - by the
    office's own workbook kept in place, a removed copy, or a file in the
@@ -8823,397 +8311,11 @@ function filedUnderSuffix(wanted, actual) {
     && /^\d+$/.test(actual.slice(base.length + 2, actual.length - ext.length - 1));
 }
 
-function UpdateTrainingMatrixInPlace({ variant = "solid", label = "Update the spreadsheet", chrome = true, onRunner }) {
-  const {
-    quals: QUALS, setQuals, trainingMatrix, setTrainingMatrix,
-    refileCertificates, setMatrixUpdated, validityMatrix, log, role,
-    setSkillsRequirements, filledFromCert, setFilledFromCert, people,
-    roundRunning, setRoundRunning,
-  } = usePortal();
-
-  const [run, setRun] = useState(null);   // null | { phase, read, total } | { phase: "failed", message }
-  const [done, setDone] = useState(null);
-  const [err, setErr] = useState("");
-  // The same run, handed out so Update portal at the top of the page can
-  // drive it. One piece of work, one place it is written down.
-  const runner = useRef(null);
-  React.useEffect(() => { if (onRunner) onRunner(() => runner.current && runner.current()); }, [onRunner]);
-  // The run is watched from a window over the page, like every other analysis.
-  // It can be put away — the run carries on, and the line by the button still
-  // says where it is up to.
-  const [hidden, setHidden] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
-  const startedAt = useRef(0);
-
-  const running = !!run && run.phase !== "failed";
-
-  // Reading the certificates is the length of the run — the filing, the
-  // validity read, the comparison and the writing that follow are a call each
-  // — so the bar tracks the reading and stands nearly full for the rest.
-  const pct = !run || run.phase === "failed" ? 0
-    : run.phase === "reading"
-      ? (run.total ? Math.min(90, Math.round((run.read / run.total) * 90)) : 0)
-      : run.phase === "filing"
-        ? 91 + (run.toFile ? Math.min(3, Math.round((run.filed / run.toFile) * 3)) : 0)
-      : run.phase === "validity" ? 95
-      : run.phase === "waiting" ? 95
-      : run.phase === "comparing" ? 96
-      : 98;
-
-  React.useEffect(() => {
-    if (!running) return;
-    const tick = () => setElapsed(Math.round((Date.now() - startedAt.current) / 1000));
-    tick();
-    const t = setInterval(tick, 1000);
-    return () => clearInterval(t);
-  }, [running]);
-
-  const where = !run ? ""
-    : run.phase === "reading"
-      ? run.total
-        ? `Reading the certificates — ${run.read} of ${run.total}.`
-        : "Looking at what is on file."
-    : run.phase === "filing"
-      ? run.toFile
-        ? `Filing each certificate under the person named on it — ${run.filed} of ${run.toFile}.`
-        : "Filing each certificate under the person named on it."
-    : run.phase === "validity" ? "Reading the validity periods off the skills matrix."
-    : run.phase === "waiting" ? "Waiting for the round on the hour to finish."
-    : run.phase === "comparing" ? "Working out each expiry date."
-    : run.phase === "writing" ? "Writing the dates into the training matrix workbook."
-    : "Working…";
-
-  const go = async () => {
-    if (running) return;
-    setErr(""); setDone(null); setHidden(false);
-    startedAt.current = Date.now();
-    setRun({ phase: "reading", read: 0, total: 0 });
-    let progress = { read: 0, total: 0 };
-    try {
-      /* The crew matrix having no items on it is not a fault; it is a portal
-         that has just been started again. Everything below needs them - the
-         analysis is asked what each item means, and the workbook is found by
-         looking for their codes - so it is said plainly here rather than
-         thrown out as an error about the items not being included, which is
-         what came back before and read like something broken. */
-      if (!(QUALS.cols || []).length) {
-        setDone({ noItems: true, read: 0, total: 0, refiled: 0, validityProblem: "" });
-        setRun(null);
-        return;
-      }
-      if (!trainingMatrix || !trainingMatrix.url) {
-        throw new Error("No training matrix is filed on the portal yet. Upload it in the boxes above, and this button will keep it up to date.");
-      }
-      if (!/\.xls[xm]$/i.test(trainingMatrix.filename || "")) {
-        throw new Error(`${trainingMatrix.filename} isn't an .xlsx workbook, so it can't be updated in place. Nothing was changed.`);
-      }
-      if (!zipCapable()) {
-        throw new Error("This browser can't open the workbook on file. Chrome, Edge, Firefox or Safari can. Nothing was changed.");
-      }
-
-      // Read every certificate that hasn't been read yet. Readings are kept as
-      // they are made, so this costs the new uploads only and can be pressed as
-      // often as anyone likes.
-      progress = await readCertificates({
-        quals: QUALS, fresh: false,
-        onPhase: (p) => { setRun(p); progress = { read: p.read, total: p.total }; },
-      });
-
-      // Certificates filed under the wrong person are moved before comparing,
-      // or they would be held against the wrong row. Failing is not worth
-      // losing the run over.
-      // The equivalence page is read before the filing pass, so a certificate
-      // it re-homes is renamed on this press rather than the one after.
-      await storeEquivalences(validityMatrix, QUALS.cols, setSkillsRequirements);
-
-      let moved = [];
-      setRun({ phase: "filing", read: progress.read, total: progress.total, filed: 0, toFile: 0 });
-      try {
-        // A slice at a time: the window keeps count as it goes, and no single
-        // request is asked to move more files than it can finish. What a pass
-        // couldn't reach is left for the next press or the hourly run.
-        let filed = 0;
-        for (let pass = 0; pass < 200; pass++) {
-          const r = await analyse({
-            action: "refile", names: QUALS.rows.map((row) => row[0]), limit: 40,
-          });
-          const got = r.moved || [];
-          moved = moved.concat(got);
-          filed += got.length;
-          const left = Number(r.remaining) || 0;
-          setRun({ phase: "filing", read: progress.read, total: progress.total, filed, toFile: filed + left });
-          if (!left || !got.length) break;
-        }
-      } catch (e) {
-        // Whatever was filed stands; the rest is picked up next time.
-      }
-      if (moved.length) refileCertificates(moved);
-
-      // The validity periods matrix is what turns "issued March 2024, runs two
-      // years" into an expiry date. It failing to read only means the dates
-      // come from what the certificates print, which is what it always meant.
-      let validityProblem = "";
-      if (validityMatrix) {
-        try {
-          setRun({ phase: "validity", read: progress.read, total: progress.total });
-          const { text, problem } = await matrixSheetText(validityMatrix);
-          if (problem) validityProblem = problem;
-          await analyse({ action: "matrix-read", which: "validity", text });
-        } catch (e) {
-          validityProblem = `The validity periods could not be read off the skills matrix, so expiry dates were taken from the certificates alone. ${e.message || e}`;
-        }
-      }
-
-      // The worker's hour may be writing the matrix and the workbook right
-      // now; comparing against a matrix it is halfway through, and then
-      // uploading over its workbook, is what the lease is there to stop.
-      const wait = { phase: "waiting", read: progress.read, total: progress.total };
-      await waitForRound(() => setRun(wait), setRoundRunning);
-
-      // What the certificates settle, cell by cell. The OPMS spreadsheet is
-      // passed to none of this — the comparison is certificates against the
-      // crew matrix, nothing else.
-      setRun({ phase: "comparing", read: progress.read, total: progress.total });
-      const res = await analyse({ action: "compare", cols: QUALS.cols, rows: QUALS.rows, sheet: null });
-      const derived = (res.summary || {}).derived || 0;
-
-      /* A certificate deleted from the library takes the date it put on the
-       * matrix with it: settleRound (source/shared/matrix-rules.js) adds a
-       * clearing entry for every cell the portal filled that no certificate
-       * still on the books claims, and never while anything is unread. It
-       * runs with the settled dates rather than after them, so the workbook
-       * is written once and the cell that was cleared and the cell that was
-       * filled go in together. Names are read through the register, as the
-       * round on the hour reads them, so a note the round kept under the
-       * register's name is the same cell here and never read as an orphan. */
-      const { settled, orphans, noteNow } = settleRound({
-        filledFromCert, claimed: res.claimed, unread: res.summary && res.summary.unread, settled: res.settled,
-        nameOf: asKnownPerson(people),
-      });
-
-      // The settled dates, laid over the crew matrix, and the exact cells they
-      // belong to — the write is narrowed to those cells and no others.
-      const { next, applied: changed, only } = applySettled(QUALS, settled);
-      const applied = changed.length;
-      // The note of which cells the portal itself filled from a certificate,
-      // as settleRound left it: the orphans out, this round's dates in.
-      setFilledFromCert(noteNow);
-
-      if (!only.size) {
-        setDone({ nothing: true, read: progress.read, total: progress.total, refiled: moved.length, validityProblem });
-        setRun(null);
-        return;
-      }
-
-      /* The crew matrix first, and the workbook after.
-       *
-       * The matrix is the portal’s own record of what the certificates say;
-       * the workbook is the office’s file. Writing the matrix only once the
-       * workbook had been written meant a library that could not be reached -
-       * a rename, a permission, a Graph outage - left the portal showing dates
-       * it already knew were wrong, and a run that cleared a certificate’s date
-       * did nothing at all. The two can be out of step for an hour; the portal
-       * being knowingly wrong is worse. */
-      const on = todayISO();
-      if (applied) {
-        // Laid over the matrix as it is now, not the copy this run began from
-        // — the hourly round runs this, and writing its snapshot back was the
-        // flip: fill in, then fifteen seconds later revert. See runMatrixAuto.
-        setQuals((q) => ((q.rows || []).length ? applySettled(q, settled).next : q));
-        setMatrixUpdated(on);
-      }
-
-      // The workbook itself, updated in place — only the settled cells.
-      setRun({ phase: "writing", read: progress.read, total: progress.total });
-      const resp = await fetch(trainingMatrix.url);
-      if (!resp.ok) throw new Error(`The training matrix on file couldn't be downloaded (${resp.status}). Nothing was changed.`);
-      const { blob, report } = await updateFiledWorkbook(await resp.arrayBuffer(), next, only);
-
-      if (!blob) {
-        setDone({ report, unchanged: true, read: progress.read, total: progress.total,
-          settled: only.size, derived, refiled: moved.length, validityProblem });
-        setRun(null);
-        return;
-      }
-
-      const named = datedWorkbookName(trainingMatrix.filename, on);
-      const file = new File([blob], named, { type: XLSX_MIME });
-      let failed = "";
-      let renamed = "";
-      try {
-        /* Refused because the hour holds the workbook: wait for it to let
-           go and file again, rather than settling for a download. */
-        let up;
-        for (let tries = 0; ; tries++) {
-          try {
-            up = await uploadSingleDocument(
-              file, "training-matrix", { uploadedBy: role, filedOn: on, session: SESSION }, "replace",
-            );
-            break;
-          } catch (e) {
-            if (e.status !== 409 || tries >= 3) throw e;
-            setRun(wait);
-            if (!(await waitForRound(undefined, setRoundRunning))) throw e;
-            setRun({ phase: "writing", read: progress.read, total: progress.total });
-          }
-        }
-        if (up.record) {
-          setTrainingMatrix(up.record);
-          // The file in SharePoint follows the name the portal filed it under.
-          if (named === up.record.filename || filedUnderSuffix(named, up.record.filename)) {
-            // Filed as wanted, or under the next suffix because the wanted
-            // name is held: either way that is its name now.
-            renamed = up.record.filename;
-          } else {
-            try {
-              await renameFiledDocument(up.record.id, named);
-              setTrainingMatrix({ ...up.record, filename: named });
-              renamed = named;
-            } catch (e) {
-              renamed = "";
-              failed = `It was filed as ${up.record.filename}, but couldn't be renamed to ${named}: ${e.message || String(e)}`;
-            }
-          }
-        }
-      } catch (e) {
-        failed = `It couldn't be filed on the portal: ${e.message || String(e)} The download below is still the updated workbook.`;
-      }
-
-      log("Admin", "Updated the training matrix from the certificates",
-        `${renamed || named} · ${report.written} ${report.written === 1 ? "cell" : "cells"} changed on "${report.sheet}"`
-        + (orphans.length ? ` · ${orphans.length} cleared, their certificates gone from the library` : "")
-        + (renamed ? "" : " · the name was left as it was"));
-      setDone({ report, filename: renamed || named, download: URL.createObjectURL(file), failed,
-        read: progress.read, total: progress.total, settled: only.size, derived,
-        orphans: orphans.length, refiled: moved.length, validityProblem });
-      setRun(null);
-    } catch (e) {
-      const message = e.message || String(e);
-      setErr(message);
-      setHidden(false);
-      setRun({ phase: "failed", message });
-    }
-  };
-
-  runner.current = () => (running ? Promise.resolve() : go());
-
-  // With no button of its own on the page, what the run has to say has nowhere
-  // to sit, so it is shown over the page and closed when it has been read.
-  const floating = !chrome && !!(err || done);
-
-  return (
-    <div style={{ width: run || err || done ? "100%" : "auto" }}>
-      <div style={{ display: chrome ? "flex" : "none", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <Button variant={variant} onClick={go} disabled={running || roundRunning}
-          title={!running && roundRunning ? ROUND_BUSY : undefined}>
-          {running ? "Updating…" : label}
-        </Button>
-        {running && (
-          <span style={{ fontFamily: T.mono, fontSize: 11.5, color: T.muted }}>{where}</span>
-        )}
-      </div>
-
-      {run && !hidden && (
-        <AnalysisWindow
-          eyebrow="Updating the training matrix spreadsheet"
-          pct={pct}
-          elapsed={elapsed}
-          failed={run.phase === "failed"}
-          message={run.message}
-          failNote="Every certificate already read was kept, so running it again carries on from there rather than starting over. Nothing was written into the spreadsheet."
-          body={<>
-            {run.phase === "reading" && (run.total
-              ? `${run.read} of ${run.total} certificates read. Only the ones not read before are read now.`
-              : "Looking at what is on file.")}
-            {run.phase === "filing" && `All ${run.total} certificates read. Putting each one in the folder of the person named on it.`}
-            {run.phase === "validity" && "Reading the validity periods off the skills matrix — how long each item stays valid once it has been done."}
-            {run.phase === "waiting" && "Waiting for the round on the hour to finish with the matrix and the workbook."}
-            {run.phase === "comparing" && "Taking the expiry date each certificate prints, and working one out from the issue date and the validity period where it doesn't."}
-            {run.phase === "writing" && "Writing the dates into the training matrix workbook, in place. Everything else in it stays as it is."}
-          </>}
-          note="Leave the page open. Every certificate reading is kept as it is made, so a run that stops partway picks up where it left off rather than starting over."
-          onHide={() => setHidden(true)}
-          onClose={() => setRun(null)}
-        />
-      )}
-
-      {/* Driven from Update portal at the top of the page, the answer
-          has nowhere of its own to sit, so it comes up over the page and is
-          closed when it has been read. On Required Documents, where the button
-          is, it stays under the button as it always did. */}
-      <div style={floating ? { position: "fixed", inset: 0, background: "rgba(22,50,74,0.45)", zIndex: 80,
-        display: "flex", alignItems: "center", justifyContent: "center", padding: 20 } : undefined}>
-      <div style={floating ? { background: T.panel, border: `1px solid ${T.rule}`, borderRadius: 3,
-        padding: "4px 18px 16px", width: "min(640px, 94vw)", maxHeight: "82vh", overflowY: "auto" } : undefined}>
-
-      {err && (
-        <div style={{ fontFamily: T.body, fontSize: 13, color: T.bRed, lineHeight: 1.6, marginTop: 8 }}>
-          The spreadsheet couldn't be updated. {err}
-        </div>
-      )}
-
-      {done && (
-        <div style={{ background: T.panel, border: `1px solid ${T.rule}`,
-          borderLeft: `4px solid ${done.nothing || done.unchanged ? T.teal : T.accent}`, borderRadius: 2,
-          padding: "13px 15px", marginTop: 12 }}>
-          <Eyebrow color={done.nothing || done.unchanged ? T.teal : T.accent}>
-            {done.noItems ? "Nothing on the matrix yet"
-              : done.nothing ? "Nothing to write yet"
-              : done.unchanged ? "Spreadsheet already up to date"
-              : "Spreadsheet updated"}
-          </Eyebrow>
-          <div style={{ fontFamily: T.body, fontSize: 14, color: T.text, lineHeight: 1.7, marginTop: 7 }}>
-            {done.noItems ? ("The crew matrix has no items on it, so there is nothing for the certificates to be read against. Add them from the skills matrix — Update portal offers them the moment it sees they are missing — and press this again.") : (<>{done.read} of {done.total} {done.total === 1 ? "certificate" : "certificates"} on file were read.{" "}
-            {done.nothing
-              ? "None of them settles an expiry date for anyone on the crew matrix yet, so the training matrix was left exactly as it is."
-              : `${done.settled} ${done.settled === 1 ? "expiry was" : "expiries were"} settled by the certificates.`}
-            {done.derived > 0 && ` ${done.derived} of those ${done.derived === 1 ? "was" : "were"} worked out from the issue date and the validity periods matrix — certificates that print an issue date but no expiry.`}
-            {done.orphans > 0 && ` ${done.orphans} ${done.orphans === 1 ? "date was" : "dates were"} cleared: the certificate behind ${done.orphans === 1 ? "it is" : "them are"} no longer in the library.`}
-            {done.refiled > 0 && ` ${done.refiled} ${done.refiled === 1 ? "certificate was" : "certificates were"} filed under the wrong crew member and ${done.refiled === 1 ? "has" : "have"} been moved.`}
-            {" "}The OPMS spreadsheet was not touched.</>)}
-          </div>
-          {workbookNotes(done.report).map((note, i) => (
-            <div key={i} style={{ fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.6, marginTop: 8 }}>
-              {note}
-            </div>
-          ))}
-          {done.download && (
-            <div style={{ marginTop: 9 }}>
-              <a href={done.download} download={done.filename}
-                style={{ fontFamily: T.mono, fontSize: 12, color: T.accent, textDecoration: "none" }}>
-                Download {done.filename}
-              </a>
-            </div>
-          )}
-          {done.validityProblem && (
-            <div style={{ fontFamily: T.body, fontSize: 13, color: T.bOrange, lineHeight: 1.6, marginTop: 8 }}>
-              {done.validityProblem}
-            </div>
-          )}
-          {done.failed && (
-            <div style={{ fontFamily: T.body, fontSize: 13, color: T.bOrange, lineHeight: 1.6, marginTop: 8 }}>
-              {done.failed}
-            </div>
-          )}
-        </div>
-      )}
-
-      {floating && (
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
-          <Button onClick={() => { setDone(null); setErr(""); }}>Close</Button>
-        </div>
-      )}
-      </div>
-      </div>
-    </div>
-  );
-}
-
 /**
  * Download the matrix as it stands, and open it.
  *
- * The sibling of Generate: where that one reads the certificates and moves the
- * matrix before writing it out, this one writes out exactly what is on the
+ * The sibling of Update matrix: where that one reads the certificates and has
+ * the round move the matrix, this one writes out exactly what is on the
  * screen now — no reading, no filing, nothing changed on the portal. The same
  * file is handed to a new tab as well as to the downloads, so the browser
  * opens it with whatever reads spreadsheets on the machine.
@@ -9619,141 +8721,6 @@ function AnalysisWindow({
             <Button variant="quiet" onClick={onHide}>Hide this window</Button>
           </>
         )}
-      </div>
-    </div>
-  );
-}
-
-/**
- * The window over whichever page is open while the crew matrix brings itself
- * up to date, and — where the run was set off by a spreadsheet — the outcome.
- *
- * The run can be set going from more than one place: filing certificates,
- * replacing the crew certificates spreadsheet, or replacing the validity
- * periods matrix. It is watched from here, once, rather than from a window per
- * screen — the admin may have moved on by the time it lands. A run that
- * followed a filing of certificates reports its outcome on that screen, under
- * the filing summary, as it always did, so this window simply goes when one of
- * those lands. A run that followed a spreadsheet has no screen of its own, so
- * its outcome is said here and closed by hand.
- */
-function MatrixAutoWindow() {
-  const { matrixAuto: auto, clearMatrixAuto } = usePortal();
-  const [hidden, setHidden] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
-  const startedAt = useRef(0);
-
-  const running = !!auto && auto.phase !== "done" && auto.phase !== "failed";
-
-  React.useEffect(() => {
-    if (!running) {
-      // Ready for the next run: its window starts shown, on a fresh clock.
-      startedAt.current = 0;
-      setHidden(false);
-      return;
-    }
-    if (!startedAt.current) startedAt.current = Date.now();
-    const tick = () => setElapsed(Math.round((Date.now() - startedAt.current) / 1000));
-    tick();
-    const t = setInterval(tick, 1000);
-    return () => clearInterval(t);
-  }, [running]);
-
-  if (!auto) return null;
-
-  const fromSheet = auto.origin !== "certificates";
-  const fromButton = auto.origin === "update-table";
-
-  if (running) {
-    if (hidden) return null;
-    // Reading the certificates is the length of the run — the filing, comparing
-    // and writing that follow are a call each — so the bar tracks the reading
-    // and stands full for the rest.
-    const pct = auto.phase === "reading"
-      ? (auto.total ? Math.min(100, Math.round((auto.read / auto.total) * 100)) : 0)
-      : 100;
-    return (
-      <AnalysisWindow
-        eyebrow={fromButton ? "Updating the table" : fromSheet ? "Updating the crew matrix" : "Reading what was just filed"}
-        pct={pct}
-        elapsed={elapsed}
-        body={<>
-          {auto.phase === "reading" && (auto.total
-            ? `Reading the certificates — ${auto.read} of ${auto.total} done.`
-            : "Looking for certificates to read...")}
-          {auto.phase === "filing" && "Putting each certificate in the folder of the person named on it..."}
-          {auto.phase === "validity" && "Reading the validity periods off the skills matrix — how long each item stays valid..."}
-          {auto.phase === "comparing" && "Holding what was read against the crew matrix and the spreadsheet on file..."}
-          {auto.phase === "writing" && "Updating the crew matrix..."}
-        </>}
-        note={fromButton
-          ? "Every certificate on file is checked against the spreadsheets and the validity periods, and the lists follow what they settle. Certificates already read are answered from what is kept, so this costs the new ones only."
-          : fromSheet
-          ? "The spreadsheet is filed already — this is the crew matrix following it. Leave the page open; each certificate reading is kept as it lands, so a lost connection costs a batch rather than the run."
-          : "This takes a few minutes on a large batch. Leave the page open — each certificate is kept as it is read, so a lost connection costs the batch it was in rather than the whole run."}
-        onHide={() => setHidden(true)}
-      />
-    );
-  }
-
-  // The outcome of a run the certificates screen isn't reporting.
-  if (!fromSheet) return null;
-
-  if (auto.phase === "failed") {
-    return (
-      <AnalysisWindow
-        failed
-        message={auto.message}
-        failNote={fromButton
-          ? "Nothing has been lost. The certificates already read are kept, so pressing Update certificate list again carries on from here rather than starting over."
-          : "The spreadsheet is filed and nothing has been lost. The certificates already read are kept, so the next run — the next upload, or Update matrix — carries on from here rather than starting over."}
-        onClose={clearMatrixAuto}
-      />
-    );
-  }
-
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 80, background: "rgba(18,41,61,0.45)",
-      display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-      <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderRadius: 3,
-        padding: 20, width: "100%", maxWidth: 460 }}>
-        <div style={{ marginBottom: 7 }}>
-          <Eyebrow color={T.green}>{fromButton ? "Table brought up to date" : "Crew matrix brought up to date"}</Eyebrow>
-        </div>
-        <div style={{ fontFamily: T.body, fontSize: 14, color: T.text, lineHeight: 1.7 }}>
-          {auto.read} of {auto.total} certificates were held against the {fromButton ? "spreadsheets on file" : "new spreadsheet"}
-          {auto.moved.length ? `, and ${auto.moved.length} ${auto.moved.length === 1 ? "was" : "were"} refiled under the person named on ${auto.moved.length === 1 ? "it" : "them"}` : ""}.{" "}
-          {auto.applied.length
-            ? `${auto.applied.length} ${auto.applied.length === 1 ? "date" : "dates"} on the crew matrix ${auto.applied.length === 1 ? "was" : "were"} brought up to what the certificates say.`
-            : "Nothing on the matrix disagreed with the certificates, so the matrix is as it was."}
-        </div>
-
-        {auto.applied.length > 0 && (
-          <div style={{ marginTop: 10, maxHeight: 190, overflowY: "auto" }}>
-            {auto.applied.map((a, i) => (
-              <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 12,
-                flexWrap: "wrap", padding: "4px 0", borderBottom: `1px solid ${T.rule}` }}>
-                <span style={{ fontFamily: T.body, fontSize: 13, color: T.text }}>
-                  {a.person} <span style={{ color: T.muted }}>· {a.code} {a.title}</span>
-                </span>
-                <span style={{ fontFamily: T.mono, fontSize: 11, color: T.muted }}>
-                  {valueReads(a.from)} → <span style={{ color: T.green }}>{valueReads(a.to)}</span>
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {auto.left > 0 && (
-          <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, lineHeight: 1.6, marginTop: 10 }}>
-            {auto.left} {auto.left === 1 ? "difference is" : "differences are"} left where no certificate
-            settles it — those are on the certificate review to be answered by hand.
-          </div>
-        )}
-
-        <div style={{ marginTop: 15 }}>
-          <Button onClick={clearMatrixAuto}>Close</Button>
-        </div>
       </div>
     </div>
   );
@@ -12761,14 +11728,13 @@ function UpdateDocumentation() {
     quals: QUALS, setQuals, trainingMatrix,
     rosterPlan, setRosterPlan, crewRoster,
     skillsMatrix, skillsRequirements, setSkillsRequirements,
-    certificates, setCertAnalysis, setMatrixAnalysis } = usePortal();
+    certificates, setCertAnalysis, setMatrixAnalysis, runMatrixRound } = usePortal();
   const [step, setStep] = useState("");          // "" when nothing is running
   const [found, setFound] = useState(null);      // whose folders the sync saw
   const [asking, setAsking] = useState(false);   // items the skills matrix has gained or lost
   // Workbooks the library no longer holds, put to whoever is there.
   const [orphaned, setOrphaned] = useState(null);
   const [err, setErr] = useState("");
-  const matrixRun = useRef(null);
   const going = useRef(false);
   // The document's stamp as this tab holds it now, readable from inside a
   // round that started a while ago: the polls carry on underneath a round,
@@ -12823,8 +11789,12 @@ function UpdateDocumentation() {
          same thing in a way that reads like a fault. It is not a fault; there
          is simply nothing to do yet. */
       if ((QUALS.cols || []).length) {
+        // The one round (runMatrixRound): the page reads and refiles, the
+        // server puts the dates on the matrix and into the workbook, under
+        // the name this press was made in - so the hour's own fallback and a
+        // person's press are told apart on the lease and in the log.
         setStep("Reading the certificates and updating the matrix");
-        if (matrixRun.current) await matrixRun.current();
+        await runMatrixRound({ origin: "portal", by: asked ? "Update portal" : "the round on the hour" });
       } else {
         setStep("");
       }
@@ -13009,11 +11979,6 @@ function UpdateDocumentation() {
             || (!(QUALS.cols || []).length ? "No items on the matrix yet" : "Last updated " + stamp(lastDocUpdate))}
         </span>
       </div>
-
-      {/* The run itself lives here, with its button left off - the one at the
-          top is what presses it. Its progress window and its answer both come
-          up over the page and are closed when they have been read. */}
-      <UpdateTrainingMatrixInPlace chrome={false} onRunner={(fn) => { matrixRun.current = fn; }} />
 
       {/* The workbook behind something the portal holds has gone from the
           library. Asked rather than acted on — see the note where it is
@@ -15474,7 +14439,7 @@ function TodayScreen({ go }) {
   if (quiet.unknown) attention.push({ n: quiet.unknown, text: "marked with a question mark nobody has answered", target: "checker", act: "Settle them" });
   if (quiet.misfiled) attention.push({ n: quiet.misfiled, text: "scans that look filed under the wrong person", target: "documents", act: "Check them" });
   if (quiet.opmsAge != null && quiet.opmsAge > 9) attention.push({ n: `${quiet.opmsAge}d`, text: "since Portways refreshed the OPMS spreadsheet — chase the weekly export", target: "opms", act: "OPMS" });
-  if (quiet.sheetAge != null && quiet.sheetAge > 30) attention.push({ n: `${quiet.sheetAge}d`, text: "since the training matrix spreadsheet was updated — press Update the spreadsheet after your next batch", target: "documents", act: "Go" });
+  if (quiet.sheetAge != null && quiet.sheetAge > 30) attention.push({ n: `${quiet.sheetAge}d`, text: "since the training matrix spreadsheet was updated — press Update matrix after your next batch", target: "documents", act: "Go" });
 
   const stKind = { expired: { fg: T.bRed, bg: T.bRedBg }, soon: { fg: T.bRed, bg: T.bRedBg }, not: { fg: T.accent, bg: T.accentSoft } };
 
@@ -17032,126 +15997,6 @@ function CoolibahPortal({ role, onSignOut }) {
     }
   };
 
-  // ---- bringing the crew matrix up to date on its own -----------------------
-  //
-  // One run, shared by everything that changes what the matrix is built from.
-  // Filing certificates has always set it going; replacing the crew
-  // certificates spreadsheet or the validity periods matrix now does too, so
-  // the matrix follows whichever of its inputs moved without anyone running
-  // anything. Only what a certificate settles is written — a difference no
-  // scan covers still goes to the certificate review to be answered by hand.
-  //
-  // The run lives here rather than on a screen so any of them can set it
-  // going, it keeps going when the admin moves to another tab, and it is
-  // watched from the one window (MatrixAutoWindow) wherever they are.
-  const [matrixAuto, setMatrixAuto] = useState(null);
-  const clearMatrixAuto = () => setMatrixAuto(null);
-
-  // What the run reads is what is on the page at the moment it reads it, not
-  // at the moment it was set going several renders earlier.
-  const matrixAutoInputs = useRef(null);
-  matrixAutoInputs.current = { quals, certSheet, validityMatrix };
-
-  // One run at a time. A change landing mid-run is remembered and run once the
-  // current one finishes, because a run that started before the change can't
-  // have counted it.
-  const matrixAutoState = useRef({ running: false, queued: null });
-
-  const runMatrixAuto = async (input = {}) => {
-    if (matrixAutoState.current.running) {
-      matrixAutoState.current.queued = { ...(matrixAutoState.current.queued || {}), ...input };
-      return;
-    }
-    matrixAutoState.current.running = true;
-
-    // A record just filed hasn't reached React state yet, so the uploader
-    // hands it in rather than waiting a render for it.
-    const sheet = "certSheet" in input ? input.certSheet : matrixAutoInputs.current.certSheet;
-    const validity = "validityMatrix" in input ? input.validityMatrix : matrixAutoInputs.current.validityMatrix;
-    const origin = input.origin || "certificates";
-
-    setMatrixAuto({ phase: "reading", read: 0, total: 0, origin });
-    try {
-      const { res, sheetProblem, moved } = await readEverything({
-        quals: matrixAutoInputs.current.quals, certSheet: sheet, validityMatrix: validity, fresh: false,
-        onPhase: (p) => setMatrixAuto({ ...p, origin }),
-      });
-
-      if (moved.length) refileCertificates(moved);
-
-      const items = res.items || [];
-      // Applied against the matrix as it stands now — the run is minutes long,
-      // and a cell may have been edited by hand while it read.
-      const { next, applied } = applySettled(matrixAutoInputs.current.quals, res.settled);
-
-      if (applied.length) {
-        /* Against the matrix as it stands at this moment, not the one this run
-           started from - it is minutes long, and Start again may have emptied
-           the matrix while it read. Writing the snapshot back would put forty
-           crew and a thousand dates straight back on a portal somebody had
-           just cleared, which is a thing you would press twice and blame
-           yourself for. */
-        /* And onto the matrix as it is at this instant, not the copy this run
-           began from. The run is minutes long; the matrix moves while it reads
-           - a refresh, the hourly round, a workbook read back in - and writing
-           a snapshot back over all of that was how the matrix filled in and
-           then, fifteen seconds later, went back to how an older run had left
-           it. The settled dates are laid over whatever is live now. */
-        setQuals((q) => ((q.rows || []).length ? applySettled(q, res.settled).next : q));
-        setMatrixUpdated(todayISO());
-        log("Crew Matrix",
-          origin === "certificates"
-            ? "Updated from the certificates just filed"
-            : origin === "update-table"
-            ? "Updated from an Update certificate list check"
-            : "Updated after a spreadsheet was replaced",
-          `${applied.length} ${applied.length === 1 ? "date" : "dates"} changed`);
-      }
-
-      // The date columns follow the same run: whatever the certificates now say
-      // about issue and expiry dates is fetched off the readings just kept.
-      refreshCertDates();
-
-      // The review screen picks up where this left off: what the certificates
-      // settled is already answered and written, and what is left is the
-      // spreadsheet disagreeing with the matrix on its own account.
-      setCertAnalysis({
-        at: res.at,
-        by: role,
-        model: res.model,
-        items,
-        notes: res.notes || [],
-        summary: { ...(res.summary || {}), sheetProblem, refiled: moved.length },
-        verdicts: Object.fromEntries(applied.map((a) => [a.id, "yes"])),
-        generated: null,
-      });
-
-      if (moved.length) {
-        log("Admin", `Refiled ${moved.length} certificate${moved.length === 1 ? "" : "s"}`,
-          moved.map((m) => `${m.filename} → ${m.to}`).join(", "));
-      }
-
-      setMatrixAuto({
-        phase: "done",
-        origin,
-        read: (res.summary || {}).read || 0,
-        total: (res.summary || {}).certificates || 0,
-        moved,
-        applied,
-        left: items.length - applied.length,
-      });
-    } catch (e) {
-      // Whatever was filed is filed either way. Only the reading that follows
-      // can fail here, and the next run carries on from where it stopped.
-      setMatrixAuto({ phase: "failed", origin, message: e.message || String(e) });
-    } finally {
-      matrixAutoState.current.running = false;
-      const queued = matrixAutoState.current.queued;
-      matrixAutoState.current.queued = null;
-      if (queued) runMatrixAuto(queued);
-    }
-  };
-
   // ---- the round, started from the page --------------------------------------
   //
   // One runner behind every Update matrix button, the certificate upload and
@@ -17549,8 +16394,8 @@ function CoolibahPortal({ role, onSignOut }) {
    * last of the crew, formatted like the row above it.
    *
    * Their dates are not written here. Those come off their certificates, which
-   * is the long read behind Update the spreadsheet; this puts the person on the
-   * sheet so the next run has a row to fill.
+   * is the long read behind Update matrix; this puts the person on the
+   * sheet so the next round has a row to fill.
    *
    * It runs after the change rather than as part of it: a workbook that cannot
    * be reached is a reason to say so, not a reason to leave a person half on or
@@ -17883,7 +16728,7 @@ function CoolibahPortal({ role, onSignOut }) {
   };
 
   const ctx = { role, admin, session: SESSION, pending, roundRunning, setRoundRunning, removeCrew, renameCrew, setCrewRank, people, setPeople,
-    notPeople, setNotPeople, certRoot, setCertRoot, writeCrewToWorkbooks, lastDocUpdate, setLastDocUpdate, folderNames, setFolderNames, filledFromCert, setFilledFromCert, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixAuto, runMatrixAuto, clearMatrixAuto, matrixRun, runMatrixRound, clearMatrixRun };
+    notPeople, setNotPeople, certRoot, setCertRoot, writeCrewToWorkbooks, lastDocUpdate, setLastDocUpdate, folderNames, setFolderNames, filledFromCert, setFilledFromCert, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixRun, runMatrixRound, clearMatrixRun };
 
   return (
     <Ctx.Provider value={ctx}>
@@ -17978,9 +16823,8 @@ function CoolibahPortal({ role, onSignOut }) {
         </footer>
       </div>
 
-      {/* The crew matrix bringing itself up to date, watched from over whichever
-          screen is open — the run can be set going from more than one of them. */}
-      <MatrixAutoWindow />
+      {/* The round from the page, watched from over whichever screen is open —
+          it can be set going from more than one of them. */}
       <UpdateMatrixRun />
     </div>
     </Ctx.Provider>

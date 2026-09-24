@@ -15,9 +15,11 @@ import { liveRowsOf, replaceSingleFile } from "../db/single-file.js";
  * written into the office's workbook, by the worker itself, with no browser
  * open anywhere.
  *
- * It is the same round Update the spreadsheet runs from the page (see
- * UpdateTrainingMatrixInPlace in source/index.html), mirrored here so the
- * portal keeps itself current: the expiry rules read off the skills matrix
+ * It is the one round: every Update matrix button on the page starts this
+ * same code through POST /api/round (runMatrixRound in source/index.html,
+ * which reads the new certificates and refiles first and never applies a
+ * date itself), and the hour runs it by itself so the portal keeps itself
+ * current: the expiry rules read off the skills matrix
  * where none are held yet, the certificates compared against the matrix as
  * the register names people, what they settle laid over the matrix and
  * saved against the revision it was read at, and - only when a cell
