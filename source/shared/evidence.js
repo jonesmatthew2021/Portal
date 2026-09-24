@@ -49,12 +49,13 @@
  *   expiresOn?: string | null, evidenceKind?: string | null,
  *   isRecognition?: boolean | null }} EvidenceReading
  * @typedef {{ days?: number | null, from?: string, covers?: string[],
- *   notWhenRecognition?: boolean, why?: string }} EvidenceKind
+ *   notWhenRecognition?: boolean, lodgedBeforeExpiry?: boolean, why?: string }} EvidenceKind
  *   One kind as the vessel file carries it: its ceiling in days (null where
  *   the law gives none), what the ceiling is counted from ("issued" - the
  *   document's own issue date - or "expiry", the certificate's), the columns
  *   it may cover, whether it is barred where the certificate is itself a
- *   recognition, and the clause it all comes from.
+ *   recognition, whether it must have been lodged before the certificate
+ *   expired to carry anything at all, and the clause it all comes from.
  * @typedef {Record<string, EvidenceKind> | null | undefined} EvidenceKinds
  * @typedef {{ nameOf: (spelling: unknown) => string | null }} Register
  * @typedef {{ kinds?: EvidenceKinds, register: Register }} EvidenceRules
@@ -129,6 +130,10 @@ export function evidenceKindsProblem(table, columnCodes) {
     for (const code of entry.covers) {
       if (!columns.includes(evidenceCode(code))) return at + " may cover " + code + ", which is not one of the vessel's columns.";
     }
+    for (const flag of ["notWhenRecognition", "lodgedBeforeExpiry"]) {
+      const said = /** @type {Record<string, unknown>} */ (entry)[flag];
+      if (said !== undefined && typeof said !== "boolean") return at + " may say " + flag + " only as true or false.";
+    }
     if (typeof entry.why !== "string" || !entry.why.trim()) return at + ' must say which clause it comes from, in its "why".';
   }
   return null;
@@ -196,7 +201,21 @@ export function coveredBy(code, person, rows, readings, todayISO, rules) {
     .filter((d) => !!d)
     .sort()
     .pop() || "";
-  const ownIsRecognition = own.some((x) => x.reading.isRecognition === true);
+  /* And the day the latest of them was issued, for the paper a certificate
+     in hand has answered. */
+  const ownIssued = own
+    .map((x) => evidenceDay(x.reading.issuedOn))
+    .filter((d) => !!d)
+    .sort()
+    .pop() || "";
+  /* Whether what ran out was itself a certificate of recognition, whose term
+     can never be extended (MO70 s 30 note). Asked of any of his certificates
+     that could be for this column, not only the ones the round managed to
+     put a code to: a recognition it could place nowhere would otherwise
+     leave an extension letter covering the column anyway. */
+  const ownIsRecognition = mine.some((x) =>
+    x.reading.isRecognition === true && !x.reading.evidenceKind
+    && (!evidenceCode(x.row.code) || evidenceCode(x.row.code) === want));
 
   /** @type {Cover[]} */
   const standing = [];
@@ -210,6 +229,25 @@ export function coveredBy(code, person, rows, readings, todayISO, rules) {
     const filedAs = evidenceCode(x.row.code);
     if (filedAs && filedAs !== want) return;
     if (entry.notWhenRecognition && ownIsRecognition) return;
+
+    const paperIssued = evidenceDay(x.reading.issuedOn);
+    /* A paper is spent once the certificate it was written about is in hand.
+       AMSA's issue letter IS the certificate only "until the card arrives"
+       (MO505 s 12(2)), and an extension or a lodged renewal is answered by
+       the certificate that came of it. So a certificate for this column
+       issued on or after the paper takes the paper off the books - without
+       which an issue letter, the one paper the law gives no end, would carry
+       a column for ever and a cell the office must chase would read as
+       carried. Where neither date was read off the scans nothing is assumed:
+       the paper stands until its own time runs out. */
+    if (ownIssued && paperIssued && ownIssued >= paperIssued) return;
+    /* A renewal lodged after the certificate had already gone carries
+       nothing: MO505 s 7(3) gives its 90 days only where the person applied
+       "before it expires". The receipt's own date is the day it was lodged.
+       Which kinds this bites is the vessel file's (lodgedBeforeExpiry) - an
+       extension letter is AMSA's own letter and may well be written after the
+       expiry it extends, so it is not one of them. */
+    if (entry.lodgedBeforeExpiry && paperIssued && ownExpiry && paperIssued > ownExpiry) return;
 
     const printed = evidenceDay(x.reading.expiresOn);
     let ceiling = "";

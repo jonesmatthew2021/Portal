@@ -87,7 +87,7 @@ export type Vessel = {
    *  may cover and the clause (source/shared/evidence.js reads this table). */
   evidenceKinds: Record<string, {
     days: number | null; from: "issued" | "expiry"; covers: string[];
-    notWhenRecognition?: boolean; why: string;
+    notWhenRecognition?: boolean; lodgedBeforeExpiry?: boolean; why: string;
   }>;
   /** The columns a certificate of recognition can never fill, whatever the
    *  foreign certificate behind it says - a foreign basic safety training or

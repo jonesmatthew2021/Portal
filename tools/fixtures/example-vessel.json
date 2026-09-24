@@ -202,16 +202,17 @@
   "evidenceKinds": {
     "extension": {
       "days": 184,
-      "from": "issued",
+      "from": "expiry",
       "covers": ["QL-01", "QL-02", "QL-05", "QL-06", "QL-10", "QL-11", "QL-14"],
       "notWhenRecognition": true,
-      "why": "MO70 s 15(3)-(4) - AMSA may extend by up to six months, and only a certificate of competency, a rating certificate, a GMDSS radio operator certificate or a marine cook certificate. Never a certificate of safety training: s 15(3) does not list it. Never a certificate of recognition, whose term can never be extended (s 30 note). The near-coastal certificates are MO505's and it gives no extension. Six months at their longest is 184 days"
+      "why": "MO70 s 15(3)-(4) - AMSA may extend the TERM of a certificate by up to six months, so the 184 days run from the expiry printed on the certificate and not from the day AMSA wrote the letter; where the letter prints its own end date, that date governs. Only a certificate of competency, a rating certificate, a GMDSS radio operator certificate or a marine cook certificate. Never a certificate of safety training: s 15(3) does not list it. Never a certificate of recognition, whose term can never be extended (s 30 note). Six months at their longest is 184 days"
     },
     "lodged-renewal": {
       "days": 90,
       "from": "expiry",
+      "lodgedBeforeExpiry": true,
       "covers": ["QL-03", "QL-04", "QL-07", "QL-08", "QL-09"],
-      "why": "MO505 s 7(3) - a near-coastal certificate whose renewal was lodged before it expired keeps the holder lawful for 90 days after the expiry printed on the card"
+      "why": "MO505 s 7(3) - a near-coastal certificate whose renewal was lodged before it expired keeps the holder lawful for 90 days after the expiry printed on the card. Lodged AFTER the card expired it carries nothing"
     },
     "crewing-permit": {
       "days": 92,

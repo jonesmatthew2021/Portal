@@ -1209,11 +1209,22 @@ test("evidence: an extension letter covers the expired Master it was written for
   const placed = [{ ...EV_ROWS[0], code: "QL-01" }, ...EV_ROWS.slice(1)];
   assert.deepEqual(coverOf("QL-01", placed), { kind: "extension", until: "2026-11-25", rowId: "ext" });
   assert.equal(coverOf("QL-11", placed), null, "not a column the letter was filed against");
-  assert.equal(coverOf("QL-11")!.kind, "extension", "unplaced, it stands for the cook certificate too");
+  /* Unplaced it stands for any column the order lets AMSA extend - but only
+     where the portal holds the certificate being extended: the six months
+     run from that certificate's own printed expiry, and AMSA cannot extend a
+     certificate nobody has filed. */
+  assert.equal(coverOf("QL-11"), null, "no cook certificate on the portal, so nothing to extend and nothing to count from");
   // A letter printing longer than the six months the order allows.
   const tooLong = { ...EV_READINGS, ext: { ...EV_READINGS.ext, expiresOn: "2027-06-01" } };
-  assert.deepEqual(coverOf("QL-01", EV_ROWS, tooLong), { kind: "extension", until: "2027-01-20", rowId: "ext" },
-    "six months from the letter's own issue is as far as it goes");
+  assert.deepEqual(coverOf("QL-01", EV_ROWS, tooLong), { kind: "extension", until: "2027-02-01", rowId: "ext" },
+    "six months of extended TERM is as far as it goes: 184 days from the expiry printed on the certificate (MO70 s 15(3)-(4))");
+  /* And a letter written months after the certificate lapsed extends the
+     term by no more than that either. Anchored to the letter instead, this
+     one would have carried him to July - eleven months past an expiry the
+     order lets AMSA extend by six. */
+  const late = { ...EV_READINGS, ext: { readable: true, holderName: "Brenton Evans", evidenceKind: "extension", issuedOn: "2027-01-01", expiresOn: null } };
+  assert.deepEqual(coverOf("QL-01", EV_ROWS, late), { kind: "extension", until: "2027-02-01", rowId: "ext" },
+    "184 days from the certificate's expiry, whenever the letter itself was written");
   // MO70 s 30 note: a recognition's term can never be extended.
   const recognised = { ...EV_READINGS, coc: { ...EV_READINGS.coc, isRecognition: true } };
   assert.equal(coverOf("QL-01", EV_ROWS, recognised), null, "an extension of a certificate of recognition is no cover");
@@ -1238,6 +1249,37 @@ test("evidence: a near-coastal renewal lodged before expiry covers 90 days and n
     "for Master <24 m NC it is, for 60 days from the day it was signed");
   const stale = { ...EV_READINGS, dec: { ...EV_READINGS.dec, issuedOn: "2026-06-01" } };
   assert.equal(coverOf("QL-08", [EV_ROWS[1]], stale), null, "a declaration whose 60 days have run out is no cover");
+  /* MO505 s 7(3) gives the 90 days only where the renewal was lodged BEFORE
+     the card expired. The card ran out on 7 July: a receipt dated the day
+     before carries him, one dated the day after carries nothing at all. */
+  const dayBefore = { ...EV_READINGS, lodged: { ...EV_READINGS.lodged, issuedOn: "2026-07-06" } };
+  assert.deepEqual(coverOf("QL-03", EV_ROWS, dayBefore), { kind: "lodged-renewal", until: "2026-10-05", rowId: "lodged" });
+  const dayAfter = { ...EV_READINGS, lodged: { ...EV_READINGS.lodged, issuedOn: "2026-07-08" } };
+  assert.equal(coverOf("QL-03", EV_ROWS, dayAfter), null, "lodged after the card had gone: the section gives him nothing");
+});
+
+test("evidence: a paper is spent once the certificate it was written about is in hand", () => {
+  /* MO505 s 12(2): AMSA's issue letter IS the certificate "until the card
+     arrives". With days null and no printed end it never ran out, so once a
+     letter was on file that column could never show red again - a cell the
+     office must chase read as carried, for ever. The card that came of it now
+     takes it off the books. */
+  const letter = [
+    { id: "iss", key: "iss", person: "EVANS, Brenton", code: "QL-04", filedOn: "2024-01-02" },
+    { id: "card", key: "card", person: "EVANS, Brenton", code: "QL-04", filedOn: "2024-03-02" },
+  ];
+  const readings: Record<string, Record<string, unknown>> = {
+    iss: { readable: true, holderName: "Brenton Evans", evidenceKind: "issue-letter", issuedOn: "2024-01-01", expiresOn: null },
+    card: { readable: true, holderName: "Brenton Evans", evidenceKind: null, isRecognition: false, issuedOn: "2024-02-15", expiresOn: "2029-02-15" },
+  };
+  assert.equal(coveredBy("QL-04", "EVANS, Brenton", letter, readings, EV_TODAY, EV_RULES), null,
+    "the card arrived, so the letter that announced it carries nothing");
+  assert.deepEqual(coveredBy("QL-04", "EVANS, Brenton", [letter[0]], readings, EV_TODAY, EV_RULES),
+    { kind: "issue-letter", until: null, rowId: "iss" }, "with no card on file it is still the certificate");
+  // Neither date read off the scans: nothing is assumed either way.
+  const undated = { ...readings, card: { ...readings.card, issuedOn: null } };
+  assert.deepEqual(coveredBy("QL-04", "EVANS, Brenton", letter, undated, EV_TODAY, EV_RULES),
+    { kind: "issue-letter", until: null, rowId: "iss" }, "a card with no issue date read off it settles nothing");
 });
 
 test("evidence: a document in another man's name covers nobody, and an issue letter runs until the card comes", () => {
@@ -1323,4 +1365,27 @@ test("the expiry day itself is the day a certificate stops counting (MO70 s 5(a)
     reminders.reminderItemLine({ person: "SITTIYOS, Kachin", code: "QL-17", title: "AMSA Medical", date: "2026-09-24", daysLeft: 0, from: [] }),
     "QL-17 AMSA Medical — expired today (24 Sep 2026)",
   );
+});
+
+test("evidence: a recognition the round could place nowhere still bars an extension", () => {
+  /* MO70 s 30 note: a certificate of recognition's term can never be
+     extended. That is a fact about the certificate that ran out, so it is
+     asked of any of his certificates that could be for this column - a
+     recognition the round could put no code to used to leave the letter
+     covering the column anyway. */
+  const letter = { id: "ext", key: "ext", person: "EVANS, Brenton", code: "QL-01", filedOn: "2026-08-02" };
+  const ticket = { id: "coc", key: "coc", person: "EVANS, Brenton", code: "QL-01", filedOn: "2021-02-01" };
+  const unplaced = { id: "rec", key: "rec", person: "EVANS, Brenton", code: null, filedOn: "2021-02-01" };
+  const readings: Record<string, Record<string, unknown>> = {
+    ext: { readable: true, holderName: "Brenton Evans", evidenceKind: "extension", issuedOn: "2026-07-20", expiresOn: "2026-11-25" },
+    coc: { readable: true, holderName: "Brenton Evans", evidenceKind: null, isRecognition: false, expiresOn: "2026-08-01" },
+    rec: { readable: true, holderName: "Brenton Evans", evidenceKind: null, isRecognition: true, expiresOn: "2026-08-01" },
+  };
+  assert.deepEqual(coveredBy("QL-01", "EVANS, Brenton", [letter, ticket], readings, EV_TODAY, EV_RULES),
+    { kind: "extension", until: "2026-11-25", rowId: "ext" }, "an ordinary certificate is extended as usual");
+  assert.equal(coveredBy("QL-01", "EVANS, Brenton", [letter, ticket, unplaced], readings, EV_TODAY, EV_RULES), null,
+    "the recognition is his, whether or not the round could name its column");
+  const elsewhere = { ...unplaced, code: "QL-09" };
+  assert.deepEqual(coveredBy("QL-01", "EVANS, Brenton", [letter, ticket, elsewhere], readings, EV_TODAY, EV_RULES),
+    { kind: "extension", until: "2026-11-25", rowId: "ext" }, "a recognition for another column says nothing about this one");
 });
