@@ -9741,6 +9741,132 @@ function MatrixAutoWindow() {
   );
 }
 
+/**
+ * The window over whichever page is open while the round from the page runs
+ * (runMatrixRound), and its outcome once it has.
+ *
+ * The round can be started from any Update matrix button, from the
+ * certificate upload, or from Update portal, and the admin may have moved on
+ * by the time it lands - so it is watched from here, once, rather than from
+ * a window per screen. While it runs the figure is the reading, then the
+ * refile, then the server's own percentage and word. A round set going by
+ * the certificate upload reports on that screen, under the filing summary,
+ * so this window goes when one of those lands; every other origin's outcome
+ * is said here and closed by hand.
+ */
+function UpdateMatrixRun() {
+  const { matrixRun: run, clearMatrixRun } = usePortal();
+  const [hidden, setHidden] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const startedAt = useRef(0);
+
+  const running = !!run && run.phase !== "done" && run.phase !== "failed";
+
+  React.useEffect(() => {
+    if (!running) {
+      // Ready for the next run: its window starts shown, on a fresh clock.
+      startedAt.current = 0;
+      setHidden(false);
+      return;
+    }
+    if (!startedAt.current) startedAt.current = Date.now();
+    const tick = () => setElapsed(Math.round((Date.now() - startedAt.current) / 1000));
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, [running]);
+
+  if (!run) return null;
+
+  if (running) {
+    if (hidden) return null;
+    const part = (n, of) => (of ? Math.min(100, Math.round((n / of) * 100)) : 0);
+    const pct = run.phase === "reading" ? part(run.read, run.total)
+      : run.phase === "filing" ? part(run.filed, run.toFile)
+      : run.phase === "waiting" ? 0
+      : run.pct || 0;
+    return (
+      <AnalysisWindow
+        eyebrow="Updating the matrix"
+        pct={pct}
+        elapsed={elapsed}
+        body={<>
+          {run.phase === "reading" && (run.total
+            ? `${run.read} of ${run.total} certificates read. Only the ones not read before are read now.`
+            : "Looking at what is on file.")}
+          {run.phase === "filing" && (run.toFile
+            ? `Filing each certificate under the person named on it — ${run.filed} of ${run.toFile}.`
+            : "Filing each certificate under the person named on it.")}
+          {run.phase === "waiting" && "Waiting for the round on the hour"}
+          {run.phase === "starting" && (run.word || "Starting")}
+        </>}
+        note="Leave the page open. Every certificate reading is kept as it is made, so a run that stops partway picks up where it left off rather than starting over."
+        onHide={() => setHidden(true)}
+      />
+    );
+  }
+
+  // The certificate upload's screen reports its own round.
+  if (run.origin === "certificates") return null;
+
+  if (run.phase === "failed") {
+    return (
+      <AnalysisWindow
+        failed
+        message={run.message}
+        failNote="Every certificate already read was kept, so running it again carries on from there rather than starting over."
+        onClose={clearMatrixRun}
+      />
+    );
+  }
+
+  const o = run.outcome || {};
+  const eyebrow = doneEyebrow(o);
+  const colour = eyebrow === "Matrix updated" ? T.accent : T.teal;
+  const changes = Array.isArray(o.changes) ? o.changes : [];
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 80, background: "rgba(18,41,61,0.45)",
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderLeft: `4px solid ${colour}`, borderRadius: 3,
+        padding: 20, width: "100%", maxWidth: 460, maxHeight: "82vh", overflowY: "auto" }}>
+        <div style={{ marginBottom: 7 }}>
+          <Eyebrow color={colour}>{eyebrow}</Eyebrow>
+        </div>
+        {doneWindowLines(o).map((line, i) => (
+          <React.Fragment key={i}>
+            <div style={{ fontFamily: T.body, fontSize: line.tone === "plain" ? 14 : 13, lineHeight: 1.7,
+              color: line.tone === "problem" ? T.bOrange : line.tone === "muted" ? T.muted : T.text }}>
+              {line.tone === "link" && line.href
+                ? <a href={line.href} download={line.download}
+                    style={{ fontFamily: T.mono, fontSize: 12, color: T.accent, textDecoration: "none" }}>{line.text}</a>
+                : line.text}
+            </div>
+            {/* The cells the round moved, from → to; a cleared one goes to blank. */}
+            {line.changes && changes.length > 0 && (
+              <div style={{ margin: "4px 0 8px", maxHeight: 190, overflowY: "auto" }}>
+                {changes.map((a, j) => (
+                  <div key={j} style={{ display: "flex", justifyContent: "space-between", gap: 12,
+                    flexWrap: "wrap", padding: "4px 0", borderBottom: `1px solid ${T.rule}` }}>
+                    <span style={{ fontFamily: T.body, fontSize: 13, color: T.text }}>
+                      {a.person} <span style={{ color: T.muted }}>· {a.code} {a.title}</span>
+                    </span>
+                    <span style={{ fontFamily: T.mono, fontSize: 11, color: T.muted }}>
+                      {a.from ? valueReads(a.from) : ""} → <span style={{ color: a.to ? T.green : T.muted }}>{a.to ? valueReads(a.to) : ""}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </React.Fragment>
+        ))}
+        <div style={{ marginTop: 15 }}>
+          <Button onClick={clearMatrixRun}>Close</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 /**
  * Step 3 — the matrices about the crew as a whole, and the set of them held
@@ -17837,6 +17963,7 @@ function CoolibahPortal({ role, onSignOut }) {
       {/* The crew matrix bringing itself up to date, watched from over whichever
           screen is open — the run can be set going from more than one of them. */}
       <MatrixAutoWindow />
+      <UpdateMatrixRun />
     </div>
     </Ctx.Provider>
   );
