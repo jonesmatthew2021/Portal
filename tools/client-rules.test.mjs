@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -2265,7 +2265,7 @@ const is = (got, want, what) => {
   const bands = await import(pathToFileURL(join(ROOT, "source", "shared", "bands.js")).href);
   is([RED_DAYS, AMBER_DAYS], [90, 180], "red is expired or within 90 days, amber within 180");
   is([bands.RED_DAYS, bands.AMBER_DAYS], [RED_DAYS, AMBER_DAYS], "the page and the worker read the same two numbers");
-  is([/within 90\b/.test(portalJsx()), (portalJsx().match(/within \$\{RED_DAYS\} days/g) || []).length], [false, 6],
+  is([/within 90\b/.test(portalJsx()), (portalJsx().match(/within \$\{RED_DAYS\} days/g) || []).length], [false, 5],
     "the reports' headings say the red band's days from RED_DAYS, never a 90 written in by hand");
   is(daysUntil("2026-10-12", "2026-09-24"), 18, "18 days from 24 Sep to 12 Oct");
   is(daysUntil("2026-09-21", "2026-09-24"), -3, "three days gone is -3");
@@ -2408,6 +2408,39 @@ const is = (got, want, what) => {
   is(online.length, 11, "online, the same eleven");
   is(online.filter((c) => c.held).length, 0, "…and none is held down");
   is(online.filter((c) => c.title !== undefined).length, 0, "…nor carries the offline line");
+}
+
+/* ---- a person's Needs attention heading says the days it lists by ---- */
+{
+  /* MatrixPerson drawn for a man holding one item RED_DAYS + 30 days out -
+     past red, inside amber - and its PDF built: the heading's count is the
+     number of lines under it, and its days are the amber band's, which is
+     what the list is filtered by. */
+  const { RED_DAYS, AMBER_DAYS, TODAY, VESSEL } = lib;
+  const on = (n) => new Date(new Date(TODAY).getTime() + n * 86400000).toISOString().slice(0, 10);
+  const cols = VESSEL.qualColumns;
+  const row = ["EVANS, Brenton", "Master", "Master", cols.map((c, i) => (i === 0 ? on(RED_DAYS + 30) : ""))];
+  const portal = { certificates: [], quals: { cols, rows: [row] }, certDates: {}, validityPeriods: null };
+  const el = (type, props, ...children) => ({ type, props: props || {}, children: children.flat(Infinity) });
+  const R = { ...ReactStub, createElement: el, useContext: () => portal, useEffect: () => {} };
+  const page = fn(
+    R, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
+    windowStub.navigator, windowStub.location, sessionStub, sessionStub, () => {}, async () => ({ ok: false }),
+    () => 0, () => 0, () => {}, () => {}, () => 0, () => {}, () => false,
+    function N() {}, function I() {}, function A() {}, class { observe() {} }, function F() {},
+    function X() {}, { now: () => 0 }, {}, {},
+  );
+  let build = null;
+  const find = (n) => {
+    if (!n || typeof n !== "object") return;
+    if (n.type === page.DownloadPDF) build = n.props.build;
+    (n.children || []).forEach(find);
+  };
+  find(page.MatrixPerson({ row, onClose: () => {} }));
+  const group = build && build().groups.find((g) => g.heading === "Needs attention");
+  is(group && group.items.length, 1, "the item 120 days out is listed under Needs attention");
+  is(group && Number(group.meta.split(" ")[0]), group && group.items.length, "…and the heading counts what is listed");
+  is(group && group.meta.includes("within " + AMBER_DAYS + " days"), true, "…by the days it was listed by");
 }
 
 if (failed) {

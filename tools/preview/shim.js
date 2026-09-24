@@ -77,18 +77,21 @@
      source/shared/reading-lines.js, written here again because this shim
      runs outside the page's own script; a check holds the two the same. */
   const flag = (name) => { try { return new URLSearchParams(location.search).get(name); } catch (e) { return null; } };
-  /* ?reminders=sent (or =failed): the weekly reminder emails switched on
-     and their last week's record, sent this Monday at 07:10 - or with one
-     address refused - so the SharePoint page's reminder line can be looked
-     at. Without the flag the setting is the document's, off by default. */
-  if ((flag("reminders") === "sent" || flag("reminders") === "failed") && mem.data) {
+  /* ?reminders=sent (or =failed, or =unanswered): the weekly reminder
+     emails switched on and their last week's record, sent this Monday at
+     07:10 - or with one address refused, or one send given up on unanswered
+     - so the SharePoint page's reminder line can be looked at. Without the
+     flag the setting is the document's, off by default. */
+  const reminderFlag = ["sent", "failed", "unanswered"].includes(flag("reminders"));
+  if (reminderFlag && mem.data) {
     mem.data = { ...mem.data, reminders: { on: true, days: 90, weekday: 1, hour: 7 } };
   }
   const fakeReminder = () => {
-    if (flag("reminders") !== "sent" && flag("reminders") !== "failed") return null;
+    if (!reminderFlag) return null;
     const at = new Date(); at.setDate(at.getDate() - ((at.getDay() + 6) % 7)); at.setHours(7, 10, 0, 0);
     return { day: todayISO(), at: at.getTime(), window: 90, own: 6, summary: 3,
-      failed: flag("reminders") === "failed" ? ["someone@example.com"] : [], skipped: null, error: null };
+      failed: flag("reminders") === "failed" ? ["someone@example.com"] : [],
+      unanswered: flag("reminders") === "unanswered" ? ["someone@example.com"] : [], skipped: null, error: null };
   };
   const OUT_OF_CREDIT = "Out of credit — top it up at console.anthropic.com";
   /* ?offline=1: the four answers the service worker keeps come back the

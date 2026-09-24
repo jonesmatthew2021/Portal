@@ -38,9 +38,11 @@ import {
  *  "last-reminder": the set day they went for (the day a send was claimed,
  *  or the last one before where nothing went and the next hour is to try
  *  again), when, the window in days, how many crew emails and
- *  summaries were sent, the addresses a send failed for, why nothing was
- *  sent where nothing needed to be, and the error where it could not be.
- *  The SharePoint page shows it. */
+ *  summaries were sent, the addresses a send failed for, the addresses whose
+ *  send was given up on unanswered (the service may still deliver those, so
+ *  they are not called failed - somebody reading "failed" would send again
+ *  by hand), why nothing was sent where nothing needed to be, and the error
+ *  where it could not be. The SharePoint page shows it. */
 export type ReminderRecord = {
   day: string | null;
   at: number;
@@ -48,6 +50,7 @@ export type ReminderRecord = {
   own: number;
   summary: number;
   failed: string[];
+  unanswered?: string[];
   skipped: string | null;
   error: string | null;
 };
@@ -74,7 +77,7 @@ export const NO_EMAIL = "email sending is not set up on this portal - nothing wa
 export const reminderLimits = { sendingForMs: 60_000, answerWithinMs: 20_000 };
 
 /** The wait for the email service to answer one send: past
- *  `answerWithinMs` the send is given up on and counted as failed, so one
+ *  `answerWithinMs` the send is given up on and named as unanswered, so one
  *  send that never returns cannot hold the hour until the platform cuts
  *  it off - the minute above only stops new sends starting. The stop
  *  clears the timer once the send has answered. The tests swap it, as
@@ -87,7 +90,8 @@ export const reminderWaits = {
     }),
 };
 
-/** Why a send given up on is on the failed list. */
+/** Why a send was given up on: it goes on the unanswered list, not the
+ *  failed one, since the service may still deliver it. */
 export const NO_ANSWER = "no answer from the email service";
 
 /** The record's line where the time ran out before the first send: nothing
@@ -123,7 +127,7 @@ export async function weeklyReminders(now: number): Promise<ReminderRecord | nul
     if (!owed) return null;
 
     const base: ReminderRecord = {
-      day: owed, at: now, window: setting.days, own: 0, summary: 0, failed: [], skipped: null, error: null,
+      day: owed, at: now, window: setting.days, own: 0, summary: 0, failed: [], unanswered: [], skipped: null, error: null,
     };
     // The claim: only one run of this tick can write it, and no tick after
     // it this week finds the reminders owed.
@@ -157,6 +161,7 @@ export async function weeklyReminders(now: number): Promise<ReminderRecord | nul
     // what went and what did not.
     let sentAny = false;
     const failed: string[] = [];
+    const unanswered: string[] = [];
     let ownSent = 0;
     let summarySent = 0;
     try {
@@ -193,7 +198,8 @@ export async function weeklyReminders(now: number): Promise<ReminderRecord | nul
           return true;
         } catch (e) {
           console.error("a reminder email was not sent:", to, said(e));
-          failed.push(to);
+          if (e instanceof Error && e.message === NO_ANSWER) unanswered.push(to);
+          else failed.push(to);
           return false;
         } finally {
           stop.abort();
@@ -209,14 +215,15 @@ export async function weeklyReminders(now: number): Promise<ReminderRecord | nul
       // Out of time before a single send: nothing went, so the day is handed
       // back like any other failure before sending.
       if (outOfTime && !sentAny) return await notSent(OUT_OF_TIME);
-      // Otherwise whoever was not reached is on the failed list, in red on
-      // the SharePoint page; the claim stands, so nobody is sent it twice.
-      return await write({ ...base, own: ownSent, summary: summarySent, failed });
+      // Otherwise whoever was not reached is on the failed or unanswered
+      // list, in red on the SharePoint page; the claim stands, so nobody is
+      // sent it twice.
+      return await write({ ...base, own: ownSent, summary: summarySent, failed, unanswered });
     } catch (e) {
       // Once anything has gone the claim stands: the day is kept, so
       // nothing is sent again this week.
       return sentAny
-        ? await write({ ...base, own: ownSent, summary: summarySent, failed, error: said(e) })
+        ? await write({ ...base, own: ownSent, summary: summarySent, failed, unanswered, error: said(e) })
         : await notSent(said(e));
     }
   } catch (e) {

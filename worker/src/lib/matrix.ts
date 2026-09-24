@@ -28,6 +28,7 @@
  */
 
 import { getStore } from "../compat/blobs.js";
+import { RED_DAYS } from "../../../source/shared/bands.js";
 import { liveSingleFileRow, singleFileCategory } from "../db/documents.js";
 import {
   askJson,
@@ -350,6 +351,14 @@ not lapsing, say so with neverExpires rather than inventing a period for it.`;
  * documents it was made from, so it survives a refresh, reads the same for
  * everyone, and is asked again when any of them is replaced.
  */
+/** What the checker is told "due" means: the window the documents give, or
+ *  the red band's days where they give none - read from bands.js, so the
+ *  checker's "due" is the same number of days as the matrix's red. */
+export const dueMeans = (withValidity: boolean) =>
+  withValidity
+    ? `the validity periods matrix or the skills matrix gives — the periods matrix first where the two differ — or expiring within ${RED_DAYS} days if neither gives one`
+    : `the skills matrix gives, or expiring within ${RED_DAYS} days if it gives none`;
+
 export async function checkMatricesOnce(force: boolean) {
   const { training, skills, validity, missing } = await matrixDocuments();
   if (missing.length) throw new MatrixMissing(bothRequiredMessage(missing), missing);
@@ -412,11 +421,7 @@ ${CHECK_SHAPE}
 How to weigh it:
 - "breach"  something required is expired or not held — the requirement is not
             being met today.
-- "due"     valid now, but inside the renewal window ${
-    validityRead
-      ? "the validity periods matrix or the skills matrix gives — the periods matrix first where the two differ — or expiring within 90 days if neither gives one"
-      : "the skills matrix gives, or expiring within 90 days if it gives none"
-  }.
+- "due"     valid now, but inside the renewal window ${dueMeans(!!validityRead)}.
 - "gap"     a requirement the training matrix says nothing about, or a shift that
             is short of what it must have.
 - "query"   the documents disagree, or one of them is unclear enough that

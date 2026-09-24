@@ -22,6 +22,10 @@ import { crewRowsOnly, crewRegister, nameLetters, registerWords } from "../../so
 import { RED_DAYS, daysUntil } from "../../source/shared/bands.js";
 import * as reminders from "../../source/shared/reminders.js";
 import { expiringIn, EXPIRING_MEANS, PORTAL_TOOLS } from "../src/lib/portal.js";
+import { dueMeans } from "../src/lib/matrix.js";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /** The office's equivalence sheet, as the portal stores it. */
 const SHEET = [
@@ -461,6 +465,14 @@ test("the assistant's expiring is the red band: RED_DAYS, and it says so", () =>
   assert.equal(EXPIRING_MEANS, "expiring is anything with 90 days or less to run", "the sentence reads as it always did");
   const certs = PORTAL_TOOLS.find((t) => t.name === "read_certificates") as { input_schema: { properties: { status: { description: string } } } };
   assert.ok(certs.input_schema.properties.status.description.includes(EXPIRING_MEANS), "and the model is told it");
+});
+
+test("the AI Checker's due is the red band's days, read from RED_DAYS both ways it is asked", () => {
+  for (const withValidity of [true, false]) {
+    assert.ok(dueMeans(withValidity).includes(`within ${RED_DAYS} days`), `with the validity matrix: ${withValidity}`);
+  }
+  const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "lib", "matrix.ts"), "utf8");
+  assert.equal(/within 90\b/.test(source), false, "no 90 written into the checker's question by hand");
 });
 
 test("the setting reads the document with the defaults where a key will not do, and only a real true is on", () => {

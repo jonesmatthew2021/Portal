@@ -3302,7 +3302,7 @@ test("at ten past seven on Monday each crew member is sent their own list and ma
   assert.ok(email.sent.every((m) => m.html.includes(`https://${vessel.domain}`)));
 
   assert.deepEqual(reminderRecord(r.portal), {
-    day: "2026-09-28", at: MONDAY_0710, window: 90, own: 2, summary: 2, failed: [], skipped: null, error: null,
+    day: "2026-09-28", at: MONDAY_0710, window: 90, own: 2, summary: 2, failed: [], unanswered: [], skipped: null, error: null,
   });
   // Asked before the lease, and the hour's own work ran after.
   const asked = r.portal.db.asked;
@@ -3386,7 +3386,7 @@ test("an all-clear week sends nothing and says so; a day already claimed sends n
   await hourAt(MONDAY_0710, reminderEnv(clear, email));
   assert.equal(email.sent.length, 0);
   assert.deepEqual(reminderRecord(clear.portal), {
-    day: "2026-09-28", at: MONDAY_0710, window: 90, own: 0, summary: 0, failed: [], skipped: "nothing expiring", error: null,
+    day: "2026-09-28", at: MONDAY_0710, window: 90, own: 0, summary: 0, failed: [], unanswered: [], skipped: "nothing expiring", error: null,
   });
 
   // A run cut off mid-send leaves its claim: the rest of the day sends nothing.
@@ -3503,7 +3503,8 @@ test("a send that never answers is given up on: the rest still go, the claim sta
     assert.ok(reminderLimits.answerWithinMs > 0 && reminderLimits.answerWithinMs < reminderLimits.sendingForMs);
     assert.deepEqual(email.sent.map((m) => m.to), ["brenton@example.com", "boss@example.com", "help@example.com"], "everybody else's went");
     const rec = reminderRecord(r.portal);
-    assert.deepEqual(rec.failed, ["kachin@example.com"], "Kachin is named");
+    assert.deepEqual(rec.unanswered, ["kachin@example.com"], "Kachin is named as unanswered");
+    assert.deepEqual(rec.failed, [], "and not as failed: the service may still deliver his");
     assert.equal(rec.own, 1);
     assert.equal(rec.summary, 2);
     assert.equal(rec.error, null);
@@ -3525,7 +3526,8 @@ test("a send that never answers is given up on: the rest still go, the claim sta
     const email2 = hanging();
     await quiet(() => hourAt(MONDAY_0710, reminderEnv(late, email2)));
     assert.deepEqual(email2.sent.map((m) => m.to), ["brenton@example.com"]);
-    assert.deepEqual(reminderRecord(late.portal).failed, ["kachin@example.com", "boss@example.com", "help@example.com"]);
+    assert.deepEqual(reminderRecord(late.portal).unanswered, ["kachin@example.com"]);
+    assert.deepEqual(reminderRecord(late.portal).failed, ["boss@example.com", "help@example.com"], "never sent, so failed");
     assert.equal(reminderRecord(late.portal).day, "2026-09-28");
     assert.equal(JSON.parse(late.portal.blobs.get("sync|last-hourly")!).applied, 1, "the round still ran");
   } finally {

@@ -106,7 +106,9 @@ function SharePointPage() {
     return { bad: false, text: "Last backup " + when + ", " + fmtBytes(b.bytes) };
   };
   // The weekly reminder emails' own line: off, or what the last week's did -
-  // in red where a send failed or none could go.
+  // in red where a send failed, went unanswered or none could go. Unanswered
+  // is kept apart from failed: the service may still deliver it, and a man
+  // sent it again by hand would have it twice.
   const reminderLine = () => {
     if (!reminders.on) return { bad: false, text: "Reminders are off" };
     const r = listing && listing.lastReminder;
@@ -116,7 +118,8 @@ function SharePointPage() {
     if (r.skipped) return { bad: false, text: "Reminders " + when + " — " + r.skipped };
     const sent = r.own + " crew, " + r.summary + " summar" + (r.summary === 1 ? "y" : "ies");
     const failed = (r.failed || []).length ? "; failed: " + r.failed.join(", ") : "";
-    return { bad: !!failed, text: "Reminders " + when + " — " + sent + failed };
+    const unanswered = (r.unanswered || []).length ? "; no answer for: " + r.unanswered.join(", ") : "";
+    return { bad: !!(failed || unanswered), text: "Reminders " + when + " — " + sent + failed + unanswered };
   };
   const fmtWhen = (s) => !s ? "" :
     new Date(s).toLocaleDateString("en-AU", { day: "2-digit", month: "short", year: "numeric" });

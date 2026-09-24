@@ -1496,9 +1496,8 @@ function UploadCertificates() {
                         width: 82, flex: "0 0 82px" }}>{d && d.issued ? colDate(d.issued) : "—"}</span>
                       <span style={{ width: 82, flex: "0 0 82px" }}>
                         {(() => {
-                          // The same colour bands as the crew matrix tiles:
-                          // red to 30 days (expired included), orange to 60,
-                          // yellow to 90, green beyond.
+                          // Coloured by bandFor, the same bands as the crew
+                          // matrix tiles, so a date reads the same colour here.
                           if (expiry) {
                             const b = bandFor(expiry);
                             return (

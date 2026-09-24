@@ -549,7 +549,7 @@ function MatrixPerson({ row, onClose }) {
                 fg: t.band.fg, bg: t.band.bg })) }]
           : []),
         ...(attention.length
-          ? [{ heading: "Needs attention", meta: `${attention.length} expired, due within ${RED_DAYS} days or not held`,
+          ? [{ heading: "Needs attention", meta: `${attention.length} expired, due within ${AMBER_DAYS} days or not held`,
               items: attention.map(line) }]
           : []),
         ...groups.map((g) => ({
