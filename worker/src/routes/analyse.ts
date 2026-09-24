@@ -988,57 +988,90 @@ export async function compareMatrix(
     }
 
     standing.push({ row, reading, person, code: code.trim().toUpperCase() });
+  }
 
-    const key = `${person.trim().toUpperCase()}::${code.trim().toUpperCase()}`;
-    if (!isRecognitionReading(reading)) {
-      const own = (isDate(row.expiresOn) ? normDate(row.expiresOn!) : null) || reading.expiresOn || "";
-      if (own && own > (foreignAt.get(key) || "")) foreignAt.set(key, own);
-    }
+  const keyFor = (person: string, code: string) =>
+    `${person.trim().toUpperCase()}::${code.trim().toUpperCase()}`;
+
+  /* The foreign certificates first, before any contest is decided. A
+     recognition's date is cut back to the certificate behind it, and a map
+     still being filled as the contests were decided would settle the same
+     pair of documents differently depending on the order the library
+     happened to list the files in. */
+  for (const { row, reading, person, code } of standing) {
+    if (isRecognitionReading(reading)) continue;
+    const own = (isDate(row.expiresOn) ? normDate(row.expiresOn!) : null) || reading.expiresOn || "";
+    const key = keyFor(person, code);
+    if (own && own > (foreignAt.get(key) || "")) foreignAt.set(key, own);
+  }
+
+  /** What one document gives one column: the date typed against it on the
+   *  portal where somebody typed one, otherwise the date read off the scan,
+   *  and nothing at all for a column that carries no expiry - with the
+   *  recognition's cut already applied, so every comparison below is between
+   *  two dates that mean the same thing. The page's cells work the date out
+   *  the same way (certificateStanding in lib/analysis.ts), so the grid and
+   *  the round cannot settle a cell differently. */
+  const dateFrom = (r: Row, rd: Reading, code: string, key: string) => {
+    const typed = isDate(r.expiresOn) ? normDate(r.expiresOn!) : null;
+    const own = neverLapses(code) ? null : typed || rd.expiresOn || null;
+    return isRecognitionReading(rd) ? recognisedUntil(rd, own, foreignAt.get(key)).until : own;
+  };
+
+  // One certificate per person and code, decided as above.
+  for (const { row, reading, person, code } of standing) {
+    const key = keyFor(person, code);
     const sitting = claim.get(key);
-    if (sitting) {
-      // The one that runs the longer is the certificate in force; the other is
-      // the one it renewed. A date typed against the certificate on the portal
-      // beats the model's reading of the scan here too — the same precedence
-      // certificateStanding() in lib/analysis.ts uses to answer the same
-      // question, so the two agree on which certificate is in force.
-      const expiryOf = (r: Row, rd: Reading) => {
-        const typed = isDate(r.expiresOn) ? normDate(r.expiresOn!) : null;
-        return neverLapses(code) ? null : typed || rd.expiresOn || null;
-      };
-      /* A certificate of recognition beats the foreign certificate it
-         recognises whichever runs the longer: the recognition is the document
-         that counts on this vessel (MO505 s 4, s 7(2)), and the cell must
-         open it. Its date is cut back to the foreign certificate's below. */
-      const mineIsRec = isRecognitionReading(reading);
-      const sittingIsRec = isRecognitionReading(sitting.reading);
-      /* The medical is the one exception to "the longer runs": it expires the
-         moment a further one is issued (MO76 s 16(3)), so of two on file the
-         one ISSUED last is the one in force even where the older prints the
-         later date. A shorter certificate signed after an injury wins. Two
-         issued the same day have nothing in the order to separate them and
-         fall back to the longer, as everything else does. */
-      const byIssue = certStatesOwnExpiry(code)
-        && (reading.issuedOn || "") !== (sitting.reading.issuedOn || "");
-      const inForce = mineIsRec !== sittingIsRec
-        ? (mineIsRec ? { row, reading } : sitting)
-        : byIssue
-          ? ((reading.issuedOn || "") > (sitting.reading.issuedOn || "") ? { row, reading } : sitting)
-          : (expiryOf(row, reading) || "") > (expiryOf(sitting.row, sitting.reading) || "") ? { row, reading } : sitting;
-      const replaced = inForce === sitting ? { row, reading } : sitting;
-      claim.set(key, inForce);
-      notes.push({
-        kind: "superseded",
-        person: replaced.row.person,
-        detail: mineIsRec !== sittingIsRec
-          ? `Two certificates on file for ${code}. ${inForce.row.filename} is AMSA's certificate of recognition, which is the document that counts here, so ${replaced.row.filename} is the foreign certificate behind it.`
-          : byIssue
-            ? `Two certificates on file for ${code}. ${inForce.row.filename} was issued last, so ${replaced.row.filename} expired the day it was signed.`
-            : `Two certificates on file for ${code}. ${inForce.row.filename} runs the longer, so ${replaced.row.filename} is treated as the one it replaced.`,
-        certificate: { id: replaced.row.id, filename: replaced.row.filename, url: `/api/files/${replaced.row.id}` },
-      });
+    if (!sitting) {
+      claim.set(key, { row, reading });
       continue;
     }
-    claim.set(key, { row, reading });
+    const mine = dateFrom(row, reading, code, key);
+    const his = dateFrom(sitting.row, sitting.reading, code, key);
+    const mineIsRec = isRecognitionReading(reading);
+    const sittingIsRec = isRecognitionReading(sitting.reading);
+    /* The medical is the one exception to "the longer runs": it expires the
+       moment a further one is issued (MO76 s 16(3)), so of two on file the
+       one ISSUED last is the one in force even where the older prints the
+       later date. A shorter certificate signed after an injury wins. Two
+       issued the same day have nothing in the order to separate them and
+       fall back to the longer, as everything else does. */
+    const byIssue = certStatesOwnExpiry(code)
+      && (reading.issuedOn || "") !== (sitting.reading.issuedOn || "");
+    /* A certificate of recognition and the foreign certificate behind it:
+       the recognition is the document that counts on this vessel (MO505 s 4,
+       s 7(2)) and the cell must open it, so it holds the cell and its date is
+       cut back to the foreign one. But nothing in the orders makes a spent
+       recognition beat a certificate that is still running - s 7(2) gives
+       standing to an AMSA seafarer certificate OR to a recognition, and
+       MO70 s 33(2) and s 37(4) only cap a recognition against the
+       certificate behind it. So where the other document actually runs the
+       longer, the longer runs, and a man who holds a current certificate is
+       not shown as expired on an old recognition. */
+    const recognitionHolds = () => {
+      const rec = mineIsRec ? mine : his;
+      const other = mineIsRec ? his : mine;
+      return !rec || !other || rec >= other;
+    };
+    const mineWins = mineIsRec !== sittingIsRec
+      ? (mineIsRec ? recognitionHolds() : !recognitionHolds())
+      : byIssue
+        ? (reading.issuedOn || "") > (sitting.reading.issuedOn || "")
+        : (mine || "") > (his || "");
+    const inForce = mineWins ? { row, reading } : sitting;
+    const replaced = mineWins ? sitting : { row, reading };
+    claim.set(key, inForce);
+    notes.push({
+      kind: "superseded",
+      person: replaced.row.person,
+      detail: isRecognitionReading(inForce.reading) !== isRecognitionReading(replaced.reading)
+        && isRecognitionReading(inForce.reading)
+        ? `Two certificates on file for ${code}. ${inForce.row.filename} is AMSA's certificate of recognition, which is the document that counts here, so ${replaced.row.filename} is the foreign certificate behind it.`
+        : byIssue
+          ? `Two certificates on file for ${code}. ${inForce.row.filename} was issued last, so ${replaced.row.filename} expired the day it was signed.`
+          : `Two certificates on file for ${code}. ${inForce.row.filename} runs the longer, so ${replaced.row.filename} is treated as the one it replaced.`,
+      certificate: { id: replaced.row.id, filename: replaced.row.filename, url: `/api/files/${replaced.row.id}` },
+    });
   }
 
   /* The covering pass. A new-style AMSA certificate of competency prints its
@@ -1051,23 +1084,60 @@ export async function compareMatrix(
      one that runs the longer is the certificate in force, and the cell links
      to whichever document that is. A covered column with no date to give -
      no end printed against the endorsement and none on the certificate -
-     claims nothing, because there would be nothing to put in the cell. */
-  for (const { row, reading, person, code } of standing) {
+     claims nothing, because there would be nothing to put in the cell.
+
+     Only the certificates that hold their own column cover anything: a
+     ticket the contest above has just decided was superseded is the one it
+     replaced, and the endorsements printed on a spent document cannot date a
+     column nothing in force carries. */
+  const displaced: { row: Row; reading: Reading; code: string }[] = [];
+  for (const [ownKey, { row, reading }] of [...claim.entries()]) {
+    const person = ownKey.slice(0, ownKey.indexOf("::"));
+    const code = ownKey.slice(ownKey.indexOf("::") + 2);
     for (const cell of coveredCells(reading, vessel.covers, vessel.qualColumns, code)) {
       if (!cell.until) continue;
       const at = cell.code.trim().toUpperCase();
-      if (!colAt.has(at)) continue;
+      // A column that carries no expiry is held or it isn't, and a date read
+      // off a line on another document says nothing about that. The page's
+      // cells refuse it the same way (lib/analysis.ts).
+      if (!colAt.has(at) || neverLapses(at)) continue;
       // A recognition reaches no further than it may reach itself.
       if (isRecognitionReading(reading) && !recognitionFills(at, vessel.neverRecognised.codes)) continue;
-      const key = `${person.trim().toUpperCase()}::${at}`;
+      const key = `${person}::${at}`;
+      /* The endorsement on a recognition runs for the remainder of the
+         foreign certificate's endorsement (MO70 s 37(4)), so the covered
+         column takes the same cut - and takes it on BOTH sides of the
+         comparison below, or a recognition would win the cell on its own
+         printed date and then have that date cut back below the document
+         that should have held it. */
+      const mine = isRecognitionReading(reading)
+        ? recognisedUntil(reading, cell.until, foreignAt.get(key)).until
+        : cell.until;
+      if (!mine) continue;
       const sitting = claim.get(key);
       if (sitting) {
-        const held = sitting.coveredUntil
-          || (neverLapses(at) ? null : (isDate(sitting.row.expiresOn) ? normDate(sitting.row.expiresOn!) : null) || sitting.reading.expiresOn)
-          || "";
-        if (held >= cell.until) continue;
+        const raw = sitting.coveredUntil
+          || (isDate(sitting.row.expiresOn) ? normDate(sitting.row.expiresOn!) : null)
+          || sitting.reading.expiresOn || null;
+        const held = !sitting.coveredUntil && isRecognitionReading(sitting.reading)
+          ? recognisedUntil(sitting.reading, raw, foreignAt.get(key)).until
+          : raw;
+        if ((held || "") >= mine) continue;
+        /* A covered date beating a certificate that IS this column: that
+           certificate is the one being replaced, and it says so - and its
+           own row still records what it is, or nothing afterwards could say
+           which cell it had been holding up. */
+        if (!sitting.coveredUntil) {
+          displaced.push({ row: sitting.row, reading: sitting.reading, code: at });
+          notes.push({
+            kind: "superseded",
+            person: sitting.row.person,
+            detail: `${row.filename} covers ${at} to ${dmy(mine)}, which is longer than ${sitting.row.filename} runs, so ${sitting.row.filename} is treated as the one it replaced.`,
+            certificate: { id: sitting.row.id, filename: sitting.row.filename, url: `/api/files/${sitting.row.id}` },
+          });
+        }
       }
-      claim.set(key, { row, reading, coveredUntil: cell.until });
+      claim.set(key, { row, reading, coveredUntil: mine });
     }
   }
 
@@ -1318,6 +1388,26 @@ export async function compareMatrix(
       detail: `No expiry could be read off this certificate, so ${code} was left as the spreadsheet has it (${cellReads(cell)}).`,
       certificate: { id: row.id, filename: row.filename, url: link.url },
     });
+  }
+
+  /* The certificates a cover displaced. They hold no cell any more, so the
+     loop above never reached them - but their own rows still have to record
+     what each one is, or after one of them is deleted nothing could say which
+     cell it had been holding up. */
+  for (const { row, reading, code } of displaced) {
+    const typed = isDate(row.expiresOn) ? normDate(row.expiresOn!) : null;
+    const note = {
+      id: row.id,
+      code,
+      expires: (neverLapses(code) ? null : typed || reading.expiresOn) || null,
+      issued: reading.issuedOn || null,
+      issuer: reading.issuer || null,
+      title: reading.certificateTitle || null,
+    };
+    const same = (row.readCode ?? null) === note.code && (row.readExpires ?? null) === note.expires
+      && (row.readIssued ?? null) === note.issued && (row.readIssuer ?? null) === note.issuer
+      && (row.readTitle ?? null) === note.title;
+    if (!same && !noted.some((n) => n.id === row.id)) noted.push(note);
   }
 
   // The other spreadsheet: the crew certificates workbook filed on the portal.

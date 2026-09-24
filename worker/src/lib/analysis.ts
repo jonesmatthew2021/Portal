@@ -924,21 +924,35 @@ export async function certificateStanding() {
   const dateFor = (reading: Reading, key: string, own: string | null) =>
     isRecognitionReading(reading) ? recognisedUntil(reading, own, foreignAt.get(key)) : { until: own, foreignUnknown: false };
 
+  /** The document behind each cell, for the covering pass: only what is in
+   *  force for its own column covers another column. */
+  const inForce = new Map<string, { row: Row; reading: Reading }>();
+
   for (const { row, reading, code, key, expires: ownExpiry, issued, issuer } of standing) {
     const { until: expires, foreignUnknown } = dateFor(reading, key, ownExpiry);
     const mineIsRec = isRecognitionReading(reading);
     const sitting = claim.get(key);
     if (sitting) {
-      /* The recognition is the document that counts on this vessel
-         (MO505 s 4, s 7(2)), so it holds the cell against the foreign
-         certificate whichever runs the longer; two of a kind are decided the
-         way they always were, by which runs the longer. */
       /* The medical is the one exception to "the longer runs": it expires the
          moment a further one is issued (MO76 s 16(3)), so of two on file the
          one ISSUED last holds the cell. Two issued the same day fall back to
          the longer, as everything else does. */
       const byIssue = certStatesOwnExpiry(code) && (issued || "") !== (sitting.issued || "");
-      const beats = mineIsRec !== !!sitting.recognition ? mineIsRec
+      /* A certificate of recognition and the foreign certificate behind it:
+         the recognition is the document that counts on this vessel
+         (MO505 s 4, s 7(2)), so it holds the cell and the cell opens it. But
+         nothing in the orders makes a spent recognition beat a certificate
+         still running - s 7(2) gives standing to an AMSA seafarer certificate
+         OR to a recognition - so where the other document actually runs the
+         longer, the longer runs. The round decides it the same way
+         (compareMatrix in routes/analyse.ts). */
+      const recognitionHolds = () => {
+        const rec = mineIsRec ? expires : sitting.expires;
+        const other = mineIsRec ? sitting.expires : expires;
+        return !rec || !other || rec >= other;
+      };
+      const beats = mineIsRec !== !!sitting.recognition
+        ? (mineIsRec ? recognitionHolds() : !recognitionHolds())
         : byIssue ? (issued || "") > (sitting.issued || "")
           : (expires || "") > (sitting.expires || "");
       if (!beats) {
@@ -954,12 +968,14 @@ export async function certificateStanding() {
         fileId: row.id, recognition: mineIsRec, foreignUnknown,
         assessedOn: reading.assessedOn || null, conditions: (reading.conditions || "").trim() || null,
       });
+      inForce.set(key, { row, reading });
       continue;
     }
     claim.set(key, {
       issued, expires, issuer, fileId: row.id, recognition: mineIsRec, foreignUnknown,
       assessedOn: reading.assessedOn || null, conditions: (reading.conditions || "").trim() || null,
     });
+    inForce.set(key, { row, reading });
   }
 
   /* The covered columns, joining the same contest: the one that runs the
@@ -967,9 +983,14 @@ export async function certificateStanding() {
      is. A covered column with no date to give claims nothing - there would be
      nothing to put in the cell. An endorsement on a recognition runs for the
      remainder of the foreign certificate's (MO70 s 37(4)), so a covered
-     column takes the same earlier-of rule. */
-  for (const { row, reading, key: ownKey, code } of standing) {
+     column takes the same earlier-of rule.
+
+     Only the certificate in force for its own column covers anything: a
+     ticket the contest above decided was superseded is the one it replaced,
+     and the endorsements printed on a spent document cannot date a column. */
+  for (const [ownKey, { row, reading }] of [...inForce.entries()]) {
     const person = ownKey.slice(0, ownKey.indexOf("::"));
+    const code = ownKey.slice(ownKey.indexOf("::") + 2);
     for (const cell of coveredCells(reading, vessel.covers, vessel.qualColumns, code)) {
       if (!cell.until || neverLapses(cell.code)) continue;
       if (isRecognitionReading(reading) && !recognitionFills(cell.code, vessel.neverRecognised.codes)) continue;

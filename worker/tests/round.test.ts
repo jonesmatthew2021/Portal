@@ -4704,3 +4704,109 @@ test("covers: two spellings of one man are one set of cells, and the recognition
   assert.deepEqual(round.settled, [{ person: "EVANS, Brenton", code: "QL-01", value: "2027-05-05" }],
     "and the round says the same, which is what it always said");
 });
+
+test("recognition: a covered column is decided on the cut date, so the round and the grid agree", async () => {
+  /* His recognition prints 2030-06-30 and says the MCA certificate behind it
+     runs to 2029-03-01, so everything it carries stops on the earlier day
+     (MO70 s 33(2), s 37(4)). He also holds a standalone ECDIS certificate to
+     2029-06-01. The round used to compare the recognition's UNCUT date
+     against it, hand the ECDIS cell to the recognition, and only then cut it
+     back to 2029-03-01 - three months of a cell the standalone certificate
+     should have held, and the page's own cells said something different. */
+  const certs = [
+    { row: { id: "rec", qualCode: "QL-01" }, reading: recognitionOf({ endorsements: [{ text: "II/2 (incl. generic ECDIS)", until: null }] }) },
+    { row: { id: "own", qualCode: "QL-13" }, reading: {
+      ...evansCoC, certificateTitle: "ECDIS", qualCode: "QL-13", expiresOn: "2029-06-01",
+      endorsements: [], units: [], isRecognition: false,
+    } },
+  ];
+  setEnv({ DB: coversDb(certs), FILE_STORE: "r2" } as never);
+  const out = await compareMatrix(coversMatrix, null, evansOnly);
+  assert.deepEqual(out.settled.map((s) => [s.code, s.value]).sort(),
+    [["QL-01", "2029-03-01"], ["QL-13", "2029-06-01"]],
+    "the standalone ECDIS certificate runs the longer of the two, so it holds its own column");
+  assert.equal(out.items.find((i) => i.code === "QL-13")!.certificate!.id, "own",
+    "and the cell opens that certificate");
+
+  setEnv({ DB: coversDb(certs), FILE_STORE: "r2" } as never);
+  const page = await certificateStanding();
+  const by = Object.fromEntries(page.dates.map((d) => [d.code, d]));
+  assert.equal(by["QL-13"].expires, "2029-06-01", "which is what the page's cells said all along");
+  assert.equal(by["QL-13"].fileId, "own");
+});
+
+test("recognition: an expired recognition never displaces a certificate that is still running", async () => {
+  /* MO505 s 7(2) gives standing to an AMSA seafarer certificate OR to a
+     certificate of recognition. Nothing in the orders makes a spent
+     recognition beat a current Australian certificate in the same column, and
+     the recognition used to win whatever the two dates were - so a man
+     holding a current ticket read as expired, in red, on a recognition he had
+     long since replaced. */
+  const current = {
+    ...evansCoC, certificateTitle: "Certificate of Competency - Master", issuer: "AMSA",
+    expiresOn: "2031-05-26", endorsements: [], units: [], isRecognition: false,
+  };
+  const spent = recognitionOf({ expiresOn: "2024-01-01", recognises: { authority: "MCA", country: "United Kingdom", number: "UK-9921", expiresOn: "2024-01-01" } });
+  const certs = [
+    { row: { id: "rec", qualCode: "QL-01" }, reading: spent },
+    { row: { id: "amsa", qualCode: "QL-01" }, reading: current },
+  ];
+  setEnv({ DB: coversDb(certs), FILE_STORE: "r2" } as never);
+  const out = await compareMatrix(coversMatrix, null, evansOnly);
+  assert.deepEqual(out.settled, [{ person: "EVANS, Brenton", code: "QL-01", value: "2031-05-26" }],
+    "the certificate he holds, not the recognition he has finished with");
+  assert.equal(out.items.find((i) => i.code === "QL-01")!.certificate!.id, "amsa", "and the cell opens it");
+  assert.equal(out.notes.some((n) => n.kind === "superseded" && /runs the longer/.test(n.detail)), true,
+    "the recognition is the one it replaced, and said so in those words");
+
+  setEnv({ DB: coversDb(certs), FILE_STORE: "r2" } as never);
+  const page = await certificateStanding();
+  assert.deepEqual(page.dates.map((d) => [d.expires, d.fileId, d.recognition]), [["2031-05-26", "amsa", false]],
+    "and the page's cells say the same");
+});
+
+test("covers: only the ticket in force covers another column", async () => {
+  /* Two Master tickets, the older carrying a fast rescue craft endorsement the
+     newer does not. The older is the one the newer replaced, so nothing in
+     force carries fast rescue craft and QL-16 stays empty: a date off a
+     ticket he no longer holds is a date nobody could produce the paper for. */
+  const certs = [
+    { row: { id: "old", qualCode: "QL-01" }, reading: {
+      ...evansCoC, expiresOn: "2029-01-01", units: [],
+      endorsements: [{ text: "VI/2 (2) s. A-VI/2 (5-8)", until: null }],
+    } },
+    { row: { id: "new", qualCode: "QL-01" }, reading: { ...evansCoC, expiresOn: "2031-05-26", endorsements: [], units: [] } },
+  ];
+  setEnv({ DB: coversDb(certs), FILE_STORE: "r2" } as never);
+  const out = await compareMatrix(coversMatrix, null, evansOnly);
+  assert.deepEqual(out.settled, [{ person: "EVANS, Brenton", code: "QL-01", value: "2031-05-26" }],
+    "the newer ticket, and no fast rescue craft off the one it replaced");
+
+  setEnv({ DB: coversDb(certs), FILE_STORE: "r2" } as never);
+  const page = await certificateStanding();
+  assert.deepEqual(page.dates.map((d) => d.code), ["QL-01"], "the page's cells the same");
+});
+
+test("covers: a covered date that beats a certificate of its own says which certificate it replaced", async () => {
+  /* The tested case the other way round: a standalone ECDIS certificate
+     expiring 2028 against a ticket covering ECDIS to 2031. The ticket holds
+     the cell - but the certificate it displaced is named, and its own row
+     still records what it is, or after somebody deletes it nothing could say
+     which cell it had been holding up. */
+  const db = coversDb([
+    { row: { id: "coc", qualCode: "QL-01" }, reading: evansCoC },
+    { row: { id: "own", filename: "ecdis.pdf", qualCode: "QL-13" }, reading: {
+      ...evansCoC, certificateTitle: "ECDIS", qualCode: "QL-13", expiresOn: "2028-01-01",
+      endorsements: [], units: [],
+    } },
+  ]);
+  setEnv({ DB: db, FILE_STORE: "r2" } as never);
+  const out = await compareMatrix(coversMatrix, null, evansOnly);
+  assert.equal(out.settled.find((s) => s.code === "QL-13")!.value, "2031-05-26");
+  assert.equal(out.notes.some((n) => n.kind === "superseded" && /ecdis\.pdf/.test(n.detail)), true,
+    "the displaced certificate is named");
+  const wrote = db.asked.filter((a) => /UPDATE documents\s+SET read_code/.test(a.sql));
+  assert.deepEqual(wrote.map((n) => [n.args[0], n.args[1], n.args[2]]).sort(),
+    [["coc", "QL-01", "2031-05-26"], ["own", "QL-13", "2028-01-01"]],
+    "and its row still says it is an ECDIS certificate expiring 2028");
+});

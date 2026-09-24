@@ -860,6 +860,22 @@ test("covers: the fast rescue craft column takes the endorsement's own printed d
   [{ code: "QL-16", until: "2028-01-01" }], "the earlier of the two, which is the certificate's own expiry");
 });
 
+test("covers: no column this vessel's table covers is one that carries no expiry", () => {
+  /* A column that carries no expiry (noExpiryCodes) is held or it isn't, and
+     a date read off a line on another document says nothing about that. Both
+     settling passes refuse such a column outright - the round's covering pass
+     in routes/analyse.ts and the page's in lib/analysis.ts - so they can
+     never show a man different things. Nothing on this vessel reaches one
+     today; if a covered column is ever put on that list, this fires and what
+     the cell should then say is a decision, not a silent change. */
+  const noExpiry = new Set(vessel.noExpiryCodes.map((c) => c.trim().toUpperCase()));
+  const covered = [
+    ...vessel.covers.map((c) => c.code.trim().toUpperCase()),
+    ...unitColumnsIn(vessel.qualColumns),
+  ];
+  assert.deepEqual(covered.filter((c) => noExpiry.has(c)), []);
+});
+
 test("covers: GMDSS is never read off a certificate of competency", () => {
   /* The GMDSS radio operator certificate is a certificate class of its own,
      with its own term and its own revalidation (MO70 s 7(1)(ca), s 15(1)(b),
