@@ -13,19 +13,18 @@
 /*  Training matrix                                                      */
 /* ==================================================================== */
 
+/* Days from today to a date, by the one count the worker's reminder emails
+   use too (daysUntil, source/shared/bands.js). */
 function daysTo(iso) {
-  return Math.round((new Date(iso) - new Date(TODAY)) / 86400000);
+  return daysUntil(iso, TODAY);
 }
 
-/* How long a certificate has left, in three bands, and the only place the
-   numbers are written down. Everything that shows a certificate's standing -
-   the matrix, the reports, a person's own page - reads them from here, so the
-   colours cannot come to mean different things on different pages.
-
-   Red covers expired as well as expiring: an item that ran out last year and
-   one that runs out next month are both work to be done now. */
-const RED_DAYS = 90;      // expired, or expiring within this many days
-const AMBER_DAYS = 180;   // expiring within this many days
+/* How long a certificate has left, in three bands. Everything that shows a
+   certificate's standing - the matrix, the reports, a person's own page -
+   reads the bands from here, so the colours cannot come to mean different
+   things on different pages. The two numbers, RED_DAYS and AMBER_DAYS, are
+   written down once in source/shared/bands.js, where the worker's weekly
+   reminder emails read the same red band. */
 
 // Expired or within 90 days red, 90-180 orange, beyond 180 green.
 function bandFor(v) {

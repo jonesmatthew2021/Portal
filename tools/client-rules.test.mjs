@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -2257,6 +2257,28 @@ const is = (got, want, what) => {
   is(showPicker(undefined, "Couldn't reach the portal"), false, "on the live site it never does: a link that is down is not a sign-in");
   is(showPicker(false, "Couldn't reach the portal"), false, "…nor with the flag set to anything but true");
   is(showPicker(true, null), false, "and under the shim a /api/me that answered needs no picker");
+}
+
+/* ---- the bands: one number for red, the same on the page and in the emails ---- */
+{
+  const { bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY } = lib;
+  const bands = await import(pathToFileURL(join(ROOT, "source", "shared", "bands.js")).href);
+  is([RED_DAYS, AMBER_DAYS], [90, 180], "red is expired or within 90 days, amber within 180");
+  is([bands.RED_DAYS, bands.AMBER_DAYS], [RED_DAYS, AMBER_DAYS], "the page and the worker read the same two numbers");
+  is(daysUntil("2026-10-12", "2026-09-24"), 18, "18 days from 24 Sep to 12 Oct");
+  is(daysUntil("2026-09-21", "2026-09-24"), -3, "three days gone is -3");
+  is(daysUntil("2026-04-06", "2026-04-04"), 2, "a daylight-saving weekend elsewhere moves nothing");
+  const on = (n) => new Date(new Date(TODAY).getTime() + n * 86400000).toISOString().slice(0, 10);
+  is(daysTo(on(18)), 18, "the page's daysTo counts from today by the shared count");
+  is(bandFor(on(-3)).key, "red", "expired is red");
+  is(bandFor(on(0)).key, "red", "expiring today is red");
+  is(bandFor(on(90)).key, "red", "90 days is still red");
+  is(bandFor(on(91)).key, "orange", "91 days is amber");
+  is(bandFor(on(180)).key, "orange", "180 days is still amber");
+  is(bandFor(on(181)).key, "green", "181 days is green");
+  is(bandFor(on(91)).days, 91, "the band carries its days");
+  is([bandFor("Y").key, bandFor("n").key, bandFor("OPEN").key, bandFor("x").key, bandFor("")],
+    ["held", "not", "not", "unknown", null], "the words keep their bands");
 }
 
 if (failed) {
