@@ -294,13 +294,15 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
  *  fetched, in the vessel's own time, with the year only when that was
  *  not today. `now` is the moment it is read, for the test's sake. */
 function offlineLine(stampISO, now = Date.now()) {
-  const at = new Date(stampISO);
+  // No stamp at all reads as no date: new Date(null) would be 1970.
+  const at = new Date(stampISO ? stampISO : "");
   if (isNaN(at.getTime())) return "Offline — showing the portal as last loaded";
   const part = (d) => {
     const parts = new Intl.DateTimeFormat("en-AU", { timeZone: VESSEL.timezone, year: "numeric", month: "numeric",
       day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(d);
     const of = (type) => (parts.find((p) => p.type === type) || {}).value || "";
-    return { year: of("year"), month: Number(of("month")), day: of("day"), hour: of("hour"), minute: of("minute") };
+    // The day as a plain number: en-AU pads it ("05") and the badge should not.
+    return { year: of("year"), month: Number(of("month")), day: String(Number(of("day"))), hour: of("hour"), minute: of("minute") };
   };
   const p = part(at);
   const today = part(new Date(now));

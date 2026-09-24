@@ -78,6 +78,21 @@
      runs outside the page's own script; a check holds the two the same. */
   const flag = (name) => { try { return new URLSearchParams(location.search).get(name); } catch (e) { return null; } };
   const OUT_OF_CREDIT = "Out of credit — top it up at console.anthropic.com";
+  /* ?offline=1: the four answers the service worker keeps come back the
+     way it hands them back when the link is down - stamped with the time
+     they were fetched, here two hours ago - so the badge's line and the
+     held-down controls can be looked at. The header is the one in
+     source/shared/offline-rules.js (FETCHED_AT_HEADER), written here
+     again because this shim runs outside the page; a rule test holds the
+     two the same. With the flag, /api/me is answered too (as the IT
+     account, which the live portal would answer from its kept copy), so
+     the page boots the way it does at sea rather than through the picker. */
+  const OFFLINE_STAMP_HEADER = "X-Portal-Fetched-At";
+  const offlineStamp = () => new Date(Date.now() - 2 * 60 * 60000).toISOString();
+  const stamped = (answer) => {
+    if (flag("offline") === "1") answer.headers.set(OFFLINE_STAMP_HEADER, offlineStamp());
+    return answer;
+  };
   // The nightly backup's record: landed this morning, or, under
   // ?backup=missing, refused because the folder is not in the library.
   const fakeBackup = () => {
@@ -267,8 +282,13 @@
     // every machine.
     const p = url.pathname.replace(/^\/[A-Za-z]:/, "");
     try {
-      if (p === "/api/state") return await handleState(req);
-      if (p === "/api/files") return await handleFiles(req, url);
+      // Only what is read gets the offline stamp: a save is never a kept copy.
+      const kept = (answer) => (req.method === "GET" ? stamped(answer) : answer);
+      if (p === "/api/me" && flag("offline") === "1") {
+        return kept(json({ name: VESSEL.it.name, email: "", role: "it", fitToSail: "" }));
+      }
+      if (p === "/api/state") return kept(await handleState(req));
+      if (p === "/api/files") return kept(await handleFiles(req, url));
       const m = p.match(/^\/api\/files\/([^/]+)$/);
       if (m) return await handleFile(req, url, decodeURIComponent(m[1]));
       /* Update documentation does a round of the library before it shows
@@ -280,7 +300,7 @@
         return json({ registered: [], mirrored: 0, followed: 0, moved: [], removed: [] });
       /* The hourly round's last outcome: the preview has no cron, so nothing
          has run and the page says so. */
-      if (p === "/api/sync/last") return json({ sync: null, hourly: flag("hourly") ? fakeHourly() : null, running: false, holder: null });
+      if (p === "/api/sync/last") return kept(json({ sync: null, hourly: flag("hourly") ? fakeHourly() : null, running: false, holder: null }));
       /* The SharePoint page's listing: no library behind the preview, so
          an empty folder, and the hour's and the import's lines only under
          their flags. */

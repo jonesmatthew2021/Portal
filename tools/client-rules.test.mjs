@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, offlineLine, controlsLocked, showPicker };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -1123,6 +1123,45 @@ const is = (got, want, what) => {
   }
   is(offline.FETCHED_AT_HEADER, lib.FETCHED_AT_HEADER, "the stamp's header is the same word in the worker and the page");
   is(offline.KEPT_APIS, ["/api/me", "/api/state", "/api/files", "/api/sync/last"], "the four answers kept, and no more");
+  /* The preview's shim writes the stamp on its answers under ?offline=1,
+     outside the page's own script, so the header is spelt there a second
+     time: held to the one word here. */
+  const shim = readFileSync(join(ROOT, "tools", "preview", "shim.js"), "utf8");
+  is(shim.includes('const OFFLINE_STAMP_HEADER = "' + offline.FETCHED_AT_HEADER + '";'), true,
+    "the preview's shim stamps its answers under the same header the service worker uses");
+}
+
+/* ---- the page offline: the badge's line, the lock, the picker ---- */
+{
+  /* Three rules the page keeps at the top: what the badge says while the
+     portal is offline, when nothing may be written, and when the preview's
+     name picker may stand in for the sign-in. The last one is the bug
+     that started this: a link that was down used to fall through to the
+     honour-system picker on the live site. */
+  const { offlineLine, controlsLocked, showPicker, VESSEL } = lib;
+  is(VESSEL.timezone, "Australia/Perth", "the line is read in the vessel's own time (the test's cases are in it)");
+  // 06:32 UTC is 14:32 in the vessel's time.
+  is(offlineLine("2026-09-24T06:32:00.000Z", Date.parse("2026-09-24T09:00:00.000Z")),
+    "Offline — showing the portal as at 24 Sep, 14:32", "the badge says when the copy on screen was fetched, without the year when that was today");
+  is(offlineLine("2026-09-24T06:32:00.000Z", Date.parse("2026-09-25T09:00:00.000Z")),
+    "Offline — showing the portal as at 24 Sep 2026, 14:32", "…and with the year when it was not");
+  // 16:30 UTC on the 23rd is already the 24th in the vessel's time.
+  is(offlineLine("2026-09-23T16:30:00.000Z", Date.parse("2026-09-24T09:00:00.000Z")),
+    "Offline — showing the portal as at 24 Sep, 00:30", "the day is the vessel's day, not UTC's");
+  is(offlineLine("2026-01-05T01:07:00.000Z", Date.parse("2026-01-05T02:00:00.000Z")),
+    "Offline — showing the portal as at 5 Jan, 09:07", "a single-figure day is written plainly");
+  is(offlineLine("not a time", Date.now()), "Offline — showing the portal as last loaded", "a stamp that cannot be read still says offline");
+  is(offlineLine(null, Date.now()), "Offline — showing the portal as last loaded", "…and so does no stamp at all");
+
+  is(controlsLocked(null, false), false, "online with no round running, everything may be written");
+  is(controlsLocked("2026-09-24T06:32:00.000Z", false), true, "offline, nothing may be written");
+  is(controlsLocked(null, true), true, "the round running holds the workbook's buttons as before");
+  is(controlsLocked("2026-09-24T06:32:00.000Z", true), true, "…and both together lock too");
+
+  is(showPicker(true, "Couldn't reach the portal"), true, "under the preview's shim a failed /api/me shows the picker");
+  is(showPicker(undefined, "Couldn't reach the portal"), false, "on the live site it never does: a link that is down is not a sign-in");
+  is(showPicker(false, "Couldn't reach the portal"), false, "…nor with the flag set to anything but true");
+  is(showPicker(true, null), false, "and under the shim a /api/me that answered needs no picker");
 }
 
 if (failed) {
