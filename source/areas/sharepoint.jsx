@@ -93,6 +93,16 @@ function SharePointPage() {
 
   const fmtBytes = (n) => n == null ? "" :
     n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`;
+
+  // The nightly backup's own line: when it last landed and how big, or
+  // why it did not, in red. Nothing at all where no backup folder is named.
+  const backupLine = () => {
+    const b = listing && listing.lastBackup;
+    if (!b) return null;
+    const when = new Date(b.at).toLocaleString("en-AU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+    if (b.error) return { bad: true, text: "Backup " + when + " failed: " + b.error + (b.day ? " (last one landed " + b.day + ")" : "") };
+    return { bad: false, text: "Last backup " + when + ", " + fmtBytes(b.bytes) };
+  };
   const fmtWhen = (s) => !s ? "" :
     new Date(s).toLocaleDateString("en-AU", { day: "2-digit", month: "short", year: "numeric" });
 
@@ -108,6 +118,7 @@ function SharePointPage() {
         <span style={{ flex: 1, minWidth: 0, lineHeight: 1.6 }}>
           <div>{syncLine()}</div>
           {hourlyLine() && <div style={{ color: hourlyLine().bad ? T.bRed : T.muted }}>{hourlyLine().text}</div>}
+          {backupLine() && <div style={{ color: backupLine().bad ? T.bRed : T.muted }}>{backupLine().text}</div>}
         </span>
         <Button variant="quiet" disabled={syncing || roundRunning} title={!syncing && roundRunning ? ROUND_BUSY : undefined}
           onClick={syncNow}>{syncing ? "Importing..." : "Import new files"}</Button>

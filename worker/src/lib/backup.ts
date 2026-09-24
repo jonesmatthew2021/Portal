@@ -1,4 +1,8 @@
-import type { PortalEnv } from "../env.js";
+import { getEnv, type PortalEnv } from "../env.js";
+import { getStore } from "../compat/blobs.js";
+import { fileStore, toReal } from "../files/store.js";
+import { certHome } from "../db/cert-home.js";
+import { PORTAL_ROW_ID } from "../db/schema.js";
 
 /**
  * The nightly backup: one JSON file a day in a folder of the owner's, in
@@ -108,4 +112,146 @@ export function folderAllowed(
     return { ok: false, reason: `the folder ${want} is one the portal files into (${inside}); pick another` };
   }
   return { ok: true };
+}
+
+/* ------------------------------------------------------------- the backup -- */
+
+/** What the last backup did, kept in the sync store under "last-backup":
+ *  the day it landed on (only ever a day that landed), when it was tried,
+ *  and the error where it did not land. The SharePoint page shows it. */
+export type BackupRecord = {
+  day: string | null;
+  at: number;
+  name: string | null;
+  bytes: number;
+  rev: number | null;
+  counts: Record<string, number>;
+  error: string | null;
+};
+
+const RECORD = "last-backup";
+export const lastBackup = () => getStore("sync").get(RECORD, { type: "json" }) as Promise<BackupRecord | null>;
+
+/** The named stores that go in the file: the AI's readings and checks. The
+ *  sync store (the hour's records, the lease) and the job stores do not. */
+const READING_STORES = ["certificate-readings", "matrix-readings", "shift-allocation-readings", "opms-checks"];
+
+/** The real paths of the folders Crew Details points at: the certificate
+ *  home and every man's own folder. The backup may not go under any. */
+async function foldersFiledInto(): Promise<string[]> {
+  const where = await certHome();
+  return [where.home, ...where.assigned.map((a) => a.key)].map((k) => trimSlashes(toReal(k + "/")));
+}
+
+const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/**
+ * The file itself, as text. Put together by hand rather than through
+ * JSON.stringify of one big object, so the shared document goes in byte
+ * for byte as the database holds it - never parsed and written out again,
+ * which is where a stray change could creep in. A reading that is not
+ * JSON as stored (it should always be) goes in as a string with a note,
+ * so the file still parses.
+ */
+async function backupBody(now: number, day: string): Promise<{ text: string; rev: number | null; counts: Record<string, number> }> {
+  const db = getEnv().DB;
+  const state = await db.prepare("SELECT data, rev FROM portal_state WHERE id = ?1").bind(PORTAL_ROW_ID).first<{ data: string; rev: number }>();
+  const documents = (await db.prepare("SELECT * FROM documents ORDER BY created_at, id").all()).results || [];
+  const users = (await db.prepare("SELECT id, email, name, role, disabled, created_at, created_by, last_login, phone FROM users").all()).results || [];
+  const readings: Record<string, { key: string; value: string }[]> = {};
+  for (const store of READING_STORES) {
+    readings[store] = (await db.prepare("SELECT key, value FROM blobs WHERE store = ?1").bind(store).all<{ key: string; value: string }>()).results || [];
+  }
+  let fauna: unknown[] = [];
+  try {
+    fauna = (await db.prepare("SELECT * FROM fauna_sightings").all()).results || [];
+  } catch (e) {
+    // The table is made the first time the phone logs a sighting; a
+    // portal that has never had one has no table and nothing to keep.
+    if (!/no such table/i.test(said(e))) throw e;
+  }
+  const readingCount = Object.values(readings).reduce((n, rows) => n + rows.length, 0);
+  const counts = { documents: documents.length, users: users.length, readings: readingCount, fauna: fauna.length };
+  const rows = (list: unknown[]) => "[" + list.map((r) => JSON.stringify(r)).join(",") + "]";
+  const asStored = (value: string) => {
+    try {
+      JSON.parse(value);
+      return value;
+    } catch {
+      return JSON.stringify({ note: "not JSON as stored", text: value });
+    }
+  };
+  const text =
+    '{"portal":"coolibah","backupVersion":1' +
+    ',"at":' + JSON.stringify(new Date(now).toISOString()) +
+    ',"perthDay":' + JSON.stringify(day) +
+    ',"rev":' + (state ? String(state.rev) : "null") +
+    ',"counts":' + JSON.stringify(counts) +
+    ',"document":' + (state ? state.data : "null") +
+    ',"documents":' + rows(documents) +
+    ',"users":' + rows(users) +
+    ',"readings":{' + READING_STORES.map((store) =>
+      JSON.stringify(store) + ":{" + readings[store].map((r) => JSON.stringify(r.key) + ":" + asStored(r.value)).join(",") + "}",
+    ).join(",") + "}" +
+    ',"fauna":' + rows(fauna) +
+    "}";
+  return { text, rev: state ? state.rev : null, counts };
+}
+
+/**
+ * The backup, from the hour: nothing where none is owed or no folder is
+ * named; otherwise one file written into BACKUP_FOLDER, the old ones
+ * dropped by name, and the record written. About fifteen calls, and no
+ * listing. Any failure goes on the record with the day left as it was,
+ * so the next hour tries again and the SharePoint page says why.
+ */
+export async function nightlyBackup(now: number): Promise<BackupRecord | null> {
+  const env = getEnv();
+  const store = getStore("sync");
+  const record = (await store.get(RECORD, { type: "json" }).catch(() => null)) as BackupRecord | null;
+  const perth = perthNow(now);
+  const hour = Number(env.BACKUP_HOUR);
+  if (!backupDue(record, perth, Number.isFinite(hour) ? hour : 2)) return null;
+  const folder = trimSlashes(env.BACKUP_FOLDER || "");
+  if (!folder) return null;
+
+  const failed = async (error: string): Promise<BackupRecord> => {
+    // The day is only ever a day that landed, so it stays as it was.
+    const next: BackupRecord = {
+      day: record?.day ?? null, name: record?.name ?? null, bytes: record?.bytes ?? 0,
+      rev: record?.rev ?? null, counts: record?.counts ?? {}, at: now, error,
+    };
+    console.error("the nightly backup was not written:", error);
+    try {
+      await store.setJSON(RECORD, next);
+    } catch (e) {
+      console.error("the backup's record was not written:", e);
+    }
+    return next;
+  };
+
+  try {
+    const allowed = folderAllowed(folder, env, await foldersFiledInto());
+    if (!allowed.ok) return await failed(allowed.reason);
+    const files = fileStore();
+    if (!(await files.hasFolder("library/" + folder))) return await failed(`the folder ${folder} is not in the library; make it in Teams`);
+
+    const { text, rev, counts } = await backupBody(now, perth.day);
+    const bytes = new TextEncoder().encode(text);
+    const name = backupName(perth.day);
+    await files.set(`library/${folder}/${name}`, bytes.buffer as ArrayBuffer, { intoExistingFolder: true });
+    for (const old of namesToDrop(perth.day)) {
+      // Each on its own: a drop that fails costs one old file, not the backup.
+      try {
+        await files.delete(`library/${folder}/${old}`);
+      } catch (e) {
+        console.error(`the old backup ${old} was not dropped:`, e);
+      }
+    }
+    const next: BackupRecord = { day: perth.day, at: now, name, bytes: bytes.length, rev, counts, error: null };
+    await store.setJSON(RECORD, next);
+    return next;
+  } catch (e) {
+    return await failed(said(e));
+  }
 }

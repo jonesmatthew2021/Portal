@@ -30,7 +30,7 @@ import importSingle from "../src/routes/import-single.js";
 import worker, { hourWaits, hourDeadline, syncLastAnswer } from "../src/index.js";
 import { writeZip, readZip, partOf, partText, datedWorkbookName } from "../../source/shared/workbook.js";
 import { asKnownPerson, crewRegister } from "../../source/shared/names.js";
-import { perthNow, backupDue, backupName, namesToDrop, folderAllowed } from "../src/lib/backup.js";
+import { perthNow, backupDue, backupName, namesToDrop, folderAllowed, nightlyBackup } from "../src/lib/backup.js";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -169,6 +169,7 @@ function fakeBucket(seed: Record<string, string>, folders: string[] = ["opms", "
   const bucket = {
     made,
     failOn: 0,
+    puts: () => writes,
     text: (key: string) => { const b = bytes.get(key); return b ? new TextDecoder().decode(b) : null; },
     keys: () => [...bytes.keys()].sort(),
     async get(key: string) {
@@ -611,7 +612,7 @@ const smallWorkbook = () => writeZip([
 /** A whole portal: the shared document, the file rows, the readings, the
  *  named stores - stateful, so a second round sees what the first left.
  *  Store rows are keyed "store|key". */
-function portalDb(doc: Record<string, unknown>, rows: Record<string, unknown>[], readings: Record<string, unknown>) {
+function portalDb(doc: Record<string, unknown>, rows: Record<string, unknown>[], readings: Record<string, unknown>, users: Record<string, unknown>[] = []) {
   const state = { data: JSON.stringify(doc), rev: 1 };
   const blobs = new Map<string, string>();
   // The version mark the store stamps on every write, for the lease's take.
@@ -678,6 +679,13 @@ function portalDb(doc: Record<string, unknown>, rows: Record<string, unknown>[],
       return { results: rows.filter((r) => r.blobKey === args[0]).map((r) => ({ id: r.id, removedAt: r.removedAt ?? null, keptInPlace: r.keptInPlace ?? null })) };
     }
     if (/UPDATE documents\s+SET read_code/.test(sql)) return { changes: 1 };
+    // The backup's reads: every document row in a fixed order, the users,
+    // and a fauna table a portal with no sightings has never made.
+    if (sql === "SELECT * FROM documents ORDER BY created_at, id") {
+      return { results: [...rows].sort((a, b) => (Number(a.createdAt ?? 0) - Number(b.createdAt ?? 0)) || String(a.id).localeCompare(String(b.id))) };
+    }
+    if (sql === "SELECT id, email, name, role, disabled, created_at, created_by, last_login, phone FROM users") return { results: users };
+    if (sql === "SELECT * FROM fauna_sightings") throw new Error("D1_ERROR: no such table: fauna_sightings");
     if (/^UPDATE documents SET removed_at/.test(sql)) {
       const r = rows.find((x) => x.id === args[0]);
       if (r) { r.removedAt = args[1]; r.blobKey = args[3]; r.keptInPlace = args[4]; }
@@ -2853,6 +2861,187 @@ test("a folder the portal files into is refused, against the real map in wrangle
   assert.equal(folderAllowed("United Operations Team/Certs/Kyle", env, alsoFiled).ok, false);
   assert.equal(folderAllowed("United Operations Team/Certs", env, alsoFiled).ok, true, "beside a man's folder is fine");
   assert.equal(folderAllowed("", env).ok, false, "no folder named");
+});
+
+/* ------------------------------------------------------------------------ *
+ * The backup on the hour: one file into the owner's folder before the
+ * lease, the books in it byte for byte and nothing that must not be, and
+ * the hour's own work untouched whatever the backup did.
+ * ------------------------------------------------------------------------ */
+const BACKUP_FOLDER = "United Operations Team/Backups";
+const backupKey = (day: string) => `library/${BACKUP_FOLDER}/Crew Portal backup ${day}.json`;
+/** Perth 02:10 on 24 Sep 2026, and 01:10. */
+const TEN_PAST_TWO = Date.parse("2026-09-23T18:10:00Z");
+const TEN_PAST_ONE = Date.parse("2026-09-23T17:10:00Z");
+const withClock = async <T>(at: number, work: () => Promise<T>) => {
+  const realNow = Date.now;
+  Date.now = () => at;
+  try { return await work(); } finally { Date.now = realNow; }
+};
+/** Evans's portal with the backup folder in the library and a user on the books. */
+const backupPortal = async () => {
+  const bucket = fakeBucket({ "opms/Brenton - OPMS/master.pdf": "a scan" }, ["opms", "removed", "opms/Brenton - OPMS", "library/" + BACKUP_FOLDER]);
+  const tmKey = "opms/20260901 - CREW QUALIFICATION EXPIRY.xlsx";
+  await bucket.put(tmKey, await smallWorkbook().arrayBuffer());
+  bucket.made.length = 0;
+  const portal = portalDb(
+    {
+      quals: { cols: [["QL-01", "Master", "Qualifications"], ["QL-17", "Medical", "Medical"]], rows: [["EVANS, Brenton", "Master", "", ["", "2030-01-17"]]] },
+      people: [{ name: "EVANS, Brenton", aliases: ["bRENTON"] }], filledFromCert: {}, orphanSeen: {}, history: [],
+    },
+    [
+      { ...billysTicket, id: "c2", person: "bRENTON", checksum: "evans-master", blobKey: "opms/Brenton - OPMS/master.pdf", sizeBytes: 6 },
+      { ...liveRow("tm1", tmKey), sizeBytes: 5000 },
+    ],
+    { "r1/evans-master.json": { ...reading, holderName: "Brenton Evans", expiresOn: "2031-05-26" } },
+    [{ id: "u1", email: "m@portal", name: "Matthew Jones", role: "management", disabled: 0, created_at: 1, created_by: null, last_login: null, phone: null }],
+  );
+  const env = getEnvFor(portal, bucket);
+  setEnv(env as never);
+  return { portal, bucket, env, tmKey };
+};
+const backupRecord = (portal: { blobs: Map<string, string> }) => JSON.parse(portal.blobs.get("sync|last-backup") || "null");
+
+test("at ten past two the hour writes the backup into the owner's folder, whole, and then does its own work", async () => {
+  const { portal, bucket } = await backupPortal();
+  // The document as it stood before the hour: the round moves it on after the backup.
+  const before = portal.state.data;
+  await withClock(TEN_PAST_TWO, () => worker.scheduled({} as never, getEnvFor(portal, bucket) as never));
+  const text = bucket.text(backupKey("2026-09-24"));
+  assert.ok(text, "the file is in the folder");
+  assert.deepEqual(bucket.made, [], "no folder was made");
+  assert.ok(text!.includes(before), "the shared document is in it byte for byte");
+  assert.notEqual(portal.state.data, before, "and the round moved the document on afterwards");
+  const file = JSON.parse(text!);
+  assert.deepEqual(Object.keys(file), ["portal", "backupVersion", "at", "perthDay", "rev", "counts", "document", "documents", "users", "readings", "fauna"]);
+  assert.equal(file.portal, "coolibah");
+  assert.equal(file.backupVersion, 1);
+  assert.equal(file.perthDay, "2026-09-24");
+  assert.equal(file.at, "2026-09-23T18:10:00.000Z");
+  assert.equal(file.rev, 1, "the revision the document was at when it was copied");
+  assert.deepEqual(file.counts, { documents: 2, users: 1, readings: 1, fauna: 0 });
+  assert.deepEqual(file.documents.map((d: { id: string }) => d.id), ["c2", "tm1"]);
+  assert.deepEqual(file.users, [{ id: "u1", email: "m@portal", name: "Matthew Jones", role: "management", disabled: 0, created_at: 1, created_by: null, last_login: null, phone: null }]);
+  assert.deepEqual(Object.keys(file.readings), ["certificate-readings", "matrix-readings", "shift-allocation-readings", "opms-checks"]);
+  assert.equal(file.readings["certificate-readings"]["r1/evans-master.json"].holderName, "Brenton Evans");
+  assert.deepEqual(file.fauna, [], "no fauna table yet is no sightings");
+  for (const never of ["sessions", "login_codes", "login_events", "portal_state_history", "round-lease", "last-hourly", "MS_CLIENT_SECRET"]) {
+    assert.ok(!text!.includes(never), never + " is not in the file");
+  }
+  // The backup's own statements, before the lease was taken: none of them
+  // near the sign-in tables or the history.
+  const leaseAt = portal.db.asked.findIndex((a) => isLeaseTake(a.sql, a.args));
+  assert.ok(leaseAt > 0, "the lease was taken after the backup");
+  assert.ok(!portal.db.asked.slice(0, leaseAt).some((a) => /sessions|login_codes|login_events|portal_state_history/.test(a.sql)), "nothing asked of the sign-in tables or the history");
+  assert.ok(!portal.db.asked.slice(0, leaseAt).some((a) => /LIKE|children/.test(a.sql)), "no listing");
+  const rec = backupRecord(portal);
+  assert.equal(rec.day, "2026-09-24");
+  assert.equal(rec.name, "Crew Portal backup 2026-09-24.json");
+  assert.equal(rec.bytes, new TextEncoder().encode(text!).length);
+  assert.equal(rec.error, null);
+  assert.equal(rec.rev, 1);
+  // And the hour's own work ran as it always does.
+  const hourly = JSON.parse(portal.blobs.get("sync|last-hourly")!);
+  assert.equal(hourly.syncError, null);
+  assert.equal(hourly.applied, 1, "the round ran");
+  assert.deepEqual(portal.doc().workbookPending ?? [], [], "the workbook was written");
+
+  // The same hour again: nothing more is written, and the record stands.
+  await withClock(TEN_PAST_TWO + 60000, () => worker.scheduled({} as never, getEnvFor(portal, bucket) as never));
+  assert.equal(backupRecord(portal).at, TEN_PAST_TWO, "the record is the first hour's");
+  assert.equal(bucket.text(backupKey("2026-09-24")), text, "the file is untouched");
+  assert.ok(!portal.db.asked.slice(leaseAt).some((a) => a.sql === "SELECT * FROM documents ORDER BY created_at, id"), "the books were not read for a backup again");
+});
+
+/** The env for a scheduled run against this portal and bucket. */
+function getEnvFor(portal: { db: unknown }, bucket: unknown) {
+  return { DB: portal.db, FILES: bucket, FILE_STORE: "r2", BACKUP_FOLDER, BACKUP_HOUR: "2",
+    SHAREPOINT_ROOT: "United Operations Team/Crew Portal", SHAREPOINT_MAP: JSON.stringify({ "opms/": "United Operations Team/OPMS Documents/" }),
+    SHAREPOINT_FAUNA_FOLDER: "United Operations Team/Fauna" };
+}
+
+test("at ten past one nothing is backed up, and with no folder named nothing is either", async () => {
+  const { portal, bucket } = await backupPortal();
+  await withClock(TEN_PAST_ONE, () => worker.scheduled({} as never, getEnvFor(portal, bucket) as never));
+  assert.equal(bucket.text(backupKey("2026-09-24")), null);
+  assert.equal(backupRecord(portal), null, "no record either");
+  assert.equal(JSON.parse(portal.blobs.get("sync|last-hourly")!).applied, 1, "the hour ran");
+
+  await withClock(TEN_PAST_TWO, () => worker.scheduled({} as never, { ...getEnvFor(portal, bucket), BACKUP_FOLDER: "" } as never));
+  assert.equal(bucket.text(backupKey("2026-09-24")), null, "BACKUP_FOLDER empty: the backup is off");
+  assert.equal(backupRecord(portal), null);
+});
+
+test("a backup that cannot be written goes on the record with no day, and the hour still runs", async () => {
+  const { portal, bucket } = await backupPortal();
+  bucket.failOn = bucket.puts() + 1;
+  await withClock(TEN_PAST_TWO, () => quiet(() => worker.scheduled({} as never, getEnvFor(portal, bucket) as never)));
+  assert.equal(bucket.text(backupKey("2026-09-24")), null, "nothing landed");
+  const rec = backupRecord(portal);
+  assert.equal(rec.error, "the library refused the write");
+  assert.equal(rec.day, null, "no day: it is owed again next hour");
+  assert.equal(rec.at, TEN_PAST_TWO);
+  const hourly = JSON.parse(portal.blobs.get("sync|last-hourly")!);
+  assert.equal(hourly.syncError, null, "the sync ran");
+  assert.equal(hourly.applied, 1, "and the round");
+
+  // Next hour the write goes through, and the day is written.
+  await withClock(TEN_PAST_TWO + 3_600_000, () => worker.scheduled({} as never, getEnvFor(portal, bucket) as never));
+  assert.ok(bucket.text(backupKey("2026-09-24")), "landed on the second try");
+  assert.equal(backupRecord(portal).day, "2026-09-24");
+  assert.equal(backupRecord(portal).error, null);
+});
+
+test("a folder the portal files into is refused on the record, and a folder not in the library too", async () => {
+  const { portal, bucket } = await backupPortal();
+  const into = await withClock(TEN_PAST_TWO, () => quiet(async () => {
+    setEnv({ ...getEnvFor(portal, bucket), BACKUP_FOLDER: "United Operations Team/OPMS Documents/Backups" } as never);
+    return nightlyBackup(Date.now());
+  }));
+  assert.match(into!.error!, /is one the portal files into \(United Operations Team\/OPMS Documents\); pick another/);
+  assert.equal(into!.day, null);
+  assert.deepEqual(bucket.keys().filter((k) => k.startsWith("library/")), [], "nothing written");
+  // The certificate home Crew Details set, and a man's own folder, count too.
+  portal.state.data = JSON.stringify({ ...portal.doc(), certRoot: "United Operations Team/Certs", people: [{ name: "EVANS, Brenton", certFolder: "United Operations Team/Elsewhere/Brenton" }] });
+  const home = await withClock(TEN_PAST_TWO, () => quiet(async () => {
+    setEnv({ ...getEnvFor(portal, bucket), BACKUP_FOLDER: "United Operations Team/Certs/Backups" } as never);
+    return nightlyBackup(Date.now());
+  }));
+  assert.match(home!.error!, /United Operations Team\/Certs/);
+  const his = await withClock(TEN_PAST_TWO, () => quiet(async () => {
+    setEnv({ ...getEnvFor(portal, bucket), BACKUP_FOLDER: "United Operations Team/Elsewhere/Brenton" } as never);
+    return nightlyBackup(Date.now());
+  }));
+  assert.match(his!.error!, /Elsewhere\/Brenton/);
+  assert.deepEqual(bucket.made, [], "no folder was made");
+});
+
+test("the backup lands even while somebody holds the lease, and the hour stands down as before", async () => {
+  const { portal, bucket } = await backupPortal();
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: TEN_PAST_TWO + 10 * 60000, by: "Update portal", token: "y" }));
+  const realSleep = hourWaits.sleep;
+  hourWaits.sleep = async () => {};
+  try {
+    await withClock(TEN_PAST_TWO, () => worker.scheduled({} as never, getEnvFor(portal, bucket) as never));
+  } finally {
+    hourWaits.sleep = realSleep;
+  }
+  assert.ok(bucket.text(backupKey("2026-09-24")), "the backup is in the folder");
+  assert.equal(backupRecord(portal).day, "2026-09-24");
+  assert.equal(JSON.parse(portal.blobs.get("sync|last-hourly")!).roundSkipped, "another round is still running");
+  assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).by, "Update portal", "the page's lease is untouched");
+});
+
+test("after the backup lands, a month of dailies and a year of monthlies remain, by name", async () => {
+  const { portal, bucket } = await backupPortal();
+  const seed = ["2026-08-25", "2026-08-24", "2026-08-23", "2026-08-18", "2026-08-17", "2026-08-01", "2025-09-01", "2025-08-01", "2025-07-01"];
+  for (const d of seed) await bucket.put(backupKey(d), bytesOf("old"));
+  bucket.made.length = 0;
+  await withClock(TEN_PAST_TWO, () => worker.scheduled({} as never, getEnvFor(portal, bucket) as never));
+  const left = bucket.keys().filter((k) => k.startsWith("library/")).map((k) => /backup (\d{4}-\d{2}-\d{2})/.exec(k)![1]);
+  assert.deepEqual(left, ["2025-07-01", "2025-09-01", "2026-08-01", "2026-08-17", "2026-08-25", "2026-09-24"],
+    "30 days back stays, 31 to 37 go, the monthlies stay but the one 13 months back; a file older than the week's window is never touched, since nothing is listed");
+  assert.deepEqual(bucket.made, [], "no folder was made");
 });
 
 test("a dated sheet beats an undated one whatever the alphabet says", () => {

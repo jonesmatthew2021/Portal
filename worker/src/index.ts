@@ -26,6 +26,7 @@ import importSingle from "./routes/import-single.js";
 import fauna, { ensureTable as ensureFaunaTable, settleLog as settleFaunaLog } from "./routes/fauna.js";
 import { runMatrixRound, roundRunning, leaseHolder, takeLease, dropLease, keepEquivalences, type Lease } from "./lib/round.js";
 import { readDocument } from "./lib/shared-state.js";
+import { nightlyBackup } from "./lib/backup.js";
 import { crewRowsOnly } from "../../source/shared/names.js";
 
 /** What GET /api/sync/last answers: when the folders were last read and
@@ -217,6 +218,15 @@ export default {
     let lease: Lease | null;
     try {
       await ensureDocumentColumns();
+      // The nightly backup, before the lease and outside it: it reads the
+      // books and writes one file into the owner's folder, takes no lease
+      // and holds nothing up, and nothing it does can stop the sync, the
+      // reading or the round. Its own record says what it did (lib/backup.ts).
+      try {
+        await nightlyBackup(t0);
+      } catch (e) {
+        console.error("the nightly backup failed outside its own catch:", e);
+      }
       lease = await takeLease("the round on the hour");
       for (let tries = 0; !lease && tries < LEASE_RETRIES; tries++) {
         await hourWaits.sleep(LEASE_RETRY_MS);
