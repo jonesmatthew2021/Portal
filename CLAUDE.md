@@ -139,6 +139,25 @@ on any line that still names this one.
   dates and the certificate list all read names through it
   (`crewRegister` / `asKnownPerson`). Do not add a name comparison that goes
   round it.
+- **A man's MSIC number and date of birth come from his certificates.** The
+  two boxes beside his name on Crew Details are filled in the round's own
+  save (`source/shared/particulars.js`: `particularsFor`, `fillParticulars`;
+  `lib/round.ts`), the hour's and Update matrix's alike, and an idle round
+  saves nothing: the MSIC number off his newest MSIC card (the column found
+  by its title in the vessel file), the date of birth where most of his
+  certificates agree (a tie is no answer) - only from certificates filed
+  under him and printed in his name, both through the register. A box
+  somebody typed is left as typed; one still holding what the certificates
+  put there (`particularsFromCert`, by his id) takes a renewed card's
+  number. A tab saving the crew list keeps the round's fill
+  (`mergeParticulars` in `mergeSaved`). The reading asks every certificate
+  for `documentNumber` and `holderBirthDate` (both keys always written);
+  `READING_VERSION` is unchanged, and the readings made before are topped
+  up by a bounded pass on the hour (`topUpParticulars` in
+  `routes/analyse.ts`: only for a box still the certificates', at most
+  twenty an hour, `particularsRead` on the hour's record, stopping on the
+  account's first no, adding the two keys and nothing else to the reading
+  held - the keys are its only memory).
 - **SharePoint folders are Matthew's.** The portal renames files where it finds
   them and never creates, renames or moves a folder. Use
   `blobFolder(blobKey)` — the folder a file is actually in — never
@@ -185,7 +204,8 @@ on any line that still names this one.
   sends stop starting a minute in (`reminderLimits`) and name whoever was
   not reached, and a send the email service does not answer within
   `answerWithinMs` (twenty seconds, the wait through `reminderWaits`) is
-  given up on and counted as failed, so they never eat the round's hour.
+  given up on and named as unanswered (`unanswered`, not `failed`: the
+  service may still deliver it), so they never eat the round's hour.
   Offline the switch, the weekdays and both boxes are held down under the
   badge's line like every other control that writes. The reminders read the
   document every hour before the lease; the lease test allows that one
