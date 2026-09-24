@@ -21,11 +21,11 @@ import { saveDocument } from "../src/lib/shared-state.js";
 import { runMatrixRound, roundRunning, takeLease, dropLease, keepEquivalences } from "../src/lib/round.js";
 import { todayThere } from "../src/lib/analysis.js";
 import sync, { apply, outranks, sheetOrder, survey } from "../src/routes/sync.js";
-import roundRoute from "../src/routes/round.js";
+import roundRoute, { BUDGET_MS, LEASE_FOR_MS, progressAnswer } from "../src/routes/round.js";
 import files from "../src/routes/files.js";
 import renameFile from "../src/routes/rename-file.js";
 import importSingle from "../src/routes/import-single.js";
-import worker, { hourWaits } from "../src/index.js";
+import worker, { hourWaits, hourDeadline } from "../src/index.js";
 import { writeZip, readZip, partOf, partText, datedWorkbookName } from "../../source/shared/workbook.js";
 import { asKnownPerson, crewRegister } from "../../source/shared/names.js";
 import { settleRound, applySettled } from "../../source/shared/matrix-rules.js";
@@ -1294,6 +1294,50 @@ test("the hour waits out a round somebody started from the page, three minutes l
   assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).by, "the round on the hour");
 });
 
+test("the hour's budget shrinks with the wait: nine minutes from the lease, never past twelve from the tick", () => {
+  const tick = 1_000_000;
+  const min = 60 * 1000;
+  assert.equal(hourDeadline(tick, tick), tick + 9 * min, "taken at once: nine minutes");
+  assert.equal(hourDeadline(tick, tick + 2 * min), tick + 11 * min, "two minutes' wait: eleven from the tick");
+  assert.equal(hourDeadline(tick, tick + 5 * min), tick + 12 * min, "five minutes' wait: capped at twelve, not fourteen");
+  assert.ok(hourDeadline(tick, tick + 5 * min) <= tick + 15 * min - 3 * min, "three of the fifteen always left for the write in flight");
+});
+
+test("an hour that waited five minutes and runs long stops before the workbook rather than past the fifteenth minute", async () => {
+  /* The clock here is a fake: each wait for the lease moves it fifteen
+     seconds, the lease is freed on the twentieth (five minutes in), and the
+     matrix save moves it seven minutes more - past twelve from the tick,
+     though not past nine from the lease. The workbook is left owed. */
+  const { portal, bucket, tmKey } = await oneManPortal();
+  const env = { DB: portal.db, FILES: bucket, FILE_STORE: "r2" };
+  portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 10 * 60000, by: "Matthew", token: "y" }));
+  const realNow = Date.now;
+  let offset = 0;
+  Date.now = () => realNow() + offset;
+  let waits = 0;
+  const realSleep = hourWaits.sleep;
+  hourWaits.sleep = async () => {
+    offset += 15000;
+    if (++waits === 20) portal.blobs.set("sync|round-lease", JSON.stringify({ until: 0, by: "Matthew", token: "y" }));
+  };
+  const restore = beforeStatement(portal.db, (sql) => /UPDATE portal_state SET data/.test(sql), async () => { offset += 7 * 60000; });
+  try {
+    await worker.scheduled({} as never, env as never);
+  } finally {
+    hourWaits.sleep = realSleep;
+    Date.now = realNow;
+    restore();
+  }
+  assert.equal(waits, 20, "taken on the try after the twentieth wait");
+  const hourly = JSON.parse(portal.blobs.get("sync|last-hourly")!);
+  assert.equal(hourly.applied, 1, "the matrix took the date");
+  assert.match(hourly.roundSkipped || "", /out of time before the workbook/);
+  assert.equal(hourly.workbook, null);
+  assert.deepEqual(portal.doc().workbookPending, ["EVANS, BRENTON|QL-01"], "the cell is owed to the workbook");
+  assert.ok(bucket.text(tmKey), "the workbook on file is where it was");
+  assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).until, 0, "the lease was still given back");
+});
+
 /* ------------------------------------------------------------------------ *
  * The skills matrix's Equivalence sheet, kept by the worker itself. It says
  * which column a certificate belongs in, and so what the file is renamed
@@ -1349,6 +1393,132 @@ test("equivalences the page stored, with no skills matrix named, are read again 
   assert.equal(bare.portal.blobs.has("matrix-readings|equivalences.json"), false);
 });
 
+/** How many times the skills workbook's bytes were fetched. */
+function countingGets(bucket: { get: (key: string) => Promise<unknown> }, key: string) {
+  const real = bucket.get.bind(bucket);
+  let n = 0;
+  bucket.get = async (k: string) => { if (k === key) n++; return real(k); };
+  return () => n;
+}
+
+test("a sheet that gives nothing against the matrix's columns writes nothing over the page's rows", async () => {
+  /* The page never posts an empty table (storeEquivalences posts only when
+     it has rows), and neither does this: the sheet's rows all want QL-17,
+     and with QL-17 not a column they are all dropped. What the page stored
+     stands, and is not read again for the same skills matrix and columns. */
+  const { portal, bucket } = await oneManPortal({ skills: true });
+  const doc = portal.doc(); doc.quals.cols = [["QL-01", "Master", "Qualifications"]]; portal.state.data = JSON.stringify(doc);
+  portal.blobs.set("matrix-readings|equivalences.json", JSON.stringify({ rows: [{ held: "Something else", code: "QL-01" }], at: "2026-09-01T00:00:00Z" }));
+  const gets = countingGets(bucket, skillsKey);
+  const out = await keepEquivalences();
+  assert.deepEqual(out, { rows: 1, written: false, problem: null });
+  assert.equal(equivalenceWrites(portal.db).length, 0, "no write of the table at all");
+  assert.deepEqual(JSON.parse(portal.blobs.get("matrix-readings|equivalences.json")!).rows, [{ held: "Something else", code: "QL-01" }], "the page's rows stand");
+  assert.equal(gets(), 1, "the workbook was read once");
+  assert.deepEqual(await keepEquivalences(), out, "the same answer again");
+  assert.equal(gets(), 1, "…without reading the workbook again");
+
+  // Nothing held at all: the same read, and a problem said.
+  portal.blobs.delete("matrix-readings|equivalences.json");
+  portal.blobs.delete("matrix-readings|m2/equivalences-tried-sk1.json");
+  const none = await keepEquivalences();
+  assert.equal(none.rows, 0);
+  assert.equal(none.written, false);
+  assert.match(none.problem || "", /gave no usable rows/);
+  assert.equal(portal.blobs.has("matrix-readings|equivalences.json"), false, "still no empty table");
+  assert.equal(gets(), 2);
+  assert.match((await keepEquivalences()).problem || "", /gave no usable rows/, "remembered, and said again");
+  assert.equal(gets(), 2, "…without a read");
+  // The page then stores rows of its own: the problem is over, and the
+  // remembered read still spares the workbook.
+  portal.blobs.set("matrix-readings|equivalences.json", JSON.stringify({ rows: [{ held: "Something else", code: "QL-01" }], at: "2026-09-01T00:00:00Z" }));
+  assert.deepEqual(await keepEquivalences(), { rows: 1, written: false, problem: null });
+  assert.equal(gets(), 2);
+});
+
+test("a skills matrix with no bytes on file is looked at again next hour, not remembered", async () => {
+  const { portal, bucket } = await oneManPortal({ skills: true });
+  await bucket.delete(skillsKey);
+  const gets = countingGets(bucket, skillsKey);
+  const first = await keepEquivalences();
+  assert.match(first.problem || "", /no bytes on file/);
+  assert.equal(portal.blobs.has("matrix-readings|m2/equivalences-tried-sk1.json"), false, "not remembered");
+  // The bytes land (the sync mends the replace): the sheet is read.
+  await bucket.put(skillsKey, await skillsWorkbook().arrayBuffer());
+  const then = await keepEquivalences();
+  assert.deepEqual(then, { rows: 1, written: true, problem: null });
+  assert.equal(gets(), 2);
+});
+
+test("a crew matrix with no columns keeps no Equivalence table, from prepare or the round", async () => {
+  const { portal, bucket } = await oneManPortal({ skills: true });
+  const doc = portal.doc(); doc.quals = { cols: [], rows: [] }; portal.state.data = JSON.stringify(doc);
+  const gets = countingGets(bucket, skillsKey);
+  const eq = await keepEquivalences();
+  assert.equal(eq.rows, 0);
+  assert.match(eq.problem || "", /no items yet/);
+  assert.equal(gets(), 0, "the workbook was not even read for the Equivalence sheet");
+  assert.equal(portal.blobs.has("matrix-readings|equivalences.json"), false, "nothing stamped against this skills matrix");
+  // prepare says the same (its own read of the workbook is for the expiry rules).
+  const out = (await (await postRound({}, "/api/round/prepare")).json()) as { equivalences: number; problem: string | null };
+  assert.equal(out.equivalences, 0);
+  assert.match(out.problem || "", /no items yet/);
+  assert.equal(portal.blobs.has("matrix-readings|equivalences.json"), false);
+});
+
+test("the Equivalence table is read again when the crew matrix's columns change, and the page's identical rows are only stamped", async () => {
+  const { portal, bucket } = await oneManPortal({ skills: true });
+  // The page stored the very rows the sheet gives, without saying which
+  // skills matrix: one read, and only the stamp is added.
+  portal.blobs.set("matrix-readings|equivalences.json", JSON.stringify({ rows: [{ held: "Master <500GT", code: "QL-17" }], at: "2026-09-01T00:00:00Z" }));
+  const gets = countingGets(bucket, skillsKey);
+  const first = await keepEquivalences();
+  assert.deepEqual(first, { rows: 1, written: false, problem: null }, "the same rows are not counted as written");
+  const kept = JSON.parse(portal.blobs.get("matrix-readings|equivalences.json")!);
+  assert.equal(kept.skillsId, "sk1");
+  assert.equal(kept.colsKey, "QL-01|QL-17");
+  assert.equal(gets(), 1);
+  await keepEquivalences();
+  assert.equal(gets(), 1, "current: not read again");
+
+  // A column added to the crew matrix: read again against the new columns.
+  const doc = portal.doc(); doc.quals.cols.push(["QL-20", "Something new", "Qualifications"]); portal.state.data = JSON.stringify(doc);
+  await keepEquivalences();
+  assert.equal(gets(), 2, "read again for the new column");
+  assert.equal(JSON.parse(portal.blobs.get("matrix-readings|equivalences.json")!).colsKey, "QL-01|QL-17|QL-20");
+});
+
+test("the page's equivalences action can say which skills matrix it read, and then the hour reads nothing", async () => {
+  const { portal, bucket } = await oneManPortal({ skills: true });
+  const req = new Request("http://portal/api/analyse", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "equivalences", rows: [{ held: "Master <500GT", code: "QL-17" }], skillsId: "sk1" }),
+  });
+  assert.deepEqual(await (await analyse(req)).json(), { stored: 1 });
+  const kept = JSON.parse(portal.blobs.get("matrix-readings|equivalences.json")!);
+  assert.equal(kept.skillsId, "sk1");
+  assert.equal(kept.colsKey, "QL-01|QL-17");
+  const gets = countingGets(bucket, skillsKey);
+  assert.deepEqual(await keepEquivalences(), { rows: 1, written: false, problem: null });
+  assert.equal(gets(), 0, "held for this skills matrix and these columns: the workbook is not read");
+});
+
+test("a skills matrix that is not a workbook is said on the hour's record, and on the round's answer", async () => {
+  const { portal, bucket } = await oneManPortal({ skills: true });
+  portal.rows.find((r) => r.id === "sk1")!.filename = "SKILLS MATRIX.pdf";
+  await worker.scheduled({} as never, { DB: portal.db, FILES: bucket, FILE_STORE: "r2" } as never);
+  const hourly = JSON.parse(portal.blobs.get("sync|last-hourly")!);
+  assert.match(hourly.equivalenceProblem || "", /not a workbook/);
+  assert.equal(hourly.roundError, null, "the round itself ran");
+  assert.equal(hourly.applied, 1);
+
+  const page = await oneManPortal({ skills: true });
+  page.portal.rows.find((r) => r.id === "sk1")!.filename = "SKILLS MATRIX.pdf";
+  const out = (await (await postRound({ by: "Matthew" })).json()) as { equivalenceProblem: string | null };
+  assert.match(out.equivalenceProblem || "", /not a workbook/);
+  assert.match(JSON.parse(page.portal.blobs.get("sync|last-hourly")!).equivalenceProblem || "", /not a workbook/);
+});
+
 /* ------------------------------------------------------------------------ *
  * The round started from the page: POST /api/round runs the same round the
  * hour runs, under the same lease, and answers with the whole outcome.
@@ -1402,14 +1572,86 @@ test("POST /api/round runs the round in the caller's name and answers with every
   assert.equal(portal.blobs.has("sync|progress"), false, "the sync's key is untouched");
 });
 
+test("the round from the page holds a short lease, is kept alive past the browser, and carries the page's runId", async () => {
+  /* The platform can cancel a request whose browser has gone, so the lease
+     must run out before the hour's five-minute wait for it does, and the
+     work is handed to waitUntil as well as awaited. */
+  const { portal } = await oneManPortal();
+  const kept: Promise<unknown>[] = [];
+  const before = Date.now();
+  const res = await roundRoute(
+    new Request("http://portal/api/round", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ by: "Matthew", runId: "run-7" }) }),
+    manager, "/api/round", (work) => { kept.push(work); },
+  );
+  const out = (await res.json()) as { runId: string; applied: number };
+  assert.equal(res.status, 200);
+  assert.equal(out.runId, "run-7", "the answer carries the page's mark");
+  assert.equal(out.applied, 1);
+  assert.equal(kept.length, 1, "the work was registered with the platform");
+  assert.equal(await kept[0], res, "…and it is the very answer");
+  const take = JSON.parse(String(leaseWrites(portal.db)[0].args[2])) as { until: number };
+  assert.ok(take.until <= before + LEASE_FOR_MS + 1000, "the lease stands for the budget plus a minute, not the hour's fifteen");
+  assert.ok(take.until > before + BUDGET_MS, "…but outlives the budget");
+  assert.ok(LEASE_FOR_MS < 5 * 60 * 1000, "shorter than the hour's wait for it");
+  const words = progressWrites(portal.db) as unknown as { runId: string }[];
+  assert.ok(words.length >= 2 && words.every((w) => w.runId === "run-7"), "every word carries the runId");
+});
+
+test("with no name sent and nobody signed in, the round is the page's", async () => {
+  const { portal } = await oneManPortal();
+  const res = await roundRoute(
+    new Request("http://portal/api/round", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }),
+    null, "/api/round",
+  );
+  assert.equal(res.status, 200);
+  assert.equal(portal.doc().history[0].by, "the page");
+  assert.equal(JSON.parse(portal.blobs.get("sync|last-hourly")!).by, "the page");
+});
+
+test("GET /api/round/progress answers the last word and whether the lease is held", async () => {
+  const { portal } = await oneManPortal();
+  assert.deepEqual(await progressAnswer(), { pct: 0, word: "No round has run yet", done: true, running: false });
+  await postRound({ by: "Matthew" });
+  const after = await progressAnswer();
+  assert.equal(after.pct, 100);
+  assert.equal(after.done, true);
+  assert.equal(after.by, "Matthew");
+  assert.equal(after.running, false);
+  assert.equal(typeof after.runId, "string", "a runId of the server's own when the page sent none");
+  assert.equal(portal.blobs.has("sync|round-progress"), true);
+});
+
+test("a workbook the server cannot write is on the record as a skipped round, so the open tab writes it", async () => {
+  /* The tab reads roundSkipped and roundError alone (shouldTabRound in
+     source/index.html) to decide whether to run the round itself, and its
+     own button rewrites a workbook of any size in the browser. */
+  const hour = await oneManPortal();
+  hour.portal.rows.find((r) => r.id === "tm1")!.sizeBytes = 7 * 1024 * 1024;
+  await worker.scheduled({} as never, { DB: hour.portal.db, FILES: hour.bucket, FILE_STORE: "r2" } as never);
+  const hourly = JSON.parse(hour.portal.blobs.get("sync|last-hourly")!);
+  assert.match(hourly.workbookProblem || "", /too big/);
+  assert.equal(hourly.roundSkipped, hourly.workbookProblem, "said on roundSkipped too");
+  assert.equal(hourly.applied, 1, "the matrix took the date");
+
+  const page = await oneManPortal();
+  page.portal.rows.find((r) => r.id === "tm1")!.sizeBytes = 7 * 1024 * 1024;
+  const out = (await (await postRound({ by: "Matthew" })).json()) as { roundSkipped: string | null; workbookProblem: string | null };
+  assert.equal(out.roundSkipped, null, "the round's own answer keeps them apart");
+  assert.match(out.workbookProblem || "", /too big/);
+  const record = JSON.parse(page.portal.blobs.get("sync|last-hourly")!);
+  assert.equal(record.roundSkipped, record.workbookProblem);
+  assert.match(record.roundSkipped || "", /too big/);
+});
+
 test("POST /api/round while the hour holds the lease is refused, and says who holds it", async () => {
   const { portal } = await oneManPortal();
   portal.blobs.set("sync|round-lease", JSON.stringify({ until: Date.now() + 60000, by: "the round on the hour", token: "x" }));
-  const res = await postRound({ by: "Matthew" });
+  const res = await postRound({ by: "Matthew", runId: "run-9" });
   assert.equal(res.status, 409);
-  const out = (await res.json()) as { error: string; by: string };
-  assert.match(out.error, /try again in a minute/);
+  const out = (await res.json()) as { error: string; by: string; runId: string };
+  assert.match(out.error, /^the round on the hour is writing the workbook; try again in a minute/);
   assert.equal(out.by, "the round on the hour");
+  assert.equal(out.runId, "run-9");
   assert.equal(portal.blobs.has("sync|round-progress"), false, "no progress record written");
   assert.equal(portal.state.rev, 1, "the document is untouched");
   assert.equal(JSON.parse(portal.blobs.get("sync|round-lease")!).by, "the round on the hour", "the hour's lease stands");

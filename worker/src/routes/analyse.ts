@@ -15,6 +15,7 @@ import {
   base64,
   blankish,
   EQUIV_KEY,
+  equivalenceColsKey,
   equivalences,
   certificateStanding,
   codeFor,
@@ -1839,7 +1840,13 @@ export default async (req: Request) => {
           .filter((r) => !!r.held && /^[A-Z]{2,4}-\d+[A-Z]?$/.test(r.code))
           .slice(0, 400)
       : [];
-    await matrixStore().setJSON(EQUIV_KEY, { rows, at: new Date().toISOString() });
+    // The page may say which skills matrix it read the sheet off. Stamped
+    // with that and the crew matrix's columns as they stand, so the hour
+    // sees the table as current and does not read the workbook again for
+    // the same rows (keepEquivalences in lib/round.ts).
+    const skillsId = typeof body.skillsId === "string" && body.skillsId.trim() ? body.skillsId.trim().slice(0, 80) : null;
+    const stamp = skillsId ? { skillsId, colsKey: equivalenceColsKey((await readDocument())?.doc.quals?.cols) } : {};
+    await matrixStore().setJSON(EQUIV_KEY, { rows, at: new Date().toISOString(), ...stamp });
     return Response.json({ stored: rows.length });
   }
 

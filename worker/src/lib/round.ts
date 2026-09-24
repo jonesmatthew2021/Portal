@@ -5,7 +5,7 @@ import {
 } from "../../../source/shared/workbook.js";
 import { compareMatrix } from "../routes/analyse.js";
 import { readDocument, saveDocument, type SharedDocument } from "./shared-state.js";
-import { EQUIV_KEY, matrixReadingKey, matrixStore, todayThere, type Matrix } from "./analysis.js";
+import { EQUIV_KEY, equivalenceColsKey, matrixReadingKey, matrixStore, todayThere, type Matrix } from "./analysis.js";
 import { getStore } from "../compat/blobs.js";
 import { fileStore, legacyRemovedKeyFor, removedKeyFor } from "../db/documents.js";
 import { liveRowsOf, replaceSingleFile } from "../db/single-file.js";
@@ -89,10 +89,12 @@ export async function roundRunning(): Promise<boolean> {
   return !!lease && lease.until > Date.now();
 }
 
-/** The lease taken, or null where somebody holds it or took it first. */
-export async function takeLease(by: string, token = crypto.randomUUID()): Promise<Lease | null> {
+/** The lease taken, or null where somebody holds it or took it first.
+ *  `ms` is how long it stands if the holder never gives it back: the
+ *  hour's fifteen minutes unless the taker knows its work is shorter. */
+export async function takeLease(by: string, token = crypto.randomUUID(), ms = LEASE_MS): Promise<Lease | null> {
   const leases = getStore("sync");
-  const lease = { until: Date.now() + LEASE_MS, by, token } satisfies Lease;
+  const lease = { until: Date.now() + ms, by, token } satisfies Lease;
   const held = await leases.getWithMetadata(LEASE_KEY, { type: "json" });
   const running = held ? (held.data as Lease | null) : null;
   if (running && running.until > Date.now()) return null;
@@ -196,10 +198,15 @@ export async function validityRulesHeld(): Promise<boolean> {
  * The skills matrix's Equivalence sheet, read off the live skills matrix
  * and kept under the same key and in the same shape the page's
  * "equivalences" action writes (storeEquivalences in source/index.html
- * is the parse this follows, line for line). Kept against the skills
- * matrix it was read from: written when nothing is held, or what is held
- * came from another skills matrix or from the page (which does not say
- * which); left alone otherwise, so an hour costs one look.
+ * is the parse this follows, and like the page this never writes an
+ * empty table: a sheet that gives nothing leaves whatever is held alone).
+ * The parse depends on the crew matrix's columns as much as on the sheet,
+ * so what is kept is stamped with both - the skills matrix it was read
+ * from and the columns it was read against - and read again when either
+ * has changed, or when what is held came from the page (which stamps
+ * neither). A read that wrote nothing is remembered under a side key for
+ * the same two, so an hour costs one look rather than the whole workbook
+ * unzipped for the same answer.
  *
  * Read before the hour's refile, not after: the sheet says which column a
  * certificate belongs in, and a certificate the sheet re-homes is renamed
@@ -207,31 +214,58 @@ export async function validityRulesHeld(): Promise<boolean> {
  *
  * Nothing here throws. What goes wrong is a problem to report.
  */
+type EquivalencesHeld = { rows?: unknown[]; skillsId?: string; colsKey?: string };
+/** A read that wrote nothing, remembered: the columns it was read against
+ *  and what it said. `whileNothingHeld` marks a problem that stops being
+ *  one once the page has stored rows of its own. */
+type EquivalencesTried = { colsKey: string; problem: string | null; whileNothingHeld?: boolean };
 export async function keepEquivalences(): Promise<{ rows: number; written: boolean; problem: string | null }> {
   try {
     const [skills] = await liveRowsOf("skills-matrix");
     if (!skills) return { rows: 0, written: false, problem: null };
-    const held = (await matrixStore().get(EQUIV_KEY, { type: "json" })) as { rows?: unknown[]; skillsId?: string } | null;
-    if (held && held.skillsId === skills.id) {
-      return { rows: Array.isArray(held.rows) ? held.rows.length : 0, written: false, problem: null };
+    const held = (await matrixStore().get(EQUIV_KEY, { type: "json" })) as EquivalencesHeld | null;
+    const heldRows = Array.isArray(held?.rows) ? held!.rows : [];
+
+    // The matrix's columns: what is accepted must land on one of them, so
+    // with none there is nothing a sheet could give - and nothing to stamp
+    // an empty table against.
+    const cur = await readDocument();
+    const cols = ((cur?.doc.quals as Quals | null)?.cols || []) as string[][];
+    const colsKey = equivalenceColsKey(cols);
+    if (!colsKey) {
+      return { rows: heldRows.length, written: false, problem: "the crew matrix has no items yet, so the Equivalence sheet was not kept" };
     }
+    if (held && held.skillsId === skills.id && held.colsKey === colsKey) {
+      return { rows: heldRows.length, written: false, problem: null };
+    }
+    const triedKey = matrixReadingKey("equivalences-tried", skills.id);
+    const tried = (await matrixStore().get(triedKey, { type: "json" })) as EquivalencesTried | null;
+    if (tried && tried.colsKey === colsKey) {
+      return { rows: heldRows.length, written: false, problem: tried.whileNothingHeld && heldRows.length ? null : tried.problem };
+    }
+    // Nothing written this time, and no need to read again for the same
+    // skills matrix against the same columns.
+    const nothing = async (problem: string | null, whileNothingHeld = false) => {
+      await matrixStore().setJSON(triedKey, { colsKey, problem, whileNothingHeld } satisfies EquivalencesTried);
+      return { rows: heldRows.length, written: false, problem: whileNothingHeld && heldRows.length ? null : problem };
+    };
+
     if (!/\.(xlsx|xlsm)$/i.test(skills.filename)) {
-      return { rows: 0, written: false, problem: `${skills.filename} is not a workbook, so the Equivalence sheet could not be read off it.` };
+      return nothing(`${skills.filename} is not a workbook, so the Equivalence sheet could not be read off it.`);
     }
     const bytes = await fileStore().get(skills.blobKey, { type: "arrayBuffer" });
-    if (!bytes) return { rows: 0, written: false, problem: `${skills.filename} has no bytes on file, so the Equivalence sheet could not be read off it.` };
+    // Bytes missing is a replace cut off, which the next sync mends: not
+    // remembered, so the next hour looks again.
+    if (!bytes) return { rows: heldRows.length, written: false, problem: `${skills.filename} has no bytes on file, so the Equivalence sheet could not be read off it.` };
     const entries = readZip(bytes);
     const sheets = listSheets(
       await partText(partOf(entries, "xl/workbook.xml")),
       await partText(partOf(entries, "xl/_rels/workbook.xml.rels")),
     );
     const sheet = sheets.find((s) => /equivalen/i.test(s.name));
-    if (!sheet) return { rows: 0, written: false, problem: `${skills.filename} has no Equivalence sheet.` };
+    if (!sheet) return nothing(`${skills.filename} has no Equivalence sheet.`);
     const grid = await readSheetRows(entries, sheet.path);
 
-    // The matrix's columns: what is accepted must land on one of them.
-    const cur = await readDocument();
-    const cols = ((cur?.doc.quals as Quals | null)?.cols || []) as string[][];
     const colCodes = new Set(cols.map((c) => String(c[0]).trim().toUpperCase()));
     const part = (cell: unknown) => {
       const m = String(cell || "").replace(/\s+/g, " ").trim().match(/^([A-Za-z]{2,4}-\d+[A-Za-z]?)\s+(.+)$/);
@@ -261,8 +295,17 @@ export async function keepEquivalences(): Promise<{ rows: number; written: boole
       .map((r) => ({ held: r.held.replace(/\s+/g, " ").trim().slice(0, 200), code: r.code.trim().toUpperCase().slice(0, 12) }))
       .filter((r) => !!r.held && /^[A-Z]{2,4}-\d+[A-Z]?$/.test(r.code))
       .slice(0, 400);
-    await matrixStore().setJSON(EQUIV_KEY, { rows, at: new Date().toISOString(), skillsId: skills.id });
-    return { rows: rows.length, written: true, problem: null };
+    // A sheet that gives nothing writes nothing: what the page stored
+    // stands, and an empty table is never put over it. It is a problem
+    // only where nothing at all is held.
+    if (!rows.length) {
+      return nothing(`${skills.filename}'s Equivalence sheet gave no usable rows against the crew matrix's columns.`, true);
+    }
+    // The same rows the page stored: only the stamp is missing, so only
+    // the stamp is added, and the table is not counted as written.
+    const same = JSON.stringify(rows) === JSON.stringify(heldRows);
+    await matrixStore().setJSON(EQUIV_KEY, { rows, at: new Date().toISOString(), skillsId: skills.id, colsKey });
+    return { rows: rows.length, written: !same, problem: null };
   } catch (e) {
     return { rows: 0, written: false, problem: `The Equivalence sheet could not be read off the skills matrix. ${said(e)}` };
   }

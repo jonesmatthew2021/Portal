@@ -1,7 +1,7 @@
 import type { PortalUser } from "../auth.js";
 import { getStore } from "../compat/blobs.js";
 import {
-  dropLease, keepEquivalences, keepValidityRules, runMatrixRound, takeLease, validityRulesHeld, type Lease,
+  dropLease, keepEquivalences, keepValidityRules, roundRunning, runMatrixRound, takeLease, validityRulesHeld, type Lease,
 } from "../lib/round.js";
 import { recordHourly } from "./sync.js";
 
@@ -16,28 +16,35 @@ import { recordHourly } from "./sync.js";
  *                              sheet and the expiry rules off the skills
  *                              matrix - kept on the server before the page
  *                              does its own reading and refiling.
- *   GET  /api/round/progress   where the round has got to (index.ts).
+ *   GET  /api/round/progress   where the round has got to (progressAnswer,
+ *                              called from index.ts).
  *
  * The page does the reading and the refile before it comes here, and
- * Update portal runs POST /api/sync first; this route only prepares,
- * compares, saves and writes. So a browser-held request is enough, with a
- * budget of four minutes against the page's own patience.
+ * Update portal runs POST /api/sync first; this route only compares, saves
+ * and writes. So the request is held open while it runs, with a budget of
+ * two minutes, and the page reads /api/round/progress for the percentage.
  *
- * What a closed tab leaves behind. The request runs on regardless of the
- * tab, to its end or its budget, and nothing it does is half done:
+ * What a closed tab leaves behind. A request whose browser has gone can be
+ * cancelled by the platform: waitUntil keeps it alive for thirty seconds
+ * past the disconnect, not to its end. So nothing here may depend on
+ * reaching the end:
  *   - each saveDocument is one conditional write against the revision it
  *     read, so the matrix is whole or untouched;
  *   - the workbook goes through replaceSingleFile, whose order of work is
  *     fixed so the old copy is never lost;
  *   - a cell that reaches the matrix but not the workbook is written on the
  *     document (workbookPending) and paid by the next round, whoever runs it;
- *   - the lease runs out on its own after LEASE_MS should the drop not land;
- *   - the progress record stays done:false until the round says otherwise,
- *     and a page compares its `at` with its own start rather than trusting
- *     the server to call it dead.
+ *   - the lease is taken for the budget plus a minute, not the hour's
+ *     fifteen, so a round cut off frees it before the hour's five-minute
+ *     wait for it runs out;
+ *   - the progress record carries the page's own runId and stays done:false
+ *     until the round says otherwise; a page treats one whose `at` is more
+ *     than sixty seconds old and not done as dead.
  */
 const PROGRESS_KEY = "round-progress";
-const BUDGET_MS = 4 * 60 * 1000;
+export const BUDGET_MS = 2 * 60 * 1000;
+/** How long the lease stands should the drop never land. */
+export const LEASE_FOR_MS = BUDGET_MS + 60 * 1000;
 
 const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -51,6 +58,17 @@ async function sayRound(pct: number, word: string, extra: Record<string, unknown
 }
 
 export const roundProgress = () => getStore("sync").get(PROGRESS_KEY, { type: "json" });
+
+/** What GET /api/round/progress answers: the last progress record, or the
+ *  word that none has run, and whether anybody holds the lease right now.
+ *  The record is never called dead here; the page matches its runId. */
+export async function progressAnswer(): Promise<Record<string, unknown>> {
+  const rec = (await roundProgress().catch(() => null)) as Record<string, unknown> | null;
+  return {
+    ...(rec ?? { pct: 0, word: "No round has run yet", done: true }),
+    running: await roundRunning().catch(() => false),
+  };
+}
 
 /** Whose lease stands, for a 409 that says who to wait for. */
 async function leaseHolder(): Promise<string | null> {
@@ -74,7 +92,14 @@ export async function prepare(): Promise<Response> {
   );
 }
 
-export default async function round(req: Request, user: PortalUser | null, path: string): Promise<Response> {
+/**
+ * `keepAlive` is the platform's waitUntil: the work is registered with it
+ * as well as awaited, so a browser that goes mid-round does not take the
+ * round's record, its lease drop or its last progress word with it.
+ */
+export default async function round(
+  req: Request, user: PortalUser | null, path: string, keepAlive?: (work: Promise<unknown>) => void,
+): Promise<Response> {
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
   if (path === "/api/round/prepare") {
     try {
@@ -85,44 +110,61 @@ export default async function round(req: Request, user: PortalUser | null, path:
   }
 
   // Who is running it: the name the page sends, else the person signed in,
-  // else the button's own name. It goes on the lease, the log and the record.
-  const sent = await req.json().catch(() => null) as { by?: unknown } | null;
-  const who = (sent && typeof sent.by === "string" && sent.by.trim() ? sent.by.trim() : (user?.name || "").trim() || "Update matrix").slice(0, 40);
+  // else the page itself. It goes on the lease, the log and the record.
+  // The runId is the page's own mark for this round, carried on every
+  // progress word so the page matches its round by it, never by the clock.
+  const sent = await req.json().catch(() => null) as { by?: unknown; runId?: unknown } | null;
+  const who = (sent && typeof sent.by === "string" && sent.by.trim() ? sent.by.trim() : (user?.name || user?.email || "").trim() || "the page").slice(0, 40);
+  const runId = sent && typeof sent.runId === "string" && sent.runId.trim() ? sent.runId.trim().slice(0, 64) : crypto.randomUUID();
 
-  const lease = await takeLease(who);
+  const lease = await takeLease(who, undefined, LEASE_FOR_MS);
   if (!lease) {
+    const holder = await leaseHolder();
     return Response.json(
-      { error: "The hourly round is writing the workbook; try again in a minute.", by: await leaseHolder() },
+      { error: `${holder || "Another round"} is writing the workbook; try again in a minute.`, by: holder, runId },
       { status: 409 },
     );
   }
-  const t0 = Date.now();
-  const timeLeft = () => Date.now() - t0 < BUDGET_MS;
-  const say = (pct: number, word: string, extra: Record<string, unknown> = {}) => sayRound(pct, word, { by: who, ...extra });
-  try {
-    await say(1, "Starting");
-    // Both idempotent: an hour or a prepare that already kept them costs a look.
-    await keepEquivalences();
-    try { await keepValidityRules(); } catch (e) { console.error("the expiry rules were not kept:", e); }
-    const outcome = await runMatrixRound({ by: who, timeLeft, mirroredThisHour: 0, lease, say });
-    // The line on the SharePoint page: the counts, not the cells.
-    const { changes, summary, ...forRecord } = outcome;
+  const work = (async () => {
+    const t0 = Date.now();
+    const timeLeft = () => Date.now() - t0 < BUDGET_MS;
+    const say = (pct: number, word: string, extra: Record<string, unknown> = {}) => sayRound(pct, word, { by: who, runId, ...extra });
     try {
-      await recordHourly({ ...forRecord, at: t0, durationMs: Date.now() - t0, by: who, read: 0, refiled: 0, syncError: null, readError: null });
+      await say(1, "Starting");
+      // Idempotent: an hour or a prepare that already kept it costs a look.
+      // The expiry rules are kept inside the round itself.
+      const eq = await keepEquivalences();
+      const outcome = await runMatrixRound({ by: who, timeLeft, mirroredThisHour: 0, lease, say });
+      // The line on the SharePoint page: the counts, not the cells. A
+      // workbook the server cannot write is a reason for the open tab to
+      // run the round itself, so it goes where the tab reads it.
+      const { changes, summary, ...forRecord } = outcome;
+      try {
+        await recordHourly({
+          ...forRecord, roundSkipped: forRecord.roundSkipped ?? forRecord.workbookProblem ?? null, equivalenceProblem: eq.problem,
+          at: t0, durationMs: Date.now() - t0, by: who, read: 0, refiled: 0, syncError: null, readError: null,
+        });
+      } catch (e) {
+        console.error("the round's record was not written:", e);
+      }
+      await say(100, "Done", { done: true });
+      return Response.json({ ...outcome, changes, summary, equivalenceProblem: eq.problem, runId }, { headers: { "Cache-Control": "no-store" } });
     } catch (e) {
-      console.error("the round's record was not written:", e);
+      // The plumbing itself failing: on the record too, so the SharePoint
+      // page does not keep showing the round before as the last word.
+      const error = said(e);
+      await recordHourly({ at: t0, durationMs: Date.now() - t0, by: who, read: 0, refiled: 0, syncError: null, readError: null, roundError: error })
+        .catch((e2) => console.error("the round's failure was not recorded:", e2));
+      await say(100, "Failed", { done: true, error });
+      return Response.json({ error, runId }, { status: 502 });
+    } finally {
+      try {
+        await dropLease(lease.token);
+      } catch (e) {
+        console.error("the round's lease was not dropped:", e);
+      }
     }
-    await say(100, "Done", { done: true });
-    return Response.json({ ...outcome, changes, summary }, { headers: { "Cache-Control": "no-store" } });
-  } catch (e) {
-    const error = said(e);
-    await say(100, "Failed", { done: true, error });
-    return Response.json({ error }, { status: 502 });
-  } finally {
-    try {
-      await dropLease(lease.token);
-    } catch (e) {
-      console.error("the round's lease was not dropped:", e);
-    }
-  }
+  })();
+  if (keepAlive) keepAlive(work);
+  return await work;
 }

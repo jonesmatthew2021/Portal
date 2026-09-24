@@ -73,18 +73,22 @@ function SharePointPage() {
     if (!h) return null;
     const when = new Date(h.at).toLocaleString("en-AU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
     // The hour's own line, or the name of whoever ran the round from the page.
-    const opening = (h.by && h.by !== "the round on the hour" ? h.by + " ran the round " : "Hourly round ") + when;
+    const fromPage = !!h.by && h.by !== "the round on the hour";
+    const opening = (fromPage ? h.by + " ran the round " : "Hourly round ") + when;
     const bad = [h.syncError, h.readError, h.roundError].filter(Boolean).join("; ");
     if (bad) return { bad: true, text: opening + " failed: " + bad };
-    const aside = [h.roundSkipped, h.workbookProblem, h.held, h.validityProblem].filter(Boolean).join("; ");
-    return { bad: false, text: opening + ": " + h.read + " certificate" + (h.read === 1 ? "" : "s") +
-      " read, " + h.refiled + " refiled" +
-      (h.applied ? ", " + h.applied + " date" + (h.applied === 1 ? "" : "s") + " applied" : "") +
-      (h.cleared ? ", " + h.cleared + " cleared" : "") +
-      (h.workbook ? ", workbook written as " + h.workbook : "") +
-      (h.leftAsTyped ? ", " + h.leftAsTyped + " cell" + (h.leftAsTyped === 1 ? "" : "s") + " left as the office typed them" : "") +
-      ", " + Math.max(1, Math.round(h.durationMs / 1000)) + "s." +
-      (aside ? " (" + aside + ")" : "") };
+    // The record says a workbook problem on roundSkipped too, for the open tab; said once here.
+    const aside = [...new Set([h.roundSkipped, h.workbookProblem, h.held, h.validityProblem, h.equivalenceProblem].filter(Boolean))].join("; ");
+    // A round run from the page did its reading and refiling before it came, so those counts are the hour's alone.
+    const parts = [
+      ...(fromPage ? [] : [h.read + " certificate" + (h.read === 1 ? "" : "s") + " read", h.refiled + " refiled"]),
+      ...(h.applied ? [h.applied + " date" + (h.applied === 1 ? "" : "s") + " applied"] : []),
+      ...(h.cleared ? [h.cleared + " cleared"] : []),
+      ...(h.workbook ? ["workbook written as " + h.workbook] : []),
+      ...(h.leftAsTyped ? [h.leftAsTyped + " cell" + (h.leftAsTyped === 1 ? "" : "s") + " left as the office typed them"] : []),
+      Math.max(1, Math.round(h.durationMs / 1000)) + "s",
+    ];
+    return { bad: false, text: opening + ": " + parts.join(", ") + "." + (aside ? " (" + aside + ")" : "") };
   };
 
   const fmtBytes = (n) => n == null ? "" :

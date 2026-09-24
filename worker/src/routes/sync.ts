@@ -393,9 +393,14 @@ export type HourlyRecord = {
   leftAsTyped?: number;
   held?: string | null;
   roundError?: string | null;
+  /** Why the tab should run the round itself: the round did not run, or
+   *  its workbook step cannot be done on the server (workbookProblem is
+   *  copied here, since an open tab reads only this and roundError). */
   roundSkipped?: string | null;
   workbookProblem?: string | null;
   validityProblem?: string | null;
+  /** Why the Equivalence sheet could not be kept off the skills matrix. */
+  equivalenceProblem?: string | null;
 };
 export const recordHourly = (r: HourlyRecord) => getStore("sync").setJSON("last-hourly", r);
 export const lastHourly = () => getStore("sync").get("last-hourly", { type: "json" }) as Promise<HourlyRecord | null>;

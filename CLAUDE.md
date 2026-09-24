@@ -125,7 +125,13 @@ modules. Edit that code there and only there.
   (`routes/round.ts`; progress under `round-progress`, read back by
   `GET /api/round/progress`): the page reads and refiles first, and
   `POST /api/round/prepare` has the server keep the Equivalence sheet and
-  the expiry rules before it does.
+  the expiry rules before it does. A browser that goes mid-round can have
+  the request cancelled, so that round takes the lease for three minutes,
+  not fifteen, and the page matches its progress by the `runId` it sent.
+  The hour's own work stops starting things nine minutes after its lease
+  or twelve after the tick, whichever is first (`hourDeadline`). The
+  Equivalence sheet is never kept as an empty table, and is read again
+  when the skills matrix or the crew matrix's columns change.
   An open admin tab runs the round only when the server has not
   (`shouldTabRound`), and a save that lands on the hour's merges the log and
   the round's notes (`mergeSaved`) rather than writing over them - each

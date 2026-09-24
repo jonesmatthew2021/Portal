@@ -569,6 +569,17 @@ export const isDate = (v: string | null | undefined) => !!v && ISO.test(v.trim()
 export type Equivalence = { held: string; code: string };
 export const EQUIV_KEY = "equivalences.json";
 
+/** The crew matrix's column codes as one string, for stamping what was
+ *  read against them (keepEquivalences in lib/round.ts): the Equivalence
+ *  sheet's parse keeps only rows that land on a column, so a column added
+ *  later means a read again. Empty where the matrix has no columns. */
+export const equivalenceColsKey = (cols: unknown): string =>
+  (Array.isArray(cols) ? cols : [])
+    .map((c) => String(Array.isArray(c) ? c[0] : "").trim().toUpperCase())
+    .filter(Boolean)
+    .sort()
+    .join("|");
+
 export async function equivalences(): Promise<Equivalence[]> {
   const held = (await matrixStore().get(EQUIV_KEY, { type: "json" })) as { rows?: Equivalence[] } | null;
   return Array.isArray(held?.rows) ? (held!.rows as Equivalence[]) : [];

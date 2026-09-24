@@ -17,7 +17,7 @@ import aiChecker from "./routes/ai-checker.js";
 import archive from "./routes/archive.js";
 import run from "./routes/run.js";
 import sync, { runSync, syncProgress, lastSync, lastHourly, recordHourly } from "./routes/sync.js";
-import round, { roundProgress } from "./routes/round.js";
+import round, { progressAnswer } from "./routes/round.js";
 import migrate from "./routes/migrate.js";
 import migrateCerts from "./routes/migrate-certs.js";
 import readOne from "./routes/read-one.js";
@@ -38,7 +38,9 @@ import { crewRowsOnly } from "../../source/shared/names.js";
  * itself, served from the assets directory.
  */
 export default {
-  async fetch(req: Request, env: PortalEnv): Promise<Response> {
+  // `ctx` is the platform's execution context; its waitUntil keeps a
+  // long request's work going for a while after the browser has gone.
+  async fetch(req: Request, env: PortalEnv, ctx?: ExecutionContext): Promise<Response> {
     setEnv(env);
     const url = new URL(req.url);
     const path = url.pathname;
@@ -118,20 +120,16 @@ export default {
       }
       if (path === "/api/sync") return await sync(req);
       // The round, started from the page: where it has got to, the rules it
-      // reads by, and the round itself (routes/round.ts). The progress record
-      // is never called dead here; the page compares its `at` with its own
-      // start.
+      // reads by, and the round itself (routes/round.ts). The round's work
+      // is registered with the platform as well as awaited, so a browser
+      // that goes mid-round does not take the record and the lease drop
+      // with it.
       if (path === "/api/round/progress") {
-        return Response.json(
-          {
-            ...((await roundProgress().catch(() => null)) as Record<string, unknown> | null
-              ?? { pct: 0, word: "No round has run yet", done: true }),
-            running: await roundRunning().catch(() => false),
-          },
-          { headers: { "Cache-Control": "no-store" } },
-        );
+        return Response.json(await progressAnswer(), { headers: { "Cache-Control": "no-store" } });
       }
-      if (path === "/api/round" || path === "/api/round/prepare") return await round(req, user, path);
+      if (path === "/api/round" || path === "/api/round/prepare") {
+        return await round(req, user, path, ctx ? (work) => ctx.waitUntil(work) : undefined);
+      }
       if (path === "/api/migrate-files") return await migrate(req);
       if (path === "/api/migrate-certs-opms") return await migrateCerts(req, user!);
       if (path === "/api/clear-r2") return await clearR2(req);
@@ -186,9 +184,13 @@ export default {
         // The round's own `at` is when it began, an ISO string; the record's
         // is the hour's start, and stays so. The cells it moved and its
         // comparison count are answered to a page that asked for the round,
-        // not kept on the hour's line.
+        // not kept on the hour's line. A workbook the server cannot write
+        // goes on roundSkipped too: an open tab reads that line to decide
+        // whether to run the round itself, and its own button can write
+        // a workbook of any size.
         const { changes: _changes, summary: _summary, ...forRecord } = round;
-        await recordHourly({ ...outcome, ...forRecord, at: t0, durationMs: Date.now() - t0 });
+        const roundSkipped = (forRecord.roundSkipped ?? forRecord.workbookProblem ?? null) as string | null;
+        await recordHourly({ ...outcome, ...forRecord, roundSkipped, at: t0, durationMs: Date.now() - t0 });
       } catch (e) {
         console.error("hourly outcome not written:", e);
       }
@@ -199,13 +201,14 @@ export default {
     // the same time is two writers of the one file, so they take the same
     // lease for their turn and stand aside while this holds it.
     //
-    // A page's turn is short - a sync, an upload, a round of up to four
+    // A page's turn is short - a sync, an upload, a round of a couple of
     // minutes - so an hour that finds the lease held waits for it rather
     // than losing the whole hour: up to twenty more tries fifteen seconds
-    // apart, five minutes in all. The hour's own budget clock starts only
-    // once it holds the lease (theHour): a scheduled run has fifteen
-    // minutes of wall time, so five spent waiting still leaves the nine
-    // the work is given.
+    // apart, five minutes in all. The work is given nine minutes from the
+    // lease, or until twelve minutes after the tick, whichever comes first
+    // (hourDeadline): a scheduled run has fifteen minutes of wall time,
+    // and the write in flight, the record and the lease drop always keep
+    // three of them whatever the wait cost.
     let lease: Lease | null;
     try {
       await ensureDocumentColumns();
@@ -224,7 +227,7 @@ export default {
       return;
     }
     try {
-      await written(await theHour(env, lease, Date.now(), outcome, written));
+      await written(await theHour(env, lease, hourDeadline(t0, Date.now()), outcome, written));
     } finally {
       try {
         await dropLease(lease.token);
@@ -243,24 +246,30 @@ export const hourWaits = {
   sleep: (ms: number) => new Promise<void>((done) => setTimeout(done, ms)),
 };
 
+/** When the hour's work must stop starting things: nine minutes from the
+ *  lease, but never past twelve from the tick. The scheduled run is cut
+ *  at fifteen, and what runs after the last check - the workbook rewrite
+ *  and its replace in the library, the record, the lease drop - needs
+ *  the three that are left. */
+export const hourDeadline = (tick: number, leaseAt: number) =>
+  Math.min(leaseAt + 9 * 60 * 1000, tick + 12 * 60 * 1000);
+
 /**
  * The hour's work under its lease: the sync, the reading, the round. What
- * comes back is the round's own word on the hour, for the record. `t0` is
- * when the lease was taken - the budget below runs from there, not from
- * the tick, so time spent waiting for the lease is not time lost to the
- * work.
+ * comes back is the round's own word on the hour, for the record.
+ * `deadline` is when the work must stop starting things (hourDeadline).
  */
 async function theHour(
-  env: PortalEnv, lease: Lease, t0: number,
+  env: PortalEnv, lease: Lease, deadline: number,
   outcome: { read: number; refiled: number; syncError: string | null; readError: string | null },
   written: (round: Record<string, unknown>) => Promise<void>,
 ): Promise<Record<string, unknown>> {
   const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
-  // Nine minutes for the whole hour's work. The reading loops stop two and
-  // a half minutes short of that, so the round always has room to run
-  // after them; the round itself is checked against the full nine.
-  const timeLeft = () => Date.now() - t0 < 9 * 60 * 1000;
-  const loopsLeft = () => Date.now() - t0 < (9 - 2.5) * 60 * 1000;
+  // The reading loops stop two and a half minutes short of the deadline,
+  // so the round always has room to run after them; the round itself is
+  // checked against the deadline.
+  const timeLeft = () => Date.now() < deadline;
+  const loopsLeft = () => Date.now() < deadline - 2.5 * 60 * 1000;
   /* The other budget is calls: one invocation may make about a thousand
      (every fetch to the model or the library, every database statement),
      and an hour that spends them all on reading leaves none for the round
@@ -313,9 +322,12 @@ async function theHour(
 
   // The skills matrix's Equivalence sheet, before the refile: it says which
   // column a certificate belongs in, and so what the file is renamed to.
-  // One look on an hour that already holds it.
+  // One look on an hour that already holds it. A sheet that could not be
+  // kept goes on the record, where the SharePoint page shows it.
+  let equivalenceProblem: string | null = null;
   if (codes.length) {
     const eq = await keepEquivalences();
+    equivalenceProblem = eq.problem;
     if (eq.problem) console.error("the Equivalence sheet was not kept:", eq.problem);
   }
 
@@ -377,5 +389,5 @@ async function theHour(
       console.error("the fauna log could not be settled on the hour:", e);
     }
   }
-  return round;
+  return { ...round, equivalenceProblem };
 }
