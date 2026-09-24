@@ -6,8 +6,9 @@ before saying it is done.
 
 ## The one rule about editing
 
-Edit **`source/index.html`** or a file under **`source/areas/`**. Nothing else
-in the frontend is a source file:
+Edit **`source/index.html`**, a file under **`source/areas/`**, or
+**`source/vessel.json`** (what is this vessel's, not the portal's). Nothing
+else in the frontend is a source file:
 
 - `preview.html`, `portal.html`, `worker/assets/index.html` are **built**. Edit
   them and the next build throws the work away.
@@ -97,6 +98,14 @@ writer (`workbook.js`), the matrix rules (`matrix-rules.js`) and the names
 register (`names.js`). The build splices them into the page at `/* @shared */`
 with the `export` taken off each declaration, and the worker imports them as
 modules. Edit that code there and only there.
+
+`source/vessel.json` — everything that is this vessel's (name, brand, timezone,
+domain, ranks, swings, customer marks, crew folders); a new vessel is a new
+file, never an edit to the page. The build declares it on the page as `VESSEL`
+at `/* @vessel */` and writes the page's head and the manifest from it; the
+worker reads it through `worker/src/vessel.ts`. The eleventh check assembles
+the page for a made-up vessel (`tools/fixtures/example-vessel.json`) and fails
+on any line that still names this one.
 
 ## Things that have already been decided
 
