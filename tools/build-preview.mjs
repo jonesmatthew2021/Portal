@@ -28,7 +28,11 @@ const BANNER = `<!--
  *  join, not replace: a replacement string is read for "$" marks ($&, $', $1),
  *  so a "$" in a certificate note or a pattern would be mangled on the way in,
  *  and "$'" would splice the rest of the shim into the middle of the JSON. */
-export const vesselIntoShim = (shim, vessel) => shim.split("__VESSEL__").join(JSON.stringify(vessel));
+export const vesselIntoShim = (shim, vessel) => into(shim, "__VESSEL__", vessel);
+/** Any value written into any slot of the shim, the same way: the crew
+ *  snapshot is everyone's notes as typed, and a "$" in one of them would be
+ *  read as a mark by replace() just as it would in the vessel file. */
+export const into = (text, mark, value) => text.split(mark).join(JSON.stringify(value));
 
 /** Returns the built preview. Writes it to preview.html unless write is false. */
 export function buildPreview({ write = true, quiet = false } = {}) {
@@ -48,14 +52,12 @@ export function buildPreview({ write = true, quiet = false } = {}) {
   let note;
   if (existsSync(DATA)) {
     const held = JSON.parse(readFileSync(DATA, "utf8"));
-    shim = shim
-      .replace("__SNAPSHOT__", JSON.stringify(held.snapshot))
-      .replace("__FILE_ROWS__", JSON.stringify(held.fileRows));
+    shim = into(into(shim, "__SNAPSHOT__", held.snapshot), "__FILE_ROWS__", held.fileRows);
     note = "crew snapshot rev " + held.snapshot.rev;
   } else {
     // No snapshot on this computer: the preview still builds and still runs,
     // it just opens empty. The snapshot is crew data and is kept out of git.
-    shim = shim.replace("__SNAPSHOT__", '{"rev":0,"data":{}}').replace("__FILE_ROWS__", "[]");
+    shim = into(into(shim, "__SNAPSHOT__", { rev: 0, data: {} }), "__FILE_ROWS__", []);
     note = "no snapshot on this computer - preview will open empty";
   }
 

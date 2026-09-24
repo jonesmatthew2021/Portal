@@ -972,13 +972,22 @@ const is = (got, want, what) => {
   /* A "$" in the file must survive the trip into the shim: replace() with a
      string reads "$'" as "the rest of the text", which would splice the shim
      into the middle of the JSON and break the preview page. */
-  const { vesselIntoShim } = await import("file:///" + ROOT.replaceAll(" ", "%20") + "/tools/build-preview.mjs");
+  const { vesselIntoShim, into } = await import("file:///" + ROOT.replaceAll(" ", "%20") + "/tools/build-preview.mjs");
   const vessel = { note: "costs $' and $& - $1 each", pattern: "^\\$$" };
   const shim = "const VESSEL = __VESSEL__;\nrest of the shim";
   is(vesselIntoShim(shim, vessel), "const VESSEL = " + JSON.stringify(vessel) + ";\nrest of the shim",
     "the vessel file goes into the shim byte for byte, dollar signs and all");
   is(JSON.parse(vesselIntoShim(shim, vessel).slice("const VESSEL = ".length, -";\nrest of the shim".length)), vessel,
     "…and reads back as the same file");
+  /* The crew snapshot goes in the same way: it is everyone's notes as typed,
+     and the notes change every day, so a "$'" in one of them must not be the
+     day the preview page stops opening. */
+  const snapshot = { rev: 7, data: { note: "paid $' on the day, $$ later" } };
+  const withSnapshot = into("const SNAPSHOT = __SNAPSHOT__;\nconst ROWS = __FILE_ROWS__;", "__SNAPSHOT__", snapshot);
+  is(withSnapshot, "const SNAPSHOT = " + JSON.stringify(snapshot) + ";\nconst ROWS = __FILE_ROWS__;",
+    "the crew snapshot goes into the shim byte for byte, and the next slot is left for its own value");
+  is(JSON.parse(withSnapshot.slice("const SNAPSHOT = ".length, withSnapshot.indexOf(";\n"))), snapshot,
+    "…and reads back as the same snapshot");
 }
 
 /* ---- the vessel file, as the build reads it ---- */
@@ -1027,6 +1036,9 @@ const is = (got, want, what) => {
     'a vessel file has no usable "shift.sheetWords.night" - it must be a string.', "the sheet's words are named for day and night");
   is(said(() => checkVessel({ ...example, swings: { ...example.swings, labels: { A: "Swing Alpha" } } }, "a vessel file")),
     'a vessel file has no usable "swings.labels.B" - it must be a string.', "the swings are labelled A and B");
+  is(said(() => checkVessel({ ...example, swings: { ...example.swings, ids: ["ALPHA"] } }, "a vessel file")),
+    'a vessel file has no usable "swings.ids" - it must be two ids, the first for swing A and the second for swing B.',
+    "the ids are paired with the labels by order, so there are two and no more");
   const establishment = example.shift.establishment.map((e) => ({ ...e }));
   establishment[2] = { ...establishment[2], pool: "purser" };
   is(said(() => checkVessel({ ...example, shift: { ...example.shift, establishment } }, "a vessel file")),

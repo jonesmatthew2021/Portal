@@ -56,8 +56,8 @@ import { heldOpmsAnswer, type OpmsHeld } from "./opms.js";
 import { shiftKeyFor, shiftSheetRow, shiftStore, type ShiftHeld } from "./shift.js";
 import { vessel } from "../vessel.js";
 
-/** The swings' names as the office says them, "Alpha and Bravo", off the
- *  vessel file's labels ("Swing Alpha" -> "Alpha"). */
+/** The swings' names as the office says them, the two labels with "Swing"
+ *  taken off and joined with "and", off the vessel file. */
 const swingWords = () => {
   const names = Object.values(vessel.swings.labels).map((l) => l.replace(/^Swing\s+/i, ""));
   return names.length > 1 ? names.slice(0, -1).join(", ") + " and " + names[names.length - 1] : names.join("");

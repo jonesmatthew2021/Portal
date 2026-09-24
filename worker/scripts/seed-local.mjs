@@ -8,7 +8,7 @@
  * store so uploads, downloads and readings can be exercised.
  *
  *   node scripts/seed-local.mjs                 rows only (fast)
- *   node scripts/seed-local.mjs --bytes matrices,certification/patwardhan-anand
+ *   node scripts/seed-local.mjs --bytes matrices,certification/smith-alan
  *                                               ...rows plus those folders' bytes
  *   node scripts/seed-local.mjs --bytes all     everything (takes a while)
  *

@@ -272,16 +272,21 @@ run("The vessel's name lives only in the vessel file", () => {
   /* Whole words, whatever their case: the slug is written "coolibah" in a
      row id or a storage key and "COOLIBAH" in a heading, and each is the
      vessel's name as much as "Coolibah" is. Whole words so that a name the
-     backup file's own format keeps ("perthDay") is not the city. */
+     backup file's own format keeps ("perthDay") is not the city. The swings'
+     names are looked for as written, case and all: the page's comparisons are
+     bound to the ids "ALPHA" and "BRAVO", which any vessel's file must carry,
+     but "Alpha" in a heading or a note is this vessel's name for its crew. */
   const WORDS = ["Coolibah", "United Marine", "MinRes", "Perth", "Ashburton", "Onslow",
     "coolibah-portal", "unitedmarine", "Preetham", "Matthew Jones", "ONS-MRN", "portways.opms.com.au"];
   const RES = WORDS.map((w) => new RegExp("\\b" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "i"));
-  const hitsIn = (line) => WORDS.filter((w, k) => RES[k].test(line));
+  const EXACT = ["Alpha", "Bravo"];
+  const EXACT_RES = EXACT.map((w) => new RegExp("\\b" + w + "\\b"));
+  const hitsIn = (line) => [...WORDS.filter((w, k) => RES[k].test(line)), ...EXACT.filter((w, k) => EXACT_RES[k].test(line))];
   // The check proves its own eyes first: lines that have slipped past it
-  // before, each written as it would be in the code, and one it must leave.
+  // before, each written as it would be in the code, and ones it must leave.
   const mustSee = ["WHERE id = 'coolibah'", 'PORTAL_ROW_ID = "coolibah"', '"coolibah-tab"', '"TSV COOLIBAH"',
-    "https://portways.opms.com.au/", "united marine", "MINRES", "Australia/Perth"];
-  const mustLeave = ["file.perthDay", "const perthDay = "];
+    "https://portways.opms.com.au/", "united marine", "MINRES", "Australia/Perth", "Alpha crew"];
+  const mustLeave = ["file.perthDay", "const perthDay = ", '"ALPHA"'];
   for (const l of mustSee) if (!hitsIn(l).length) throw new Error("the check cannot see " + l + " - it would let the vessel's name back into the code");
   for (const l of mustLeave) if (hitsIn(l).length) throw new Error("the check mistakes " + l + " for the vessel's name");
   const hits = [];

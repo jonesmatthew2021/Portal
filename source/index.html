@@ -4684,10 +4684,10 @@ const SWINGS = [
 ];
 
 const swingNamed = (letter) => (SWINGS.find((s) => s.letter === letter) || {}).name || `Swing ${letter}`;
-/* The crew's name on the roster, by the swing's id - "Alpha" for the swing
-   labelled "Swing Alpha", the way the worker says it (lib/portal.ts). A
-   roster row carries the id; the file lists the ids and the labels in the
-   same order, A then B. An id the file does not carry is shown as it is. */
+/* The crew's name on the roster, by the swing's id - the swing's label with
+   "Swing" taken off, the way the worker says it (lib/portal.ts). A roster
+   row carries the id; the file lists the ids and the labels in the same
+   order, A then B. An id the file does not carry is shown as it is. */
 const SWING_CREW_WORD = Object.fromEntries(VESSEL.swings.ids.map((id, i) =>
   [id, String((SWINGS[i] || {}).name || id).replace(/^Swing\s+/i, "")]));
 const swingCrewWord = (id) => SWING_CREW_WORD[id] || id;
@@ -4748,8 +4748,8 @@ function matchSwingList(entries, people) {
  * ways it moves — a crew change, and the swing lists the office sends — are a
  * button each.
  *
- * Who belongs to which swing is not worked out here either. Alpha and Bravo each
- * arrive as a document, and each is shown exactly as it was written.
+ * Who belongs to which swing is not worked out here either. Each swing's crew
+ * arrives as a document, and each is shown exactly as it was written.
  */
 /* The rank headings the swing board is read under, in the order a swing list
    is written: bridge first, engine room after, galley last. A person's rank is
@@ -15648,8 +15648,8 @@ function Portal({ role, onSignOut }) {
     // Anyone a swing's board doesn't mention follows the rotation and its
     // one-off changes, and a board for a swing already gone is dropped.
     swingBoards: {},
-    // The two swing lists as the office sends them — one document each for Alpha
-    // and Bravo, kept whole so the crew can be shown exactly as the document
+    // The two swing lists as the office sends them — one document for each
+    // swing, kept whole so the crew can be shown exactly as the document
     // wrote them, in order of rank.
     swingLists: { A: null, B: null },
     // The dates the office has given for a swing, kept against the swing number.

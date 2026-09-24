@@ -412,6 +412,8 @@ test("the ids the page keys on are the file's to carry and not to rename", () =>
     /"shift.sheetWords.night" - it must be a string\./);
   assert.throws(() => checkVessel({ ...vessel, swings: { ...vessel.swings, labels: { A: "Swing Alpha" } } }, "a vessel file"),
     /"swings.labels.B" - it must be a string\./);
+  assert.throws(() => checkVessel({ ...vessel, swings: { ...vessel.swings, ids: ["ALPHA"] } }, "a vessel file"),
+    /"swings.ids" - it must be two ids, the first for swing A and the second for swing B\./);
   const establishment = vessel.shift.establishment.map((e) => ({ ...e }));
   establishment[2] = { ...establishment[2], pool: "purser" };
   assert.throws(() => checkVessel({ ...vessel, shift: { ...vessel.shift, establishment } }, "a vessel file"),

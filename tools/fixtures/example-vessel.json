@@ -58,7 +58,7 @@
   "parties": ["Example Marine", "Example Ports", "Example Customer", "MV Example", "Other"],
   "swings": {
     "ids": ["ALPHA", "BRAVO"],
-    "labels": { "A": "Swing Alpha", "B": "Swing Bravo" },
+    "labels": { "A": "Swing Able", "B": "Swing Baker" },
     "pattern": { "anchor": "2026-01-07", "cycle": 14 },
     "legacyNotes": [
       { "id": "sw-2025-12", "label": "10 Dec – 24 Dec 2025" }
