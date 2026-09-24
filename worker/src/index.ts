@@ -93,8 +93,9 @@ export default {
         // A crew save is rebuilt server-side to carry only their comments —
         // read-only means read-only whatever the page happened to send.
         const save = user && user.role === "crew" && req.method === "PUT" ? await crewStateBody(req) : req;
-        // The name goes with the save, so the history says who made it.
-        return await state(save, user?.name || null);
+        // The name goes with the save, so the history says who made it; the
+        // level decides which copy of the document comes back (crew's or whole).
+        return await state(save, user?.name || null, user?.role ?? null);
       }
       // The last 200 saves, and putting one of them back.
       if (path === "/api/state/history") return await history(req, user!);

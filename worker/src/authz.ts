@@ -47,11 +47,66 @@ export const denied = () =>
     { status: 403 },
   );
 
+/* --------------------------------------------- the crew's copy of it ---- */
+
+/** What crew are never handed of the document: the two boxes beside each
+ *  man on Crew Details (an admin page) that the round fills from his
+ *  certificates, and the round's note of what it put in them. Crew read
+ *  everything the portal shows them, and it shows them neither. */
+const CREW_NEVER_SEES = { person: ["msic", "dob"], document: ["particularsFromCert"] } as const;
+
+/* The crew's copy, made once per revision per isolate. The route hands the
+   stored JSON through byte for byte because every open portal polls it
+   every few seconds and parsing 600 KB per poll was enough to trip the CPU
+   budget; the crew's copy has to be parsed to be made, so it is made when
+   the revision moves and handed back from here until it does. The text is
+   compared as well as the number: a test's portals, and a database put
+   back from a backup, can carry the same number over a different document. */
+let crewCopy: { rev: number; raw: string; text: string } | null = null;
+
+/** The document as a crew login is handed it: the stored JSON with each
+ *  man's MSIC number and date of birth, and the round's note of them,
+ *  taken off - and nothing else touched, so the copy a crew phone keeps
+ *  offline (the service worker keeps whatever this answers) never holds
+ *  them either. A document that will not parse hands crew nothing. */
+export function crewStateView(rev: number, dataText: string): string {
+  if (crewCopy && crewCopy.rev === rev && crewCopy.raw === dataText) return crewCopy.text;
+  let doc: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(dataText);
+    doc = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    doc = {};
+  }
+  let touched = false;
+  for (const key of CREW_NEVER_SEES.document) {
+    if (key in doc) { delete doc[key]; touched = true; }
+  }
+  if (Array.isArray(doc.people)) {
+    doc.people = doc.people.map((p) => {
+      if (!p || typeof p !== "object" || Array.isArray(p)) return p;
+      const person = { ...(p as Record<string, unknown>) };
+      for (const key of CREW_NEVER_SEES.person) {
+        if (key in person) { delete person[key]; touched = true; }
+      }
+      return person;
+    });
+  }
+  // Nothing to take off: the bytes go out as they are, the way every other
+  // grant gets them, rather than restrung.
+  const text = touched || !dataText.trim().startsWith("{") ? JSON.stringify(doc) : dataText;
+  crewCopy = { rev, raw: dataText, text };
+  return text;
+}
+
 /**
  * A crew member's state save, reduced to what crew may change: comments.
  * Returns a replacement Request whose body is the current state with only
  * the comments taken from the submitted one — same rev, so the optimistic
- * save semantics are untouched.
+ * save semantics are untouched. Everything else - the crew list with each
+ * man's two boxes, and the round's note of them (crewStateView takes them
+ * off the copy crew are handed) - is the stored document's, so a crew
+ * save can neither blank nor change them, whatever the page sent.
  */
 export async function crewStateBody(req: Request): Promise<Request> {
   let sent: { rev?: unknown; data?: unknown };

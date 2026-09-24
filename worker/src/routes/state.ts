@@ -1,5 +1,7 @@
 import { PORTAL_ROW_ID } from "../db/schema.js";
 import { getEnv } from "../env.js";
+import type { PortalUser } from "../auth.js";
+import { crewStateView } from "../authz.js";
 import { MAX_BYTES, recordHistory, countsOf } from "../lib/shared-state.js";
 // The history helpers live with the shared-state code now (lib/shared-state.ts);
 // re-exported here so history.ts keeps its imports.
@@ -38,10 +40,15 @@ async function currentRaw() {
 
 /* -------------------------------------------------------------- route ---- */
 
-export default async (req: Request, savedBy: string | null = null) => {
+export default async (req: Request, savedBy: string | null = null, role: PortalUser["role"] | null = null) => {
+  // The stored JSON as this grant is handed it: byte for byte, but crew get
+  // the crew's copy (authz.ts) - on a GET and on a save answered 409 alike.
+  const dataFor = (row: { data: string; rev: number }) =>
+    role === "crew" ? crewStateView(row.rev, row.data) : row.data;
+
   if (req.method === "GET") {
     const row = await currentRaw();
-    const body = row ? `{"rev":${row.rev},"data":${row.data}}` : '{"rev":0,"data":null}';
+    const body = row ? `{"rev":${row.rev},"data":${dataFor(row)}}` : '{"rev":0,"data":null}';
     return new Response(body, {
       headers: { ...NO_STORE, "Content-Type": "application/json" },
     });
@@ -79,7 +86,7 @@ export default async (req: Request, savedBy: string | null = null) => {
   const conflict = async () => {
     const row = await currentRaw();
     const payload = row
-      ? `{"conflict":true,"rev":${row.rev},"data":${row.data}}`
+      ? `{"conflict":true,"rev":${row.rev},"data":${dataFor(row)}}`
       : '{"conflict":true,"rev":0,"data":null}';
     return new Response(payload, {
       status: 409,

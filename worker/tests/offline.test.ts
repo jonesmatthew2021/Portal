@@ -19,6 +19,8 @@ import { assetHeaders, withAssetHeaders } from "../src/lib/offline.js";
 import state from "../src/routes/state.js";
 import { setEnv } from "../src/env.js";
 import { fakeDb } from "./helpers.js";
+import worker from "../src/index.js";
+import { crewStateView } from "../src/authz.js";
 import { forgetsOn, keepable, PAGE_HEADER } from "../../source/shared/offline-rules.js";
 
 const WORKER = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -135,4 +137,131 @@ test("the assets build wrote the service worker with its version, the rules fold
   for (const f of files) {
     assert.equal(Buffer.compare(readFileSync(join(source, f)), readFileSync(join(assets, f))), 0, "worker/assets/vendor/" + f + " is byte for byte source/vendor/" + f);
   }
+});
+
+/* ------------------------------------------------------------------------ *
+ * The crew's copy of the document. GET /api/state hands the whole document
+ * to every signed-in grant, and a crew phone keeps that answer offline.
+ * Crew never see Crew Details, so the two boxes the round fills there -
+ * each man's MSIC number and date of birth - and the round's note of what
+ * it put in them leave the server only for management and IT.
+ * ------------------------------------------------------------------------ */
+
+const SID = "a".repeat(48);
+type Grant = { id: string; email: string; name: string; role: "it" | "management" | "crew" };
+const CREW: Grant = { id: "u1", email: "deckhand@example.com", name: "Alan Deckhand", role: "crew" };
+const MANAGER: Grant = { id: "u2", email: "master@example.com", name: "Matthew", role: "management" };
+const IT: Grant = { id: "u3", email: "it@example.com", name: "IT Help", role: "it" };
+
+/** The document with one man's boxes filled by the round and another's
+ *  typed by hand, and the round's note of what it filled. */
+const boxesDoc = () => ({
+  people: [
+    { id: "p1", name: "EVANS, Brenton", rank: "Master", msic: "MSIC 1111", dob: "1980-03-10" },
+    { id: "p2", name: "SITTIYOS, Kachin", rank: "Deckhand", msic: "TYPED 2", dob: "1975-05-05" },
+  ],
+  particularsFromCert: { p1: { msic: "MSIC 1111", dob: "1980-03-10", was: { msic: ["MSIC 0001"] } } },
+  comments: [{ id: "c1", text: "hello" }],
+  quals: { cols: [], rows: [] },
+});
+
+/** A portal whose one row holds `doc` at revision 3, signed in as `user`. */
+function signedInPortal(doc: Record<string, unknown>, user: Grant) {
+  const state = { data: JSON.stringify(doc), rev: 3 };
+  const db = fakeDb((sql, args) => {
+    if (/FROM sessions s/.test(sql)) return { results: [user] };
+    if (/PRAGMA table_info/.test(sql)) return { results: [{ name: "adopted_from_folder" }, { name: "kept_in_place" }] };
+    if (/SELECT data, rev FROM portal_state/.test(sql)) return { results: [{ ...state }] };
+    if (/SELECT data FROM portal_state/.test(sql)) return { results: [{ data: state.data }] };
+    if (/UPDATE portal_state SET data/.test(sql)) {
+      if (args[3] !== state.rev) return { changes: 0 };
+      state.data = String(args[1]); state.rev++;
+      return { changes: 1 };
+    }
+    if (/portal_state_history/.test(sql)) return { results: [], changes: 1 };
+    return undefined;
+  });
+  const env = { DB: db };
+  setEnv(env as never);
+  const ask = (method: string, body?: unknown) => worker.fetch(new Request("https://portal.example/api/state", {
+    method, headers: { cookie: "portal_session=" + SID, ...(body ? { "content-type": "application/json" } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  }), env as never);
+  return { state, ask, doc: () => JSON.parse(state.data) };
+}
+
+test("a crew login's GET /api/state carries no man's MSIC number or date of birth, nor the round's note of them; management and IT get the whole document", async () => {
+  const crew = signedInPortal(boxesDoc(), CREW);
+  const answer = await crew.ask("GET");
+  assert.equal(answer.status, 200);
+  const got = (await answer.json()) as { rev: number; data: Record<string, unknown> };
+  assert.equal(got.rev, 3);
+  assert.deepEqual(got.data.people, [
+    { id: "p1", name: "EVANS, Brenton", rank: "Master" },
+    { id: "p2", name: "SITTIYOS, Kachin", rank: "Deckhand" },
+  ], "the filled boxes and the typed ones alike are not there");
+  assert.equal("particularsFromCert" in got.data, false, "nor what the round put in them");
+  assert.deepEqual(got.data.comments, [{ id: "c1", text: "hello" }], "the rest of the document is as it is");
+  assert.equal(keepable("api", answer.status, answer.headers), true,
+    "this answer is the one a crew phone keeps offline, so the kept copy never holds them either");
+
+  for (const who of [MANAGER, IT]) {
+    const theirs = signedInPortal(boxesDoc(), who);
+    const whole = (await (await theirs.ask("GET")).json()) as { data: Record<string, unknown> };
+    assert.deepEqual(whole.data, boxesDoc(), who.role + " reads the document as it is");
+  }
+});
+
+test("the crew's copy is the same document with only the three taken off, and a document without them is untouched", () => {
+  const text = JSON.stringify(boxesDoc());
+  const view = JSON.parse(crewStateView(7, text));
+  const { particularsFromCert: _f, ...rest } = boxesDoc();
+  assert.deepEqual(view, { ...rest, people: rest.people.map(({ msic: _m, dob: _d, ...p }) => p) });
+  const plain = JSON.stringify({ people: [{ name: "EVANS, Brenton" }], comments: [] });
+  assert.equal(crewStateView(8, plain), plain, "nothing to take off: the same bytes go out");
+  assert.equal(crewStateView(9, "not json {"), "{}", "a document that will not parse hands crew nothing rather than everything");
+  // People that are not a list, and a person that is not a record, are left as they are.
+  assert.equal(crewStateView(10, JSON.stringify({ people: "odd" })), JSON.stringify({ people: "odd" }));
+  assert.equal(crewStateView(11, JSON.stringify({ people: [null, 3, { msic: "X" }] })), JSON.stringify({ people: [null, 3, {}] }));
+});
+
+test("a crew save cannot blank or change a man's MSIC number or date of birth, or the round's note of them; a management save can", async () => {
+  const crew = signedInPortal(boxesDoc(), CREW);
+  // The tab's document, as crew were handed it: no boxes and no note - and
+  // then with the boxes made up, which a page could only do if tampered with.
+  const sent = boxesDoc();
+  for (const p of sent.people as Record<string, unknown>[]) { delete p.msic; delete p.dob; }
+  delete (sent as Record<string, unknown>).particularsFromCert;
+  sent.comments = [{ id: "c1", text: "hello" }, { id: "c2", text: "a comment" }];
+  const saved = await crew.ask("PUT", { rev: 3, data: sent });
+  assert.equal(saved.status, 200, await saved.text());
+  assert.deepEqual(crew.doc().people, boxesDoc().people, "every box is as it was");
+  assert.deepEqual(crew.doc().particularsFromCert, boxesDoc().particularsFromCert);
+  assert.deepEqual(crew.doc().comments, sent.comments, "the comment went in");
+
+  const forged = boxesDoc();
+  (forged.people[0] as Record<string, unknown>).msic = "MSIC 9999";
+  (forged.people[1] as Record<string, unknown>).dob = "";
+  (forged as Record<string, unknown>).particularsFromCert = { p2: { msic: "TYPED 2" } };
+  const again = await crew.ask("PUT", { rev: 4, data: forged });
+  assert.equal(again.status, 200);
+  assert.deepEqual(crew.doc().people, boxesDoc().people, "different ones sent: the stored values are as they were");
+  assert.deepEqual(crew.doc().particularsFromCert, boxesDoc().particularsFromCert);
+
+  // A crew save on a stale revision is answered with the crew's copy too.
+  const stale = await crew.ask("PUT", { rev: 3, data: sent });
+  assert.equal(stale.status, 409);
+  const back = (await stale.json()) as { conflict: boolean; data: Record<string, unknown> };
+  assert.equal(back.conflict, true);
+  assert.equal("particularsFromCert" in back.data, false, "the conflict's copy of the document is the crew's copy");
+  assert.equal("msic" in (back.data.people as Record<string, unknown>[])[0], false);
+
+  const mgmt = signedInPortal(boxesDoc(), MANAGER);
+  const changed = boxesDoc();
+  (changed.people[0] as Record<string, unknown>).msic = "MSIC 2222";
+  (changed as Record<string, unknown>).particularsFromCert = { p1: { msic: "MSIC 2222" } };
+  const ok = await mgmt.ask("PUT", { rev: 3, data: changed });
+  assert.equal(ok.status, 200);
+  assert.equal(mgmt.doc().people[0].msic, "MSIC 2222", "management's save changes the box");
+  assert.deepEqual(mgmt.doc().particularsFromCert, { p1: { msic: "MSIC 2222" } });
 });

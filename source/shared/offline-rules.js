@@ -112,7 +112,10 @@ export function forgetsBefore(method, url, origin) {
 }
 
 /** The four answers the service worker keeps the last good copy of. Nothing
- *  else under /api/ is ever kept. */
+ *  else under /api/ is ever kept. Each is kept as the server answered it
+ *  to this grant: a crew phone's /api/state is the crew's copy of the
+ *  document (crewStateView in worker/src/authz.ts), so it never holds a
+ *  man's MSIC number or date of birth. */
 export const KEPT_APIS = ["/api/me", "/api/state", "/api/files", "/api/sync/last"];
 
 /** The cache a build keeps its copies in: a new build is a new cache, and
