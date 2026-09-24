@@ -24,7 +24,7 @@ import { OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM } from "../../../source
 import { coveredCells } from "../../../source/shared/covers.js";
 import { isRecognitionReading, recognisedUntil, recognitionFills } from "../../../source/shared/recognition.js";
 import { coveredBy } from "../../../source/shared/evidence.js";
-import { crewRegister } from "../../../source/shared/names.js";
+import { crewRegister, nameIsSomebodyElse } from "../../../source/shared/names.js";
 import { readDocument } from "./shared-state.js";
 
 // Certificates are read with a vision model — most of them are scans rather than
@@ -839,6 +839,17 @@ export async function certificateStanding() {
   const certs = await liveCertificates();
   const store = readingStore();
   const eqTable = await equivalences();
+  /* Names through the crew register, the one way the portal compares them.
+     Two things turn on it here: a document printed in another man's name
+     fills nothing, and a man whose certificates sit under two spellings of
+     his name has one set of cells and not two. The round reads names the
+     same way (compareMatrix in routes/analyse.ts), so the grid and the round
+     cannot key a cell differently - which they did: the foreign certificate
+     landed under the folder's spelling, the recognition under the register's,
+     and the earlier-of rule between them never ran. */
+  const cur = await readDocument();
+  const people = (Array.isArray(cur?.doc.people) ? cur!.doc.people : []) as { name?: string }[];
+  const register = crewRegister(people);
 
   const readings = await Promise.all(
     certs.map(async (row) => ({
@@ -887,6 +898,12 @@ export async function certificateStanding() {
     // the certificate of safety training and the marine cook certificate.
     if (isRecognitionReading(reading) && !recognitionFills(code, vessel.neverRecognised.codes)) continue;
 
+    // Whose certificate this is, as the register names him.
+    const person = register.nameOf(row.person) || row.person;
+    // Printed in another man's name: his folder, not his certificate. The
+    // round refuses the same document (the rule is in source/shared/names.js).
+    if (nameIsSomebodyElse(reading.holderName, row.person, person)) continue;
+
     // A date typed against the certificate on the portal beats the model's
     // reading of the scan, same as in the comparison. An item recorded as
     // carrying no expiry has none to show either way.
@@ -897,7 +914,7 @@ export async function certificateStanding() {
     // on the certification checker.
     const issuer = (reading.issuer || "").trim() || null;
 
-    const key = `${row.person.trim().toUpperCase()}::${code.trim().toUpperCase()}`;
+    const key = `${person.trim().toUpperCase()}::${code.trim().toUpperCase()}`;
     if (!isRecognitionReading(reading) && expires && expires > (foreignAt.get(key) || "")) foreignAt.set(key, expires);
     standing.push({ row, reading, code: code.trim().toUpperCase(), key, expires, issued, issuer });
   }
@@ -982,7 +999,7 @@ export async function certificateStanding() {
        ceilings are the vessel file's. The cell shows amber and says what
        carries him; nothing is ever green on a cover, because the certificate
        itself has gone. */
-    covers: await evidenceCovers(certs, readings, eqTable),
+    covers: await evidenceCovers(certs, readings, eqTable, register),
     // `fileId` names the scan each line's dates were read from, so the
     // certification screens can put a link to the certificate itself on the line.
     dates: [...claim.entries()].map(([key, v]) => {
@@ -1029,7 +1046,12 @@ export async function certificateStanding() {
  * evidence documents at all - which is most hours - this walks the readings
  * once and answers nothing.
  */
-async function evidenceCovers(certs: Row[], readings: { row: Row; reading: Reading | null }[], eqTable: Awaited<ReturnType<typeof equivalences>>) {
+async function evidenceCovers(
+  certs: Row[],
+  readings: { row: Row; reading: Reading | null }[],
+  eqTable: Awaited<ReturnType<typeof equivalences>>,
+  register: ReturnType<typeof crewRegister>,
+) {
   const kinds = vessel.evidenceKinds as Record<string, { covers?: string[] }>;
   const columns = [...new Set(Object.values(kinds).flatMap((k) => (k.covers || []).map((c) => String(c).trim().toUpperCase())))];
   if (!columns.length) return [] as { person: string; code: string; kind: string; until: string | null; fileId: string }[];
@@ -1043,9 +1065,6 @@ async function evidenceCovers(certs: Row[], readings: { row: Row; reading: Readi
   // Nothing on the books is one of the five papers: no cover to work out.
   if (!rows.some((r) => !!held.get(r.key)?.evidenceKind)) return [];
 
-  const cur = await readDocument();
-  const people = (Array.isArray(cur?.doc.people) ? cur!.doc.people : []) as { name?: string }[];
-  const register = crewRegister(people);
   const today = todayThere();
   const rules = { kinds: vessel.evidenceKinds, register };
 

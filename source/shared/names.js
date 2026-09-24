@@ -74,6 +74,42 @@ export const nameLetters = (n) => String(n || "").toUpperCase().replace(/[^A-Z]/
  */
 export const registerWords = (n) => String(n || "").toUpperCase().split(/[^A-Z]+/).filter((w) => w.length > 1);
 
+/** The words in a name as the two settling paths hold a printed name against
+ *  a folder's: accents folded away first, so "José" filed and "Jose" printed
+ *  are one word and not two. Digits count - a folder is sometimes numbered.
+ * @param {unknown} n
+ */
+const holderWords = (n) =>
+  String(n || "").normalize("NFKD").toUpperCase().split(/[^A-Z0-9]+/).filter((w) => w.length > 1);
+
+/**
+ * Whether the name printed on a document says it is somebody else's.
+ *
+ * A scan filed against the wrong crew member is worse than one not filed at
+ * all: it would put another man's dates in this man's cells. So the name the
+ * model read off the document has to share a word with the folder it sits in
+ * or with the register's name for that man - a certificate filed under "sAM"
+ * and printed "Sam Sample" is the same man.
+ *
+ * A document with no name read off it says nothing either way and is left
+ * alone: plenty of scans are too poor to read a name from.
+ *
+ * The round (compareMatrix in worker/src/routes/analyse.ts) and the page's
+ * cells (certificateStanding in worker/src/lib/analysis.ts) both ask this
+ * one question, so the grid and the round can never disagree about whose
+ * certificate a document is.
+ * @param {unknown} printed the holder's name as it was read off the scan
+ * @param {unknown} filedUnder the name on the folder the scan sits in
+ * @param {unknown} known the register's name for that man, where it has one
+ * @returns {boolean}
+ */
+export function nameIsSomebodyElse(printed, filedUnder, known) {
+  const on = holderWords(printed);
+  if (!on.length) return false;
+  const filed = [...holderWords(filedUnder), ...holderWords(known)];
+  return !filed.some((w) => on.includes(w));
+}
+
 /**
  * The register, ready to answer to a name written any way round.
  *

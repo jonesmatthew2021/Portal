@@ -8,7 +8,7 @@ import {
 } from "../db/documents.js";
 import { imageToPdf } from "../lib/pdf-wrap.js";
 import { readDocument } from "../lib/shared-state.js";
-import { asKnownPerson, crewRegister } from "../../../source/shared/names.js";
+import { asKnownPerson, crewRegister, nameIsSomebodyElse } from "../../../source/shared/names.js";
 import { isMsicCard, msicAsWritten, msicCodeIn, newestCard, openToCertificates, particularsFor, particularsKeyOf, ticketCodesIn } from "../../../source/shared/particulars.js";
 import { coveredCells, unitColumnsIn } from "../../../source/shared/covers.js";
 import { isRecognitionReading, recognisedUntil, recognitionFills } from "../../../source/shared/recognition.js";
@@ -937,22 +937,18 @@ export async function compareMatrix(
       continue;
     }
 
-    // The name on the document against the person it was filed under. A scan
-    // filed against the wrong crew member is worse than one not filed at all.
-    // The register's name for him counts as his too: a certificate filed
-    // under "sAM" and printed "Sam Sample" is the same man.
-    if (reading.holderName) {
-      const on = words(reading.holderName);
-      const filed = [...words(row.person), ...words(person)];
-      if (on.length && !filed.some((w) => on.includes(w))) {
-        notes.push({
-          kind: "name-mismatch",
-          person: row.person,
-          detail: `Filed under ${row.person}, but the certificate is in the name of ${reading.holderName}.`,
-          certificate: link,
-        });
-        continue;
-      }
+    /* The name on the document against the person it was filed under. A scan
+       filed against the wrong crew member is worse than one not filed at
+       all. The one rule is in source/shared/names.js, so the page's cells
+       (certificateStanding) refuse the same document this does. */
+    if (nameIsSomebodyElse(reading.holderName, row.person, person)) {
+      notes.push({
+        kind: "name-mismatch",
+        person: row.person,
+        detail: `Filed under ${row.person}, but the certificate is in the name of ${reading.holderName}.`,
+        certificate: link,
+      });
+      continue;
     }
 
     /* A paper that stands in for a certificate is not the certificate.

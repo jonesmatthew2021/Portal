@@ -4662,3 +4662,45 @@ test("evidence: the letter's own date never lands in the cell, on the round or o
   assert.deepEqual(page.covers.map((c) => [c.code, c.kind, c.fileId]), [["QL-01", "extension", "letter"]],
     "and the letter reaches the page only as a cover");
 });
+
+test("covers: the page's cells refuse a ticket printed in another man's name too", async () => {
+  /* The mirror of the round's own test above. The two used to disagree: the
+     round rejected the document with a name-mismatch note and settled
+     nothing, while the page's cells handed the grid a green date and a
+     working Open link to somebody else's ticket - in its own column and in
+     every column it covers. */
+  setEnv({ DB: coversDb([
+    { row: { qualCode: "QL-01" }, reading: { ...evansCoC, holderName: "Kachin Sittiyos" } },
+  ]), FILE_STORE: "r2" } as never);
+  const out = await certificateStanding();
+  assert.deepEqual(out.dates, [], "nothing in his cells off another man's certificate");
+});
+
+test("covers: two spellings of one man are one set of cells, and the recognition is cut back", async () => {
+  /* His foreign ticket is filed under "Brenton Evans" and AMSA's recognition
+     of it under "EVANS, Brenton". Keyed on the folder's spelling the two
+     landed under different keys, the earlier-of rule never ran, and the page
+     showed the recognition's own date - three years longer than the
+     certificate behind it (MO70 s 33(2), s 37(4)) - and flagged the foreign
+     certificate as one the portal does not hold. */
+  const people = [{ name: "EVANS, Brenton", aliases: ["Brenton Evans"] }];
+  const foreign = {
+    ...evansCoC, certificateTitle: "Master (MCA)", issuer: "MCA", holderName: "Brenton Evans",
+    expiresOn: "2027-05-05", endorsements: [], units: [], isRecognition: false,
+  };
+  const rec = recognitionOf({ recognises: { authority: "MCA", country: "United Kingdom", number: "UK-9921", expiresOn: null } });
+  const certs = [
+    { row: { id: "foreign", person: "Brenton Evans", qualCode: "QL-01" }, reading: foreign },
+    { row: { id: "rec", person: "EVANS, Brenton", qualCode: "QL-01" }, reading: rec },
+  ];
+  setEnv({ DB: coversDb(certs, people), FILE_STORE: "r2" } as never);
+  const out = await certificateStanding();
+  assert.deepEqual(out.dates.map((d) => [d.person, d.code, d.expires, d.recognition, d.foreignUnknown]),
+    [["EVANS, BRENTON", "QL-01", "2027-05-05", true, false]],
+    "one man, one cell, cut back to the certificate the recognition is for");
+
+  setEnv({ DB: coversDb(certs, people), FILE_STORE: "r2" } as never);
+  const round = await compareMatrix(coversMatrix, null, asKnownPerson(people));
+  assert.deepEqual(round.settled, [{ person: "EVANS, Brenton", code: "QL-01", value: "2027-05-05" }],
+    "and the round says the same, which is what it always said");
+});
