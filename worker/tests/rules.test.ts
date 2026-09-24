@@ -17,8 +17,10 @@ import { crewFolderIn, looseIn, whoseFolder } from "../src/routes/sync.js";
 import { asKey } from "../src/db/cert-home.js";
 import { canonicalPersonName } from "../src/db/person-name.js";
 import { setEnv } from "../src/env.js";
-import { vessel, checkVessel } from "../src/vessel.js";
-import { crewRowsOnly } from "../../source/shared/names.js";
+import { vessel, checkVessel, vesselNow } from "../src/vessel.js";
+import { crewRowsOnly, crewRegister } from "../../source/shared/names.js";
+import { RED_DAYS, daysUntil } from "../../source/shared/bands.js";
+import * as reminders from "../../source/shared/reminders.js";
 
 /** The office's equivalence sheet, as the portal stores it. */
 const SHEET = [
@@ -422,4 +424,124 @@ test("the ids the page keys on are the file's to carry and not to rename", () =>
   assert.throws(() => checkVessel({ ...vessel, shift: { ...vessel.shift, establishment } }, "a vessel file"),
     /"shift.establishment\[2\].shifts\[1\]" - it must be day or night\./);
   assert.equal(checkVessel(vessel), vessel, "the file as it is carries every id the page keys on");
+});
+
+/* ------------------------------------------------------------------------ *
+ * The weekly certificate-expiry reminders, as rules (source/shared/
+ * reminders.js): what is on a list, who is sent which, and when it is due.
+ * Sending somebody else's certificates to an inbox, or the same email
+ * twice, is what these hold against.
+ * ------------------------------------------------------------------------ */
+const REMINDER_RULES = { crewRowsOnly, crewRegister, daysUntil };
+const REMINDER_TODAY = "2026-09-28";
+/** A date `n` days from REMINDER_TODAY. */
+const inDays = (n: number) => new Date(Date.parse(REMINDER_TODAY) + n * 86400000).toISOString().slice(0, 10);
+const REMINDER_QUALS = {
+  cols: [["QL-01", "Master", "Qualification"], ["QL-17", "AMSA Medical", "Medical"], ["VS-04", "Induction e-learning", "E-Learning"], ["QL-20", "Sea Survival", "Safety"]],
+  rows: [
+    ["SITTIYOS, Kachin", "Cook", "", [inDays(90), inDays(0), inDays(5), "OPEN"]],
+    ["EVANS, Brenton", "Master", "", [inDays(91), inDays(-3), "", "Y"]],
+    ["SAMPLE, Sam", "Deckhand", "", ["N", "", "", inDays(400)]],
+    ["Number Required", "", "", [inDays(1), inDays(1), "", ""]],
+  ],
+};
+const REMINDER_PEOPLE = [{ name: "SITTIYOS, Kachin", aliases: ["bILLY"] }, { name: "EVANS, Brenton", aliases: [] }, { name: "SAMPLE, Sam", aliases: [] }];
+const expiring = (quals: unknown, people = REMINDER_PEOPLE, days = 90) =>
+  reminders.expiringWithin(quals as never, people, days, REMINDER_TODAY, vessel.noExpiryCodes, REMINDER_RULES);
+
+test("the red band and the reminder window are the same 90 days", () => {
+  assert.equal(RED_DAYS, 90);
+  assert.equal(reminders.REMINDER_DEFAULTS.days, RED_DAYS);
+  assert.deepEqual(reminders.REMINDER_DEFAULTS, { on: false, days: 90, weekday: 1, hour: 7 }, "off, 90 days, Monday, 07:00");
+});
+
+test("the setting reads the document with the defaults where a key will not do, and only a real true is on", () => {
+  assert.deepEqual(reminders.reminderSetting(undefined), reminders.REMINDER_DEFAULTS);
+  assert.deepEqual(reminders.reminderSetting({ on: true, days: 30, weekday: 3, hour: 6 }), { on: true, days: 30, weekday: 3, hour: 6 });
+  assert.deepEqual(reminders.reminderSetting({ on: "true", days: "60", weekday: 9, hour: -1 }), { on: false, days: 60, weekday: 1, hour: 7 });
+  assert.deepEqual(reminders.reminderSetting({ on: 1, days: 0, weekday: 1.5, hour: "" }), { on: false, days: 90, weekday: 1, hour: 7 });
+});
+
+test("what is expiring: crew rows only, dates only, never the items that never lapse, soonest first", () => {
+  assert.deepEqual(expiring(REMINDER_QUALS), [
+    { person: "EVANS, Brenton", code: "QL-17", title: "AMSA Medical", date: inDays(-3), daysLeft: -3 },
+    { person: "SITTIYOS, Kachin", code: "QL-17", title: "AMSA Medical", date: inDays(0), daysLeft: 0 },
+    { person: "SITTIYOS, Kachin", code: "QL-01", title: "Master", date: inDays(90), daysLeft: 90 },
+  ], "0 and 90 days in, 91 out, expired in; VS-04, OPEN, Y, N and blanks skipped; the requirement row is nobody");
+  assert.equal(vessel.noExpiryCodes.includes("VS-04"), true, "VS-04 never lapses (the vessel file)");
+  assert.equal(expiring(REMINDER_QUALS, REMINDER_PEOPLE, 91).length, 4, "a 91-day window takes the 91st day");
+  assert.deepEqual(expiring(null), [], "no matrix, nothing");
+  assert.throws(() => reminders.expiringWithin(REMINDER_QUALS as never, REMINDER_PEOPLE, 90, REMINDER_TODAY, vessel.noExpiryCodes, {}), /needs crewRowsOnly and daysUntil/);
+  // A row the office spelt its own way is listed under the register's name.
+  const spelt = { ...REMINDER_QUALS, rows: [["bILLY", "Cook", "", [inDays(10), "", "", ""]]] };
+  assert.deepEqual(expiring(spelt).map((i) => i.person), ["SITTIYOS, Kachin"]);
+});
+
+test("each crew grant is sent their own list, through the register; management and IT the summary; nobody else anything", () => {
+  const items = expiring(REMINDER_QUALS);
+  const users = [
+    { id: "u1", email: "kachin@example.com", name: "Kachin Sittiyos", role: "crew", disabled: 0 },
+    { id: "u2", email: "brenton@example.com", name: "Brenton Evans", role: "crew", disabled: 1 },
+    { id: "u3", email: "sam@example.com", name: "Sam Sample", role: "crew", disabled: 0 },
+    { id: "u4", email: "boss@example.com", name: "Matthew Jones", role: "management", disabled: 0 },
+    { id: "u5", email: "help@example.com", name: "IT Help", role: "it", disabled: 0 },
+    { id: "u6", email: "old@example.com", name: "Old Boss", role: "management", disabled: 1 },
+    { id: "u7", email: "stranger@example.com", name: "Alan Stranger", role: "crew", disabled: 0 },
+    { id: "u8", email: "kachin", name: "Kachin Sittiyos", role: "crew", disabled: 0 },
+    { id: "u9", email: "BOSS@example.com", name: "Matthew Jones", role: "management", disabled: 0 },
+    { id: "u10", email: "billy@example.com", name: "Kachin", role: "crew", disabled: 0 },
+  ];
+  const out = reminders.recipientsFor(users, REMINDER_PEOPLE, items, REMINDER_RULES);
+  assert.deepEqual(out.own.map((o) => [o.user.email, o.person, o.items.map((i) => i.code)]), [
+    ["kachin@example.com", "SITTIYOS, Kachin", ["QL-17", "QL-01"]],
+  ], "\"Kachin Sittiyos\" is the row \"SITTIYOS, Kachin\"; Brenton is disabled; Sam has nothing due; a stranger and a one-word name are nobody's; a broken address is none");
+  assert.deepEqual(out.summary.map((u) => u.email), ["boss@example.com", "help@example.com"], "management and IT, each address once, the disabled one left out");
+  // Two men the grant's name could be: nobody's list.
+  const twins = [...REMINDER_PEOPLE, { name: "SITTIYOS, Kachin James", aliases: [] }];
+  assert.deepEqual(reminders.recipientsFor(users, twins, items, REMINDER_RULES).own, [], "a name the register cannot put to one person sends nothing");
+  assert.throws(() => reminders.recipientsFor(users, REMINDER_PEOPLE, items, {}), /needs crewRegister/);
+});
+
+test("the reminders are due on the day, from the hour, once", () => {
+  // Monday 28 Sep 2026 where the vessel is.
+  const at = (utc: string) => vesselNow(Date.parse(utc));
+  assert.deepEqual(at("2026-09-27T23:10:00Z"), { day: "2026-09-28", hour: 7, weekday: 1 }, "07:10 Monday in Perth is 23:10 Sunday UTC");
+  assert.deepEqual(at("2026-09-27T15:59:00Z"), { day: "2026-09-27", hour: 23, weekday: 0 }, "a minute to midnight is still Sunday in Perth");
+  assert.deepEqual(at("2026-09-27T16:00:00Z"), { day: "2026-09-28", hour: 0, weekday: 1 }, "midnight is Monday in Perth while it is Sunday in UTC");
+  const due = (utc: string, record: { day?: string | null } | null = null) => reminders.reminderDue(record, at(utc), 1, 7);
+  assert.equal(due("2026-09-27T23:10:00Z"), true, "07:10 Monday: due");
+  assert.equal(due("2026-09-27T22:10:00Z"), false, "06:10 Monday: not yet");
+  assert.equal(due("2026-09-28T02:10:00Z"), true, "10:10 Monday, the morning's ticks missed: still due");
+  assert.equal(due("2026-09-28T23:10:00Z"), false, "07:10 Tuesday: not due");
+  assert.equal(due("2026-09-27T23:10:00Z", { day: "2026-09-28" }), false, "sent already this Monday: not twice");
+  assert.equal(due("2026-09-28T00:10:00Z", { day: "2026-09-28" }), false, "…nor at 08:10");
+  assert.equal(due("2026-10-04T23:10:00Z", { day: "2026-09-28" }), true, "the next Monday: due again");
+});
+
+test("the emails say the list in plain words, and nothing else but the portal's address", () => {
+  const items = expiring(REMINDER_QUALS);
+  const it = (daysLeft: number, date: string) => ({ person: "SITTIYOS, Kachin", code: "QL-17", title: "AMSA Medical", date, daysLeft });
+  assert.equal(reminders.reminderItemLine(it(18, "2026-10-12")), "QL-17 AMSA Medical — expires 12 Oct 2026 (18 days)");
+  assert.equal(reminders.reminderItemLine(it(1, "2026-09-25")), "QL-17 AMSA Medical — expires 25 Sep 2026 (1 day)");
+  assert.equal(reminders.reminderItemLine(it(0, "2026-09-24")), "QL-17 AMSA Medical — expires today (24 Sep 2026)");
+  assert.equal(reminders.reminderItemLine(it(-3, "2026-09-21")), "QL-17 AMSA Medical — expired 3 days ago (21 Sep 2026)");
+  const ship = `${vessel.name} ${vessel.nameAccent}`;
+  const own = reminders.reminderText(vessel, "SITTIYOS, Kachin", items.filter((i) => i.person === "SITTIYOS, Kachin"), REMINDER_TODAY, 90);
+  assert.equal(own.subject, `Your certificates expiring within 90 days - ${ship}`);
+  assert.equal(own.text,
+    `Your certificates on the ${ship} crew matrix (SITTIYOS, Kachin) that have expired or expire within 90 days, as at 28 Sep 2026:\n\n` +
+    "QL-17 AMSA Medical — expires today (28 Sep 2026)\n" +
+    "QL-01 Master — expires 27 Dec 2026 (90 days)\n\n" +
+    `https://${vessel.domain}\n`);
+  assert.match(own.html, /<li[^>]*>QL-01 Master — expires 27 Dec 2026 \(90 days\)<\/li>/);
+  const summary = reminders.summaryText(vessel, reminders.byPerson(items), REMINDER_TODAY, 90);
+  assert.equal(summary.subject, `Crew certificates expiring within 90 days - ${ship}`);
+  assert.equal(summary.text,
+    `Crew certificates on the ${ship} crew matrix that have expired or expire within 90 days, as at 28 Sep 2026 - 3 items, 2 people:\n\n` +
+    "EVANS, Brenton\n  QL-17 AMSA Medical — expired 3 days ago (25 Sep 2026)\n\n" +
+    "SITTIYOS, Kachin\n  QL-17 AMSA Medical — expires today (28 Sep 2026)\n  QL-01 Master — expires 27 Dec 2026 (90 days)\n\n" +
+    `https://${vessel.domain}\n`);
+  // A name is written into the html as text, never as markup.
+  const odd = reminders.reminderText(vessel, "<b>O'NEIL</b>, Pat", [{ ...it(5, "2026-10-03"), title: "A & B" }], REMINDER_TODAY, 90);
+  assert.ok(odd.html.includes("&lt;b&gt;O'NEIL&lt;/b&gt;") && odd.html.includes("A &amp; B") && !odd.html.includes("<b>O'NEIL"));
 });

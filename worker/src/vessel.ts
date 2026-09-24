@@ -189,15 +189,20 @@ export function checkVessel(value: unknown, from = "source/vessel.json"): Vessel
 /** This vessel. */
 export const vessel: Vessel = checkVessel(raw);
 
-/** The vessel's own day and hour at `now`: the vessel decides the day, the
- *  tick is UTC. en-CA gives YYYY-MM-DD, which is the shape the portal stores. */
-export function vesselNow(now: number | Date): { day: string; hour: number } {
+/** The vessel's own day, hour and weekday at `now`: the vessel decides the
+ *  day, the tick is UTC. en-CA gives YYYY-MM-DD, which is the shape the
+ *  portal stores. The weekday (0 Sunday to 6 Saturday) is worked out from
+ *  that day rather than asked of the formatter, so it can never be UTC's
+ *  weekday while the day is the vessel's - it is what the weekly reminder
+ *  emails are due on. */
+export function vesselNow(now: number | Date): { day: string; hour: number; weekday: number } {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: vessel.timezone, hourCycle: "h23",
     year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit",
   }).formatToParts(new Date(now));
   const part = (type: string) => parts.find((p) => p.type === type)?.value || "";
-  return { day: `${part("year")}-${part("month")}-${part("day")}`, hour: Number(part("hour")) % 24 };
+  const day = `${part("year")}-${part("month")}-${part("day")}`;
+  return { day, hour: Number(part("hour")) % 24, weekday: new Date(day + "T00:00:00Z").getUTCDay() };
 }
 
 /** Today, as YYYY-MM-DD, where the vessel is - which is what an expiry is

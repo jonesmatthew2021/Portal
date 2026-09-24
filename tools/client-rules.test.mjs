@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderItemLine, reminderText, summaryText };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -2279,6 +2279,62 @@ const is = (got, want, what) => {
   is(bandFor(on(91)).days, 91, "the band carries its days");
   is([bandFor("Y").key, bandFor("n").key, bandFor("OPEN").key, bandFor("x").key, bandFor("")],
     ["held", "not", "not", "unknown", null], "the words keep their bands");
+}
+
+/* ---- the weekly reminders: what is on a list, who is sent it, when ---- */
+{
+  const { REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderItemLine,
+    reminderText, summaryText, crewRowsOnly, crewRegister, daysUntil, RED_DAYS, VESSEL } = lib;
+  // The page's own copies of the rules the reminders lean on, handed in the
+  // way the worker hands in the modules'.
+  const rules = { crewRowsOnly, crewRegister, daysUntil };
+  const today = "2026-09-28";
+  const on = (n) => new Date(Date.parse(today) + n * 86400000).toISOString().slice(0, 10);
+  const quals = {
+    cols: [["QL-01", "Master", "Qualification"], ["QL-17", "AMSA Medical", "Medical"], ["VS-04", "Induction", "E-Learning"]],
+    rows: [
+      ["SITTIYOS, Kachin", "Cook", "", [on(90), on(0), on(5)]],
+      ["EVANS, Brenton", "Master", "", [on(91), on(-3), ""]],
+      ["SAMPLE, Sam", "Deckhand", "", ["Y", "OPEN", ""]],
+      ["Number Required", "", "", [on(1), "", ""]],
+    ],
+  };
+  const people = [{ name: "SITTIYOS, Kachin", aliases: ["bILLY"] }, { name: "EVANS, Brenton" }, { name: "SAMPLE, Sam" }];
+
+  is(REMINDER_DEFAULTS, { on: false, days: RED_DAYS, weekday: 1, hour: 7 }, "the reminders ship off: 90 days (the red band), Monday, 07:00");
+  is(reminderSetting({}), REMINDER_DEFAULTS, "a document with no setting reads the defaults");
+  is(reminderSetting({ on: "yes", days: 400 }).on, false, "only a real true switches them on");
+
+  const items = expiringWithin(quals, people, 90, today, VESSEL.noExpiryCodes, rules);
+  is(items.map((i) => [i.person, i.code, i.daysLeft]),
+    [["EVANS, Brenton", "QL-17", -3], ["SITTIYOS, Kachin", "QL-17", 0], ["SITTIYOS, Kachin", "QL-01", 90]],
+    "0 and 90 days on the list, 91 off, expired on; VS-04, Y, OPEN and blanks never; the requirement row is nobody");
+  is(byPerson(items).map((g) => g.person), ["EVANS, Brenton", "SITTIYOS, Kachin"], "one list per person, by name");
+
+  const users = [
+    { email: "kachin@example.com", name: "Kachin Sittiyos", role: "crew", disabled: 0 },
+    { email: "sam@example.com", name: "Sam Sample", role: "crew", disabled: 0 },
+    { email: "brenton@example.com", name: "Brenton Evans", role: "crew", disabled: 1 },
+    { email: "boss@example.com", name: "Matthew Jones", role: "management", disabled: 0 },
+    { email: "help@example.com", name: "IT Help", role: "it", disabled: 0 },
+  ];
+  const sent = recipientsFor(users, people, items, rules);
+  is(sent.own.map((o) => [o.user.email, o.person, o.items.length]), [["kachin@example.com", "SITTIYOS, Kachin", 2]],
+    "\"Kachin Sittiyos\" is sent the row \"SITTIYOS, Kachin\"; Sam has nothing due; Brenton is disabled");
+  is(sent.summary.map((u) => u.email), ["boss@example.com", "help@example.com"], "management and IT get the summary");
+
+  const monday7 = { day: "2026-09-28", hour: 7, weekday: 1 };
+  is(reminderDue(null, monday7, 1, 7), true, "due at 07:10 Monday");
+  is(reminderDue(null, { ...monday7, hour: 6 }, 1, 7), false, "not at 06:10");
+  is(reminderDue(null, { day: "2026-09-29", hour: 7, weekday: 2 }, 1, 7), false, "not on Tuesday");
+  is(reminderDue({ day: "2026-09-28" }, monday7, 1, 7), false, "not twice on one Monday");
+
+  is(reminderItemLine(items[0]), "QL-17 AMSA Medical — expired 3 days ago (25 Sep 2026)", "an expired line");
+  is(reminderItemLine(items[2]), "QL-01 Master — expires 27 Dec 2026 (90 days)", "an expiring line");
+  is(reminderText(VESSEL, "SITTIYOS, Kachin", byPerson(items)[1].items, today, 90).subject,
+    "Your certificates expiring within 90 days - " + VESSEL.name + " " + VESSEL.nameAccent, "the crew member's subject");
+  is(summaryText(VESSEL, byPerson(items), today, 90).text.split("\n").slice(-2), ["https://" + VESSEL.domain, ""],
+    "the summary ends on the portal's address");
 }
 
 if (failed) {

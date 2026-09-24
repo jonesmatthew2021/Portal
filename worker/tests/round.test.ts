@@ -2712,9 +2712,9 @@ test("a phone photo the model cannot read is still taken off again when the phon
 test("the vessel's clock decides the backup's day and hour", () => {
   // The vessel file says Australia/Perth, eight hours ahead of UTC.
   assert.equal(vessel.timezone, "Australia/Perth");
-  assert.deepEqual(vesselNow(Date.parse("2026-09-24T15:59:00Z")), { day: "2026-09-24", hour: 23 });
-  assert.deepEqual(vesselNow(Date.parse("2026-09-24T16:00:00Z")), { day: "2026-09-25", hour: 0 });
-  assert.deepEqual(vesselNow(Date.parse("2026-09-23T18:10:00Z")), { day: "2026-09-24", hour: 2 }, "ten past two in the morning where the vessel is");
+  assert.deepEqual(vesselNow(Date.parse("2026-09-24T15:59:00Z")), { day: "2026-09-24", hour: 23, weekday: 4 });
+  assert.deepEqual(vesselNow(Date.parse("2026-09-24T16:00:00Z")), { day: "2026-09-25", hour: 0, weekday: 5 });
+  assert.deepEqual(vesselNow(Date.parse("2026-09-23T18:10:00Z")), { day: "2026-09-24", hour: 2, weekday: 4 }, "ten past two in the morning where the vessel is");
 });
 
 test("a backup is owed after the hour, once a day, and again every hour until it lands", () => {
