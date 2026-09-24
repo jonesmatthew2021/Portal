@@ -175,6 +175,19 @@
   "noExpiryCodes": ["VS-04"],
   "elearningGroups": ["Project Induction", "Vessel Induction", "Project Specific"],
   "certStated": { "QL-17": "1 or 2 years — as printed on the certificate" },
+  "covers": [
+    {
+      "code": "QL-13",
+      "when": "\\becdis\\b",
+      "perpetual": true,
+      "why": "MO70 s 37(3) table item 8: the ECDIS endorsement never expires, so the column takes the certificate's own printed date. The office's 5 years is wrong by law."
+    },
+    {
+      "code": "QL-16",
+      "when": "(^|[^-])vi/2\\s*(\\(\\s*2\\s*\\)|para\\.?\\s*2)|fast rescue (boat|craft)",
+      "why": "MO70 s 37(3) item 2, s 37(5): the fast rescue boat endorsement runs 5 years from the day the proficiency was issued, so its own printed end date governs where AMSA printed one. STCW VI/2 (1) and A-VI/2 (1-4) are survival craft and fill nothing."
+    }
+  ],
   "certPageNotes": [
     "VS-04 Helm CONNECT - Crew Basic + Jobs has no expiry date. The checker treats it as held once completed - it never lapses and is never counted as expired.",
     "QL-18 Provide First Aid: crew already aboard as at 29 Jun 2026 keep their existing 5-year expiry; anyone joining after that date holds it on a 3-year expiry (skills matrix roll-out sheet).",
@@ -230,7 +243,7 @@
     ["QL-16", "Fast Rescue Craft (FRC)", "Qualification"],
     ["QL-17", "AMSA Certificate of Medical Fitness - Form 303", "Qualification"],
     ["QL-18", "Provide First Aid - HLTAID011", "Qualification"],
-    ["QL-19", "Adv Resuscitation and Oxygen Therapy - HLTIAD015", "Qualification"],
+    ["QL-19", "Adv Resuscitation and Oxygen Therapy - HLTAID015", "Qualification"],
     ["QL-20", "Use hygienic practices for food safety - SITXFSA005", "Qualification"],
     ["VS-01", "Maritime Security Identification Card", "Vessel Specific"],
     ["VS-02", "ECDIS Type Specific - Furuno ECDIS, FMD series", "Vessel Specific"],

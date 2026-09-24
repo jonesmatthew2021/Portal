@@ -22,6 +22,7 @@ import { crewRowsOnly, crewRegister, nameLetters, registerWords } from "../../so
 import { RED_DAYS, daysUntil } from "../../source/shared/bands.js";
 import * as reminders from "../../source/shared/reminders.js";
 import { particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, ticketCodesIn, isMsicCard, openToCertificates } from "../../source/shared/particulars.js";
+import { coveredCells, coveredCodes, unitCodesIn, unitColumnsIn } from "../../source/shared/covers.js";
 import { expiringIn, EXPIRING_MEANS, PORTAL_TOOLS } from "../src/lib/portal.js";
 import { dueMeans } from "../src/lib/matrix.js";
 import { readFileSync } from "node:fs";
@@ -785,4 +786,120 @@ test("particulars: a tab's save over the round's keeps the round's fill where th
     { id: "p1", name: "EVANS, Brenton", msic: "MSIC 0002", rank: "Master" },
     { id: "p2", name: "SITTIYOS, Kachin", dob: "1975-05-06" },
   ], "Evans's rank is the tab's and his number the round's; the date the tab typed for Kachin is the tab's");
+});
+
+/* ------------------------------------------------------------------------ *
+ * One certificate fills every column it covers: the endorsements printed on
+ * it against the vessel file's table, and the unit codes printed on a
+ * training statement against the column titles. The clauses are in
+ * source/shared/covers.js.
+ * ------------------------------------------------------------------------ */
+
+/** Brenton Evans's new-style Master certificate of competency, as the
+ *  reading lists what is printed on it. */
+const EVANS_COC = [
+  "II/2 (incl. generic ECDIS)", "II/5", "VI/1 s. A-VI/1 (2)", "VI/2 (1) s. A-VI/2 (1-4)",
+  "VI/3 s. A-VI/3 (1-4)", "VI/4 (1) s. A-VI/4 (1-3)", "VI/4 (2) s. A-VI/4 (4-6)",
+  "VI/6 (1) s. A-VI/6 (4)",
+].map((text) => ({ text, until: null }));
+
+/** A reading of a certificate that runs to 26 May 2031 - Evans's ticket -
+ *  listing whatever the test prints on it. */
+const covering = (over: Record<string, unknown>) =>
+  ({ readable: true, expiresOn: "2031-05-26", endorsements: [], units: [], ...over }) as never;
+const cellsCovered = (over: Record<string, unknown>, ownCode?: string | null) =>
+  coveredCells(covering(over), vessel.covers, vessel.qualColumns, ownCode);
+const codesCovered = (over: Record<string, unknown>, ownCode?: string | null) =>
+  coveredCodes(covering(over), vessel.covers, vessel.qualColumns, ownCode);
+
+test("covers: an ECDIS endorsement fills the ECDIS column with the certificate's own date, and nothing else on Evans's ticket fills anything", () => {
+  /* His ticket prints eight endorsements. Only the ECDIS line is a column on
+     this matrix: II/5, VI/1, VI/2 (1), VI/3, VI/4 and VI/6 fill nothing, and
+     VI/1 in particular never fills QL-12 - the certificate of safety
+     training is a class of its own that cannot be endorsed onto another
+     document (MO70 s 7(1)(e), s 34(1)). */
+  assert.deepEqual(cellsCovered({ endorsements: EVANS_COC }, "QL-01"), [{ code: "QL-13", until: "2031-05-26" }],
+    "the ECDIS column, dated as the ticket is dated");
+  assert.equal(codesCovered({ endorsements: EVANS_COC }, "QL-01").includes("QL-12"), false,
+    "a VI/1 line is a course, not a certificate of safety training");
+  assert.deepEqual(codesCovered({ endorsements: [{ text: "II/2", until: null }] }, "QL-01"), [], "II/2 on its own is not ECDIS");
+  assert.deepEqual(codesCovered({ endorsements: [{ text: "VI/2 (1) s. A-VI/2 (1-4)", until: null }] }, "QL-01"), [],
+    "VI/2 (1) and A-VI/2 (1-4) are survival craft, not fast rescue craft");
+  // MO70 s 37(3) item 8: the endorsement is perpetual, so a date printed
+  // against it never shortens the column below the certificate's own.
+  assert.deepEqual(cellsCovered({ endorsements: [{ text: "II/1 incl. ECDIS", until: "2028-01-01" }] }, "QL-01"),
+    [{ code: "QL-13", until: "2031-05-26" }], "ECDIS does not expire of itself: the certificate's date");
+});
+
+test("covers: the fast rescue craft column takes the endorsement's own printed date where AMSA printed one", () => {
+  // MO70 s 37(3) item 2, s 37(5): five years from the proficiency's issue,
+  // which is not the day it was written onto the certificate of competency.
+  assert.deepEqual(cellsCovered({ endorsements: [{ text: "VI/2 (2) s. A-VI/2 (5-8)", until: "2029-06-18" }] }, "QL-01"),
+    [{ code: "QL-16", until: "2029-06-18" }]);
+  assert.deepEqual(cellsCovered({ endorsements: [{ text: "VI/2(2)", until: null }] }, "QL-01"),
+    [{ code: "QL-16", until: "2031-05-26" }], "no date printed against it: the certificate's own");
+  assert.deepEqual(codesCovered({ endorsements: [{ text: "VI/2 para 2", until: null }] }, "QL-01"), ["QL-16"], "however the paragraph is printed");
+  assert.deepEqual(codesCovered({ endorsements: [{ text: "Proficiency in fast rescue boats", until: null }] }, "QL-01"), ["QL-16"], "or named in words");
+  assert.deepEqual(codesCovered({ endorsements: [{ text: "Fast Rescue Craft", until: null }] }, "QL-01"), ["QL-16"]);
+  // Two lines reaching the same column: the shorter term governs, because an
+  // endorsement is a line on a document and cannot outlast the earlier date.
+  assert.deepEqual(cellsCovered({ endorsements: [
+    { text: "VI/2 (2)", until: "2029-06-18" }, { text: "fast rescue boats", until: "2028-01-01" }] }, "QL-01"),
+  [{ code: "QL-16", until: "2028-01-01" }]);
+});
+
+test("covers: GMDSS is never read off a certificate of competency", () => {
+  /* The GMDSS radio operator certificate is a certificate class of its own,
+     with its own term and its own revalidation (MO70 s 7(1)(ca), s 15(1)(b),
+     s 21B, s 25A). No rule makes it an endorsement, so the IV/2 line printed
+     on a ticket fills nothing: QL-14 is filled by the GMDSS document itself,
+     or by an AMSA certificate of recognition of one. */
+  assert.deepEqual(codesCovered({ endorsements: [{ text: "IV/2", until: null }] }, "QL-01"), []);
+  assert.deepEqual(codesCovered({ endorsements: [{ text: "GMDSS - STCW Reg IV/2", until: null }] }, "QL-01"), []);
+  assert.equal(vessel.covers.some((c) => c.code.toUpperCase() === "QL-14"), false, "and the vessel file's table has no GMDSS row to do it with");
+});
+
+test("covers: a unit code printed on a training statement fills every column whose title carries it", () => {
+  /* One first-aid statement of attainment, printed with the other units on
+     the same certificate: HLTAID011 is its own column and HLTAID015 another,
+     both running to the statement's own expiry. */
+  const statement = { expiresOn: "2029-03-01", units: ["HLTAID011", "HLTAID015"] };
+  assert.deepEqual(cellsCovered(statement, "QL-18"), [{ code: "QL-19", until: "2029-03-01" }],
+    "the column it fills itself is not covered again");
+  assert.deepEqual(codesCovered(statement, null), ["QL-18", "QL-19"], "filed against nothing, it covers both");
+  assert.deepEqual(codesCovered({ units: ["HLTAID009"] }, "QL-18"), [], "a unit no column names fills nothing");
+  assert.deepEqual(codesCovered({ units: ["HLTAID01"] }, null), [], "HLTAID01 is not HLTAID011");
+  assert.deepEqual(codesCovered({ units: ["RIIWHS202E", "SITXFSA005"] }, null), ["PT-02", "QL-20"]);
+  assert.deepEqual(codesCovered({ units: ["first", "aid", "Master"] }, null), [],
+    "a word is not a unit code, whatever column title carries it");
+  assert.deepEqual(unitColumnsIn(vessel.qualColumns), ["QL-18", "QL-19", "QL-20", "PT-02", "PT-03"],
+    "the training columns are read off the titles, not written down anywhere");
+  assert.deepEqual(unitCodesIn(["HLTAID011", " hltaid011 ", "x", null]), ["HLTAID011"], "the same code twice is one code");
+});
+
+test("covers: a reading that says nothing covers nothing", () => {
+  assert.deepEqual(codesCovered({ readable: false, endorsements: EVANS_COC }, "QL-01"), [], "a certificate that could not be read");
+  const before = { readable: true, expiresOn: "2031-05-26" };      // read before the question was asked
+  assert.deepEqual(coveredCodes(before as never, vessel.covers, vessel.qualColumns, "QL-01"), [], "a reading with no endorsements key at all");
+  assert.deepEqual(coveredCodes(null, vessel.covers, vessel.qualColumns, "QL-01"), []);
+  assert.deepEqual(codesCovered({ endorsements: EVANS_COC }, "QL-13"), [], "the ECDIS certificate itself covers no second ECDIS column");
+  assert.deepEqual(coveredCodes(covering({ endorsements: EVANS_COC }), vessel.covers, [["QL-01", "Master", "Qualification"]], "QL-01"), [],
+    "a column this matrix has not got is never filled");
+  assert.deepEqual(coveredCodes(covering({ endorsements: EVANS_COC }), [{ code: "QL-13", when: "(unclosed" }], vessel.qualColumns, "QL-01"), [],
+    "a pattern that does not compile covers nothing");
+  assert.deepEqual(cellsCovered({ expiresOn: null, endorsements: [{ text: "ECDIS", until: null }] }, "QL-01"),
+    [{ code: "QL-13", until: null }], "no date anywhere: the column is covered and the caller has no date to put in it");
+});
+
+test("the vessel file's covers table is checked: a pattern that will not compile, and a code that is not a column", () => {
+  const bad = (covers: unknown[]) => () => checkVessel({ ...vessel, covers }, "a vessel file");
+  assert.throws(bad([{ code: "QL-13" }]), /a vessel file has no usable "covers\[0\]" - it must be a code and a pattern, both strings/);
+  assert.throws(bad([{ code: "QL-13", when: "(unclosed" }]), /"covers\[0\].when" - it must be a pattern that compiles/);
+  assert.throws(bad([{ code: "QL-99", when: "ecdis" }]), /"covers\[0\].code" - it must be one of the codes in qualColumns/);
+  assert.throws(bad([{ code: "QL-13", when: "ecdis", perpetual: "yes" }]), /"covers\[0\].perpetual" - it must be true or false/);
+  assert.throws(bad([{ code: "QL-13", when: "ecdis", why: "" }]), /"covers\[0\].why"/);
+  const { covers: _dropped, ...without } = vessel;
+  assert.throws(() => checkVessel(without, "a vessel file"), /a vessel file has no usable "covers"/);
+  assert.equal(checkVessel(vessel), vessel, "the file as it is passes");
+  for (const rule of vessel.covers) assert.ok(rule.why && /MO\d\d/.test(rule.why), rule.code + " carries the clause it comes from");
 });
