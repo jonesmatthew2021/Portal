@@ -15,7 +15,7 @@ import { getEnv } from "../env.js";
  *                over the app registration (MS_TENANT_ID, MS_CLIENT_ID and
  *                the MS_CLIENT_SECRET secret).
  *
- * Keys are paths — "certification/evans-brenton/AMSA Medical 2029.pdf" — and
+ * Keys are paths — "certification/smith-alan/AMSA Medical 2029.pdf" — and
  * mean the same thing in both drivers, so flipping FILE_STORE changes where
  * bytes go and nothing else. The surface is the slice of the old blob API the
  * ported code actually calls.
@@ -365,7 +365,7 @@ function sharepointStore(): FileStore {
       return { key, size: item.size };
     },
     async list(opts) {
-      // Prefixes here are always folder paths ("certification/evans-brenton/").
+      // Prefixes here are always folder paths ("certification/smith-alan/").
       // The walk speaks the library's real paths; what goes back out is the
       // portal's own keys, so callers never see the mapping.
       const drive = await driveId();

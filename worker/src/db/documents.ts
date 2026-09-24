@@ -54,7 +54,7 @@ export function forgetDocumentColumns() {
 
 // Crew certificates are kept apart from everything else in the store, one folder
 // per person, so a person's certificates can be found as a set:
-//   certification/evans-brenton/AMSA Medical 2029.pdf
+//   certification/smith-alan/AMSA Medical 2029.pdf
 export const CERT_ROOT = "certification";
 
 // The crew certificates spreadsheet sits alongside those folders. Only ever one

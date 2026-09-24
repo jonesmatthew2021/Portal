@@ -218,7 +218,7 @@
     ["VS-04", "Helm CONNECT - Crew Basic + Jobs", "Vessel Specific"],
     ["VS-05", "MRN - Connecting Tug to Barge Articouple System", "Vessel Specific"],
     ["PS-01", "MRN - Marine Fauna Observer", "Project Specific"],
-    ["PS-02", "Example Customer - Mooring Operations Awareness - Onslow", "Project Specific"],
+    ["PS-02", "Example Customer - Mooring Operations Awareness - Example Port", "Project Specific"],
     ["MS-01", "Phase 1 - ASD and ATB Theory & Assessment", "Master Specific"],
     ["MS-02", "Phase 2 - Simulator Training & Practical Assessment ASD", "Master Specific"],
     ["MS-03", "Phase 3 - Simulator Training & Practical Assessment ATB", "Master Specific"],

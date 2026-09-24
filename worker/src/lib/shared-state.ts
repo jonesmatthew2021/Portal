@@ -124,7 +124,7 @@ export type SharedDocument = Record<string, unknown> & {
   matrixUpdated?: string;
   lastDocUpdate?: string;
   /** Cells the round put on the matrix that have not reached the office's
-   *  workbook yet ("EVANS, BRENTON|QL-01"), kept by lib/round.ts until a
+   *  workbook yet ("SMITH, ALAN|QL-01"), kept by lib/round.ts until a
    *  write lands. */
   workbookPending?: string[] | null;
 };

@@ -264,14 +264,16 @@ run("The vessel's name lives only in the vessel file", () => {
      a new source/vessel.json - so nothing but that file may name this one.
      The page is assembled here, in memory, for a made-up vessel
      (tools/fixtures/example-vessel.json) and read for this vessel's names,
-     and the worker's own sources are read the same way; the fauna log's files
-     are another job's and are left out. A hit is a name that would follow the
-     code onto the next vessel's portal. The real build is not touched. */
+     and so is the home-screen manifest written for it; the worker's own
+     sources, the build scripts and the preview's shim are read the same way;
+     the fauna log's files are another job's and are left out. A hit is a name
+     that would follow the code onto the next vessel's portal. The real build
+     is not touched. */
   /* Whole words, whatever their case: the slug is written "coolibah" in a
      row id or a storage key and "COOLIBAH" in a heading, and each is the
      vessel's name as much as "Coolibah" is. Whole words so that a name the
      backup file's own format keeps ("perthDay") is not the city. */
-  const WORDS = ["Coolibah", "United Marine", "MinRes", "Perth", "Ashburton",
+  const WORDS = ["Coolibah", "United Marine", "MinRes", "Perth", "Ashburton", "Onslow",
     "coolibah-portal", "unitedmarine", "Preetham", "Matthew Jones", "ONS-MRN", "portways.opms.com.au"];
   const RES = WORDS.map((w) => new RegExp("\\b" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "i"));
   const hitsIn = (line) => WORDS.filter((w, k) => RES[k].test(line));

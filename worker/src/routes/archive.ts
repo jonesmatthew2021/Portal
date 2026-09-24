@@ -52,7 +52,7 @@ function segment(value: string | null, fallback: string) {
  * Where a document belongs in the archive, before collisions are settled.
  *
  * Certificates and the single-file documents are already filed under a path in
- * the blob store — `certification/evans-brenton/AMSA Medical 2029.pdf` — and
+ * the blob store — `certification/smith-alan/AMSA Medical 2029.pdf` — and
  * that path is the best description of them there is, so it is kept as-is.
  * Everything else is stored under `uploads/<id>`, which says nothing to anyone
  * opening the archive, so those are laid out by what the portal files them as.
