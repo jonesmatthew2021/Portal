@@ -749,37 +749,10 @@ function TrainingMatrix() {
   // The scan behind a pressed cell, opened in the same viewer the checker uses.
   const [cellScan, setCellScan] = useState(null);
   const [group, setGroup] = useState("All");
+  // The grid's frame. The page scrolls it up and down, and FloatingBar (in
+  // the shell, shared with the roster) drives it sideways from the bottom of
+  // the screen and keeps its column headings in sight.
   const frame = useRef(null);
-  const bar = useRef(null);
-  const inner = useRef(null);
-  const lock = useRef(false);
-
-  // A scrollbar that floats at the bottom of the screen and drives the table,
-  // so it's reachable wherever you are on the page.
-  React.useEffect(() => {
-    const f = frame.current, b = bar.current, i = inner.current;
-    if (!f || !b || !i) return;
-    const size = () => {
-      i.style.width = f.scrollWidth + "px";
-      b.style.display = f.scrollWidth > f.clientWidth + 4 ? "block" : "none";
-      const r = f.getBoundingClientRect();
-      b.style.left = r.left + "px";
-      b.style.width = r.width + "px";
-    };
-    const fromTable = () => { if (lock.current) return; lock.current = true; b.scrollLeft = f.scrollLeft; lock.current = false; };
-    const fromBar = () => { if (lock.current) return; lock.current = true; f.scrollLeft = b.scrollLeft; lock.current = false; };
-    size();
-    f.addEventListener("scroll", fromTable);
-    b.addEventListener("scroll", fromBar);
-    window.addEventListener("resize", size);
-    const t = setTimeout(size, 200);
-    return () => {
-      f.removeEventListener("scroll", fromTable);
-      b.removeEventListener("scroll", fromBar);
-      window.removeEventListener("resize", size);
-      clearTimeout(t);
-    };
-  });
 
   const [q, setQ] = useState("");
   const [only, setOnly] = useState("all");
@@ -1169,7 +1142,7 @@ function TrainingMatrix() {
       </div>
 
       {/* floats above everything, pinned to the bottom of the screen */}
-      <div ref={bar} className="um-floatbar"><div ref={inner} style={{ height: 1 }} /></div>
+      <FloatingBar frame={frame} />
 
       {cellScan && (
         <CertViewer url={cellScan.url} person={cellScan.person} code={cellScan.code}

@@ -1047,21 +1047,33 @@ ${fontFaces()}
 .um-g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .um-swing3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
 /* The roster timeline: the one other thing beside the crew matrix that
-   scrolls sideways, with the names pinned while the months slide under them. */
-.um-timeline { overflow: auto; min-height: 150px; border: 1px solid ${T.rule}; border-radius: 2px; }
+   scrolls sideways, with the names pinned while the months slide under them.
+   Like the matrix it runs its full length down the page, its own sideways bar
+   hidden for the floating one, and its three date rows (months, day numbers,
+   weekday letters) are moved down together by --mx-head to stay at the top of
+   the screen until the table ends. */
+.um-timeline {
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+  border: 1px solid ${T.rule}; border-radius: 2px;
+}
+.um-timeline::-webkit-scrollbar { display: none; }
 .um-timeline table { border-collapse: collapse; }
-.um-timeline thead th { position: sticky; background: ${T.panel}; z-index: 3; }
-.um-timeline thead .um-tl-r1 th { top: 0; }
-.um-timeline thead .um-tl-r2 th { top: 22px; }
-.um-timeline thead .um-tl-r3 th { top: 34px; }
+.um-timeline thead th {
+  position: relative; background: ${T.panel}; z-index: 3;
+  transform: translateY(var(--mx-head, 0px));
+}
 .um-timeline thead th.um-tl-crew, .um-timeline thead th.um-tl-rank, .um-timeline thead th.um-tl-name { z-index: 4; }
 .um-timeline .um-tl-crew { position: sticky; left: 0; background: ${T.panel}; z-index: 2; }
 .um-timeline .um-tl-rank { position: sticky; left: 52px; background: ${T.panel}; z-index: 2; }
 .um-timeline .um-tl-name { position: sticky; left: 152px; background: ${T.panel}; z-index: 2;
   box-shadow: inset -1px 0 0 ${T.rule}; }
+/* A pixel of cover above the top date row, and above Rank and Name where they
+   meet it, so at a high zoom no hairline of the rows passing beneath shows
+   along those edges while the dates are held at the top of the screen. */
+.um-timeline thead .um-tl-r1 th, .um-timeline thead .um-tl-r2 th.um-tl-rank { box-shadow: 0 -1px 0 ${T.panel}; }
+.um-timeline thead .um-tl-r1 th.um-tl-name, .um-timeline thead .um-tl-r2 th.um-tl-name {
+  box-shadow: inset -1px 0 0 ${T.rule}, 0 -1px 0 ${T.panel}; }
 .um-timeline.um-tl-drag { user-select: none; }
-body.um-tight .um > div { padding-bottom: 10px !important; }
-body.um-tight footer { margin-top: 12px !important; }
 .um-timeline td.um-tl-d { width: 13px; min-width: 13px; height: 22px; padding: 0;
   border-top: 1px solid ${T.rule}; border-left: 1px solid ${T.hatchBg}; }
 .um-timeline td.um-tl-f { border-left-color: rgba(255,255,255,0.5); }
@@ -1094,29 +1106,24 @@ body.um-tight footer { margin-top: 12px !important; }
 .um-ranks { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
 .um-scroll { overflow-x: auto; }
 
-/* Matrix frame: the table scrolls inside this, so its horizontal bar sits at the
-   bottom of the viewport no matter how far down the table you are. */
+/* Matrix frame: the table runs its full length down the page, and the page's
+   own scroll bar takes it up and down. It only scrolls sideways in here, and
+   its own sideways bar is hidden - the floating one at the bottom of the
+   screen drives it instead, so there is one bar, always within reach. */
 .um-matrix {
-  overflow: auto;
-  max-height: calc(100vh - 250px);
-  min-height: 320px;
+  overflow-x: auto;
+  overflow-y: hidden;
   border: 1px solid ${T.rule};
   border-radius: 2px;
   background: ${T.panel};
-  scrollbar-color: ${T.accent} ${T.raised};
-  scrollbar-width: auto;
+  scrollbar-width: none;
 }
-.um-matrix::-webkit-scrollbar { height: 0; width: 11px; }
-.um-matrix::-webkit-scrollbar-track { background: ${T.raised}; }
-.um-matrix::-webkit-scrollbar-thumb {
-  background: ${T.accent}; border-radius: 7px; border: 3px solid ${T.raised};
-}
-.um-matrix::-webkit-scrollbar-thumb:hover { background: ${T.text}; }
-.um-matrix::-webkit-scrollbar-corner { background: ${T.raised}; }
+.um-matrix::-webkit-scrollbar { display: none; }
 
-/* Floating horizontal scrollbar - sits above the page, always within reach. */
+/* Floating horizontal scrollbar - sits above the page, always within reach.
+   (--um-floatbar-lift is set only by the test preview, to clear its ribbon.) */
 .um-floatbar {
-  position: fixed; bottom: 10px; z-index: 60; display: none;
+  position: fixed; bottom: calc(10px + var(--um-floatbar-lift, 0px)); z-index: 60; display: none;
   overflow-x: auto; overflow-y: hidden; height: 16px;
   background: ${T.panel}; border: 1px solid ${T.rule}; border-radius: 9px;
   box-shadow: 0 2px 10px rgba(18,41,61,0.18);
@@ -1132,12 +1139,17 @@ body.um-tight footer { margin-top: 12px !important; }
 /* Reports print clean - no navigation, no buttons. */
 @media print {
   .um-noprint, .um-floatbar, nav, header, footer { display: none !important; }
+  .um-matrix thead th, .um-timeline thead th { transform: none !important; }
   .um-report { color: #000; }
   body, .um { background: #fff !important; }
 }
 .um-matrix table { border-collapse: separate; border-spacing: 0; }
+/* The page scrolls the table now, not the frame, so a sticky top would not
+   stick: the column headings are moved down by hand (--mx-head, set as the
+   page scrolls) to stay at the top of the screen until the table ends. */
 .um-matrix thead th {
-  position: sticky; top: 0; z-index: 3;
+  position: relative; z-index: 3;
+  transform: translateY(var(--mx-head, 0px));
   background: ${T.panel}; box-shadow: inset 0 -1px 0 ${T.rule};
 }
 .um-matrix tbody td:first-child, .um-matrix thead th:first-child {
@@ -6657,6 +6669,170 @@ function Portal({ role, onSignOut }) {
     </div>
     </Ctx.Provider>
   );
+}
+
+/* The two wide grids - the crew matrix and the roster - run their full length
+ * down the page, and the page's own scroll bar takes them up and down. Each
+ * scrolls sideways inside its frame with the frame's own bar hidden; the one
+ * sideways bar floats at the bottom of the screen while any of the grid is on
+ * screen, and the grid's heading rows are moved down (--mx-head, read by the
+ * stylesheet) to stay at the top of the screen until the grid ends. Nothing
+ * at the top of the portal is held on screen, so they stay under the top edge
+ * itself.
+ *
+ * Why the headings are moved by hand rather than by a separate sticky strip
+ * above the grid that the browser pins by itself: the roster's heading rows
+ * are where days are picked (pressed and swept, and lit through the grid's
+ * frame), and its columns are sized by the browser from its cells rather than
+ * fixed, so a second copy of the headings could come out a pixel off its
+ * columns. Moving the real rows keeps them the columns' own. */
+
+// How far the heading rows have to move down. frameTop is where the headings
+// start on screen and frameHeight the height of the table, headHeight the
+// headings' own, pinAt the line they stay under (0, the top edge). Nothing
+// while the table's top is still below that line, and never past its end.
+// The top goes negative as it scrolls off the screen - that is the point -
+// but a height or a line that is negative or missing moves nothing.
+function matrixHeadOffset(frameTop, frameHeight, headHeight, pinAt) {
+  const ok = (v) => typeof v === "number" && isFinite(v);
+  if (![frameTop, frameHeight, headHeight, pinAt].every(ok)) return 0;
+  if (frameHeight < 0 || headHeight < 0 || pinAt < 0) return 0;
+  return Math.max(0, Math.min(pinAt - frameTop, frameHeight - headHeight));
+}
+
+// That move, in whole pixels of the screen (dpr of them to a page pixel). The
+// browser draws the headings' top on the nearest pixel, and a top that sits
+// on or near a half pixel can go either way - so rounding the move to the
+// nearest can put them a pixel below the line, with a hairline of the rows
+// beneath showing above them. The move is rounded down instead unless it is
+// within a quarter pixel of the next, which keeps the drawn top on the line
+// or a pixel above it (hiding a pixel of the headings' own top padding),
+// never below.
+function headPixels(down, dpr) {
+  if (!down || !(dpr > 0) || !isFinite(down)) return 0;
+  return Math.floor(down * dpr + 0.25) / dpr;
+}
+
+// Two sideways scrollers kept in step - a grid and its floating bar - each
+// given as anything with a scrollLeft; fromA and fromB answer each one's
+// scroll event. A scroll event arrives a drawn frame after the position moved,
+// so when one side is set to follow the other, the event that raises comes
+// later still - by which time a swipe has carried the other side on. So each
+// side remembers the place it was last sent to, and an event that finds it
+// there is that echo and goes no further; anything else is a real move and is
+// sent across. (A flag held only while one side was being set could not tell:
+// the echo came after the flag was down and pulled the grid back, and a
+// sideways swipe went about half as far.)
+function scrollPair(a, b) {
+  let toA = null, toB = null;
+  const fromA = () => {
+    const echo = toA !== null && Math.abs(a.scrollLeft - toA) < 1;
+    toA = null;
+    if (echo || Math.abs(b.scrollLeft - a.scrollLeft) < 1) return;
+    toB = a.scrollLeft;
+    b.scrollLeft = toB;
+  };
+  const fromB = () => {
+    const echo = toB !== null && Math.abs(b.scrollLeft - toB) < 1;
+    toB = null;
+    if (echo || Math.abs(a.scrollLeft - b.scrollLeft) < 1) return;
+    toA = b.scrollLeft;
+    a.scrollLeft = toA;
+  };
+  return { fromA, fromB };
+}
+
+// The floating bar for the grid in `frame` (a ref), kept in step with it both
+// ways. It hides itself while the grid is off the screen or narrow enough to
+// need none, and while there is no grid at all.
+function FloatingBar({ frame }) {
+  const bar = useRef(null);
+  const inner = useRef(null);
+  // The grid's frame as an element, so the listening below is set up once for
+  // it and again only when the grid itself comes or goes (the crew matrix's
+  // goes when a filter leaves nobody) - never on each redraw of the page
+  // around it, which on the roster is every day crossed in a drag.
+  const [el, setEl] = useState(null);
+  React.useEffect(() => { if (frame.current !== el) setEl(frame.current); });
+  React.useEffect(() => {
+    const f = el, b = bar.current, i = inner.current;
+    if (!b || !i) return;
+    if (!f) { b.style.display = "none"; return; }
+    let queued = 0, late = 0, wide = false, left = "", width = "";
+    // The bar's own scroll range made the grid's exactly, so neither can be
+    // carried past where the other can go. Measured only while it shows: a
+    // hidden bar has no width to measure.
+    const range = () => { i.style.width = (f.scrollWidth - f.clientWidth + b.clientWidth) + "px"; };
+    // Whether the bar shows, where it sits, and where the headings sit - as
+    // the page scrolls, in the scroll itself, so the headings never trail it.
+    // Each is written only when it has changed: on the roster the headings
+    // are a thousand cells, and every one is restyled when --mx-head moves.
+    const place = () => {
+      const r = f.getBoundingClientRect();
+      const show = wide && r.bottom > 0 && r.top < window.innerHeight;
+      if (show !== (b.style.display === "block")) {
+        b.style.display = show ? "block" : "none";
+        // A hidden bar forgets where it was, so it picks up the grid's place
+        // when it comes back.
+        if (show) { range(); b.scrollLeft = f.scrollLeft; }
+      }
+      const at = r.left + "px";
+      if (at !== left) b.style.left = left = at;
+      const t = f.querySelector("table"), h = t && t.tHead;
+      if (!h) return;
+      // Measured off the heading rows and the table themselves (their own box
+      // never moves - only their cells do), and landed on the screen's own
+      // pixels, so no half-pixel sliver of the rows beneath shows above them.
+      const hr = h.getBoundingClientRect();
+      const exact = matrixHeadOffset(hr.top, t.getBoundingClientRect().height, hr.height, 0);
+      const down = headPixels(exact, window.devicePixelRatio || 1) + "px";
+      if (h.style.getPropertyValue("--mx-head") !== down) h.style.setProperty("--mx-head", down);
+    };
+    const size = () => {
+      cancelAnimationFrame(queued); clearTimeout(late);
+      queued = 0; late = 0;
+      wide = f.scrollWidth > f.clientWidth + 4;
+      const w = f.getBoundingClientRect().width + "px";
+      if (w !== width) b.style.width = width = w;
+      if (b.style.display === "block") range();
+      place();
+    };
+    // A change of size is measured once a drawn frame, and on a timer too: a
+    // tab in the background is not drawn, and a frame booked there would hold
+    // every later change back.
+    const soon = () => {
+      if (queued || late) return;
+      queued = requestAnimationFrame(size);
+      late = setTimeout(size, 120);
+    };
+    const pair = scrollPair(f, b);
+    size();
+    f.addEventListener("scroll", pair.fromA, { passive: true });
+    b.addEventListener("scroll", pair.fromB, { passive: true });
+    window.addEventListener("scroll", place, { passive: true });
+    window.addEventListener("resize", soon);
+    // The grid growing or shrinking, and anything above it moving it down the
+    // page, is caught by watching the grid, its table and the page itself.
+    const grows = typeof ResizeObserver === "function" ? new ResizeObserver(soon) : null;
+    if (grows) {
+      grows.observe(f);
+      const t = f.querySelector("table");
+      if (t) grows.observe(t);
+      grows.observe(document.body);
+    }
+    const t = setTimeout(size, 200);
+    return () => {
+      f.removeEventListener("scroll", pair.fromA);
+      b.removeEventListener("scroll", pair.fromB);
+      window.removeEventListener("scroll", place);
+      window.removeEventListener("resize", soon);
+      if (grows) grows.disconnect();
+      cancelAnimationFrame(queued);
+      clearTimeout(late);
+      clearTimeout(t);
+    };
+  }, [el]);
+  return <div ref={bar} className="um-floatbar"><div ref={inner} style={{ height: 1 }} /></div>;
 }
 
 /* Nothing on the portal runs off the side of the screen.

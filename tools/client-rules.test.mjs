@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, recognisedUntil, recognitionFills, foreignExpiryOn, isRecognitionReading, certCoverFor, coverLine, bandWithCover, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, paperKind, EVIDENCE_KINDS, EVIDENCE_LABELS, marineOrderLines, filedAsLines, notOnMatrixLines, filedCodeIn, filedAsLine, readingLines, placedLine, readAsLine };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, recognisedUntil, recognitionFills, foreignExpiryOn, isRecognitionReading, certCoverFor, coverLine, bandWithCover, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, paperKind, EVIDENCE_KINDS, EVIDENCE_LABELS, marineOrderLines, filedAsLines, notOnMatrixLines, filedCodeIn, filedAsLine, readingLines, placedLine, readAsLine, matrixHeadOffset, headPixels, scrollPair };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -2919,6 +2919,165 @@ const is = (got, want, what) => {
   is(/readingLines\(/.test(area) && /id="placed-by-reading"/.test(area), true, "the lines are the gaps list's");
   is(/\{admin && only === "attention" && \(\s*<div[^>]*><CertChecker /.test(matrixPage), true, "and the gaps list is shown to management only");
   is((matrixPage.match(/<CertChecker/g) || []).length, 1, "nowhere else");
+}
+
+/* ---- the matrix's column headings stay on screen as the page scrolls ----
+   The page scrolls the grid now, not a fixed-height window, so the heading
+   row is moved down by hand: nothing while the grid's top is still on
+   screen below the line, the distance scrolled past it after, and never
+   past the end of the table. */
+{
+  const { matrixHeadOffset } = lib;
+  is(matrixHeadOffset(300, 1500, 60, 0), 0, "the grid's top is still below the line: the headings sit where they are");
+  is(matrixHeadOffset(0, 1500, 60, 0), 0, "exactly at the line: nothing to move");
+  is(matrixHeadOffset(-200, 1500, 60, 0), 200, "200px scrolled past the top of the screen: moved down 200");
+  is(matrixHeadOffset(-120, 1500, 60, 80), 200, "200px above a bar held at the top: moved down 200, under the bar");
+  is(matrixHeadOffset(-5000, 1500, 60, 0), 1440, "scrolled past the end: they stop on the last row, frame less headings");
+  is(matrixHeadOffset(-1440, 1500, 60, 0), 1440, "the last row exactly");
+  is(matrixHeadOffset(), 0, "nothing measured, nothing moved");
+  is(matrixHeadOffset(-200, undefined, 60, 0), 0, "no frame height: nothing moved");
+  is(matrixHeadOffset(-200, 1500, 60, NaN), 0, "a line that is not a number: nothing moved");
+  is(matrixHeadOffset(-200, -1500, 60, 0), 0, "a negative frame height: nothing moved");
+  is(matrixHeadOffset(-200, 1500, -60, 0), 0, "a negative heading height: nothing moved");
+  is(matrixHeadOffset(-200, 1500, 60, -10), 0, "a negative line: nothing moved");
+  is(matrixHeadOffset(-200, 40, 60, 0), 0, "headings taller than the frame: nothing moved");
+  // The roster's three date rows (22 + 12 + 12, and the rule under them) move
+  // as one block by the same rule.
+  is(matrixHeadOffset(-300, 1200, 47, 0), 300, "the roster's date rows: moved down as far as the table has gone");
+  is(matrixHeadOffset(-3000, 1200, 47, 0), 1153, "and they stop on its last crew row");
+
+  // Landed on the screen's own pixels: the browser draws a top where it
+  // rounds it to, so the headings are drawn exactly on the line. A top on a
+  // half pixel is where rounding the move alone put them a pixel low.
+  const { headPixels } = lib;
+  // Where the headings' top is drawn, in screen pixels from the line, with the
+  // browser's tie at a half pixel taken the unlucky way (downwards): 0 is on
+  // the line, -1 a pixel above (the rows beneath covered), 1 a pixel below (a
+  // hairline of them showing).
+  const drawnAt = (top, down, dpr) => {
+    const at = (top + down) * dpr;
+    return Math.abs(at - Math.round(at)) === 0.5 ? Math.ceil(at) : Math.round(at);
+  };
+  const safe = (v) => v === 0 || v === -1;
+  let low = [];
+  [1, 1.25, 1.5, 2, 3].forEach((dpr) => {
+    for (let n = 0; n <= 100; n++) {
+      const top = -299 - n / 100;
+      if (!safe(drawnAt(top, headPixels(-top, dpr), dpr))) low.push(dpr + "x at " + top);
+    }
+  });
+  is(low, [], "at 100%, 125%, 150%, 200% and 300%, wherever the top falls, the headings are drawn on the line or a pixel above");
+  is(drawnAt(-299.6000061, headPixels(299.6000061, 1.25), 1.25) <= 0, true,
+    "the top the roster measured at 125% (a hair past a half pixel) is not drawn below the line");
+  is(drawnAt(-150.25, Math.round(150.25 * 2) / 2, 2), 1, "where rounding the move to the nearest drew a top on a half pixel a pixel low");
+  is(headPixels(1153, 2), 1153, "a move of whole pixels is left as it is");
+  is(headPixels(0, 2), 0, "no move is no move");
+  is(headPixels(200, 0), 0, "no pixel ratio to go on: nothing moved");
+}
+
+/* ---- the grid and its floating bar keep in step, however fast a swipe ----
+   Played the way the browser plays it: setting a scroller's position moves it
+   at once (held to its range, and no event if it did not move), and its scroll
+   event comes at the next drawn frame - once, however often it moved in
+   between, and after the events already waiting. The old way, a flag held only
+   while the one side was being set, is run through the same frames to show
+   they catch it: its echo came a frame late and pulled the grid back. */
+{
+  const { scrollPair } = lib;
+  const oldLock = (a, b) => {
+    let lock = false;
+    return {
+      fromA: () => { if (lock) return; lock = true; b.scrollLeft = a.scrollLeft; lock = false; },
+      fromB: () => { if (lock) return; lock = true; a.scrollLeft = b.scrollLeft; lock = false; },
+    };
+  };
+  const world = (pairOf, max = 3000) => {
+    let due = [];
+    const scroller = () => {
+      let at = 0;
+      const el = { on: null };
+      Object.defineProperty(el, "scrollLeft", {
+        get: () => at,
+        set: (v) => {
+          const n = Math.max(0, Math.min(max, v));
+          if (n === at) return;
+          at = n;
+          if (!due.includes(el)) due.push(el);
+        },
+      });
+      return el;
+    };
+    const grid = scroller(), bar = scroller();
+    const pair = pairOf(grid, bar);
+    grid.on = pair.fromA;
+    bar.on = pair.fromB;
+    // One drawn frame: the events waiting are delivered in the order they
+    // were raised; any raised while delivering wait for the next frame.
+    const frame = () => { const now = due; due = []; now.forEach((el) => el.on()); };
+    const settle = () => { for (let n = 0; n < 10; n++) frame(); };
+    return { grid, bar, frame, settle };
+  };
+  // A swipe on the grid itself: so far each frame, then let go.
+  const swipe = (pairOf, steps) => {
+    const w = world(pairOf);
+    steps.forEach((s) => { w.grid.scrollLeft += s; w.frame(); });
+    w.settle();
+    return [w.grid.scrollLeft, w.bar.scrollLeft];
+  };
+  const ten = (n) => Array.from({ length: 10 }, () => n);
+  is(swipe(scrollPair, ten(50)), [500, 500], "a 500px trackpad swipe moves the grid 500px, and the bar with it");
+  is(swipe(scrollPair, ten(120)), [1200, 1200], "a fast shift+wheel of 1200px moves it 1200px");
+  is(swipe(scrollPair, [3, 7, 1, 40, 2, 90, 5]), [148, 148], "uneven steps add up exactly");
+  is(swipe(scrollPair, ten(400)), [3000, 3000], "a swipe past the end stops at the end, both together");
+  is(swipe(oldLock, ten(50))[0] < 500, true, "the old flag, played the same way, loses ground - so these frames would catch it");
+
+  // Dragging the bar's thumb: the grid follows every step, never skipping
+  // back, and ends where the thumb is let go.
+  const drag = (pairOf) => {
+    const w = world(pairOf);
+    const seen = [];
+    for (let n = 1; n <= 20; n++) { w.bar.scrollLeft = n * 37; w.frame(); seen.push(w.grid.scrollLeft); }
+    w.settle();
+    return { seen, end: [w.grid.scrollLeft, w.bar.scrollLeft] };
+  };
+  const dragged = drag(scrollPair);
+  is(dragged.end, [740, 740], "dragging the bar to 740 takes the grid to 740");
+  is(dragged.seen.every((v, n) => n === 0 || v >= dragged.seen[n - 1]), true, "the grid never jumps back on the way");
+  is(dragged.seen.slice(-1)[0], 740, "and is there on the frame the thumb gets there");
+
+  // The two in turn: a swipe on the grid, then the bar dragged back, then
+  // the grid again - each hands over cleanly to the other.
+  const w = world(scrollPair);
+  ten(30).forEach((s) => { w.grid.scrollLeft += s; w.frame(); });
+  w.frame();
+  [250, 200, 150, 100].forEach((v) => { w.bar.scrollLeft = v; w.frame(); });
+  w.frame();
+  ten(20).forEach((s) => { w.grid.scrollLeft += s; w.frame(); });
+  w.settle();
+  is([w.grid.scrollLeft, w.bar.scrollLeft], [300, 300], "grid, then bar, then grid: they end together where the last move left them");
+}
+
+/* ---- both grids' stylesheets move their headings the one way ----
+   The heading rows are moved down by --mx-head on the crew matrix and the
+   roster alike, print puts them back where they belong, and the floating bar
+   is lifted clear of the test preview's ribbon by a variable only the preview
+   sets. */
+{
+  const page = readFileSync(join(ROOT, "source", "index.html"), "utf8");
+  const shim = readFileSync(join(ROOT, "tools", "preview", "shim.js"), "utf8");
+  // The rule's whole block, to the brace that closes it on a line of its own
+  // (a colour written in as ${T.panel} carries a brace of its own).
+  const rule = (selector) => {
+    const at = page.indexOf(selector + " {");
+    return at < 0 ? "" : page.slice(at, page.indexOf("\n}", at));
+  };
+  is(/translateY\(var\(--mx-head/.test(rule(".um-matrix thead th")), true, "the crew matrix's headings move by --mx-head");
+  is(/translateY\(var\(--mx-head/.test(rule(".um-timeline thead th")), true, "the roster's headings move by --mx-head");
+  const print = page.slice(page.indexOf("@media print {"), page.indexOf("@media print {") + 600);
+  is(/\.um-matrix thead th, \.um-timeline thead th \{ transform: none !important; \}/.test(print), true,
+    "print puts both grids' headings back at the top of their tables");
+  is(/\.um-floatbar[^{]*\{[^}]*var\(--um-floatbar-lift, 0px\)/.test(page), true, "the bar's lift is 0 unless something sets it");
+  is(shim.includes("--um-floatbar-lift"), true, "the test preview sets the lift to clear its ribbon");
 }
 
 if (failed) {

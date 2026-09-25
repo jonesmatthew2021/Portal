@@ -550,6 +550,15 @@
       "position:fixed;bottom:0;left:0;right:0;z-index:99999;background:#8a5a00;color:#fff;" +
       "font:600 12px/1.6 system-ui,sans-serif;text-align:center;padding:3px 10px;pointer-events:none;opacity:.92";
     document.body.appendChild(el);
+    /* The grids' floating sideways bar sits at the bottom of the screen, where
+       this ribbon is. It is lifted clear by the ribbon's own height (taller on
+       a phone, where the words wrap) through --um-floatbar-lift, which the
+       live site never sets. */
+    const lift = () => document.documentElement.style.setProperty(
+      "--um-floatbar-lift", Math.ceil(el.getBoundingClientRect().height) + "px");
+    lift();
+    if (typeof ResizeObserver === "function") new ResizeObserver(lift).observe(el);
+    addEventListener("resize", lift);
   });
 })();
 /* ====================================================================== */
