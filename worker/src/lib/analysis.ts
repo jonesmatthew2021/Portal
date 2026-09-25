@@ -166,6 +166,9 @@ export const READING_ASKS = {
   evidence: ["evidenceKind"],
 } as const;
 
+/** One column the reader says a document is evidence for. */
+export type ReadingColumn = { code: string; confidence: "high" | "medium" | "low"; why: string | null };
+
 /** What the model is asked to come back with for one certificate. */
 export type Reading = {
   version: string;
@@ -179,8 +182,21 @@ export type Reading = {
   issuedOn?: string | null;
   expiresOn?: string | null;
   neverExpires?: boolean;
+  /** The first column the model gave "high" or "medium", kept for
+   *  everything that still reads one code; null where it gave none. */
   qualCode?: string | null;
   codeConfidence?: "high" | "medium" | "low" | null;
+  /** Every matrix column the model says the document is evidence for, with
+   *  how sure it is and why (at most fifteen words). "high": the document
+   *  plainly is that item; "medium": it satisfies it by a level, an
+   *  equivalence or an endorsement, or the filed column is plausible;
+   *  "low": a guess. A reading without the key was made before it was
+   *  asked for, and is read the old way (one code). */
+  columns?: ReadingColumn[];
+  /** The document is a register page, an approval listing or a spreadsheet
+   *  extract: evidence only for the vessel file's registerEvidenced
+   *  columns, and unreadable for anything else. */
+  registerPage?: boolean;
   notes?: string | null;
   /** The card, licence or certificate number as printed (on the MSIC card,
    *  the card number). Present, null or not, on every reading made since

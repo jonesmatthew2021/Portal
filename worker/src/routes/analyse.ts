@@ -54,7 +54,9 @@ import {
   todayThere,
   type Matrix,
   type MatrixReading,
+  type Equivalence,
   type Reading,
+  type ReadingColumn,
   type Row,
   certStatesOwnExpiry,
 } from "../lib/analysis.js";
@@ -157,8 +159,10 @@ Return exactly this JSON object and nothing else — no prose, no markdown fence
   "issuedOn": "YYYY-MM-DD"|null,
   "expiresOn": "YYYY-MM-DD"|null,   // the date it stops being valid
   "neverExpires": true|false,       // true only when the document states it does not expire
-  "qualCode": string|null,          // the matrix code it answers to, from the list given, or null
-  "codeConfidence": "high"|"medium"|"low",
+  "columns": [                      // every matrix column this document is evidence for, from the list given
+    { "code": string, "confidence": "high"|"medium"|"low", "why": string }  // why: at most 15 words
+  ],
+  "registerPage": true|false,       // the document is a register page, an approval listing or a spreadsheet extract
   "notes": string|null,             // at most 15 words, only if something matters
   "documentNumber": string|null,    // the card, licence or certificate number as printed; on an MSIC card, the card number
   "holderBirthDate": "YYYY-MM-DD"|null, // the holder's date of birth, only if printed
@@ -183,11 +187,24 @@ Rules:
 - Set readable to false only when the document is too poor to read, or is none
   of these: a certificate, a licence, a training statement of attainment, or
   one of the five papers named under evidenceKind below. A certificate or
-  course for something not on the list is readable, with qualCode null. The
+  course for something not on the list is readable, with columns []. The
   five papers are readable and carry their evidenceKind.
-- Only give qualCode when the document is plainly that item. Use "high" only when
-  the printed title and the item title are the same qualification. If two codes
-  could fit, pick neither and return null.
+- columns: list every matrix column this document is evidence for. A document
+  can be evidence for more than one: a statement of attainment with several
+  units, a licence with several classes, a certificate of competency that
+  also carries an endorsement or a second capacity, a higher level of the
+  same course.
+- A higher level of the same course or ticket satisfies the lower: Crew
+  Intermediate satisfies Crew Basic; Master satisfies Chief Mate. The
+  office's equivalences, given with the list, say which certificates stand
+  for which column - apply them.
+- confidence: "high" when the document plainly is that item; "medium" when it
+  satisfies the item by a level, an equivalence or an endorsement, or the
+  filed column is plausible; "low" for a guess. Never leave out a column you
+  can see: give it "low" rather than silence.
+- registerPage: true for a register page, an approval listing or a
+  spreadsheet extract. Such a page is evidence only for the register columns
+  named with the list; for anything else it is not a certificate.
 - endorsements: the STCW regulation numbers and the named endorsements printed
   as part of what the certificate certifies, each as printed — "II/2 (incl.
   generic ECDIS)", "VI/2 (1) s. A-VI/2 (1-4)", "Proficiency in fast rescue
@@ -215,15 +232,47 @@ Rules:
 - Never invent a name, a date, a number or a code. null is the right answer when
   it is not on the page.`;
 
-function instructionFor(row: Row, codes: [string, string][]) {
+/** What the question carries besides the document: the office's
+ *  Equivalence sheet as the round keeps it (keepEquivalences in
+ *  lib/round.ts). The vessel file's covers rows are NOT given: those are
+ *  applied by rule after the reading (source/shared/covers.js), whatever
+ *  the model makes of the page. */
+export type ReadingAsk = { equivalences: Equivalence[] };
+
+/** The question's context, loaded once for a batch. */
+export async function readingAsk(): Promise<ReadingAsk> {
+  return { equivalences: await equivalences() };
+}
+
+/** The columns a register page may stand as evidence for (the vessel
+ *  file's registerEvidenced): the office records some approvals in a
+ *  register rather than on a certificate. Nothing else takes one. */
+export function registerColumns(): string[] {
+  const listed = (vessel as { registerEvidenced?: { codes?: unknown } }).registerEvidenced;
+  const codes = listed && Array.isArray(listed.codes) ? listed.codes : [];
+  return codes.map((c) => String(c).trim().toUpperCase()).filter(Boolean);
+}
+
+function instructionFor(row: Row, codes: [string, string][], ask: ReadingAsk) {
   const list = codes.map(([code, title]) => `${code} — ${title}`).join("\n");
+  /* The filed column: the code in a name the office wrote. Never one the
+     portal wrote itself - that is the model's own earlier guess, and asking
+     it to weigh that would be asking it to agree with itself. */
+  const filedCode = row.qualCode || row.namedByPortal ? null : filedCodeIn(row.filename, codes);
   const filed = [
     row.person ? `Filed against: ${row.person}` : null,
     row.qualCode ? `Filed against matrix code: ${row.qualCode}` : null,
+    filedCode ? `Filed under column: ${filedCode}` : null,
     `Filename: ${row.filename}`,
   ]
     .filter(Boolean)
     .join("\n");
+  // "<held> counts as <code>", one a line, only for columns on this list.
+  const live = new Set(codes.map(([c]) => c.trim().toUpperCase()));
+  const eq = ask.equivalences
+    .filter((e) => e && e.held && live.has(String(e.code || "").trim().toUpperCase()))
+    .map((e) => `${String(e.held).trim()} counts as ${String(e.code).trim().toUpperCase()}`);
+  const register = registerColumns().filter((c) => live.has(c));
 
   return `Read the attached certificate and return the JSON described.
 
@@ -232,8 +281,16 @@ ${filed}
 The matrix codes it could answer to:
 ${list}
 
-What it was filed against is what a person typed when they uploaded it, and may
-be wrong. Report what the document itself says.`;
+The office's equivalences:
+${eq.length ? eq.join("\n") : "(none)"}
+
+The columns a register page can be evidence for:
+${register.length ? register.join(", ") : "(none)"}
+
+What it was filed against is what the office believes this document is for.
+Weigh it: if the document plausibly is that item, list that column with your
+confidence; if the document is clearly something else, say what it is, and
+list the filed column as "low" with the reason.`;
 }
 
 /* How much of a list, and of a line, one document may give.
@@ -303,6 +360,42 @@ function capacitiesFrom(v: unknown): string[] {
   return out;
 }
 
+/** The words the model's reason for a column is kept to: it goes on Needs
+ *  attention as it is written, so it has to stay one short phrase. */
+const MAX_WHY_WORDS = 15;
+const MAX_WHY_CHARS = 140;
+const CONFIDENCE_RANK = { high: 3, medium: 2, low: 1 } as const;
+
+/** Every column the model said the document is evidence for: only codes the
+ *  matrix has (written as the matrix writes them), a confidence it does not
+ *  recognise read as a guess, the reason held to fifteen words, and a code
+ *  given twice kept once at the surer of the two. */
+export function columnsFrom(v: unknown, codes: [string, string][]): ReadingColumn[] {
+  if (!Array.isArray(v)) return [];
+  const out: ReadingColumn[] = [];
+  for (const item of v) {
+    const asObject = item && typeof item === "object" && !Array.isArray(item) ? (item as Record<string, unknown>) : null;
+    const said = str(asObject ? asObject.code : item);
+    if (!said) continue;
+    const hit = codes.find(([c]) => c.trim().toUpperCase() === said.toUpperCase());
+    if (!hit) continue;
+    const code = hit[0].trim();
+    const conf = str(asObject?.confidence);
+    const confidence: ReadingColumn["confidence"] = conf === "high" || conf === "medium" ? conf : "low";
+    const whyText = str(asObject?.why);
+    const words = whyText ? whyText.split(/\s+/) : [];
+    const why = whyText ? (words.length > MAX_WHY_WORDS ? words.slice(0, MAX_WHY_WORDS).join(" ") : whyText).slice(0, MAX_WHY_CHARS) : null;
+    const had = out.find((c) => c.code.toUpperCase() === code.toUpperCase());
+    if (had) {
+      if (CONFIDENCE_RANK[confidence] > CONFIDENCE_RANK[had.confidence]) { had.confidence = confidence; had.why = why; }
+      continue;
+    }
+    out.push({ code, confidence, why });
+    if (out.length >= MAX_LISTED) break;
+  }
+  return out;
+}
+
 /** What a certificate of recognition prints about the foreign certificate
  *  behind it — only what is printed, and nothing at all where the document
  *  is not a recognition. */
@@ -335,7 +428,7 @@ function evidenceKindFrom(v: unknown): EvidenceKind | null {
   return (EVIDENCE_KINDS as readonly string[]).includes(said) ? (said as EvidenceKind) : null;
 }
 
-async function askModel(row: Row, bytes: ArrayBuffer, codes: [string, string][]) {
+async function askModel(row: Row, bytes: ArrayBuffer, codes: [string, string][], ask: ReadingAsk) {
   const shape = mediaFor(row)!;
   const source = { type: "base64", media_type: shape.media, data: base64(bytes) };
   const fileBlock =
@@ -345,7 +438,7 @@ async function askModel(row: Row, bytes: ArrayBuffer, codes: [string, string][])
 
   const { json: parsed, truncated } = await askJson({
     system: SYSTEM,
-    content: [fileBlock, { type: "text", text: instructionFor(row, codes) }],
+    content: [fileBlock, { type: "text", text: instructionFor(row, codes, ask) }],
     // A certificate reading is a dozen short fields, but max_tokens covers what
     // the model thinks on the way there as well, and a poor scan is thought
     // about for a while. The room is there so a hard-to-read certificate comes
@@ -354,26 +447,49 @@ async function askModel(row: Row, bytes: ArrayBuffer, codes: [string, string][])
     effort: "low",
   });
 
-  const code = str(parsed.qualCode);
-  const confidence = str(parsed.codeConfidence);
+  /* Every column the model says the document is evidence for, each with how
+     sure it is and why. An answer in the old shape - one qualCode - is
+     still read, as that one column. */
+  let columns = Array.isArray(parsed.columns)
+    ? columnsFrom(parsed.columns, codes)
+    : columnsFrom(parsed.qualCode ? [{ code: parsed.qualCode, confidence: parsed.codeConfidence }] : [], codes);
+  const registerPage = parsed.registerPage === true;
+  let readable = parsed.readable !== false;
+  let registerReason: string | null = null;
+  /* A register page, an approval listing or a spreadsheet extract is no
+     certificate. It counts only for the columns the vessel file names as
+     kept in a register (registerEvidenced); for anything else it is
+     unreadable, as such a page always was. */
+  if (registerPage && readable) {
+    const allowed = registerColumns();
+    columns = columns.filter((c) => allowed.includes(c.code.toUpperCase()));
+    if (!columns.length) {
+      readable = false;
+      registerReason = "A register page or listing, not a certificate.";
+    }
+  }
+  // The one code everything that still reads it goes by: the first column
+  // the model was sure of or held by a level, never a guess.
+  const first = columns.find((c) => c.confidence !== "low") || null;
 
   const reading: Reading = {
     version: READING_VERSION,
     at: new Date().toISOString(),
     model: MODEL,
-    readable: parsed.readable !== false,
+    readable,
     holderName: str(parsed.holderName),
     certificateTitle: str(parsed.certificateTitle),
     issuer: str(parsed.issuer),
     issuedOn: date(parsed.issuedOn),
     expiresOn: date(parsed.expiresOn),
     neverExpires: parsed.neverExpires === true,
-    // Only a code the matrix actually has. A code the model made up would
-    // otherwise land a date in whichever column happened to match. Compared
-    // upper case, the same way the rest of the codebase matches matrix codes.
-    qualCode: code && codes.some(([c]) => c.toUpperCase() === code.toUpperCase()) ? code : null,
-    codeConfidence:
-      confidence === "high" || confidence === "medium" || confidence === "low" ? confidence : null,
+    // Only a code the matrix actually has (columnsFrom). A code the model
+    // made up would otherwise land a date in whichever column happened to
+    // match.
+    qualCode: first ? first.code : null,
+    codeConfidence: first ? first.confidence : null,
+    columns,
+    registerPage,
     // A reading that stopped partway is still worth keeping — the fields it had
     // written are read off the certificate like any other — but whoever looks at
     // it should know the rest of the document went unsaid.
@@ -399,7 +515,7 @@ async function askModel(row: Row, bytes: ArrayBuffer, codes: [string, string][])
   };
 
   if (!reading.readable && !reading.reason) {
-    reading.reason = reading.notes || "The model couldn't make out what this document is.";
+    reading.reason = registerReason || reading.notes || "The model couldn't make out what this document is.";
   }
   return reading;
 }
@@ -412,7 +528,7 @@ function unreadableReading(reason: string): Reading {
     version: READING_VERSION, at: new Date().toISOString(), model: null, readable: false, reason,
     documentNumber: null, holderBirthDate: null,
     endorsements: [], units: [], capacities: [], isRecognition: false, recognises: null,
-    assessedOn: null, conditions: null, evidenceKind: null,
+    assessedOn: null, conditions: null, evidenceKind: null, columns: [], registerPage: false,
   };
 }
 
@@ -421,7 +537,7 @@ function unreadableReading(reason: string): Reading {
  * model turned away is written down as unreadable; anything about the
  * account - no credit, the rate, a busy model, the key - throws, to be
  * tried again once the account is in order. */
-export async function readCertificate(row: Row, codes: [string, string][]): Promise<Reading> {
+export async function readCertificate(row: Row, codes: [string, string][], ask?: ReadingAsk): Promise<Reading> {
   const unreadable = (reason: string) => unreadableReading(reason);
   const shape = mediaFor(row);
   if (!shape) return unreadable(`${row.filename} isn't a PDF or an image, so it can't be read.`);
@@ -431,7 +547,7 @@ export async function readCertificate(row: Row, codes: [string, string][]): Prom
   const bytes = await fileStore().get(row.blobKey, { type: "arrayBuffer" });
   if (!bytes) return unreadable("The file is no longer in the store.");
   try {
-    return await askModel(row, bytes, codes);
+    return await askModel(row, bytes, codes, ask || (await readingAsk()));
   } catch (e) {
     if (e instanceof ModelRefusal && e.kind === "document") {
       const said = refusalSays(e);
@@ -471,6 +587,8 @@ export async function extract(codes: [string, string][], limit: number) {
 
   const outstanding = certs.filter((row) => !done.has(readingKey(row)));
   const batch = outstanding.slice(0, limit);
+  // The question's context, once for the batch.
+  const ask = batch.length ? await readingAsk() : { equivalences: [] };
 
   const failures: { filename: string; person: string | null; error: string; kind: RefusalKind | null }[] = [];
 
@@ -493,7 +611,7 @@ export async function extract(codes: [string, string][], limit: number) {
           return;
         }
 
-        await store.setJSON(readingKey(row), await askModel(row, bytes, codes));
+        await store.setJSON(readingKey(row), await askModel(row, bytes, codes, ask));
       } catch (e) {
         // The model turning the document itself away - a corrupted or
         // password-protected file gets the same refusal every time it is sent,

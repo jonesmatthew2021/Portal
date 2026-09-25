@@ -2872,6 +2872,70 @@ test("a reading asks what else the certificate covers, whether it is a recogniti
   assert.equal(READING_VERSION, "r1", "and no reading made before is thrown away for them");
 });
 
+test("the question asks for every column the document is evidence for, with the office's equivalences and its filed column", async () => {
+  /* The old question asked for one code and told the model to give none
+     where two could fit, so 297 readable certificates on the live portal
+     came back with no code at all. Now it lists every column it sees, each
+     with how sure it is and why, and weighs the column the office filed the
+     document under. The old code is kept, from the first sure-or-by-a-level
+     column, for everything that still reads it. */
+  const { portal } = await unreadPortal(3);
+  const u1 = portal.rows.find((r) => r.id === "u1")!;
+  u1.filename = "EVANS, Brenton - VS-04 Helm CONNECT.pdf";
+  portal.blobs.set("matrix-readings|equivalences.json", JSON.stringify({ rows: [{ held: "Master <500GT", code: "QL-03" }, { held: "Something off the list", code: "QL-99" }] }));
+  const codes: [string, string][] = [["QL-01", "Master"], ["QL-03", "Master <100m NC"], ["QL-17", "Medical"], ["VS-04", "Helm CONNECT"]];
+  const model = modelAnswers((n) => {
+    const asked = model.calls[n - 1];
+    if (asked.includes("Helm CONNECT.pdf")) {
+      return { status: 200, body: readingStream({ ...reading, qualCode: undefined, codeConfidence: undefined, certificateTitle: "Crew Intermediate - Helm CONNECT",
+        columns: [
+          { code: "vs-04", confidence: "medium", why: "Crew Intermediate is a higher level of the course the office filed this under, so it satisfies the lower one" },
+          { code: "QL-99", confidence: "high", why: "not a column" },
+          { code: "QL-01", confidence: "sure", why: "a guess" },
+          { code: "VS-04", confidence: "low", why: "the same column again, less sure" },
+        ] }) };
+    }
+    if (asked.includes("unread-2.pdf")) {
+      // The old shape, one code: still read, as that one column.
+      return { status: 200, body: readingStream({ ...reading, qualCode: "QL-01", codeConfidence: "high" }) };
+    }
+    // A register page filed for a column no register stands for.
+    return { status: 200, body: readingStream({ ...reading, qualCode: undefined, codeConfidence: undefined, registerPage: true, columns: [{ code: "QL-01", confidence: "medium", why: "listed on the register" }] }) };
+  });
+  try {
+    await extract(codes, 4);
+  } finally {
+    model.restore();
+  }
+  const helm = model.calls.find((c) => c.includes("Helm CONNECT.pdf"))!;
+  assert.ok(helm.includes("columns") && helm.includes("confidence") && helm.includes("registerPage"), "the question asks for the columns and whether it is a register page");
+  assert.ok(!helm.includes('"qualCode"'), "and no longer for one code");
+  assert.ok(helm.includes("Master <500GT counts as QL-03"), "the office's Equivalence sheet goes in, one line a column");
+  assert.ok(!helm.includes("Something off the list"), "only for columns on the matrix");
+  assert.ok(helm.includes("Filed under column: VS-04"), "the column the office filed it under");
+  assert.ok(!model.calls.find((c) => c.includes("unread-2.pdf"))!.includes("Filed under column"), "and none where the name files it under nothing");
+  assert.ok(!helm.includes(vessel.covers[0].when), "the vessel file's covers rows are not given: they are applied by rule after");
+
+  const read = (id: string) => JSON.parse(portal.blobs.get(`certificate-readings|r1/${id}.json`)!);
+  const first = read("unread-1");
+  assert.deepEqual(first.columns, [
+    { code: "VS-04", confidence: "medium", why: "Crew Intermediate is a higher level of the course the office filed this under, so" },
+    { code: "QL-01", confidence: "low", why: "a guess" },
+  ], "only the matrix's codes, as it writes them; an unknown confidence is a guess; the reason held to fifteen words; a code given twice kept at the surer");
+  assert.equal(first.qualCode, "VS-04", "the old code from the first column held by a level or better");
+  assert.equal(first.codeConfidence, "medium");
+
+  const second = read("unread-2");
+  assert.deepEqual(second.columns, [{ code: "QL-01", confidence: "high", why: null }], "an answer in the old shape is one column");
+  assert.equal(second.qualCode, "QL-01");
+
+  const third = read("unread-3");
+  assert.equal(third.readable, false, "a register page filed for a column no register stands for is not a certificate");
+  assert.equal(third.reason, "A register page or listing, not a certificate.");
+  assert.deepEqual(third.columns, []);
+  assert.equal(third.qualCode, null);
+});
+
 test("a PDF the model turns away is stored as unreadable, with the plain reason, and stops nothing", async () => {
   const { portal } = await unreadPortal(1);
   const model = modelAnswers(() => ({ status: 400, body: BAD_PDF_BODY }));
