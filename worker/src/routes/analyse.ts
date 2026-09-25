@@ -2,6 +2,7 @@
 import {
   canonicaliseCertificate,
   fileStore,
+  filingName,
   liveSingleFileRow,
   refileCertificate,
   safeName,
@@ -12,7 +13,7 @@ import { asKnownPerson, crewRegister, nameIsSomebodyElse } from "../../../source
 import { isMsicCard, msicAsWritten, msicCodeIn, newestCard, openToCertificates, particularsFor, particularsKeyOf, ticketCodesIn } from "../../../source/shared/particulars.js";
 import { coveredCells, unitColumnsIn } from "../../../source/shared/covers.js";
 import { paperKind } from "../../../source/shared/evidence.js";
-import { filedAsLine } from "../../../source/shared/filed-as.js";
+import { filedAsLine, filedCodeIn } from "../../../source/shared/filed-as.js";
 import { isRecognitionReading, recognisedUntil, recognitionFills } from "../../../source/shared/recognition.js";
 import { vessel } from "../vessel.js";
 import { getEnv } from "../env.js";
@@ -679,9 +680,18 @@ export async function refile(names: string[], limit = Infinity) {
     if (!personName) continue;
     const ext = ((row.filename.match(/\.[^.]+$/) || [""])[0] || "").toLowerCase();
     const targetExt = ext === ".pdf" || [".jpg", ".jpeg", ".png"].includes(ext) ? ".pdf" : ext;
-    if (row.filename === safeName(`${personName} - ${code} ${title}`) + targetExt) continue;
+    // The one filing name (filingName dashes a slash in the title, so
+    // "STCW Reg IV/2" is not cut down to "2" by safeName's path stripping).
+    const wantBase = filingName(personName, code, title);
+    if (row.filename === safeName(wantBase) + targetExt) continue;
     if (done >= limit) { remaining++; continue; }
-    const renamedRow = await canonicaliseCertificate(row, `${personName} - ${code} ${title}`, imageToPdf);
+    // Whether the code is the office's own: codeFor took it off the office's
+    // name (a hand tag comes first there, and a name the portal wrote is no
+    // filing). Then the rename only tidies the office's word into the
+    // portal's shape, and the row is not marked as the portal's naming - or
+    // the filed column would be thrown away after one refile.
+    const filed = row.namedByPortal ? null : filedCodeIn(row.filename, cols);
+    const renamedRow = await canonicaliseCertificate(row, wantBase, imageToPdf, !!filed && code === filed);
     if (renamedRow) {
       moved.push({ id: renamedRow.id, filename: renamedRow.filename, folder: row.folder!, from: row.filename, to: personName });
       done++;

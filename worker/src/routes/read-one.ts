@@ -1,7 +1,8 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
-import { canonicaliseCertificate, refileCertificate, relocateToRemovedBlob } from "../db/documents.js";
+import { canonicaliseCertificate, filingName, refileCertificate, relocateToRemovedBlob } from "../db/documents.js";
+import { filedCodeIn } from "../../../source/shared/filed-as.js";
 import { holderOnMatrix, readCertificate } from "./analyse.js";
 import { codeFor, equivalences, ModelRefusal, plainLine, readingKey, readingStore, type Reading } from "../lib/analysis.js";
 import { imageToPdf } from "../lib/pdf-wrap.js";
@@ -87,11 +88,17 @@ export default async (req: Request): Promise<Response> => {
   if (holder && (current.person || "") !== holder) {
     current = await refileCertificate(current, holder, "");
   }
-  const code = String(codeFor(current, reading, await equivalences(), quals.cols || []) || "").trim().toUpperCase();
+  const cols = quals.cols || [];
+  const code = String(codeFor(current, reading, await equivalences(), cols) || "").trim().toUpperCase();
   const title = code ? titles[code] || "" : "";
   const personName = names.includes(current.person || "") ? current.person : holder;
   if (code && title && personName) {
-    const renamed = await canonicaliseCertificate(current, `${personName} - ${code} ${title}`, imageToPdf);
+    // The same name the hourly refile gives (filingName: a slash in the
+    // title becomes a dash), and the same answer to whose code it is: one
+    // taken off the office's own name leaves the row unmarked, so the filed
+    // column still counts next hour (routes/analyse.ts, refile).
+    const filed = current.namedByPortal ? null : filedCodeIn(current.filename, cols);
+    const renamed = await canonicaliseCertificate(current, filingName(personName, code, title), imageToPdf, !!filed && code === filed);
     if (renamed) current = renamed;
   }
 

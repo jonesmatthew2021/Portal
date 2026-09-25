@@ -543,10 +543,18 @@ on any line that still names this one.
     guess would outrank the sheet whose job is to correct it, for ever. So
     every rename the portal makes marks the row (`documents.named_by_portal`,
     set in `canonicaliseCertificate`), and `codeFor`/`filedAsFor` skip the
-    filename of a marked row - the sheet and the model decide as before. Files
-    the portal named before 25 Sep 2026 carry no mark and cannot be told from
-    the office's: they are read as the office's until a hand tag or a rename
-    says otherwise. Where the filed column and the reading disagree the filed
+    filename of a marked row - the sheet and the model decide as before.
+    **Except a rename under the office's own code**: where `codeFor` took the
+    code off the office's name (the refile and the upload's read pass
+    `fromOffice`), the rename only tidies that name into the portal's
+    spelling and the row stays unmarked - or one hourly refile would throw
+    the office's word away, empty the cell and silence the filed-as line.
+    Files the portal named before 25 Sep 2026 carry no mark and cannot be told
+    from the office's: they are read as the office's until a hand tag or a
+    rename says otherwise. The one filing name is built by `filingName`
+    (`worker/src/db/documents.ts`), which turns a slash in the column's title
+    into a dash ("STCW Reg IV/2" → "STCW Reg IV-2"): `safeName` strips a
+    folder path off an uploaded name and would cut the title to "2". Where the filed column and the reading disagree the filed
     column still takes the date and **Needs attention says so**, for
     management, in one line - "<person> — <code>: filed as <column>, reads as
     <title>" (`filedAsFor`, `filedAsLine`; under its own heading **Filed as —
@@ -560,7 +568,8 @@ on any line that still names this one.
     documents no column places at all - read, readable, his own (not a paper
     standing in for a certificate, not printed in another man's name), no
     hand tag, no code in the name, nothing the sheet or the model could
-    place, covering nothing - are listed under Needs attention as **On file,
+    place (a code the model gave at low confidence fills no cell but is still
+    its answer, so that document is not listed), covering nothing - are listed under Needs attention as **On file,
     not on the matrix — n**, one line each, "<person> — <title or filename>",
     by person (`notOnMatrix` from `certificateStanding`, `notOnMatrixLines`
     on the page). Whether any of them becomes a column is the office's

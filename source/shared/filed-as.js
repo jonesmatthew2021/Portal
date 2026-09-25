@@ -20,10 +20,12 @@
  *
  * A name the portal wrote itself on the refile is not the office's word: its
  * code is the model's guess written down, and the row says so
- * (`namedByPortal`, set where the portal renames a file). Such a name is no
- * filing, so the Equivalence sheet can still move the certificate. Names
- * the portal wrote before that mark existed (25 Sep 2026) cannot be told
- * from the office's and are read as the office's.
+ * (`namedByPortal`, set where the portal renames a file under a code that
+ * was not already the office's - a rename that only tidies the office's own
+ * "<CODE>" into the portal's spelling keeps the office's word and no mark).
+ * A marked name is no filing, so the Equivalence sheet can still move the
+ * certificate. Names the portal wrote before that mark existed (25 Sep
+ * 2026) cannot be told from the office's and are read as the office's.
  *
  * Where the filed column and the model's reading disagree, the filed column
  * still gets the certificate's date and Needs attention says so in one line

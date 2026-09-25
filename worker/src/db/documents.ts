@@ -326,6 +326,23 @@ export function safeName(name: string) {
   return base.replace(/[^A-Za-z0-9._ ()&+,'-]/g, "_").slice(0, 120) || "certificate";
 }
 
+/**
+ * The one filing name a read certificate gets, without its extension:
+ * "PERSON - CODE Title". Every renamer builds it here, so the refile, the
+ * upload's read and the "is it already named right" comparison agree.
+ *
+ * A slash in the column's title is turned into a dash first. safeName keeps
+ * only what follows the last slash - its job is to take a folder path off
+ * an uploaded name - and three titles carry one ("STCW Reg II/5 & III/5",
+ * "STCW Reg II/1 & II/2", "STCW Reg IV/2"), so 26 certificates were renamed
+ * to "2.pdf" and "5).pdf", in SharePoint too, before this. Uploaded names
+ * are still cleaned exactly as before; only the title the portal writes is
+ * dashed.
+ */
+export function filingName(person: string, code: string, title: string) {
+  return `${person} - ${code} ${title.replace(/[\\/]/g, "-")}`;
+}
+
 export function withSuffix(name: string, n: number) {
   const dot = name.lastIndexOf(".");
   return dot > 0 ? `${name.slice(0, dot)} (${n})${name.slice(dot)}` : `${name} (${n})`;
@@ -555,11 +572,19 @@ export async function purgeDocument(row: DocumentRow) {
  * rule must not read it back as the office's word - or the model's first
  * guess would outrank the Equivalence sheet for ever after. A name already
  * right is left unmarked: it may be the office's own.
+ *
+ * Except where the code is the office's: `fromOffice` says the caller took
+ * the code off the office's own name (the filed column, filedCodeIn), and
+ * the rename only tidies that name into the portal's shape. Marking it would
+ * throw the office's word away after one hourly refile - the filed column
+ * would be skipped from then on, the cell would empty and the filed-as line
+ * would go quiet - so such a rename keeps the row unmarked.
  */
 export async function canonicaliseCertificate(
   row: DocumentRow,
   wantBase: string,
   imageToPdf: (bytes: ArrayBuffer, contentType: string | null) => Uint8Array | null,
+  fromOffice = false,
 ) {
   const ext = ((row.filename.match(/\.[^.]+$/) || [""])[0] || "").toLowerCase();
   const convertible = [".jpg", ".jpeg", ".png"].includes(ext);
@@ -612,8 +637,9 @@ export async function canonicaliseCertificate(
       .set({
         blobKey: to, filename, contentType: type, sizeBytes: data.byteLength,
         // Only a name the portal actually changed is the portal's: a photo
-        // wrapped as a PDF under the office's own name keeps the office's word.
-        ...(base(filename) !== base(r.filename) ? { namedByPortal: 1 } : {}),
+        // wrapped as a PDF under the office's own name keeps the office's word,
+        // and so does a name tidied under the column the office itself filed.
+        ...(base(filename) !== base(r.filename) && !fromOffice ? { namedByPortal: 1 } : {}),
       })
       .where(eq(documents.id, r.id))
       .returning();

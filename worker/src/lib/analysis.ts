@@ -948,8 +948,8 @@ export async function certificateStanding() {
      Needs attention says so, one line each (filedAsFor says when). */
   const filedAs: { person: string; code: string; title: string; readsAs: string | null; fileId: string }[] = [];
   /* The documents on file that no column places: read, readable, and with
-     no column from a hand tag, the filename, the sheet or the model, and
-     covering none either. The matrix has no column for them; whether any
+     no column from a hand tag, the filename, the sheet or the model (at any
+     confidence), and covering none either. The matrix has no column for them; whether any
      becomes one is the office's call, and the list is so the call can be
      made (Needs attention: "On file, not on the matrix"). */
   const notOnMatrix: { person: string; title: string; filename: string; fileId: string }[] = [];
@@ -1005,9 +1005,13 @@ export async function certificateStanding() {
        typedOver). */
     const code = named && named.trim() ? named : null;
     const asDated = typed ? { ...reading, expiresOn: typed } : reading;
-    // Whether anything on the matrix places it: a column of its own, or a
-    // column it covers.
-    const placed = !!code || coveredCells(asDated, vessel.covers, vessel.qualColumns, null).some((c) => !!c.until);
+    // Whether anything on the matrix places it: a column of its own, a
+    // column it covers, or a code the reader gave at all - a low-confidence
+    // code fills no cell, but it is still the reader's answer that the paper
+    // is one of the matrix's items, so it is the round's business and not a
+    // document the matrix lacks a column for.
+    const placed = !!code || !!String(reading.qualCode || "").trim()
+      || coveredCells(asDated, vessel.covers, vessel.qualColumns, null).some((c) => !!c.until);
     if (paperKind(row, reading)) continue;
     // AMSA recognises only the classes MO70 s 7(2)(b) lists, which leave out
     // the certificate of safety training and the marine cook certificate.

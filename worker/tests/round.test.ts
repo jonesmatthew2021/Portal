@@ -19,7 +19,7 @@ import readOne from "../src/routes/read-one.js";
 import restoreFile from "../src/routes/restore-file.js";
 import { MAX_BYTES } from "../src/lib/shared-state.js";
 import { OUT_OF_CREDIT, READING_UNAVAILABLE, READING_VERSION, certificateStanding } from "../src/lib/analysis.js";
-import { KeptInPlace, ensureDocumentColumns, forgetDocumentColumns, purgeDocument, relocateToRemovedBlob, removeDocument, restoreDocument } from "../src/db/documents.js";
+import { KeptInPlace, ensureDocumentColumns, filingName, forgetDocumentColumns, purgeDocument, relocateToRemovedBlob, removeDocument, restoreDocument, safeName } from "../src/db/documents.js";
 import { replaceSingleFile } from "../src/db/single-file.js";
 import { saveDocument } from "../src/lib/shared-state.js";
 import { runMatrixRound, roundRunning, leaseHolder, takeLease, dropLease, renewLease, keepEquivalences, SETTLE_MS } from "../src/lib/round.js";
@@ -488,11 +488,15 @@ const oneManPortal = async (over: {
    *  named for the column given here, and read by the model as a course
    *  the matrix has no column for. */
   filedAs?: "VS-04" | "QL-04";
+  /** The certificate's filename as the office wrote it, in place of the
+   *  portal's own canonical spelling - so the refile has a name to tidy. */
+  filedName?: string;
 } = {}) => {
   const tmKey = over.theirs ? "opms/CREW QUALIFICATION EXPIRY.xlsx" : "opms/20260901 - CREW QUALIFICATION EXPIRY.xlsx";
   const filedCols: [string, string, string][] = [["VS-04", "Helm CONNECT", "Vessel"], ["QL-04", "Master <45m NC", "Qualifications"]];
   const filedTitle = over.filedAs ? filedCols.find((c) => c[0] === over.filedAs)![1] : "";
-  const scanKey = over.filedAs ? `opms/Brenton - OPMS/EVANS, Brenton - ${over.filedAs} ${filedTitle}.pdf` : "opms/Brenton - OPMS/master.pdf";
+  const scanName = over.filedName || (over.filedAs ? `EVANS, Brenton - ${over.filedAs} ${filedTitle}.pdf` : "master.pdf");
+  const scanKey = `opms/Brenton - OPMS/${scanName}`;
   const bucket = fakeBucket({ [scanKey]: "a scan" }, ["opms", "removed", "opms/Brenton - OPMS", "opms/skills"]);
   await bucket.put(tmKey, await smallWorkbook(over.filedAs ? filedCols.map((c) => c[0]) : []).arrayBuffer());
   if (over.skills) await bucket.put(skillsKey, await skillsWorkbook().arrayBuffer());
@@ -690,6 +694,109 @@ test("filed as: the hour puts the filed column on the matrix and in the office's
   assert.equal(portal.state.rev, rev, "no save on an unchanged hour");
 });
 
+test("filed as: the refile tidies the office's own name and keeps the office's word, hour after hour", async () => {
+  /* The trap: the refile renames every read certificate to the portal's
+     "<PERSON> - <CODE> <Title>.pdf", and marks a renamed row as the
+     portal's naming so the model's guess is never read back as a filing.
+     But for an office-named file the code IS the office's - codeFor took it
+     off the name - and marking it threw the office's word away after one
+     hourly refile: the cell emptied and the filed-as line went quiet. */
+  const { portal, bucket } = await oneManPortal({ filedAs: "VS-04", filedName: "Brenton - vs-04 helm connect.pdf" });
+  // A key so the hour runs its refile; the certificate is already read, so
+  // the model is never asked.
+  const env = { DB: portal.db, FILES: bucket, FILE_STORE: "r2", ANTHROPIC_API_KEY: "k" };
+  await worker.scheduled({} as never, env as never);
+
+  const ticket = portal.rows.find((r) => r.id === "c2")!;
+  assert.equal(ticket.filename, "EVANS, Brenton - VS-04 Helm CONNECT.pdf", "tidied into the portal's own spelling");
+  assert.equal(ticket.blobKey, "opms/Brenton - OPMS/EVANS, Brenton - VS-04 Helm CONNECT.pdf");
+  assert.ok(bucket.text("opms/Brenton - OPMS/EVANS, Brenton - VS-04 Helm CONNECT.pdf"), "the file moved with it");
+  assert.equal(bucket.text("opms/Brenton - OPMS/Brenton - vs-04 helm connect.pdf"), null, "and the old name is not left behind");
+  assert.ok(!ticket.namedByPortal, "the code was the office's, so the name is still the office's word");
+  const hourly = JSON.parse(portal.blobs.get("sync|last-hourly")!);
+  assert.equal(hourly.refiled, 2, "the label and the rename");
+  assert.equal(hourly.applied, 1, "and the same hour's round fills the filed column");
+  assert.deepEqual(portal.doc().quals.rows[0][3], ["", "2030-01-17", "Y", ""], "VS-04 is held");
+  const doc = portal.doc();
+  const out = await compareMatrix(doc.quals, null, asKnownPerson(doc.people));
+  assert.deepEqual(out.notes.filter((n) => n.kind === "filed-as").map((n) => n.detail),
+    ["EVANS, Brenton — VS-04: filed as Helm CONNECT, reads as Crew Intermediate course"], "the round still says the disagreement");
+  assert.deepEqual((await certificateStanding()).filedAs.map((f) => [f.code, f.readsAs]), [["VS-04", "Crew Intermediate course"]], "and so does the page");
+  const rev = portal.state.rev;
+
+  // The next hour, refile and all: nothing to rename, nothing to save.
+  await worker.scheduled({} as never, env as never);
+  const again = JSON.parse(portal.blobs.get("sync|last-hourly")!);
+  assert.equal(again.refiled, 0, "a name already right is left alone");
+  assert.equal(again.applied, 0);
+  assert.equal(portal.state.rev, rev, "no save on an unchanged hour");
+  assert.equal(ticket.filename, "EVANS, Brenton - VS-04 Helm CONNECT.pdf");
+  assert.ok(!ticket.namedByPortal, "still the office's");
+  assert.deepEqual(portal.doc().quals.rows[0][3], ["", "2030-01-17", "Y", ""], "VS-04 is still held");
+});
+
+test("a name the portal wrote from the model's guess is marked as its own, so the Equivalence sheet can still move it", async () => {
+  /* The other side of the rule: "master.pdf" carries no column, so the code
+     in the new name is the model's (QL-01), and the row is marked. A sheet
+     filed later says the ticket belongs in QL-17, and because the name is
+     the portal's and not a filing, the sheet wins and the file follows. */
+  const { portal, bucket } = await oneManPortal({ qualCode: null });
+  const env = { DB: portal.db, FILES: bucket, FILE_STORE: "r2", ANTHROPIC_API_KEY: "k" };
+  await worker.scheduled({} as never, env as never);
+  const ticket = portal.rows.find((r) => r.id === "c2")!;
+  assert.equal(ticket.filename, "EVANS, Brenton - QL-01 Master.pdf", "named from the model's code");
+  assert.equal(ticket.namedByPortal, 1, "and marked as the portal's naming");
+  assert.equal(portal.doc().quals.rows[0][3][0], "2031-05-26", "QL-01 takes the date");
+
+  // The skills matrix arrives, with its Equivalence sheet.
+  await bucket.put(skillsKey, await skillsWorkbook().arrayBuffer());
+  portal.rows.push({ ...liveRow("sk1", skillsKey, 1), category: "skills-matrix", sizeBytes: 4000 });
+  await worker.scheduled({} as never, env as never);
+  assert.equal(ticket.filename, "EVANS, Brenton - QL-17 Medical.pdf", "the sheet moved it: the portal's own name was no filing to stand in the way");
+  assert.equal(ticket.namedByPortal, 1);
+  assert.ok(bucket.text("opms/Brenton - OPMS/EVANS, Brenton - QL-17 Medical.pdf"));
+  assert.equal(bucket.text("opms/Brenton - OPMS/EVANS, Brenton - QL-01 Master.pdf"), null);
+});
+
+test("a slash in a column's title is a dash in the filing name, never a path to strip", async () => {
+  /* Three titles carry a slash - "STCW Reg II/5 & III/5", "STCW Reg II/1 &
+     II/2", "STCW Reg IV/2" - and safeName keeps only what follows the last
+     one, because its job is to take a folder path off an uploaded name. So
+     the refile renamed 26 live certificates to "2.pdf", "2 (2).pdf" and
+     "5).pdf", in SharePoint too. */
+  assert.equal(safeName("EVANS, Brenton - QL-14 GMDSS - STCW Reg IV/2.pdf"), "2.pdf", "the trap, as it was");
+  assert.equal(filingName("EVANS, Brenton", "QL-14", "GMDSS - STCW Reg IV/2"), "EVANS, Brenton - QL-14 GMDSS - STCW Reg IV-2");
+  assert.equal(safeName(filingName("EVANS, Brenton", "QL-14", "GMDSS - STCW Reg IV/2") + ".pdf"), "EVANS, Brenton - QL-14 GMDSS - STCW Reg IV-2.pdf", "the whole title kept");
+  assert.equal(filingName("X", "QL-10", "Rating (STCW Reg II/5 & III/5)"), "X - QL-10 Rating (STCW Reg II-5 & III-5)");
+  assert.equal(filingName("X", "QL-13", "ECDIS - STCW Reg II\\1"), "X - QL-13 ECDIS - STCW Reg II-1", "a backslash the same");
+  assert.equal(safeName("C:\\fakepath\\scan.pdf"), "scan.pdf", "an uploaded name is still cleaned exactly as before");
+  assert.equal(safeName("folder/sub/scan.pdf"), "scan.pdf");
+
+  // A certificate the bug had renamed to "2.pdf": the next refile gives it
+  // its full name, the old name is not left behind, and a name already
+  // right is not renamed again the hour after.
+  const { portal, bucket } = await oneManPortal({ qualCode: null });
+  const ticket = portal.rows.find((r) => r.id === "c2")!;
+  ticket.filename = "2.pdf"; ticket.blobKey = "opms/Brenton - OPMS/2.pdf"; ticket.namedByPortal = 1;
+  await bucket.put("opms/Brenton - OPMS/2.pdf", bytesOf("a scan"));
+  await bucket.delete("opms/Brenton - OPMS/master.pdf");
+  portal.blobs.set("certificate-readings|r1/evans-master.json", JSON.stringify({ ...reading, holderName: "Brenton Evans", certificateTitle: "GMDSS General Operator's Certificate", qualCode: "QL-14", codeConfidence: "high" }));
+  const doc = portal.doc();
+  doc.quals.cols.push(["QL-14", "GMDSS - STCW Reg IV/2", "Qualifications"]);
+  doc.quals.rows[0][3].push("");
+  portal.state.data = JSON.stringify(doc);
+
+  const first = (await (await refile(["EVANS, Brenton"])).json()) as { moved: { from: string | null; filename: string }[] };
+  assert.deepEqual(first.moved.map((m) => m.filename), ["2.pdf", "EVANS, Brenton - QL-14 GMDSS - STCW Reg IV-2.pdf"], "the label, then the full name");
+  assert.equal(ticket.filename, "EVANS, Brenton - QL-14 GMDSS - STCW Reg IV-2.pdf");
+  assert.equal(ticket.blobKey, "opms/Brenton - OPMS/EVANS, Brenton - QL-14 GMDSS - STCW Reg IV-2.pdf");
+  assert.ok(bucket.text("opms/Brenton - OPMS/EVANS, Brenton - QL-14 GMDSS - STCW Reg IV-2.pdf"), "the bytes under the full name");
+  assert.equal(bucket.text("opms/Brenton - OPMS/2.pdf"), null, "and not under the cut one");
+
+  const second = (await (await refile(["EVANS, Brenton"])).json()) as { moved: unknown[] };
+  assert.deepEqual(second.moved, [], "named right: the comparison uses the same dashed title, so it is not renamed every hour");
+});
+
 test("on file, not on the matrix: a readable document with no column anywhere is listed, and nothing else is", async () => {
   /* 214 documents on the live portal name no column at all - MRN contractor
      inductions, psychosocial hazards, MHE quizzes - and the matrix has no
@@ -706,6 +813,7 @@ test("on file, not on the matrix: a readable document with no column anywhere is
     scan("quiz", "MHE quiz.pdf", "quiz"),
     scan("letter", "extension.pdf", "letter"),
     scan("his", "kachin.pdf", "his"),
+    scan("unsure", "unsure.pdf", "unsure"),
   );
   const read = (over: Record<string, unknown>) => JSON.stringify({ ...reading, holderName: "Brenton Evans", qualCode: null, endorsements: [], units: [], capacities: [], ...over });
   portal.blobs.set("certificate-readings|r1/hs.json", read({ certificateTitle: "MRN Marine Contractor H&S", expiresOn: "2027-01-01" }));
@@ -716,6 +824,10 @@ test("on file, not on the matrix: a readable document with no column anywhere is
   // column for; and a document printed in another man's name is not his.
   portal.blobs.set("certificate-readings|r1/letter.json", read({ certificateTitle: "Extension of certificate", evidenceKind: "extension", expiresOn: "2026-12-01" }));
   portal.blobs.set("certificate-readings|r1/his.json", read({ certificateTitle: "MinRes Psychosocial Hazards", holderName: "Kachin Sittiyos", expiresOn: "2027-06-01" }));
+  // A code the reader gave but was not sure of fills no cell, and is still
+  // the reader's answer that the paper is one of the matrix's items: the
+  // round's business, not a document the matrix lacks a column for.
+  portal.blobs.set("certificate-readings|r1/unsure.json", read({ certificateTitle: "Master", qualCode: "QL-01", codeConfidence: "low", expiresOn: "2029-01-01" }));
   // Unread: nothing to say yet.
   const doc = portal.doc();
   doc.quals.cols.push(["HR-01", "Dogging (DG)", "High risk work"]);
@@ -723,8 +835,8 @@ test("on file, not on the matrix: a readable document with no column anywhere is
   portal.state.data = JSON.stringify(doc);
   const page = await certificateStanding();
   assert.deepEqual(page.notOnMatrix, [{ person: "EVANS, Brenton", title: "MRN Marine Contractor H&S", filename: "MRN Marine Contractor HS.pdf", fileId: "hs" }],
-    "the induction alone: the filed QL-04 ticket, the covering licence, the unreadable scan, the unread quiz, the letter and the other man's document are not on the list");
-  assert.deepEqual(page.dates.map((d) => d.code).sort(), ["HR-01", "QL-04"]);
+    "the induction alone: the filed QL-04 ticket, the covering licence, the unreadable scan, the unread quiz, the letter, the other man's document and the unsure reading are not on the list");
+  assert.deepEqual(page.dates.map((d) => d.code).sort(), ["HR-01", "QL-04"], "and the unsure reading fills no cell either");
   // A reading with no printed title lists the file by its name.
   portal.blobs.set("certificate-readings|r1/hs.json", read({ certificateTitle: null, expiresOn: "2027-01-01" }));
   assert.deepEqual((await certificateStanding()).notOnMatrix.map((x) => x.title), ["MRN Marine Contractor HS.pdf"]);
