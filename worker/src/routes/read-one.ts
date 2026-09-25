@@ -104,7 +104,7 @@ export default async (req: Request): Promise<Response> => {
     // column still counts next hour (routes/analyse.ts, refile).
     const filed = current.namedByPortal ? null : filedCodeIn(current.filename, cols);
     // The extension the file will carry, so the whole name fits (filingName).
-    const ext = ((current.filename.match(/.[^.]+$/) || [""])[0] || "").toLowerCase();
+    const ext = ((current.filename.match(/\.[^.]+$/) || [""])[0] || "").toLowerCase();
     const targetExt = ext === ".pdf" || [".jpg", ".jpeg", ".png"].includes(ext) ? ".pdf" : ext;
     const renamed = await canonicaliseCertificate(current, filingName(personName, code, title, targetExt), imageToPdf, !!filed && code === filed);
     if (renamed) current = renamed;

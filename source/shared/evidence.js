@@ -52,7 +52,7 @@
  *   as the library's listing hands them over.
  * @typedef {{ readable?: boolean, holderName?: string | null, issuedOn?: string | null,
  *   expiresOn?: string | null, evidenceKind?: string | null,
- *   isRecognition?: boolean | null }} EvidenceReading
+ *   isRecognition?: boolean | null, holder?: unknown }} EvidenceReading
  * @typedef {{ days?: number | null, from?: string, covers?: string[],
  *   notWhenRecognition?: boolean, lodgedBeforeExpiry?: boolean, why?: string }} EvidenceKind
  *   One kind as the vessel file carries it: its ceiling in days (null where
@@ -67,7 +67,11 @@
  *   Whether the name printed on a document says it is somebody else's - the
  *   one question the round and the page's cells ask (nameIsSomebodyElse in
  *   names.js), handed in so this rule can never answer it differently.
- * @typedef {{ kinds?: EvidenceKinds, register: Register, nameIsSomebodyElse: NameIsSomebodyElse }} EvidenceRules
+ * @typedef {(printed: unknown, holder: any, filedUnder: unknown, known: unknown, people: any) => { his: boolean }} WhoseCertificate
+ *   Whose a document is once the reader's pick of a person is weighed too
+ *   (whoseCertificate in names.js), with the register it weighs it against.
+ * @typedef {{ kinds?: EvidenceKinds, register: Register, nameIsSomebodyElse: NameIsSomebodyElse,
+ *   whoseCertificate?: WhoseCertificate, people?: unknown }} EvidenceRules
  * @typedef {{ kind: string, until: string | null, rowId: string }} Cover
  *   The cover that stands: which paper it is, the day it stops counting
  *   (null for an issue letter, which the law gives no end), and the row to
@@ -240,7 +244,14 @@ export function coveredBy(code, person, rows, readings, todayISO, rules) {
        equality of nameOf instead, a spelling the register could not resolve
        ("Brent Evans" against an alias of "bRENTON") was his to the round and
        nobody's here. */
-    if (isSomebodyElse(reading.holderName, row.person, me)) return;
+    /* Where the caller hands in whoseCertificate, the reader's pick is
+       weighed exactly as the round and the cells weigh it: a certificate the
+       pick placed on him ("Bill", read as his) is his here too, so his own
+       later certificate or recognition bars an extension the same way. */
+    const whose = rules.whoseCertificate;
+    if (typeof whose === "function"
+      ? !whose(reading.holderName, reading.holder, row.person, me, rules.people).his
+      : isSomebodyElse(reading.holderName, row.person, me)) return;
     seen.add(key);
     /* What the document is: the paper the person said it was, else the
        certificate where they tagged its column, else what the reading calls

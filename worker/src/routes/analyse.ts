@@ -201,9 +201,12 @@ Rules:
   also carries an endorsement or a second capacity, a higher level of the
   same course.
 - A higher level of the same course or ticket satisfies the lower: Crew
-  Intermediate satisfies Crew Basic; Master satisfies Chief Mate. The
-  office's equivalences, given with the list, say which certificates stand
-  for which column - apply them.
+  Intermediate satisfies Crew Basic. A higher certificate of competency
+  satisfies a lower one only where its limits - tonnage, length, near-coastal
+  or unlimited, propulsion power - are at least the column's: a Master <24m
+  NC does not satisfy a Chief Mate <3000GT. Give such a column "medium",
+  never "high". The office's equivalences, given with the list, say which
+  certificates stand for which column - apply them.
 - confidence: "high" when the document plainly is that item; "medium" when it
   satisfies the item by a level, an equivalence or an endorsement, or the
   filed column is plausible; "low" for a guess. Never leave out a column you
@@ -269,9 +272,12 @@ export async function readingAsk(): Promise<ReadingAsk> {
 
 /** The reader's pick of a person, turned from the number it was given back
  *  into the register's name: the number means nothing once the list moves.
- *  A number off the list is no pick. `others` are the names of anyone else
- *  the reader said the printed name could be - whoseCertificate
- *  (source/shared/names.js) takes a pick with anyone in it as no pick. */
+ *  A number off the list is no pick. `others` are anyone else the reader
+ *  said the printed name could be - readerPick (source/shared/names.js)
+ *  takes a pick with anyone in it as no pick. The reader saying there is
+ *  somebody else is kept however it said it: a number off the list, a name
+ *  written out instead of a number, or one number not in a list is kept as
+ *  written, so the doubt is never thrown away with the form it came in. */
 export function holderFrom(v: unknown, crew: ReadingAsk["crew"]): ReadingHolder | null {
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
   const said = v as Record<string, unknown>;
@@ -283,7 +289,13 @@ export function holderFrom(v: unknown, crew: ReadingAsk["crew"]): ReadingHolder 
   const conf = str(said.confidence);
   const confidence: ReadingHolder["confidence"] = conf === "high" || conf === "medium" ? conf : "low";
   const why = whyFrom(said.why);
-  const others = [...new Set((Array.isArray(said.others) ? said.others : []).map(at).filter((n): n is string => !!n && n !== person))];
+  const raw = Array.isArray(said.others) ? said.others : said.others == null ? [] : [said.others];
+  const others = [...new Set(
+    raw
+      .filter((x) => x != null && String(x).trim() !== "")
+      .map((x) => at(x) || String(typeof x === "object" ? JSON.stringify(x) : x).trim().slice(0, 60))
+      .filter((n) => n !== person),
+  )].slice(0, 5);
   return { person, confidence, why, others };
 }
 
@@ -503,10 +515,16 @@ async function askModel(row: Row, bytes: ArrayBuffer, codes: [string, string][],
   /* A register page, an approval listing or a spreadsheet extract is no
      certificate. It counts only for the columns the vessel file names as
      kept in a register (registerEvidenced); for anything else it is
-     unreadable, as such a page always was. */
+     unreadable, as such a page always was. Even there it is never the
+     certificate itself, so the most it says is "medium" - which fills the
+     cell and puts it on Needs attention for a look - and a guess about a
+     register page is no evidence at all: it is unreadable, whichever way
+     the reader worded its doubt. */
   if (registerPage && readable) {
     const allowed = registerColumns();
-    columns = columns.filter((c) => allowed.includes(c.code.toUpperCase()));
+    columns = columns
+      .filter((c) => allowed.includes(c.code.toUpperCase()) && c.confidence !== "low")
+      .map((c) => (c.confidence === "high" ? { ...c, confidence: "medium" as const } : c));
     if (!columns.length) {
       readable = false;
       registerReason = "A register page or listing, not a certificate.";
@@ -750,7 +768,7 @@ export function holderOnMatrix(holderName: string, names: string[]) {
 /**
  * Whose a certificate is, for the label on its row: the printed name where
  * it fits one man on the matrix (holderOnMatrix), then the printed name as
- * the crew register reads it - one of his spellings on Crew Details - and
+ * the crew register spells it - one of his spellings on Crew Details - and
  * only then the reader's pick off the register (readerPlaces in
  * source/shared/names.js, which never lets the pick take a certificate the
  * printed name fits the man it is filed under). The round asks the same
@@ -767,7 +785,10 @@ export function holderFor(
   const printed = reading.holderName || "";
   const byName = printed ? holderOnMatrix(printed, names) : null;
   if (byName) return byName;
-  const known = printed ? crewRegister(people).nameOf(printed) : null;
+  // One of his spellings, or two or more of his words: never a surname or a
+  // given name alone, which is the reader's to weigh ("D. EVANS" is not the
+  // one Evans on the register just because David is not on it yet).
+  const known = printed ? crewRegister(people).spelled(printed) : null;
   if (known) return names.includes(known) ? known : null;
   const picked = readerPlaces(printed, reading.holder, row.person, people);
   return picked && names.includes(picked.person) ? picked.person : null;
@@ -2000,16 +2021,36 @@ const ONCE_MISNAMED = /^\d+( \(\d+\))?\.pdf$|^\d\)\.pdf$/;
  * held was made before the question asked for them: every column the
  * reader gives and whose it is. Nothing the first look read is moved - not
  * its date and not its one code (qualCode, which the MSIC card rule still
- * reads): the columns are what place the document from now on (columnsFor). A second look that could not read the
- * scan adds none of it - the first reading stands, placed as it always
- * was - and leaves the mark, so it is not paid for again.
+ * reads): the columns are what place the document from now on (columnsFor).
+ *
+ * So a column the first look placed the document in is never lost to the
+ * second look quietly: where the second leaves it out or calls it a guess,
+ * it is kept as "medium" - still filled, and on Needs attention for a look,
+ * since the two looks disagree. A second look that finds the document is a
+ * register page is the exception: a register page counts only for the
+ * register columns (columnsFor), so what the first look placed it in
+ * elsewhere, and the column it is filed for, go. A second look that could
+ * not read the scan adds none of it - the first reading stands, placed as
+ * it always was - and leaves the mark, so it is not paid for again.
  */
 function columnsAdded(again: Reading, held: Reading): Partial<Reading> {
   if ("columns" in held) return {};
+  if (again.registerPage === true) {
+    return { registerPage: true, columns: again.readable && Array.isArray(again.columns) ? again.columns : [], holder: again.holder ?? null };
+  }
   if (!again.readable || !Array.isArray(again.columns)) return { columnsAsked: true };
+  let columns = again.columns;
+  const first = held.qualCode && (held.codeConfidence === "high" || held.codeConfidence === "medium") ? held.qualCode.trim() : "";
+  if (first) {
+    const same = (c: { code: string }) => c.code.trim().toUpperCase() === first.toUpperCase();
+    const now = columns.find(same);
+    if (!now || now.confidence === "low") {
+      columns = [...columns.filter((c) => !same(c)), { code: first, confidence: "medium", why: "read so the first time" }];
+    }
+  }
   return {
-    columns: again.columns,
-    registerPage: again.registerPage === true,
+    columns,
+    registerPage: false,
     holder: again.holder ?? null,
   };
 }
@@ -2256,6 +2297,11 @@ export async function topUpParticulars(
   for (const [at, row] of certs.entries()) {
     const reading = held.get(readingKey(row));
     if (!reading || reading.readable === false || "columns" in reading || reading.columnsAsked) continue;
+    /* A row tagged by hand is placed by the tag alone, whatever the reader
+       says of its columns; only whose it is could still matter, and only
+       where the printed name does not fit the man it is filed under. So a
+       tagged certificate in its own man's name is not paid for. */
+    if (row.qualCode && !nameIsSomebodyElse(reading.holderName, row.person, register.nameOf(row.person || ""))) continue;
     const code = codeFor(row, reading, eqTable, cols);
     const sure = !!reading.qualCode && reading.codeConfidence !== "low";
     const tier = !code && ONCE_MISNAMED.test(row.filename) ? 0
@@ -2298,6 +2344,16 @@ export async function topUpParticulars(
       }
       out.failed++;
       console.error("a certificate was not read again for the keys it is missing:", c.row.filename, e);
+      /* A look for the columns and the holder that fails on the scan's own
+         account (an answer that would not parse, a fault the model gave no
+         reason for) is tried once more on a later hour, and then marked as
+         asked: otherwise the same certificate sits at the front of the queue
+         and is paid for every hour for ever. */
+      if (me === null) {
+        const tried: Reading = { ...c.reading, ...(c.reading.columnsTried ? { columnsAsked: true } : { columnsTried: true }) };
+        await store.setJSON(readingKey(c.row), tried).catch((err: unknown) =>
+          console.error("a failed look was not marked:", c.row.filename, err));
+      }
       return "skip";
     }
     // The second look is held against the man it was asked for: the first

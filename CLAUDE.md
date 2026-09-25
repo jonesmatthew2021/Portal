@@ -594,17 +594,28 @@ on any line that still names this one.
     disappears; covers add on top, a column counted once. The file keeps the
     office's filed code in its name. A reading without `columns` (made
     before) is placed the old way until the hour's top-up asks it once, 20 an
-    hour, no-code first. **The register stays the one place names live**:
-    a printed name the register reads decides without the reader; the
-    reader's pick (`readerPick`/`whoseCertificate` in
+    hour, no-code first (a hand-tagged row in its own man's name is not
+    asked; a look that fails on the scan is tried twice at most; a column
+    the first look placed and the second drops is kept as medium, and a
+    second look that finds a register page stands). **The register stays
+    the one place names live**: a printed name the register spells (one of
+    his spellings, or two or more of his words - `crewRegister`'s
+    `spelled`, never a surname or given name alone) decides without the
+    reader; the reader's pick (`readerPick`/`whoseCertificate` in
     `source/shared/names.js`) stands on high, on medium only where the
-    printed name shares a word with the man, never with somebody else in
-    mind, and never takes a certificate whose printed name fits the man it is
-    filed under; where it places one on a name his register entry lacks,
-    Needs attention asks for the name to be added to Crew Details
-    (`readAsLine`). **A register page is evidence only for the columns the
-    vessel file names** (`registerEvidenced`: CS-03, CS-04); for anything
-    else it is unreadable. **A slash in a column title never reaches a
+    printed name shares a word with the man and nothing on it says it could
+    be somebody else (two men with that word, or a given name or initial
+    that is none of his - a sure pick like that is placed with "check");
+    never with somebody else in mind (`others`, however written, or
+    another register man named in its reasons); never takes a certificate
+    whose printed name fits the man it is filed under, and moves one out of
+    a register man's folder only on a printed word in common; where it
+    places one on a name his register entry lacks, Needs attention asks for
+    the name to be added to Crew Details (`readAsLine`). **A register page
+    is evidence only for the columns the vessel file names**
+    (`registerEvidenced`: CS-03, CS-04), only on the reader's medium
+    (its high is held to medium, its low is unreadable, and the filed column
+    alone never counts); for anything else it is unreadable. **A slash in a column title never reaches a
     filename again**, and a long name keeps the title's closing bracket
     (`filingName`); a name a person types by hand is the office's word
     (`rename-file` clears `named_by_portal`). The preview shows the lines

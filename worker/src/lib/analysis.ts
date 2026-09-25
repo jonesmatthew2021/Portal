@@ -210,6 +210,9 @@ export type Reading = {
    *  and the holder and could not read the scan: the first reading stands,
    *  and it is not paid for again (topUpParticulars). */
   columnsAsked?: boolean;
+  /** Set where that look failed once on something other than the account
+   *  (an answer that would not parse): one more try, then columnsAsked. */
+  columnsTried?: boolean;
   notes?: string | null;
   /** The card, licence or certificate number as printed (on the MSIC card,
    *  the card number). Present, null or not, on every reading made since
@@ -887,7 +890,8 @@ export function registerColumns(): string[] {
  *     less (the filed-as rule, with its own line): nothing the office filed
  *     disappears. A guess (low) fills nothing on its own. A column two of
  *     them name is counted once. A register page counts only for the
- *     vessel file's register columns.
+ *     vessel file's register columns, only on the reader's word, and never
+ *     as more than medium: it is a listing, not the certificate.
  *   - A reading made before the question asked for every column has one
  *     code, and is placed as it always was: the filed column, then the
  *     sheet, then the model's code where it was not a guess.
@@ -930,7 +934,11 @@ export function columnsFor(
   const out: PlacedColumn[] = [];
   const has = (code: string) => out.some((c) => c.code.trim().toUpperCase() === code.trim().toUpperCase());
   const add = (c: PlacedColumn) => { if (may(c.code) && !has(c.code)) out.push(c); };
-  const said = reading.columns.filter((c) => c && typeof c.code === "string");
+  // A register page is never more than medium, whatever a reading stored
+  // before the question held it there said.
+  const said = reading.columns
+    .filter((c) => c && typeof c.code === "string")
+    .map((c) => (register && c.confidence === "high" ? { ...c, confidence: "medium" as const } : c));
   const readerOn = (code: string) => said.find((c) => c.code.trim().toUpperCase() === code.trim().toUpperCase());
 
   const sheet = register ? null : sheetSays(reading, table);
@@ -940,7 +948,9 @@ export function columnsFor(
     if (r && r.confidence === "high") add({ code: filed, by: "read", confidence: "high" });
     else if (sheet && sheet.toUpperCase() === filed.toUpperCase()) add({ code: filed, by: "sheet" });
     else if (r && r.confidence === "medium") add({ code: filed, by: "read", confidence: "medium", why: r.why ?? null });
-    else add({ code: filed, by: "filed" });
+    // A register page counts only on the reader's word, and always with the
+    // line for a look: the office's filing alone never makes one evidence.
+    else if (!register) add({ code: filed, by: "filed" });
   }
   said.filter((c) => c.confidence === "high").forEach((c) => add({ code: c.code, by: "read", confidence: "high" }));
   if (sheet) add({ code: sheet, by: "sheet" });
@@ -1313,7 +1323,7 @@ export async function certificateStanding() {
        ceilings are the vessel file's. The cell shows amber and says what
        carries him; nothing is ever green on a cover, because the certificate
        itself has gone. */
-    covers: await evidenceCovers(certs, readings, eqTable, register, cols),
+    covers: await evidenceCovers(certs, readings, eqTable, register, cols, people),
     /* The filings the reading disagrees with, one line each on Needs
        attention: whose, which column, and what the model read it as. */
     filedAs,
@@ -1376,6 +1386,8 @@ async function evidenceCovers(
   register: ReturnType<typeof crewRegister>,
   /** The live matrix's columns, for the column a filename files a paper under. */
   cols: unknown,
+  /** The crew register, for the reader's pick of a person (whoseCertificate). */
+  people: { name?: string; aliases?: string[] }[] = [],
 ) {
   const kinds = vessel.evidenceKinds as Record<string, { covers?: string[] }>;
   const columns = [...new Set(Object.values(kinds).flatMap((k) => (k.covers || []).map((c) => String(c).trim().toUpperCase())))];
@@ -1396,7 +1408,7 @@ async function evidenceCovers(
 
   const today = todayThere();
   // The name question is the one the cells above and the round ask.
-  const rules = { kinds: vessel.evidenceKinds, register, nameIsSomebodyElse };
+  const rules = { kinds: vessel.evidenceKinds, register, nameIsSomebodyElse, whoseCertificate, people };
 
   // Whose papers they are, as the register names them.
   const mine = new Set<string>();
