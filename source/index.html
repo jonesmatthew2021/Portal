@@ -1094,25 +1094,19 @@ body.um-tight footer { margin-top: 12px !important; }
 .um-ranks { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
 .um-scroll { overflow-x: auto; }
 
-/* Matrix frame: the table scrolls inside this, so its horizontal bar sits at the
-   bottom of the viewport no matter how far down the table you are. */
+/* Matrix frame: the table runs its full length down the page, and the page's
+   own scroll bar takes it up and down. It only scrolls sideways in here, and
+   its own sideways bar is hidden - the floating one at the bottom of the
+   screen drives it instead, so there is one bar, always within reach. */
 .um-matrix {
-  overflow: auto;
-  max-height: calc(100vh - 250px);
-  min-height: 320px;
+  overflow-x: auto;
+  overflow-y: hidden;
   border: 1px solid ${T.rule};
   border-radius: 2px;
   background: ${T.panel};
-  scrollbar-color: ${T.accent} ${T.raised};
-  scrollbar-width: auto;
+  scrollbar-width: none;
 }
-.um-matrix::-webkit-scrollbar { height: 0; width: 11px; }
-.um-matrix::-webkit-scrollbar-track { background: ${T.raised}; }
-.um-matrix::-webkit-scrollbar-thumb {
-  background: ${T.accent}; border-radius: 7px; border: 3px solid ${T.raised};
-}
-.um-matrix::-webkit-scrollbar-thumb:hover { background: ${T.text}; }
-.um-matrix::-webkit-scrollbar-corner { background: ${T.raised}; }
+.um-matrix::-webkit-scrollbar { display: none; }
 
 /* Floating horizontal scrollbar - sits above the page, always within reach. */
 .um-floatbar {
@@ -1132,12 +1126,17 @@ body.um-tight footer { margin-top: 12px !important; }
 /* Reports print clean - no navigation, no buttons. */
 @media print {
   .um-noprint, .um-floatbar, nav, header, footer { display: none !important; }
+  .um-matrix thead th { transform: none !important; }
   .um-report { color: #000; }
   body, .um { background: #fff !important; }
 }
 .um-matrix table { border-collapse: separate; border-spacing: 0; }
+/* The page scrolls the table now, not the frame, so a sticky top would not
+   stick: the column headings are moved down by hand (--mx-head, set as the
+   page scrolls) to stay at the top of the screen until the table ends. */
 .um-matrix thead th {
-  position: sticky; top: 0; z-index: 3;
+  position: relative; z-index: 3;
+  transform: translateY(var(--mx-head, 0px));
   background: ${T.panel}; box-shadow: inset 0 -1px 0 ${T.rule};
 }
 .um-matrix tbody td:first-child, .um-matrix thead th:first-child {

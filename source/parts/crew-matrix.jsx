@@ -680,6 +680,31 @@ function MatrixPerson({ row, onClose }) {
 const MX_NAME_W = 184;
 const MX_COL_W = 64;
 
+// How far the column headings have to move down to stay at the top of the
+// screen while the page scrolls the matrix. frameTop is where the table starts
+// on screen and frameHeight its height, pinAt the line they stay under (the
+// bottom of anything fixed at the top of the page, else 0). Nothing while the
+// table's top is still below that line, and never past its end. The top
+// goes negative as it scrolls off the screen - that is the point - but a
+// height or a line that is negative or missing moves nothing.
+function matrixHeadOffset(frameTop, frameHeight, headHeight, pinAt) {
+  const ok = (v) => typeof v === "number" && isFinite(v);
+  if (![frameTop, frameHeight, headHeight, pinAt].every(ok)) return 0;
+  if (frameHeight < 0 || headHeight < 0 || pinAt < 0) return 0;
+  return Math.max(0, Math.min(pinAt - frameTop, frameHeight - headHeight));
+}
+
+// The line the headings stay under: the bottom of the portal's header or tab
+// bar, if either is held at the top of the screen; otherwise the top edge.
+function matrixPinAt() {
+  let pin = 0;
+  document.querySelectorAll("header.um-head, nav.um-nav").forEach((el) => {
+    const at = window.getComputedStyle(el).position;
+    if (at === "fixed" || at === "sticky") pin = Math.max(pin, el.getBoundingClientRect().bottom);
+  });
+  return pin;
+}
+
 function TrainingMatrix() {
   const { quals: QUALS, setQuals, log, matrixUpdated, certSheet, certificates, certDates,
     skillsRequirements, setSkillsRequirements, validityMatrix, removeCrew, admin, rosterPlan } = usePortal();
@@ -754,29 +779,57 @@ function TrainingMatrix() {
   const inner = useRef(null);
   const lock = useRef(false);
 
-  // A scrollbar that floats at the bottom of the screen and drives the table,
-  // so it's reachable wherever you are on the page.
+  // A scrollbar that floats at the bottom of the screen and drives the table
+  // sideways, shown while any of the table is on screen. The page scrolls the
+  // table up and down, so the column headings are moved down with it here too
+  // (--mx-head, read by the stylesheet) to stay in sight until the table ends.
   React.useEffect(() => {
     const f = frame.current, b = bar.current, i = inner.current;
-    if (!f || !b || !i) return;
+    if (!f || !b || !i) { if (b) b.style.display = "none"; return; }
+    let queued = 0;
     const size = () => {
+      queued = 0;
       i.style.width = f.scrollWidth + "px";
-      b.style.display = f.scrollWidth > f.clientWidth + 4 ? "block" : "none";
       const r = f.getBoundingClientRect();
+      const wide = f.scrollWidth > f.clientWidth + 4;
+      const seen = r.bottom > 0 && r.top < window.innerHeight;
+      const was = b.style.display === "block";
+      b.style.display = wide && seen ? "block" : "none";
       b.style.left = r.left + "px";
       b.style.width = r.width + "px";
+      // A hidden bar forgets where it was, so it picks up the table's place
+      // when it comes back.
+      if (wide && seen && !was) b.scrollLeft = f.scrollLeft;
+      // Measured off the heading row and the table themselves (the row's own
+      // box never moves - only its cells do), so the border's rounding at
+      // any zoom cannot leave a sliver between the headings and the line.
+      const head = f.querySelector("thead"), table = f.querySelector("table");
+      const h = head && table ? head.getBoundingClientRect() : null;
+      const down = h ? matrixHeadOffset(h.top, table.getBoundingClientRect().height, h.height, matrixPinAt()) : 0;
+      f.style.setProperty("--mx-head", down + "px");
     };
+    const soon = () => { if (!queued) queued = requestAnimationFrame(size); };
     const fromTable = () => { if (lock.current) return; lock.current = true; b.scrollLeft = f.scrollLeft; lock.current = false; };
     const fromBar = () => { if (lock.current) return; lock.current = true; f.scrollLeft = b.scrollLeft; lock.current = false; };
     size();
     f.addEventListener("scroll", fromTable);
     b.addEventListener("scroll", fromBar);
-    window.addEventListener("resize", size);
+    window.addEventListener("scroll", soon, { passive: true });
+    window.addEventListener("resize", soon);
+    const grows = typeof ResizeObserver === "function" ? new ResizeObserver(soon) : null;
+    if (grows) {
+      grows.observe(f);
+      const table = f.querySelector("table");
+      if (table) grows.observe(table);
+    }
     const t = setTimeout(size, 200);
     return () => {
       f.removeEventListener("scroll", fromTable);
       b.removeEventListener("scroll", fromBar);
-      window.removeEventListener("resize", size);
+      window.removeEventListener("scroll", soon);
+      window.removeEventListener("resize", soon);
+      if (grows) grows.disconnect();
+      if (queued) cancelAnimationFrame(queued);
       clearTimeout(t);
     };
   });
