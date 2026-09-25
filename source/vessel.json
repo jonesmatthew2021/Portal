@@ -284,6 +284,10 @@
     "codes": ["QL-11", "QL-12"],
     "why": "MO70 s 7(2)(b) - AMSA may recognise a foreign certificate only of the classes in s 7(1)(a), (aa), (b), (c) and (ca). The certificate of safety training (s 7(1)(e)) and the marine cook certificate (s 7(1)(d)) are not among them, so a recognition claiming either fills nothing"
   },
+  "registerEvidenced": {
+    "codes": ["CS-03", "CS-04"],
+    "why": "The office records the cargo system operator and trainer approvals in an approvals register, not on a certificate, so a register page is evidence for these two columns and no other; a register page, approval listing or spreadsheet extract for any other column is not a certificate. The default built on 25 Sep 2026, awaiting the Master's word"
+  },
   "docBuckets": ["vesselSafety", "partnershipSafety", "insurance", "travel", "templates", "agreements", "documentation"],
   "labels": {
     "correspondence": "Partnership Correspondence",

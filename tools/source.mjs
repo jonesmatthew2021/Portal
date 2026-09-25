@@ -80,7 +80,7 @@ const VESSEL_SHAPE = [
   ["elearningCodes", "string[]"], ["noExpiryCodes", "string[]"], ["elearningGroups", "string[]"],
   ["certStated", "object"], ["vesselFacts", "object"], ["covers", "array"],
   ["renewalNeeds", "object"], ["evidenceKinds", "object"], ["neverRecognised.codes", "string[]"],
-  ["neverRecognised.why", "string"],
+  ["neverRecognised.why", "string"], ["registerEvidenced.codes", "string[]"], ["registerEvidenced.why", "string"],
   ["certPageNotes", "string[]"], ["tickets", "object"],
   ["docBuckets", "string[]"], ["labels", "object"], ["qualColumns", "array"], ["crewFolders", "object"],
 ];
@@ -207,6 +207,10 @@ export function checkVessel(vessel, from = "source/vessel.json") {
   /* The columns a recognition can never fill (MO70 s 7(2)(b)). */
   vessel.neverRecognised.codes.forEach((c, i) => {
     if (!columnCodes.has(String(c).trim().toUpperCase())) throw wrong("neverRecognised.codes[" + i + "]", "one of the codes in qualColumns");
+  });
+  /* The columns a register page stands for (the reader's registerPage). */
+  vessel.registerEvidenced.codes.forEach((c, i) => {
+    if (!columnCodes.has(String(c).trim().toUpperCase())) throw wrong("registerEvidenced.codes[" + i + "]", "one of the codes in qualColumns");
   });
   return vessel;
 }

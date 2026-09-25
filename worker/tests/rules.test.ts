@@ -1218,6 +1218,11 @@ test("checkVessel asks the renewal, evidence and recognition tables the same que
     () => checkVessel({ ...vessel, neverRecognised: { codes: ["QL-99"], why: "MO70 s 7\\(2\\)\\(b\\)" } }, "a vessel file"),
     /"neverRecognised.codes\[0\]" - it must be one of the codes in qualColumns/,
   );
+  assert.throws(
+    () => checkVessel({ ...vessel, registerEvidenced: { codes: ["CS-99"], why: "the office's register" } }, "a vessel file"),
+    /"registerEvidenced.codes\[0\]" - it must be one of the codes in qualColumns/,
+  );
+  assert.deepEqual(vessel.registerEvidenced.codes, ["CS-03", "CS-04"], "the two cargo-system approvals the office keeps in a register, and nothing else");
   assert.equal(checkVessel(vessel), vessel, "the file as it is passes all three");
   // Every entry carries the clause it comes from: the law's mapping is data
   // somebody can read against the order, not a number in the code.

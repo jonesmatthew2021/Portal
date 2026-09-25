@@ -109,6 +109,10 @@ export type Vessel = {
    *  marine cook certificate is not one of the classes AMSA may recognise
    *  (MO70 s 7(2)(b)). */
   neverRecognised: { codes: string[]; why: string };
+  /** The columns a register page, approval listing or spreadsheet extract
+   *  may stand as evidence for: the approvals the office keeps in a register
+   *  rather than on a certificate. Any other such page is not a certificate. */
+  registerEvidenced: { codes: string[]; why: string };
   certPageNotes: string[];
   tickets: Record<string, { grade: number; stream: string; short: string }>;
   docBuckets: string[];
@@ -144,7 +148,7 @@ const SHAPE: [string, Kind][] = [
   ["elearningCodes", "string[]"], ["noExpiryCodes", "string[]"], ["elearningGroups", "string[]"],
   ["certStated", "object"], ["vesselFacts", "object"], ["covers", "array"],
   ["renewalNeeds", "object"], ["evidenceKinds", "object"], ["neverRecognised.codes", "string[]"],
-  ["neverRecognised.why", "string"],
+  ["neverRecognised.why", "string"], ["registerEvidenced.codes", "string[]"], ["registerEvidenced.why", "string"],
   ["certPageNotes", "string[]"], ["tickets", "object"],
   ["docBuckets", "string[]"], ["labels", "object"], ["qualColumns", "array"], ["crewFolders", "object"],
 ];
@@ -270,6 +274,11 @@ export function checkVessel(value: unknown, from = "source/vessel.json"): Vessel
    * not a column would bar nothing and say nothing about it. */
   v.neverRecognised.codes.forEach((c, i) => {
     if (!columnCodes.has(String(c).trim().toUpperCase())) throw wrong(`neverRecognised.codes[${i}]`, "one of the codes in qualColumns");
+  });
+  /* The columns a register page stands for: a code that is not a column
+     would let a register page count for nothing anybody could see. */
+  v.registerEvidenced.codes.forEach((c, i) => {
+    if (!columnCodes.has(String(c).trim().toUpperCase())) throw wrong(`registerEvidenced.codes[${i}]`, "one of the codes in qualColumns");
   });
   return v;
 }

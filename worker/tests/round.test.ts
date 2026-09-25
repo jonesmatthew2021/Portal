@@ -18,7 +18,7 @@ import analyse, { compareMatrix, conditionsFrom, extract, refile, topUpParticula
 import readOne from "../src/routes/read-one.js";
 import restoreFile from "../src/routes/restore-file.js";
 import { MAX_BYTES } from "../src/lib/shared-state.js";
-import { OUT_OF_CREDIT, READING_UNAVAILABLE, READING_VERSION, certificateStanding } from "../src/lib/analysis.js";
+import { OUT_OF_CREDIT, READING_UNAVAILABLE, READING_VERSION, certificateStanding, codeFor } from "../src/lib/analysis.js";
 import { KeptInPlace, ensureDocumentColumns, filingName, forgetDocumentColumns, purgeDocument, relocateToRemovedBlob, removeDocument, restoreDocument, safeName } from "../src/db/documents.js";
 import { replaceSingleFile } from "../src/db/single-file.js";
 import { saveDocument } from "../src/lib/shared-state.js";
@@ -1006,6 +1006,7 @@ const smartPortal = async (docs: { id: string; filename: string; reading: Record
     ["QL-08", "Master <24m NC", "Qualification"],
     ["PT-02", "Enter and Work in Confined Spaces - RIIWHS202E", "Permit to Work"],
     ["PT-03", "Work Safely at Heights - RIIWHS204E", "Permit to Work"],
+    ["CS-04", "Cargo System - Trainer - Practical", "Cargo System"],
   ];
   doc.quals.cols.push(...more);
   doc.quals.rows[0][3].push(...more.map(() => ""));
@@ -1092,6 +1093,100 @@ test("what it is for: a guess fills nothing, and a reading made before the new q
   assert.equal(evansCell(portal, "QL-08"), "", "a guess fills nothing");
   assert.equal(evansCell(portal, "QL-04"), "2031-05-26", "the old reading's one code, as before");
   assert.deepEqual((await certificateStanding()).notOnMatrix, [], "a guess is still the reader's answer that the paper is the matrix's business");
+});
+
+test("a register page counts only for the columns the office keeps in a register", async () => {
+  /* The office records the cargo-system approvals in a register, not on a
+     certificate (the vessel file's registerEvidenced: CS-03 and CS-04). A
+     register page filed for CS-04 that the reader holds to be evidence for
+     it fills the cell, with the line for a quick look. */
+  const { portal, env } = await smartPortal([{ id: "reg", filename: "EVANS, Brenton - CS-04 Cargo System - Trainer - Practical.pdf",
+    reading: { certificateTitle: "Cargo system approvals register", registerPage: true, qualCode: "CS-04", codeConfidence: "medium",
+      columns: [{ code: "CS-04", confidence: "medium", why: "listed as an approved trainer on the register" }] } }]);
+  await worker.scheduled({} as never, env as never);
+  assert.equal(evansCell(portal, "CS-04"), "2031-05-26", "filled");
+  assert.deepEqual(await roundNotes(portal, "placed"), ["EVANS, Brenton — CS-04: placed by the reading (listed as an approved trainer on the register)"]);
+
+  // The same page filed for QL-01, read today: not a certificate, so nothing.
+  const other = await unreadPortal(1);
+  other.portal.rows.splice(other.portal.rows.findIndex((r) => r.id === "c2"), 1);
+  const u1 = other.portal.rows.find((r) => r.id === "u1")!;
+  u1.filename = "EVANS, Brenton - QL-01 Master.pdf";
+  const model = modelAnswers(() => ({ status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans", registerPage: true,
+    columns: [{ code: "QL-01", confidence: "medium", why: "listed on the register" }] }) }));
+  try {
+    await extract([["QL-01", "Master"], ["QL-17", "Medical"]], 4);
+  } finally {
+    model.restore();
+  }
+  const doc = other.portal.doc();
+  const out = await compareMatrix(doc.quals, null, asKnownPerson(doc.people));
+  assert.deepEqual(out.claimed, [], "nothing filled - not even by the column in its name");
+  assert.deepEqual(out.notes.filter((n) => n.kind === "unreadable").map((n) => n.detail), ["A register page or listing, not a certificate."]);
+});
+
+test("the readings made before the question asked for every column are read again once, a few an hour, the ones with no code first", async () => {
+  /* 297 readable certificates on the live portal have no code: they go
+     first, the files the slash bug once named "2.pdf" at the very front;
+     then the ones whose filed column the reading disagrees with; then the
+     rest. Twenty an hour at most, and once each: the new keys, or the mark
+     a look that could not read the scan leaves, are all the memory there is. */
+  const { portal, bucket } = await unreadPortal(0);
+  // His boxes typed on Crew Details, so no look is paid for his particulars
+  // and the queue here is the columns' alone.
+  const withBoxes = portal.doc();
+  withBoxes.people = [{ id: "p1", name: "EVANS, Brenton", aliases: ["bRENTON"], msic: "MSIC 1", dob: "1980-01-01" }];
+  portal.state.data = JSON.stringify(withBoxes);
+  const old = (id: string, filename: string, r: Record<string, unknown>) => {
+    portal.rows.push({ ...billysTicket, id, person: "EVANS, Brenton", folder: "brenton", checksum: id, blobKey: `opms/Brenton - OPMS/${filename}`, filename, sizeBytes: 6, qualCode: null });
+    portal.blobs.set(`certificate-readings|r1/${id}.json`, JSON.stringify({ ...reading, holderName: "Brenton Evans", ...r }));
+  };
+  for (const [id, name] of [["rest", "rest.pdf"], ["filed", "EVANS, Brenton - QL-17 Medical.pdf"], ["nocode", "nocode.pdf"], ["two", "2 (2).pdf"]]) {
+    await bucket.put(`opms/Brenton - OPMS/${name}`, bytesOf("a scan"));
+  }
+  old("rest", "rest.pdf", { qualCode: "QL-01", codeConfidence: "high" });
+  old("filed", "EVANS, Brenton - QL-17 Medical.pdf", { qualCode: "QL-01", codeConfidence: "high" });
+  old("nocode", "nocode.pdf", { qualCode: null, codeConfidence: "low", expiresOn: "2030-01-01" });
+  old("two", "2 (2).pdf", { qualCode: null, codeConfidence: "low" });
+  // A loose scan in a name the register does not know: exactly what the
+  // pick off the register is for, so it is looked at too.
+  portal.rows.push({ ...billysTicket, id: "stranger", person: "Other", folder: "other", checksum: "stranger", blobKey: "opms/Other/stranger.pdf", filename: "stranger.pdf", sizeBytes: 6, qualCode: null });
+  portal.blobs.set("certificate-readings|r1/stranger.json", JSON.stringify({ ...reading, holderName: "Bill" }));
+  await bucket.put("opms/Other/stranger.pdf", bytesOf("a scan"));
+  // Already asked the new question: never read again.
+  old("asked", "asked.pdf", { columns: [{ code: "QL-01", confidence: "high", why: null }], holder: null, endorsements: [], units: [], capacities: [] });
+  // Evans's own ticket (tagged QL-01) has an old reading too: one of the rest.
+  const model = modelAnswers((n) => {
+    const asked = model.calls[n - 1];
+    if (asked.includes("nocode.pdf")) return { status: 400, body: BAD_PDF_BODY };
+    return { status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans", expiresOn: "2099-12-31",
+      columns: [{ code: "QL-01", confidence: "medium", why: "a Master ticket" }], holder: { person: 1, confidence: "high", why: "name printed", others: [] } }) };
+  });
+  const codes: [string, string][] = [["QL-01", "Master"], ["QL-17", "Medical"]];
+  const filenameOf = (call: string) => (/Filename: ([^\n\\]+)/.exec(call) || [])[1];
+  try {
+    // One an hour, so the order is the queue's and nothing else's.
+    let read = 0;
+    for (let hour = 0; hour < 6; hour++) read += (await topUpParticulars(codes, { cap: 1, timeLeft: () => true })).read;
+    assert.deepEqual(model.calls.map(filenameOf), ["2 (2).pdf", "nocode.pdf", "EVANS, Brenton - QL-17 Medical.pdf", "master.pdf", "rest.pdf", "stranger.pdf"],
+      "the once-misnamed file first, then no code, then the filing the reading disagrees with, then the rest, the loose scan included");
+    assert.equal(read, 6, "one each");
+    const capped = await topUpParticulars(codes, { cap: 20, timeLeft: () => true });
+    assert.equal(capped.read, 0);
+    assert.equal(model.calls.length, 6, "each read once, the one it could not read included, and the one already asked never");
+  } finally {
+    model.restore();
+  }
+  const two = JSON.parse(portal.blobs.get("certificate-readings|r1/two.json")!);
+  assert.deepEqual(two.columns, [{ code: "QL-01", confidence: "medium", why: "a Master ticket" }], "the new keys are added");
+  assert.equal(two.holder.person, "EVANS, Brenton", "whose it is, off the register");
+  assert.equal(two.qualCode, null, "nothing the first look read is moved, its one code included");
+  assert.equal(two.expiresOn, reading.expiresOn, "nor its date");
+  assert.equal(codeFor({ filename: "2 (2).pdf" }, two, [], [["QL-01", "Master"]]), "QL-01", "the columns place it now, so the refile can name it");
+  const nocode = JSON.parse(portal.blobs.get("certificate-readings|r1/nocode.json")!);
+  assert.equal("columns" in nocode, false, "a look that could not read the scan adds no columns: the first reading stands");
+  assert.equal(nocode.columnsAsked, true, "but it is marked, so it is not paid for again");
+  assert.equal(nocode.expiresOn, "2030-01-01");
 });
 
 test("on file, not on the matrix: a readable document with no column anywhere is listed, and nothing else is", async () => {
@@ -4394,16 +4489,26 @@ test("the reminders ask the users table only for columns it has", () => {
 type PCert = { id: string; checksum: string; code: string | null; person?: string; filedOn?: string; reading?: Record<string, unknown> | null };
 /** A reading made as the question is asked now: every key there, empty
  *  where the document printed nothing, so nothing about it is read again. */
-const newReading = (over: Record<string, unknown>) => ({
-  ...reading, holderName: "Brenton Evans", documentNumber: null, holderBirthDate: null,
-  endorsements: [], units: [], capacities: [], isRecognition: false, recognises: null,
-  assessedOn: null, conditions: null, evidenceKind: null, ...over,
-});
-/** A reading made before any of those keys was asked for: not one of them. */
+const newReading = (over: Record<string, unknown>) => {
+  const r: Record<string, unknown> = {
+    ...reading, holderName: "Brenton Evans", documentNumber: null, holderBirthDate: null,
+    endorsements: [], units: [], capacities: [], isRecognition: false, recognises: null,
+    assessedOn: null, conditions: null, evidenceKind: null, holder: null, ...over,
+  };
+  // Made now, so it lists its columns: the one code it carries, as sure as it was.
+  if (!("columns" in over)) r.columns = r.qualCode ? [{ code: r.qualCode, confidence: r.codeConfidence || "high", why: null }] : [];
+  return r;
+};
+/** A reading made before any of those keys was asked for: not one of them.
+ *  It does carry the columns and the holder, though they were asked for
+ *  later still: the one look every older reading gets for those is its own
+ *  story (the "read again once, a few an hour" test), and these tests are
+ *  about what the particulars and the back-fill pay for. */
 const oldReading = (over: Record<string, unknown>) => {
-  const r: Record<string, unknown> = { ...reading, holderName: "Brenton Evans", ...over };
+  const r: Record<string, unknown> = { ...reading, holderName: "Brenton Evans", holder: null, ...over };
   for (const key of ["documentNumber", "holderBirthDate", "endorsements", "units", "capacities",
     "isRecognition", "recognises", "assessedOn", "conditions", "evidenceKind"]) delete r[key];
+  if (!("columns" in over)) r.columns = r.qualCode ? [{ code: r.qualCode, confidence: r.codeConfidence || "high", why: null }] : [];
   return r;
 };
 const EVANS_P = { id: "p1", name: "EVANS, Brenton", aliases: ["bRENTON"] };
@@ -4733,7 +4838,9 @@ test("no more than twenty certificates are read again in an hour; the rest wait 
   } finally {
     second.restore();
   }
-  assert.equal(second.calls.length, 5, "the other five the next");
+  // His own Master ticket's older reading has its one look for the columns
+  // and whose it is too, now there is room under the cap.
+  assert.equal(second.calls.filter((c) => /card-\d+/.test(c)).length, 5, "the other five the next");
   assert.equal(portal.doc().people.filter((p: { msic?: string }) => p.msic).length, 25, "every box filled by then");
 });
 

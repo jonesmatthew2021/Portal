@@ -1991,6 +1991,29 @@ function keysAdded(again: Reading, held: Reading, gives: boolean, particulars: b
   return out as Partial<Reading>;
 }
 
+/** The names the slash in three column titles once cut a certificate's
+ *  filename down to ("2.pdf", "2 (2).pdf", "5).pdf"), before 6147318. */
+const ONCE_MISNAMED = /^\d+( \(\d+\))?\.pdf$|^\d\)\.pdf$/;
+
+/**
+ * What a second look adds for the columns and the holder, where the reading
+ * held was made before the question asked for them: every column the
+ * reader gives and whose it is. Nothing the first look read is moved - not
+ * its date and not its one code (qualCode, which the MSIC card rule still
+ * reads): the columns are what place the document from now on (columnsFor). A second look that could not read the
+ * scan adds none of it - the first reading stands, placed as it always
+ * was - and leaves the mark, so it is not paid for again.
+ */
+function columnsAdded(again: Reading, held: Reading): Partial<Reading> {
+  if ("columns" in held) return {};
+  if (!again.readable || !Array.isArray(again.columns)) return { columnsAsked: true };
+  return {
+    columns: again.columns,
+    registerPage: again.registerPage === true,
+    holder: again.holder ?? null,
+  };
+}
+
 /**
  * The readings made before the question asked what it asks now, topped up -
  * a few an hour, never the whole crew read again (that is $15-25 of
@@ -2143,7 +2166,7 @@ export async function topUpParticulars(
      a certificate read for the keys that came after them is a list of one,
      with nothing to wait for. The particulars are pushed first, so the
      hour's cap is theirs before the back-fill's. */
-  const jobs: { me: string; certs: Cert[]; wants: "msic" | "dob" | null }[] = [];
+  const jobs: { me: string | null; certs: Cert[]; wants: "msic" | "dob" | null }[] = [];
   const asked = new Set<string>();
   /** Every certificate that could answer for a key it has not got, with the
    *  man it is filed under, gathered as each man's are worked out. */
@@ -2221,6 +2244,33 @@ export async function topUpParticulars(
     const cert: Cert = { row, reading, code: String(codeFor(row, reading, eqTable, cols) || "").trim().toUpperCase(), at };
     if (wantsMore(cert)) missing.push({ me, cert });
   }
+  /* The readings made before the question asked for every column and whose
+     a certificate is off the register (columns, holder): every readable one,
+     whoever it is filed under - a loose scan is exactly what the pick is for -
+     looked at once, after the particulars and before the back-fill below,
+     which a look for these fills as well. In order: the files the slash bug
+     once cut to "2.pdf" that still have no code (they keep that name until
+     a reading names a column), then the readings with no code at all, then
+     those whose filed column the reading disagrees with, then the rest. */
+  const smart: { cert: Cert; tier: number }[] = [];
+  for (const [at, row] of certs.entries()) {
+    const reading = held.get(readingKey(row));
+    if (!reading || reading.readable === false || "columns" in reading || reading.columnsAsked) continue;
+    const code = codeFor(row, reading, eqTable, cols);
+    const sure = !!reading.qualCode && reading.codeConfidence !== "low";
+    const tier = !code && ONCE_MISNAMED.test(row.filename) ? 0
+      : !sure ? 1
+      : filedAsFor(row, reading, eqTable, cols) ? 2 : 3;
+    smart.push({ cert: { row, reading, code: String(code || "").trim().toUpperCase(), at }, tier });
+  }
+  smart.sort((a, b) => a.tier - b.tier || a.cert.at - b.cert.at);
+  for (const { cert } of smart) {
+    const key = readingKey(cert.row);
+    if (asked.has(key)) continue;
+    asked.add(key);
+    jobs.push({ me: null, certs: [cert], wants: null });
+  }
+
   // One look per certificate, whatever it is missing: the question asks for
   // every key at once, so a certificate a man's particulars already claim
   // this hour is not read a second time for these.
@@ -2232,11 +2282,13 @@ export async function topUpParticulars(
   }
 
   let left = opts.cap;
-  const readOne = async (c: Cert, me: string, particulars: boolean): Promise<Reading | "halt" | "skip"> => {
+  // The question's context, once for the pass.
+  const ask = await readingAsk();
+  const readOne = async (c: Cert, me: string | null, particulars: boolean): Promise<Reading | "halt" | "skip"> => {
     if (out.stopped || !opts.timeLeft()) return "halt";
     let again: Reading;
     try {
-      again = await readCertificate(c.row, codes);
+      again = await readCertificate(c.row, codes, ask);
     } catch (e) {
       // The account, not the scan: nothing stored, and nothing more asked
       // this hour. Anything else costs this one certificate its turn.
@@ -2254,14 +2306,19 @@ export async function topUpParticulars(
     // the refile would move the certificate on it, and this pass moves
     // nothing. His own name is kept where the first look had none, so the
     // rule, which takes nothing from a certificate naming nobody, can use it.
+    /* A look for the columns and the holder (`me` null) is held against
+       nobody: what the document is for and whose it is are the very
+       questions, and the refile and the round weigh the answer
+       (whoseCertificate). */
     const holder = again.readable ? again.holderName ?? null : null;
-    const his = !!holder && register.nameOf(holder) === me;
+    const his = !!holder && (me === null || register.nameOf(holder) === me);
     const gives = again.readable && (!holder || his);
     const topped: Reading = {
       ...c.reading,
       holderName: c.reading.holderName ?? (his ? holder : null),
       ...keysAdded(again, c.reading, gives, particulars),
-      particularsAsked: true,
+      ...columnsAdded(again, c.reading),
+      ...(me === null ? {} : { particularsAsked: true }),
     };
     try {
       await store.setJSON(readingKey(c.row), topped);
@@ -2283,7 +2340,8 @@ export async function topUpParticulars(
     left -= job.certs.length;
     let used = 0;
     const wants = job.wants;
-    const before = wants ? found(job.me, wants) : null;
+    const me = job.me;
+    const before = wants && me ? found(me, wants) : null;
     for (const c of job.certs) {
       const r = await readOne(c, job.me, !!wants);
       if (r === "halt") break;
@@ -2294,7 +2352,7 @@ export async function topUpParticulars(
       // needed. Only the rule's own answer counts - a date it throws out,
       // or one that only ties with another, leaves the search going. A
       // certificate read for the keys it is missing has nothing to wait for.
-      if (wants && found(job.me, wants) !== before) break;
+      if (wants && me && found(me, wants) !== before) break;
     }
     left += job.certs.length - used;
   };

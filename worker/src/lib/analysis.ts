@@ -206,6 +206,10 @@ export type Reading = {
    *  where the printed name alone does not say (whoseCertificate in
    *  source/shared/names.js decides whether the pick stands). */
   holder?: ReadingHolder | null;
+  /** Set where the hour looked at an older reading again for the columns
+   *  and the holder and could not read the scan: the first reading stands,
+   *  and it is not paid for again (topUpParticulars). */
+  columnsAsked?: boolean;
   notes?: string | null;
   /** The card, licence or certificate number as printed (on the MSIC card,
    *  the card number). Present, null or not, on every reading made since
@@ -863,9 +867,7 @@ export type PlacedColumn = {
  *  file's registerEvidenced): the office records some approvals in a
  *  register, not on a certificate. Nothing else takes one. */
 export function registerColumns(): string[] {
-  const listed = (vessel as { registerEvidenced?: { codes?: unknown } }).registerEvidenced;
-  const codes = listed && Array.isArray(listed.codes) ? listed.codes : [];
-  return codes.map((c) => String(c).trim().toUpperCase()).filter(Boolean);
+  return vessel.registerEvidenced.codes.map((c) => String(c).trim().toUpperCase()).filter(Boolean);
 }
 
 /**
