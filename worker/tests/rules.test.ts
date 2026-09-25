@@ -1871,6 +1871,9 @@ test("the reader's pick: a given name his only by a letter or two, an initial or
   assert.deepEqual(john("Joan SMITH"), { person: "SMITH, John", line: "check" }, "a letter from his given name");
   assert.deepEqual(john("Johnny SMITH"), { person: "SMITH, John", line: "check" }, "a longer form of it");
   assert.deepEqual(john("J. SMITH"), { person: "SMITH, John", line: "check" }, "his initial");
+  assert.deepEqual(john("SMITH"), { person: "SMITH, John", line: "check" }, "his surname alone: less to go on than his initial, checked the same");
+  assert.deepEqual(john("John"), { person: "SMITH, John", line: "check" }, "his given name alone");
+  assert.deepEqual(readerPlaces("SMITH", { person: "SMITH, John", confidence: "high", others: [] }, "Loose", people), { person: "SMITH, John", line: "check" });
   assert.deepEqual(john("Joan SMITH", "medium"), { person: "SMITH, John", line: "check" }, "a maybe is checked as before");
   assert.deepEqual(readerPlaces("Joan SMITH", { person: "SMITH, John", confidence: "high", others: [] }, "Loose", people), { person: "SMITH, John", line: "check" },
     "the refile labels it with the line");

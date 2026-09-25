@@ -608,7 +608,8 @@ on any line that still names this one.
     it says it could be somebody else (two men with that word, a word of
     another man's beside it, or a given name or initial that is none of
     his - a sure pick like that is placed with "check", and so is one whose
-    other name is his only by an initial, a short form or a letter or two);
+    other name is his only by an initial, a short form or a letter or two,
+    or is not printed at all - "JITENDER" alone);
     never with somebody else in mind (`others`, however written, or
     another register man named in its reasons); never takes a certificate
     whose printed name fits the man it is filed under, and moves one out of

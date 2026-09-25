@@ -217,9 +217,12 @@ function pickWeighed(printed, holder, people) {
   const near = unmatched.length ? rest.filter((w) => unmatched.some((u) => pieceCanBe(w, u))) : [];
   const contradicts = shares && unmatched.length > 0 && rest.length > 0 && !near.length;
   const loose = shares && near.length > 0;
+  // Only part of his name and nothing else ("JITENDER" alone): his word,
+  // but less to go on than "R. JITENDER", so checked the same.
+  const partial = shares && rest.length === 0 && unmatched.length > 0;
   const doubt = everyoneElses || contradicts || elsewhere;
 
-  if (sure) return { person, shares, line: !shares ? "add" : doubt || loose ? "check" : null };
+  if (sure) return { person, shares, line: !shares ? "add" : doubt || loose || partial ? "check" : null };
   return shares && !doubt ? { person, shares, line: "check" } : null;
 }
 
