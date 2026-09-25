@@ -3,7 +3,7 @@ import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
 import { canonicaliseCertificate, filingName, refileCertificate, relocateToRemovedBlob } from "../db/documents.js";
 import { filedCodeIn } from "../../../source/shared/filed-as.js";
-import { holderOnMatrix, readCertificate } from "./analyse.js";
+import { holderFor, readCertificate } from "./analyse.js";
 import { codeFor, equivalences, ModelRefusal, plainLine, readingKey, readingStore, type Reading } from "../lib/analysis.js";
 import { imageToPdf } from "../lib/pdf-wrap.js";
 import { getEnv } from "../env.js";
@@ -32,8 +32,13 @@ export default async (req: Request): Promise<Response> => {
 
   const state = await getEnv().DB.prepare("SELECT data FROM portal_state LIMIT 1").first<{ data: string }>();
   let quals: { cols?: string[][]; rows?: string[][] } = {};
+  // The crew register too: whose a certificate is where the printed name
+  // alone does not say is the same question the hourly refile asks (holderFor).
+  let people: { name?: string; aliases?: string[] }[] = [];
   try {
-    quals = JSON.parse(state?.data || "{}")?.quals || {};
+    const doc = JSON.parse(state?.data || "{}");
+    quals = doc?.quals || {};
+    people = Array.isArray(doc?.people) ? doc.people : [];
   } catch {
     quals = {};
   }
@@ -82,7 +87,7 @@ export default async (req: Request): Promise<Response> => {
   }
 
   let current = row;
-  const holder = reading.readable && reading.holderName ? holderOnMatrix(reading.holderName, names) : null;
+  const holder = reading.readable && reading.holderName ? holderFor(row, reading, names, people) : null;
   // Whose it is, written on the row. The file stays in the folder the office
   // put it in — see refileCertificate for why it no longer moves.
   if (holder && (current.person || "") !== holder) {

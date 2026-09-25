@@ -19,7 +19,7 @@ import { asKey } from "../src/db/cert-home.js";
 import { canonicalPersonName } from "../src/db/person-name.js";
 import { setEnv } from "../src/env.js";
 import { vessel, checkVessel, vesselNow } from "../src/vessel.js";
-import { crewRowsOnly, crewRegister, nameLetters, registerWords, nameIsSomebodyElse } from "../../source/shared/names.js";
+import { crewRowsOnly, crewRegister, nameLetters, registerWords, nameIsSomebodyElse, readAsLine, readerPick, whoseCertificate } from "../../source/shared/names.js";
 import { RED_DAYS, daysUntil, hasExpired } from "../../source/shared/bands.js";
 import * as reminders from "../../source/shared/reminders.js";
 import { particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, ticketCodesIn, isMsicCard, openToCertificates } from "../../source/shared/particulars.js";
@@ -1727,4 +1727,27 @@ test("evidence: a recognition the round could place nowhere still bars an extens
   const elsewhere = { ...unplaced, code: "QL-09" };
   assert.deepEqual(coveredBy("QL-01", "EVANS, Brenton", [letter, ticket, elsewhere], readings, EV_TODAY, EV_RULES),
     { kind: "extension", until: "2026-11-25", rowId: "ext" }, "a recognition for another column says nothing about this one");
+});
+
+test("the reader's pick of a person: a guess, two people or nobody on the register is no pick; medium needs a word in common", () => {
+  const people = [{ name: "SITTIYOS, Kachin", aliases: ["bILLY"] }, { name: "JITENDER, Rohin", aliases: [] }];
+  const pick = (printed: string, person: string | null, confidence: string, others: string[] = []) =>
+    readerPick(printed, { person, confidence, others }, people);
+  assert.deepEqual(pick("Bill", "SITTIYOS, Kachin", "high"), { person: "SITTIYOS, Kachin", line: "add" }, "sure, and nothing in common: his, and the name is to be added");
+  assert.deepEqual(pick("K SITTIYOS", "SITTIYOS, Kachin", "high"), { person: "SITTIYOS, Kachin", line: null }, "sure, and his surname: his, nothing to ask");
+  assert.deepEqual(pick("K SITTIYOS", "SITTIYOS, Kachin", "medium"), { person: "SITTIYOS, Kachin", line: "check" }, "a maybe with his surname: his, to be checked");
+  assert.equal(pick("Rohin Jitender", "SITTIYOS, Kachin", "medium"), null, "a maybe with nothing in common is refused");
+  assert.equal(pick("Bill", "SITTIYOS, Kachin", "low"), null, "a guess is no pick");
+  assert.equal(pick("Bill", "SITTIYOS, Kachin", "high", ["JITENDER, Rohin"]), null, "never two people");
+  assert.equal(pick("Bill", "ROSE, Somebody", "high"), null, "nobody on the register");
+  assert.equal(pick("", "SITTIYOS, Kachin", "high"), null, "a document that prints no name is placed by nothing the reader says");
+  assert.equal(pick("Bill", null, "high"), null);
+  assert.equal(readAsLine("GMDSS", "SITTIYOS, Kachin", " Bill ", "add"), `GMDSS read as SITTIYOS, Kachin's — add "Bill" to their names on Crew Details`);
+  assert.equal(readAsLine("GMDSS", "SITTIYOS, Kachin", "Bill", "check"), `GMDSS read as SITTIYOS, Kachin's — check, and add "Bill" to their names on Crew Details`);
+  // Whose it is: the register's spelling first, and a pick never takes a
+  // document from the man whose name it fits.
+  assert.deepEqual(whoseCertificate("bILLY", null, "SITTIYOS, Kachin", "SITTIYOS, Kachin", people), { his: true, line: null }, "an alias is his");
+  assert.deepEqual(whoseCertificate("Bill", { person: "SITTIYOS, Kachin", confidence: "high", others: [] }, "SITTIYOS, Kachin", "SITTIYOS, Kachin", people), { his: true, line: "add" });
+  assert.deepEqual(whoseCertificate("Kachin Sittiyos", { person: "JITENDER, Rohin", confidence: "high", others: [] }, "SITTIYOS, Kachin", "SITTIYOS, Kachin", people), { his: true, line: null }, "the printed name is his; the pick is not asked");
+  assert.deepEqual(whoseCertificate("Bill", { person: "JITENDER, Rohin", confidence: "high", others: [] }, "SITTIYOS, Kachin", "SITTIYOS, Kachin", people), { his: false, line: null }, "a pick of another man, on a name that fits neither: not his");
 });

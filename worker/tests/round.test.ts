@@ -34,7 +34,7 @@ import importSingle from "../src/routes/import-single.js";
 import worker, { hourWaits, hourDeadline, syncLastAnswer } from "../src/index.js";
 import { graphBudget } from "../src/files/store.js";
 import { writeZip, readZip, partOf, partText, datedWorkbookName } from "../../source/shared/workbook.js";
-import { asKnownPerson, crewRegister } from "../../source/shared/names.js";
+import { asKnownPerson, crewRegister, readAsLine, readerPick, whoseCertificate } from "../../source/shared/names.js";
 import { backupDue, backupName, namesToDrop, folderAllowed, nightlyBackup } from "../src/lib/backup.js";
 import { REMINDER_USERS_SQL, NO_EMAIL, UNFINISHED, OUT_OF_TIME, reminderLimits, reminderWaits, weeklyReminders } from "../src/lib/reminders.js";
 import { vessel, vesselNow } from "../src/vessel.js";
@@ -858,6 +858,133 @@ test("a long name keeps the title's closing bracket, and the refile after rename
   assert.equal(bucket.text("opms/Brenton - OPMS/" + cut), null, "and the cut name is not left behind");
   const again = (await (await refile([long])).json()) as { moved: unknown[] };
   assert.deepEqual(again.moved, [], "the next refile renames nothing");
+});
+
+/* ------------------------------------------------------------------------ *
+ * Whose a certificate is: the reader picks off the register.
+ * ------------------------------------------------------------------------ */
+
+/** Evans's portal with two more men on the matrix and the register -
+ *  SITTIYOS, Kachin and JITENDER, Rohin - and loose scans filed under
+ *  nobody the register knows, each with the reading given. */
+const crewPortal = async (loose: { id: string; reading: Record<string, unknown> }[], aliases: Record<string, string[]> = {}) => {
+  const made = await oneManPortal({ qualCode: null });
+  // Evans's own ticket gone, so every cell says only these.
+  made.portal.rows.splice(made.portal.rows.findIndex((r) => r.id === "c2"), 1);
+  await made.bucket.delete("opms/Brenton - OPMS/master.pdf");
+  const doc = made.portal.doc();
+  doc.quals.rows.push(["SITTIYOS, Kachin", "Cook", "", ["", ""]], ["JITENDER, Rohin", "GPH", "", ["", ""]]);
+  doc.people = [
+    { name: "EVANS, Brenton", aliases: ["bRENTON"] },
+    { name: "SITTIYOS, Kachin", aliases: aliases["SITTIYOS, Kachin"] || [] },
+    { name: "JITENDER, Rohin", aliases: [] },
+  ];
+  made.portal.state.data = JSON.stringify(doc);
+  for (const { id, reading: r } of loose) {
+    const key = `opms/Loose - OPMS/${id}.pdf`;
+    await made.bucket.put(key, bytesOf("a scan"));
+    made.portal.rows.push({ ...billysTicket, id, person: "Loose", folder: "loose", checksum: id, blobKey: key, filename: `${id}.pdf`, sizeBytes: 6, qualCode: null });
+    made.portal.blobs.set(`certificate-readings|r1/${id}.json`, JSON.stringify({ ...reading, expiresOn: "2031-05-26", columns: [{ code: "QL-01", confidence: "high", why: null }], ...r }));
+  }
+  made.bucket.made.length = 0;
+  const env = { DB: made.portal.db, FILES: made.bucket, FILE_STORE: "r2", ANTHROPIC_API_KEY: "k" };
+  return { ...made, env };
+};
+const cellOf = (portal: { doc: () => { quals: { rows: [string, string, string, string[]][] } } }, person: string) =>
+  portal.doc().quals.rows.find((r) => r[0] === person)![3][0];
+
+test("whose it is: the reader's pick stands where the printed name alone does not say, and the office is asked to add the name", async () => {
+  const { portal, env } = await crewPortal([
+    // Initials: the register reads the surname alone as the one Jitender.
+    { id: "jit", reading: { holderName: "R. JITENDER", holder: { person: "JITENDER, Rohin", confidence: "high", why: "surname and initial", others: [] } } },
+    // A nickname nobody has typed onto Crew Details: the reader knows it.
+    { id: "bill", reading: { holderName: "Bill", holder: { person: "SITTIYOS, Kachin", confidence: "high", why: "Bill is what Kachin goes by", others: [] } } },
+  ]);
+  await worker.scheduled({} as never, env as never);
+  assert.equal(portal.rows.find((r) => r.id === "jit")!.person, "JITENDER, Rohin", "labelled for the man the register reads the initials as");
+  assert.equal(portal.rows.find((r) => r.id === "bill")!.person, "SITTIYOS, Kachin", "labelled for the reader's pick");
+  assert.equal(cellOf(portal, "JITENDER, Rohin"), "2031-05-26", "his cell filled");
+  assert.equal(cellOf(portal, "SITTIYOS, Kachin"), "2031-05-26", "and Kachin's");
+
+  const page = await certificateStanding();
+  assert.deepEqual(page.dates.map((d) => [d.person, d.code, d.expires]).sort(),
+    [["JITENDER, ROHIN", "QL-01", "2031-05-26"], ["SITTIYOS, KACHIN", "QL-01", "2031-05-26"]], "the page's cells agree with the round");
+  assert.deepEqual(page.readAs.map((r) => readAsLine(r.certificate, "SITTIYOS, Kachin", r.printed, r.line)),
+    [`Master <500GT read as SITTIYOS, Kachin's — add "Bill" to their names on Crew Details`],
+    "one line, for the name the register does not carry: the initials are already his");
+  const doc = portal.doc();
+  const out = await compareMatrix(doc.quals, null, asKnownPerson(doc.people));
+  assert.deepEqual(out.notes.filter((n) => n.kind === "read-as").map((n) => n.detail),
+    [`Master <500GT read as SITTIYOS, Kachin's — add "Bill" to their names on Crew Details`], "the round says the same sentence");
+});
+
+test("whose it is: a spelling on Crew Details places the certificate without the reader", async () => {
+  // Matthew's example was "Bill" against the alias "Billy": the register
+  // matches a spelling whole, so the alias here is the printed spelling.
+  const { portal, env } = await crewPortal([
+    { id: "billy", reading: { holderName: "Billy", holder: null } },
+  ], { "SITTIYOS, Kachin": ["Billy"] });
+  await worker.scheduled({} as never, env as never);
+  assert.equal(portal.rows.find((r) => r.id === "billy")!.person, "SITTIYOS, Kachin");
+  assert.equal(cellOf(portal, "SITTIYOS, Kachin"), "2031-05-26");
+  assert.deepEqual((await certificateStanding()).readAs, [], "nothing to add: the name is already his");
+});
+
+test("whose it is: a medium pick is checked, and never lands on a man the printed name has nothing in common with", async () => {
+  const { portal, env } = await crewPortal([
+    // A surname and a misspelt given name: the reader's medium, sharing the surname.
+    { id: "kach", reading: { holderName: "Kachn SITTIYOS-WONG", holder: { person: "SITTIYOS, Kachin", confidence: "medium", why: "surname matches, given name misspelt", others: [] } } },
+    // A medium pick with nothing in common: refused.
+    { id: "rose", reading: { holderName: "Rohan Jitendra", holder: { person: "EVANS, Brenton", confidence: "medium", why: "a guess", others: [] } } },
+    // Two could fit: never two people.
+    { id: "two", reading: { holderName: "K. Wong", holder: { person: "SITTIYOS, Kachin", confidence: "medium", why: "could be Kachin or Rohin", others: ["JITENDER, Rohin"] } } },
+  ]);
+  await worker.scheduled({} as never, env as never);
+  assert.equal(portal.rows.find((r) => r.id === "kach")!.person, "SITTIYOS, Kachin", "a medium pick that shares his surname places it");
+  assert.equal(portal.rows.find((r) => r.id === "rose")!.person, "Loose", "a medium pick that shares nothing places nothing");
+  assert.equal(portal.rows.find((r) => r.id === "two")!.person, "Loose", "a pick with somebody else in mind is no pick");
+  assert.equal(cellOf(portal, "SITTIYOS, Kachin"), "2031-05-26");
+  assert.equal(cellOf(portal, "EVANS, Brenton"), "", "nothing in Evans's cell");
+  const page = await certificateStanding();
+  assert.deepEqual(page.readAs.map((r) => readAsLine(r.certificate, "SITTIYOS, Kachin", r.printed, r.line)),
+    [`Master <500GT read as SITTIYOS, Kachin's — check, and add "Kachn SITTIYOS-WONG" to their names on Crew Details`], "the medium line says check");
+  // Two candidates: no pick, whatever the confidence.
+  assert.equal(readerPick("R. SITTIYOS", { person: "SITTIYOS, Kachin", confidence: "high", others: ["JITENDER, Rohin"] }, portal.doc().people), null, "never two people");
+});
+
+test("whose it is: the reader never takes a certificate printed in another crew member's name", async () => {
+  /* Filed in Kachin's folder, printed "Brenton Evans", and the reader
+     picks Kachin: the printed name is somebody on the register, so the
+     pick is not asked at all, and the note says whose name it is in. */
+  const { portal } = await crewPortal([]);
+  const key = "opms/Billy - OPMS/theirs.pdf";
+  portal.rows.push({ ...billysTicket, id: "theirs", person: "SITTIYOS, Kachin", checksum: "theirs", blobKey: key, filename: "theirs.pdf", qualCode: null });
+  portal.blobs.set("certificate-readings|r1/theirs.json", JSON.stringify({ ...reading, holderName: "Brenton Evans", expiresOn: "2031-05-26",
+    columns: [{ code: "QL-01", confidence: "high", why: null }], holder: { person: "SITTIYOS, Kachin", confidence: "high", why: "filed in his folder", others: [] } }));
+  const doc = portal.doc();
+  const out = await compareMatrix(doc.quals, null, asKnownPerson(doc.people));
+  assert.deepEqual(out.claimed, [], "Kachin's cell takes nothing");
+  assert.deepEqual(out.notes.filter((n) => n.kind === "name-mismatch").map((n) => n.detail),
+    ["Filed under SITTIYOS, Kachin, but the certificate is in the name of Brenton Evans."], "the existing note");
+  assert.deepEqual((await certificateStanding()).dates, [], "and the page's cells agree");
+  assert.equal(whoseCertificate("Brenton Evans", { person: "SITTIYOS, Kachin", confidence: "high", others: [] }, "SITTIYOS, Kachin", "SITTIYOS, Kachin", doc.people).his, false);
+});
+
+test("whose it is: the reader is shown the register numbered, and its number comes back as the register's name", async () => {
+  const { portal } = await unreadPortal(1);
+  const doc = portal.doc();
+  doc.people = [{ name: "EVANS, Brenton", aliases: ["bRENTON"] }, { name: "SITTIYOS, Kachin", aliases: [] }];
+  portal.state.data = JSON.stringify(doc);
+  const model = modelAnswers(() => ({ status: 200, body: readingStream({ ...reading, holderName: "Bill", holder: { person: 2, confidence: "high", why: "Bill is Kachin", others: [1, 9] } }) }));
+  try {
+    await extract([["QL-01", "Master"]], 4);
+  } finally {
+    model.restore();
+  }
+  assert.ok(model.calls[0].includes("1. EVANS, Brenton (also: bRENTON)") && model.calls[0].includes("2. SITTIYOS, Kachin"), "the crew, numbered, with their other spellings");
+  const stored = JSON.parse(portal.blobs.get("certificate-readings|r1/unread-1.json")!);
+  assert.deepEqual(stored.holder, { person: "SITTIYOS, Kachin", confidence: "high", why: "Bill is Kachin", others: ["EVANS, Brenton"] },
+    "the number is the register's name; a number off the list is nobody");
 });
 
 test("on file, not on the matrix: a readable document with no column anywhere is listed, and nothing else is", async () => {

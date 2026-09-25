@@ -111,6 +111,124 @@ export function nameIsSomebodyElse(printed, filedUnder, known) {
 }
 
 /**
+ * The reader's pick of a person, where it stands.
+ *
+ * Names on certificates are all over the place - anyone can upload, and a
+ * printed "R. JITENDER", a surname alone, a transliteration, a married name
+ * or a nickname nobody has typed onto Crew Details yet all used to fill
+ * nothing. So the reader is shown the register, numbered, and asked which
+ * of these people the certificate is for (`holder` on the reading, the
+ * person already turned from a number into the register's name). This is
+ * the check that the pick is not absurd, and what the office is asked to do
+ * about it:
+ *
+ *   - no pick, a guess ("low"), or a pick the reader made with somebody
+ *     else in mind as well (`others`) - never two people - is no pick;
+ *   - the pick must be a person on the register, and the document must
+ *     print a name at all;
+ *   - "high" stands. Where the printed name shares no word with the man or
+ *     any of his spellings, it still stands - the reader may know "Bill"
+ *     is Kachin - and the office is asked to add the printed name to his
+ *     names ("add"), so the register stays the one place names live and the
+ *     next certificate does not need the reader's memory;
+ *   - "medium" stands only where the printed name shares a word with him,
+ *     and the office is asked to check it ("check"). A "medium" pick of a
+ *     man the printed name has nothing in common with is refused: the
+ *     reader may not put "Rohin Jitender" on "ROSE, Matthew" on a maybe.
+ *
+ * "Shares a word" is nameIsSomebodyElse's own question, not a second one.
+ * @param {unknown} printed the holder's name as read off the document
+ * @param {{ person?: unknown, confidence?: unknown, others?: unknown } | null | undefined} holder the reader's pick
+ * @param {Person[] | null | undefined} people the register
+ * @returns {{ person: string, line: "add" | "check" | null } | null}
+ */
+export function readerPick(printed, holder, people) {
+  if (!holder || !holder.person) return null;
+  if (Array.isArray(holder.others) && holder.others.length) return null;
+  const sure = holder.confidence === "high";
+  if (!sure && holder.confidence !== "medium") return null;
+  if (!String(printed || "").trim()) return null;
+  const on = (people || []).find((p) => p && String(p.name || "").trim() === String(holder.person).trim());
+  if (!on) return null;
+  const person = String(on.name).trim();
+  const shares = !nameIsSomebodyElse(printed, person, (on.aliases || []).join(" "));
+  if (sure) return { person, line: shares ? null : "add" };
+  return shares ? { person, line: "check" } : null;
+}
+
+/**
+ * Whose certificate a document is, as the round and the page's cells both
+ * ask it (compareMatrix in worker/src/routes/analyse.ts, certificateStanding
+ * in worker/src/lib/analysis.ts): whether it is the man it is filed under,
+ * and what, if anything, the office is asked to do about the name.
+ *
+ * A printed name the register reads is that man's spelling, and the answer
+ * is as it always was: the reader has nothing to add. Otherwise, where the
+ * reader's pick stands (readerPick) and IS the man it is filed under (the
+ * hourly refile labels the row with the pick before the round runs), it is
+ * his, and the pick's line goes with it - "add" or "check" - until his
+ * names on Crew Details carry the printed spelling. A pick of anybody else
+ * never takes it from the man it is filed under where the printed name fits
+ * him: the reader is never let move a certificate that plausibly is the
+ * filed man's, whatever it says.
+ * @param {unknown} printed the holder's name as read off the document
+ * @param {{ person?: unknown, confidence?: unknown, others?: unknown } | null | undefined} holder the reader's pick
+ * @param {unknown} filedUnder the name on the row (the folder's, or the refile's label)
+ * @param {unknown} known the register's name for that man, as the caller reads it
+ * @param {Person[] | null | undefined} people the register
+ * @returns {{ his: boolean, line: "add" | "check" | null }}
+ */
+export function whoseCertificate(printed, holder, filedUnder, known, people) {
+  const reg = crewRegister(people);
+  const filed = String(filedUnder || "");
+  known = String(known || "") || reg.nameOf(filed) || filed;
+  const fits = !nameIsSomebodyElse(printed, filed, known);
+  const byRegister = String(printed || "").trim() ? reg.nameOf(printed) : null;
+  // A printed name the register itself reads: one of his spellings, or
+  // somebody else's - the reader is not asked.
+  if (byRegister) return { his: byRegister === known || fits, line: null };
+  const picked = readerPick(printed, holder, people);
+  if (picked && picked.person === known) return { his: true, line: picked.line };
+  return { his: fits, line: null };
+}
+
+/**
+ * The reader's pick, only where nothing else says whose the document is:
+ * not where the register reads the printed name itself, and not where the
+ * printed name fits the man the document is filed under. The refile asks
+ * this to label a row; whoseCertificate asks it to accept one.
+ * @param {unknown} printed
+ * @param {{ person?: unknown, confidence?: unknown, others?: unknown } | null | undefined} holder
+ * @param {unknown} filedUnder
+ * @param {Person[] | null | undefined} people
+ * @returns {{ person: string, line: "add" | "check" | null } | null}
+ */
+export function readerPlaces(printed, holder, filedUnder, people) {
+  const reg = crewRegister(people);
+  if (String(printed || "").trim() && reg.nameOf(printed)) return null;
+  const known = filedUnder ? reg.nameOf(filedUnder) : null;
+  if (known && !nameIsSomebodyElse(printed, filedUnder, known)) return null;
+  return readerPick(printed, holder, people);
+}
+
+/**
+ * The one line Needs attention says where the reader placed a certificate
+ * on a man whose names on Crew Details do not yet include the name printed
+ * on it: "add" where the reader was sure, "check" where it was not.
+ * @param {unknown} certificate the certificate's printed title, or its filename
+ * @param {unknown} person the register's name for him
+ * @param {unknown} printed the name printed on the certificate
+ * @param {"add" | "check"} line
+ */
+export function readAsLine(certificate, person, printed, line) {
+  const said = `${String(certificate == null ? "" : certificate)} read as ${String(person == null ? "" : person)}'s — `;
+  const name = `"${String(printed == null ? "" : printed).trim()}"`;
+  return line === "check"
+    ? `${said}check, and add ${name} to their names on Crew Details`
+    : `${said}add ${name} to their names on Crew Details`;
+}
+
+/**
  * The register, ready to answer to a name written any way round.
  *
  * Two ways of asking. First the spelling itself, letter for letter, which

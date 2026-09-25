@@ -9,7 +9,7 @@ import {
 } from "../db/documents.js";
 import { imageToPdf } from "../lib/pdf-wrap.js";
 import { readDocument } from "../lib/shared-state.js";
-import { asKnownPerson, crewRegister, nameIsSomebodyElse } from "../../../source/shared/names.js";
+import { asKnownPerson, crewRegister, nameIsSomebodyElse, readAsLine, readerPlaces, whoseCertificate } from "../../../source/shared/names.js";
 import { isMsicCard, msicAsWritten, msicCodeIn, newestCard, openToCertificates, particularsFor, particularsKeyOf, ticketCodesIn } from "../../../source/shared/particulars.js";
 import { coveredCells, unitColumnsIn } from "../../../source/shared/covers.js";
 import { paperKind } from "../../../source/shared/evidence.js";
@@ -57,6 +57,7 @@ import {
   type Equivalence,
   type Reading,
   type ReadingColumn,
+  type ReadingHolder,
   type Row,
   certStatesOwnExpiry,
 } from "../lib/analysis.js";
@@ -163,6 +164,9 @@ Return exactly this JSON object and nothing else — no prose, no markdown fence
     { "code": string, "confidence": "high"|"medium"|"low", "why": string }  // why: at most 15 words
   ],
   "registerPage": true|false,       // the document is a register page, an approval listing or a spreadsheet extract
+  "holder": {                       // which of the numbered crew the certificate is for
+    "person": number|null, "confidence": "high"|"medium"|"low", "why": string, "others": [number]
+  },
   "notes": string|null,             // at most 15 words, only if something matters
   "documentNumber": string|null,    // the card, licence or certificate number as printed; on an MSIC card, the card number
   "holderBirthDate": "YYYY-MM-DD"|null, // the holder's date of birth, only if printed
@@ -205,6 +209,12 @@ Rules:
 - registerPage: true for a register page, an approval listing or a
   spreadsheet extract. Such a page is evidence only for the register columns
   named with the list; for anything else it is not a certificate.
+- holder: which of the numbered crew given with the list this certificate is
+  for, from the name printed on it. Allow initials, the name in another order,
+  a middle name, a transliteration or a partial name. "why" in at most 15
+  words. person null when it is nobody on the list. "others": the numbers of
+  anyone else on the list the printed name could also be - never guess
+  between two people; [] when there is nobody else.
 - endorsements: the STCW regulation numbers and the named endorsements printed
   as part of what the certificate certifies, each as printed — "II/2 (incl.
   generic ECDIS)", "VI/2 (1) s. A-VI/2 (1-4)", "Proficiency in fast rescue
@@ -237,11 +247,42 @@ Rules:
  *  lib/round.ts). The vessel file's covers rows are NOT given: those are
  *  applied by rule after the reading (source/shared/covers.js), whatever
  *  the model makes of the page. */
-export type ReadingAsk = { equivalences: Equivalence[] };
+export type ReadingAsk = { equivalences: Equivalence[]; crew: { name: string; aliases: string[] }[] };
 
-/** The question's context, loaded once for a batch. */
+/** The question's context, loaded once for a batch: the Equivalence sheet,
+ *  and the crew register - every person's name and the other spellings they
+ *  answer to (Crew Details), numbered in the question so the reader picks a
+ *  person off it rather than spelling one. */
 export async function readingAsk(): Promise<ReadingAsk> {
-  return { equivalences: await equivalences() };
+  const cur = await readDocument().catch(() => null);
+  const people = (Array.isArray(cur?.doc.people) ? cur!.doc.people : []) as { name?: unknown; aliases?: unknown }[];
+  const crew = people
+    .map((p) => ({
+      name: String((p && p.name) || "").trim(),
+      aliases: (Array.isArray(p && p.aliases) ? (p.aliases as unknown[]) : []).map((a) => String(a || "").trim()).filter(Boolean),
+    }))
+    .filter((p) => p.name);
+  return { equivalences: await equivalences(), crew };
+}
+
+/** The reader's pick of a person, turned from the number it was given back
+ *  into the register's name: the number means nothing once the list moves.
+ *  A number off the list is no pick. `others` are the names of anyone else
+ *  the reader said the printed name could be - whoseCertificate
+ *  (source/shared/names.js) takes a pick with anyone in it as no pick. */
+export function holderFrom(v: unknown, crew: ReadingAsk["crew"]): ReadingHolder | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const said = v as Record<string, unknown>;
+  const at = (n: unknown) => {
+    const i = typeof n === "number" ? n : typeof n === "string" && /^\d+$/.test(n.trim()) ? Number(n.trim()) : NaN;
+    return Number.isInteger(i) && i >= 1 && i <= crew.length ? crew[i - 1].name : null;
+  };
+  const person = at(said.person);
+  const conf = str(said.confidence);
+  const confidence: ReadingHolder["confidence"] = conf === "high" || conf === "medium" ? conf : "low";
+  const why = whyFrom(said.why);
+  const others = [...new Set((Array.isArray(said.others) ? said.others : []).map(at).filter((n): n is string => !!n && n !== person))];
+  return { person, confidence, why, others };
 }
 
 /** The columns a register page may stand as evidence for (the vessel
@@ -273,6 +314,7 @@ function instructionFor(row: Row, codes: [string, string][], ask: ReadingAsk) {
     .filter((e) => e && e.held && live.has(String(e.code || "").trim().toUpperCase()))
     .map((e) => `${String(e.held).trim()} counts as ${String(e.code).trim().toUpperCase()}`);
   const register = registerColumns().filter((c) => live.has(c));
+  const crew = ask.crew.map((p, i) => `${i + 1}. ${p.name}${p.aliases.length ? ` (also: ${p.aliases.join(", ")})` : ""}`);
 
   return `Read the attached certificate and return the JSON described.
 
@@ -286,6 +328,9 @@ ${eq.length ? eq.join("\n") : "(none)"}
 
 The columns a register page can be evidence for:
 ${register.length ? register.join(", ") : "(none)"}
+
+The crew, numbered (for holder):
+${crew.length ? crew.join("\n") : "(none)"}
 
 What it was filed against is what the office believes this document is for.
 Weigh it: if the document plausibly is that item, list that column with your
@@ -366,6 +411,14 @@ const MAX_WHY_WORDS = 15;
 const MAX_WHY_CHARS = 140;
 const CONFIDENCE_RANK = { high: 3, medium: 2, low: 1 } as const;
 
+/** The reader's reason, held to fifteen words and a line's length. */
+function whyFrom(v: unknown): string | null {
+  const said = str(v);
+  if (!said) return null;
+  const words = said.split(/\s+/);
+  return (words.length > MAX_WHY_WORDS ? words.slice(0, MAX_WHY_WORDS).join(" ") : said).slice(0, MAX_WHY_CHARS);
+}
+
 /** Every column the model said the document is evidence for: only codes the
  *  matrix has (written as the matrix writes them), a confidence it does not
  *  recognise read as a guess, the reason held to fifteen words, and a code
@@ -382,9 +435,7 @@ export function columnsFrom(v: unknown, codes: [string, string][]): ReadingColum
     const code = hit[0].trim();
     const conf = str(asObject?.confidence);
     const confidence: ReadingColumn["confidence"] = conf === "high" || conf === "medium" ? conf : "low";
-    const whyText = str(asObject?.why);
-    const words = whyText ? whyText.split(/\s+/) : [];
-    const why = whyText ? (words.length > MAX_WHY_WORDS ? words.slice(0, MAX_WHY_WORDS).join(" ") : whyText).slice(0, MAX_WHY_CHARS) : null;
+    const why = whyFrom(asObject?.why);
     const had = out.find((c) => c.code.toUpperCase() === code.toUpperCase());
     if (had) {
       if (CONFIDENCE_RANK[confidence] > CONFIDENCE_RANK[had.confidence]) { had.confidence = confidence; had.why = why; }
@@ -490,6 +541,7 @@ async function askModel(row: Row, bytes: ArrayBuffer, codes: [string, string][],
     codeConfidence: first ? first.confidence : null,
     columns,
     registerPage,
+    holder: holderFrom(parsed.holder, ask.crew),
     // A reading that stopped partway is still worth keeping — the fields it had
     // written are read off the certificate like any other — but whoever looks at
     // it should know the rest of the document went unsaid.
@@ -528,7 +580,7 @@ function unreadableReading(reason: string): Reading {
     version: READING_VERSION, at: new Date().toISOString(), model: null, readable: false, reason,
     documentNumber: null, holderBirthDate: null,
     endorsements: [], units: [], capacities: [], isRecognition: false, recognises: null,
-    assessedOn: null, conditions: null, evidenceKind: null, columns: [], registerPage: false,
+    assessedOn: null, conditions: null, evidenceKind: null, columns: [], registerPage: false, holder: null,
   };
 }
 
@@ -588,7 +640,7 @@ export async function extract(codes: [string, string][], limit: number) {
   const outstanding = certs.filter((row) => !done.has(readingKey(row)));
   const batch = outstanding.slice(0, limit);
   // The question's context, once for the batch.
-  const ask = batch.length ? await readingAsk() : { equivalences: [] };
+  const ask = batch.length ? await readingAsk() : { equivalences: [], crew: [] };
 
   const failures: { filename: string; person: string | null; error: string; kind: RefusalKind | null }[] = [];
 
@@ -703,6 +755,32 @@ export function holderOnMatrix(holderName: string, names: string[]) {
 }
 
 /**
+ * Whose a certificate is, for the label on its row: the printed name where
+ * it fits one man on the matrix (holderOnMatrix), then the printed name as
+ * the crew register reads it - one of his spellings on Crew Details - and
+ * only then the reader's pick off the register (readerPlaces in
+ * source/shared/names.js, which never lets the pick take a certificate the
+ * printed name fits the man it is filed under). The round asks the same
+ * question the same way (whoseCertificate), so a row labelled here is a row
+ * the round fills. Null where nothing says, or the answer is nobody on the
+ * matrix.
+ */
+export function holderFor(
+  row: { person?: string | null },
+  reading: Reading,
+  names: string[],
+  people: { name?: string; aliases?: string[] }[],
+): string | null {
+  const printed = reading.holderName || "";
+  const byName = printed ? holderOnMatrix(printed, names) : null;
+  if (byName) return byName;
+  const known = printed ? crewRegister(people).nameOf(printed) : null;
+  if (known) return names.includes(known) ? known : null;
+  const picked = readerPlaces(printed, reading.holder, row.person, people);
+  return picked && names.includes(picked.person) ? picked.person : null;
+}
+
+/**
  * Move certificates into the folder of the person they are actually for.
  *
  * A certificate is filed under whoever the uploader said, worked out from the
@@ -721,9 +799,14 @@ export async function refile(names: string[], limit = Infinity) {
   // for one of them keeps that column (codeFor reads the filename).
   const titles: Record<string, string> = {};
   let cols: unknown[] = [];
+  // The crew register, for whose a certificate is where the printed name
+  // alone does not say (holderFor).
+  let people: { name?: string; aliases?: string[] }[] = [];
   try {
     const state = await getEnv().DB.prepare("SELECT data FROM portal_state LIMIT 1").first<{ data: string }>();
-    const listed = JSON.parse(state?.data || "{}")?.quals?.cols || [];
+    const doc = JSON.parse(state?.data || "{}");
+    people = Array.isArray(doc?.people) ? doc.people : [];
+    const listed = doc?.quals?.cols || [];
     cols = Array.isArray(listed) ? listed : [];
     for (const c of cols as unknown[][]) {
       titles[String(c[0]).trim().toUpperCase()] = String(c[1] || "").trim();
@@ -763,7 +846,7 @@ export async function refile(names: string[], limit = Infinity) {
   for (const row of certs) {
     const reading = readings.get(readingKey(row)) || null;
     if (!reading || !reading.readable || !reading.holderName) continue;
-    const person = holderOnMatrix(reading.holderName, names);
+    const person = holderFor(row, reading, names, people);
     if (!person) continue;
     named.set(row.id, person);
     if ((row.person || "") !== person) {
@@ -1028,6 +1111,8 @@ export async function compareMatrix(
   opts: { withParticulars?: boolean } = {},
 ): Promise<CompareResult & { particulars?: ParticularsInput }> {
   const as = (n: string) => { const k = nameOf(n); return k == null || k === "" ? n : k; };
+  // The crew register, for the reader's pick of a person (whoseCertificate).
+  const people = ((await readDocument().catch(() => null))?.doc.people || []) as { name?: string; aliases?: string[] }[];
   const certs = await liveCertificates();
   const held = await allReadings();
 
@@ -1130,8 +1215,11 @@ export async function compareMatrix(
     /* The name on the document against the person it was filed under. A scan
        filed against the wrong crew member is worse than one not filed at
        all. The one rule is in source/shared/names.js, so the page's cells
-       (certificateStanding) refuse the same document this does. */
-    if (nameIsSomebodyElse(reading.holderName, row.person, person)) {
+       (certificateStanding) refuse the same document this does - and it is
+       where the reader's pick of a person off the register is weighed, only
+       where the printed name and the folder give no answer of their own. */
+    const whose = whoseCertificate(reading.holderName, reading.holder, row.person, person, people);
+    if (!whose.his) {
       notes.push({
         kind: "name-mismatch",
         person: row.person,
@@ -1204,6 +1292,18 @@ export async function compareMatrix(
         kind: "filed-as",
         person: row.person,
         detail: filedAsLine(as(row.person || ""), disagreed.code, disagreed.title, disagreed.readsAs),
+        certificate: link,
+      });
+    }
+    /* The reader placed it on a man whose names on Crew Details do not yet
+       carry the name printed on it: said once, in the one sentence, so the
+       name is added where names live and the next certificate needs no
+       reader to place it. Past every check, for the same reason as above. */
+    if (whose.line) {
+      notes.push({
+        kind: "read-as",
+        person: row.person,
+        detail: readAsLine((reading.certificateTitle || "").trim() || row.filename, person, reading.holderName, whose.line),
         certificate: link,
       });
     }

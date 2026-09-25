@@ -25,7 +25,7 @@ import { coveredCells } from "../../../source/shared/covers.js";
 import { isRecognitionReading, recognisedUntil, recognitionFills } from "../../../source/shared/recognition.js";
 import { coveredBy, paperKind } from "../../../source/shared/evidence.js";
 import { filedCodeIn } from "../../../source/shared/filed-as.js";
-import { crewRegister, nameIsSomebodyElse } from "../../../source/shared/names.js";
+import { crewRegister, nameIsSomebodyElse, whoseCertificate } from "../../../source/shared/names.js";
 import { readDocument } from "./shared-state.js";
 
 // Certificates are read with a vision model — most of them are scans rather than
@@ -169,6 +169,11 @@ export const READING_ASKS = {
 /** One column the reader says a document is evidence for. */
 export type ReadingColumn = { code: string; confidence: "high" | "medium" | "low"; why: string | null };
 
+/** The reader's pick of whose a certificate is: a person off the register
+ *  (their register name, turned from the number the question gave), how
+ *  sure it is and why, and anyone else the printed name could also be. */
+export type ReadingHolder = { person: string | null; confidence: "high" | "medium" | "low"; why: string | null; others: string[] };
+
 /** What the model is asked to come back with for one certificate. */
 export type Reading = {
   version: string;
@@ -197,6 +202,10 @@ export type Reading = {
    *  extract: evidence only for the vessel file's registerEvidenced
    *  columns, and unreadable for anything else. */
   registerPage?: boolean;
+  /** Which person on the register the reader says the certificate is for,
+   *  where the printed name alone does not say (whoseCertificate in
+   *  source/shared/names.js decides whether the pick stands). */
+  holder?: ReadingHolder | null;
   notes?: string | null;
   /** The card, licence or certificate number as printed (on the MSIC card,
    *  the card number). Present, null or not, on every reading made since
@@ -969,6 +978,9 @@ export async function certificateStanding() {
      becomes one is the office's call, and the list is so the call can be
      made (Needs attention: "On file, not on the matrix"). */
   const notOnMatrix: { person: string; title: string; filename: string; fileId: string }[] = [];
+  /* The certificates the reader placed on a man whose names do not yet
+     include the name printed on them (whoseCertificate's line). */
+  const readAs: { person: string; certificate: string; printed: string; line: "add" | "check"; fileId: string }[] = [];
 
   const claim = new Map<
     string,
@@ -1036,8 +1048,10 @@ export async function certificateStanding() {
     // Whose certificate this is, as the register names him.
     const person = register.nameOf(row.person) || row.person;
     // Printed in another man's name: his folder, not his certificate. The
-    // round refuses the same document (the rule is in source/shared/names.js).
-    if (nameIsSomebodyElse(reading.holderName, row.person, person)) continue;
+    // round refuses the same document (the rule is in source/shared/names.js),
+    // and weighs the reader's pick of a person off the register the same way.
+    const whose = whoseCertificate(reading.holderName, reading.holder, row.person, person, people);
+    if (!whose.his) continue;
     if (!placed) {
       /* Nothing places it and it covers nothing: on file, not on the matrix.
          Decided after the paper and the name checks, so a letter is not
@@ -1049,6 +1063,13 @@ export async function certificateStanding() {
         filename: row.filename, fileId: row.id,
       });
       continue;
+    }
+    /* The reader placed it on a man whose names on Crew Details do not yet
+       carry the printed name: one line on Needs attention (readAsLine), so
+       the name goes where names live. */
+    if (whose.line) {
+      readAs.push({ person: person.trim().toUpperCase(), certificate: (reading.certificateTitle || "").trim() || row.filename,
+        printed: String(reading.holderName || "").trim(), line: whose.line, fileId: row.id });
     }
     if (!code) { coverOnly.push({ row, reading: asDated, person: person.trim().toUpperCase() }); continue; }
     const disagreed = filedAsFor(row, reading, eqTable, cols);
@@ -1180,6 +1201,8 @@ export async function certificateStanding() {
     filedAs,
     /* The documents no column places, for the office to decide about. */
     notOnMatrix,
+    /* The names the reader matched that Crew Details does not carry yet. */
+    readAs,
     // `fileId` names the scan each line's dates were read from, so the
     // certification screens can put a link to the certificate itself on the line.
     dates: [...claim.entries()].map(([key, v]) => {
