@@ -304,10 +304,15 @@ function CrewDetails() {
   const [newName, setNewName] = useState("");
   const [newRank, setNewRank] = useState("");
   const [newSwing, setNewSwing] = useState("");
-  const newKnown = !!(canonicalName(newName) && reg.nameOf(canonicalName(newName)));
+  /* Who on the register the typed name already is, as the register spells
+     him - letter for letter, or two or more of one man's words (spelled),
+     never one word alone: a new man sharing a first name with somebody is
+     somebody new. Said beside the button, so a press that does nothing
+     says why and names who he already is. */
+  const newKnown = canonicalName(newName) ? reg.spelled(canonicalName(newName)) : null;
   const addNew = () => {
     const name = canonicalName(newName);
-    if (!name || reg.nameOf(name)) return;
+    if (!name || reg.spelled(name)) return;
     setPeople((list) => [...(list || []), {
       id: nextId(), name, aliases: [], active: true,
       rank: newRank || "",
@@ -467,9 +472,13 @@ function CrewDetails() {
               borderRadius: 2, border: "1px solid " + (newKnown ? T.bRed : T.rule), background: T.raised, color: T.text }} />
           {rankPicker(newRank, setNewRank, 195)}
           {swingPicker(newSwing, setNewSwing, 125)}
-          <Button writes variant="quiet" disabled={!canonicalName(newName) || newKnown}
-            title={newKnown ? canonicalName(newName) + " is already on the register" : undefined}
+          <Button writes variant="quiet" disabled={!canonicalName(newName) || !!newKnown}
             onClick={addNew}>Add to the crew</Button>
+          {newKnown && (
+            <span style={{ fontFamily: T.body, fontSize: 12.5, color: T.bRed }}>
+              Already on the register as {newKnown}
+            </span>
+          )}
         </div>
         {groups.map((g) => (
           <div key={g.title}>
