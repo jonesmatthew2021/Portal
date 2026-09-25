@@ -988,6 +988,8 @@ test("whose it is: the reader is shown the register numbered, and its number com
     model.restore();
   }
   assert.ok(model.calls[0].includes("1. EVANS, Brenton (also: bRENTON)") && model.calls[0].includes("2. SITTIYOS, Kachin"), "the crew, numbered, with their other spellings");
+  // The MSIC card's "FEB 30" is the last day of that month (Matthew, 26 Sep 2026): the question says so.
+  assert.ok(/FEB 30[\s\S]*last day of that month[\s\S]*2030-02-28/.test(model.calls[0]), "the MSIC expiry rule is in the question");
   const stored = JSON.parse(portal.blobs.get("certificate-readings|r1/unread-1.json")!);
   assert.deepEqual(stored.holder, { person: "SITTIYOS, Kachin", confidence: "high", why: "Bill is Kachin", others: ["EVANS, Brenton", "9"] },
     "the number is the register's name; a number off the list is kept as said, so the doubt is not lost");
@@ -1512,6 +1514,44 @@ test("the reader's doubt that somebody else could be the holder is kept, however
     assert.deepEqual(holder!.others, [], `no doubt: ${JSON.stringify(others)}`);
     // The pick stands - checked, K being his only by an initial.
     assert.deepEqual(readerPick("K. SITTIYOS", holder, people), { person: "SITTIYOS, Kachin", line: "check" });
+  }
+});
+
+test("an MSIC card read with no expiry is looked at once more, first, and takes the expiry the second look reads", async () => {
+  /* Every Australian MSIC prints its expiry as "FEB 30" - the last day of
+     that month (Matthew, 26 Sep 2026). A card read before the question
+     said so, with no expiry, is asked again once, ahead of the rest; the
+     expiry the second look reads is the one date a second look may add. */
+  const { portal, bucket } = await unreadPortal(0);
+  const withBoxes = portal.doc();
+  withBoxes.people = [{ id: "p1", name: "EVANS, Brenton", aliases: ["bRENTON"], msic: "MSIC 1", dob: "1980-01-01" }];
+  portal.state.data = JSON.stringify(withBoxes);
+  const old = (id: string, filename: string, r: Record<string, unknown>) => {
+    portal.rows.push({ ...billysTicket, id, person: "EVANS, Brenton", folder: "brenton", checksum: id, blobKey: `opms/Brenton - OPMS/${filename}`, filename, sizeBytes: 6, qualCode: null });
+    portal.blobs.set(`certificate-readings|r1/${id}.json`, JSON.stringify({ ...reading, holderName: "Brenton Evans", ...r }));
+  };
+  for (const name of ["msic.pdf", "dated-msic.pdf", "nocode.pdf"]) await bucket.put(`opms/Brenton - OPMS/${name}`, bytesOf("a scan"));
+  // Read already for its columns, so nothing else would ask it again.
+  const asked = { columns: [{ code: "VS-01", confidence: "high", why: "MSIC card" }], holder: null, endorsements: [], units: [], capacities: [] };
+  old("msic", "msic.pdf", { certificateTitle: "Maritime Security Identification Card", qualCode: "VS-01", codeConfidence: "high", expiresOn: null, ...asked });
+  old("dated", "dated-msic.pdf", { certificateTitle: "Maritime Security Identification Card", qualCode: "VS-01", codeConfidence: "high", expiresOn: "2029-05-31", ...asked });
+  old("nocode", "nocode.pdf", { qualCode: null, codeConfidence: "low" });
+  const model = modelAnswers(() => ({ status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans", certificateTitle: "Maritime Security Identification Card",
+    qualCode: "VS-01", codeConfidence: "high", expiresOn: "2030-02-28", columns: [{ code: "VS-01", confidence: "high", why: "MSIC card" }], holder: { person: 1, confidence: "high", why: "name printed", others: [] } }) }));
+  const codes: [string, string][] = [["QL-01", "Master"], ["VS-01", "Maritime Security Identification Card"]];
+  const filenameOf = (call: string) => (/Filename: ([^\n\\]+)/.exec(call) || [])[1];
+  try {
+    const first = await topUpParticulars(codes, { cap: 1, timeLeft: () => true });
+    assert.equal(first.read, 1);
+    assert.deepEqual(model.calls.map(filenameOf), ["msic.pdf"], "the card with no expiry goes first, ahead of the columns queue");
+    const topped = JSON.parse(portal.blobs.get("certificate-readings|r1/msic.json")!);
+    assert.equal(topped.expiresOn, "2030-02-28", "the second look's expiry is taken where the first read none");
+    assert.equal(topped.expiryAsked, true);
+    await topUpParticulars(codes, { cap: 5, timeLeft: () => true });
+    // Then the columns queue (nocode) and the back-fill of his own ticket's keys (master) - the card asked once, and the dated card never.
+    assert.deepEqual(model.calls.map(filenameOf), ["msic.pdf", "nocode.pdf", "master.pdf"], "asked once, and the dated card never");
+  } finally {
+    model.restore();
   }
 });
 

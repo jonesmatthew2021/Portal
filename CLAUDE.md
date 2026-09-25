@@ -186,6 +186,13 @@ on any line that still names this one.
   reads another man's name - and nothing else to the reading held but his
   own name where the first look read none; the keys are its only memory; a
   fault of its own goes on `particularsError`, never the reading's red).
+  **Every Australian MSIC card prints its expiry as a month and a two-digit
+  year in large type under the name ("FEB 30"): the last day of that
+  month, 28 Feb 2030** (Matthew, 26 Sep 2026) - the reader's question says
+  so, the crew certificates page's notes say so (`certPageNotes`), and an
+  MSIC card read with no expiry is looked at once more by the hour's top-up
+  (`expiryAsked`), first in its queue, its expiry taken from the second
+  look where the first read none - the one date a second look may add.
   Crew are never handed either: a crew login's `GET /api/state` (and a
   save's 409) is the crew's copy of the document (`crewStateView` in
   `authz.ts` - no `msic`, no `dob`, no `particularsFromCert`), a crew

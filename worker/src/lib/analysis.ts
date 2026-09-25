@@ -213,6 +213,10 @@ export type Reading = {
   /** Set where that look failed once on something other than the account
    *  (an answer that would not parse): one more try, then columnsAsked. */
   columnsTried?: boolean;
+  /** Set where the hour looked once more at an MSIC card read with no
+   *  expiry (the card prints it as "FEB 30", the last day of that month):
+   *  asked once, whatever the second look read (topUpParticulars). */
+  expiryAsked?: boolean;
   notes?: string | null;
   /** The card, licence or certificate number as printed (on the MSIC card,
    *  the card number). Present, null or not, on every reading made since

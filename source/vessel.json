@@ -218,6 +218,7 @@
     }
   ],
   "certPageNotes": [
+    "VS-01 Maritime Security Identification Card: every Australian MSIC prints its expiry as a month and year in large type under the name, e.g. FEB 30. The card expires on the last day of that month - 28 Feb 2030.",
     "VS-04 Helm CONNECT - Crew Basic + Jobs has no expiry date. The checker treats it as held once completed - it never lapses and is never counted as expired.",
     "QL-18 Provide First Aid: crew already aboard as at 29 Jun 2026 keep their existing 5-year expiry; anyone joining after that date holds it on a 3-year expiry (skills matrix roll-out sheet).",
     "QL-19 Advanced Resuscitation: existing crew keep their 2-year expiry; new starters after 29 Jun 2026 hold it on a 1-year expiry (skills matrix roll-out sheet).",

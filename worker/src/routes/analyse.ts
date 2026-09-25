@@ -191,6 +191,10 @@ Rules:
 - Dates: Australian documents are day-first. "10/03/2028" is 2028-03-10.
 - Only give expiresOn if a date of expiry, valid-until or renewal-due is actually
   printed. Never calculate one from the issue date, and never guess a year.
+- An Australian Maritime Security Identification Card (MSIC) prints its expiry
+  as a month and a two-digit year in large type under the holder's name, e.g.
+  "FEB 30": the card expires on the last day of that month, so expiresOn is
+  2030-02-28 (the 29th in a leap year). That is how every MSIC card is printed.
 - Set readable to false only when the document is too poor to read, or is none
   of these: a certificate, a licence, a training statement of attainment, or
   one of the five papers named under evidenceKind below. A certificate or
@@ -2332,6 +2336,16 @@ export async function topUpParticulars(
       : filedAsFor(row, reading, eqTable, cols) ? 2 : 3;
     smart.push({ cert: { row, reading, code: String(code || "").trim().toUpperCase(), at }, tier });
   }
+  /* An MSIC card read with no expiry, whoever it is filed under: every
+     Australian MSIC prints its expiry as "FEB 30" - the last day of that
+     month - and a reading made before the question said so may have read
+     none. Looked at once more, ahead of everything else in the queue, and
+     marked asked whatever the second look reads (expiryAsked). */
+  for (const [at, row] of certs.entries()) {
+    const reading = held.get(readingKey(row));
+    if (!reading || reading.readable === false || reading.expiresOn || reading.expiryAsked || !isMsicCard(reading, msic)) continue;
+    smart.push({ cert: { row, reading, code: String(codeFor(row, reading, eqTable, cols) || "").trim().toUpperCase(), at }, tier: -1 });
+  }
   smart.sort((a, b) => a.tier - b.tier || a.cert.at - b.cert.at);
   for (const { cert } of smart) {
     const key = readingKey(cert.row);
@@ -2398,6 +2412,11 @@ export async function topUpParticulars(
       ...keysAdded(again, c.reading, gives, particulars),
       ...columnsAdded(again, c.reading),
       ...(me === null ? {} : { particularsAsked: true }),
+      /* The one date a second look may add: an expiry where the first look
+         read none (an MSIC card's "FEB 30", the last day of that month,
+         which the question now explains). Never a date moved. */
+      ...(!c.reading.expiresOn && gives && again.expiresOn ? { expiresOn: again.expiresOn } : {}),
+      ...(isMsicCard(c.reading, msic) ? { expiryAsked: true } : {}),
     };
     try {
       await store.setJSON(readingKey(c.row), topped);
