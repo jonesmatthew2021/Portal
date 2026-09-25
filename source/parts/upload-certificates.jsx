@@ -692,6 +692,7 @@ function UploadCertificates() {
         (res.replaced || []).forEach((r) => replacedIds.push(r.id));
         results.push({
           key: item.key,
+          id: res.record.id,
           name: res.record.filename,
           person: item.person,
           state: (res.replaced || []).length ? "replaced" : "filed",
@@ -1194,6 +1195,18 @@ function UploadCertificates() {
                   : r.state === "skipped" ? T.muted : T.green }}>
                 {r.state === "unassigned" ? "no crew member" : r.state}{r.msg ? ` — ${r.msg}` : ""}
               </span>
+              {/* The reader's warning, once the round that follows the batch
+                  has read the file: the column it was filed under against
+                  what the reader made of it (the same line Needs attention
+                  carries, filedAs on the dates). */}
+              {(() => {
+                const f = r.id && certDates && (certDates.filedAs || []).find((x) => x.url === `/api/files/${r.id}`);
+                return f ? (
+                  <span style={{ flexBasis: "100%", fontFamily: T.body, fontSize: 12.5, color: T.bOrange }}>
+                    {tagWarning(f.code, f.title, f.readsAs)}
+                  </span>
+                ) : null;
+              })()}
             </div>
           ))}
         </div>
@@ -2849,7 +2862,10 @@ function CrewCertificateUpload() {
           continue;
         }
         patchJob(key, { pct: 100, phase: "Done", done: true, filename: out.filename, url: out.url, code: out.code,
-          note: out.readable ? (out.code ? "" : "Certificate type not identified — name kept as uploaded.") : (out.reason || "Couldn't be read.") });
+          // The reader's warning where it thinks the file was put in the wrong
+          // column (tagWarning) comes before anything else the row could say.
+          warn: !!out.warning,
+          note: out.warning || (out.readable ? (out.code ? "" : "Certificate type not identified — name kept as uploaded.") : (out.reason || "Couldn't be read.")) });
       } catch (e) {
         clearInterval(timer);
         patchJob(key, { pct: 100, phase: "Uploaded — not renamed", done: true, filename: rec.filename, url: rec.url, note: String(e.message || e) });
@@ -2973,7 +2989,7 @@ function CrewCertificateUpload() {
                   <div style={{ height: "100%", width: `${j.pct}%`, background: j.failed || (j.note && j.phase === "Failed") ? T.bRed : T.accent,
                     transition: "width .4s" }} />
                 </div>
-                <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.muted }}>{j.phase}{j.note ? ` · ${j.note}` : ""}</div>
+                <div style={{ fontFamily: T.body, fontSize: 12.5, color: j.warn ? T.bOrange : T.muted }}>{j.phase}{j.note ? ` · ${j.note}` : ""}</div>
                 {j.done && j.url && (
                   <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
                     <span style={{ fontFamily: T.body, fontSize: 13, color: T.text }}>Save this document for upload to OPMS</span>

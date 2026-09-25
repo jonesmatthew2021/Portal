@@ -2,9 +2,9 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
 import { canonicaliseCertificate, filingName, refileCertificate, relocateToRemovedBlob } from "../db/documents.js";
-import { filedCodeIn } from "../../../source/shared/filed-as.js";
+import { filedCodeIn, tagWarning } from "../../../source/shared/filed-as.js";
 import { holderFor, readCertificate } from "./analyse.js";
-import { codeFor, equivalences, ModelRefusal, plainLine, readingKey, readingStore, type Reading } from "../lib/analysis.js";
+import { codeFor, equivalences, filedAsFor, ModelRefusal, plainLine, readingKey, readingStore, type Reading } from "../lib/analysis.js";
 import { imageToPdf } from "../lib/pdf-wrap.js";
 import { getEnv } from "../env.js";
 
@@ -94,8 +94,15 @@ export default async (req: Request): Promise<Response> => {
     current = await refileCertificate(current, holder, "");
   }
   const cols = quals.cols || [];
-  const code = String(codeFor(current, reading, await equivalences(), cols) || "").trim().toUpperCase();
+  const table = await equivalences();
+  const code = String(codeFor(current, reading, table, cols) || "").trim().toUpperCase();
   const title = code ? titles[code] || "" : "";
+  // The column the person picked (or the office's name) against what the
+  // reader made of the document: where they disagree, the warning the
+  // upload page shows on the file (tagWarning; the same disagreement Needs
+  // attention lists, filedAsFor).
+  const disagreed = filedAsFor(current, reading, table, cols);
+  const warning = disagreed ? tagWarning(disagreed.code, disagreed.title, disagreed.readsAs) : null;
   const personName = names.includes(current.person || "") ? current.person : holder;
   if (code && title && personName) {
     // The same name the hourly refile gives (filingName: a slash in the
@@ -120,5 +127,6 @@ export default async (req: Request): Promise<Response> => {
     readable: !!reading.readable,
     holder: reading.holderName || null,
     reason: (reading as Reading & { reason?: string }).reason || null,
+    warning,
   });
 };

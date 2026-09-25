@@ -1105,6 +1105,31 @@ test("what it is for: a guess fills nothing, and a reading made before the new q
   assert.deepEqual((await certificateStanding()).notOnMatrix, [], "a guess is still the reader's answer that the paper is the matrix's business");
 });
 
+test("a hand tag fills its column whatever the reader says, and the reader's disagreement is said", async () => {
+  /* Matthew, 26 Sep 2026: the column picked on the upload page is the
+     column, and where the AI thinks the person picked the wrong one, a
+     warning. Tagged QL-04, read as a Watchkeeper Deck ticket (QL-08, sure):
+     QL-04 fills from the tag, QL-08 does not, and Needs attention says so. */
+  const { portal, env } = await smartPortal([{ id: "tagged", filename: "scan.pdf", qualCode: "QL-04",
+    reading: { certificateTitle: "Watchkeeper Deck", qualCode: "QL-08", codeConfidence: "high",
+      columns: [{ code: "QL-08", confidence: "high", why: "Watchkeeper Deck corresponds to Master <24m NC" }] } }]);
+  await worker.scheduled({} as never, env as never);
+  assert.equal(evansCell(portal, "QL-04"), "2031-05-26", "the tagged column, from the tag");
+  assert.equal(evansCell(portal, "QL-08"), "", "a tag alone places the document");
+  assert.deepEqual(await roundNotes(portal, "filed-as"), ["EVANS, Brenton — QL-04: filed as Master <45m NC, reads as Watchkeeper Deck"], "the disagreement is said");
+  const page = await certificateStanding();
+  assert.deepEqual(page.filedAs.map((f) => [f.code, f.readsAs, f.fileId]), [["QL-04", "Watchkeeper Deck", "tagged"]], "and the page's cells carry it, with the file");
+
+  // The reader agrees, or has nothing to offer: no line.
+  const agreed = await smartPortal([
+    { id: "ok", filename: "scan.pdf", qualCode: "QL-04", reading: { certificateTitle: "Master <45m NC", qualCode: "QL-04", codeConfidence: "high", columns: [{ code: "QL-04", confidence: "high", why: null }] } },
+    { id: "blank", filename: "scan2.pdf", qualCode: "QL-08", reading: { certificateTitle: "Some course", qualCode: null, codeConfidence: null, columns: [] } },
+  ]);
+  await worker.scheduled({} as never, agreed.env as never);
+  assert.deepEqual(await roundNotes(agreed.portal, "filed-as"), []);
+  assert.equal(evansCell(agreed.portal, "QL-08"), "2031-05-26", "the tag fills the column the reader could not name");
+});
+
 test("a register page counts only for the columns the office keeps in a register", async () => {
   /* The office records the cargo-system approvals in a register, not on a
      certificate (the vessel file's registerEvidenced: CS-03 and CS-04). A

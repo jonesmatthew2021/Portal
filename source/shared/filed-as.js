@@ -87,6 +87,22 @@ export function filedAsLine(person, code, title, readsAs) {
 }
 
 /**
+ * The warning the upload page shows on a file the reader thinks was put in
+ * the wrong column (Matthew, 26 Sep 2026: "if the AI realises the user is
+ * putting it in the wrong column, put up a warning prompt"). The column
+ * stands - it is the person's word - and this says what the reader made of
+ * the document instead. Nothing more.
+ * @param {unknown} code the column it was filed under
+ * @param {unknown} title that column's title
+ * @param {unknown} readsAs what the reading called the document, or null
+ */
+export function tagWarning(code, title, readsAs) {
+  const read = String(readsAs == null ? "" : readsAs).trim();
+  const column = [String(code == null ? "" : code), String(title == null ? "" : title)].filter(Boolean).join(" · ");
+  return `Filed as ${column}, but it reads as ${read || "nothing on the matrix"} - check it.`;
+}
+
+/**
  * The one line Needs attention says where the reader placed a document in a
  * column by a level, an equivalence or an endorsement rather than because
  * it plainly is that item ("medium"): whose, which column, and the reader's

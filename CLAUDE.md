@@ -590,7 +590,16 @@ on any line that still names this one.
     that fill a cell, so the round and the page never differ on it) - so a
     wrong filing is visible rather than silently accepted; where the model
     gave the same column (however sure it was) or the document prints the
-    column's own title, no line. **An unreadable document fills nothing from
+    column's own title, no line. **A hand tag is questioned the same way**
+    (Matthew, 26 Sep 2026: "if the AI realises the user is putting it in
+    the wrong column, put up a warning prompt"): the tag always fills its
+    column, and where the reader is sure or held (high or medium) the
+    document is another column and not the tagged one, the line is said -
+    a reader with no column to offer questions no tag - and the upload page
+    shows the same disagreement on the file itself (`tagWarning` in
+    `filed-as.js`: on a phone upload the moment `read-one` answers, on the
+    admin batch once the round that follows it has read the file, off the
+    dates' `filedAs` by the file's id). **An unreadable document fills nothing from
     its name**: a filename is not evidence that a paper exists. And the
     documents no column places at all - read, readable, his own (not a paper
     standing in for a certificate, not printed in another man's name), no

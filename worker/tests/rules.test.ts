@@ -12,7 +12,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { equivalentCode, codeFor, filedAsFor, ModelRefusal, plainLine, errorLine, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM } from "../src/lib/analysis.js";
-import { filedCodeIn, filedAsLine } from "../../source/shared/filed-as.js";
+import { filedCodeIn, filedAsLine, tagWarning } from "../../source/shared/filed-as.js";
 import { AI_BUSY, checkerRefusalLine } from "../src/lib/checker.js";
 import { crewFolderIn, looseIn, whoseFolder } from "../src/routes/sync.js";
 import { asKey } from "../src/db/cert-home.js";
@@ -174,7 +174,22 @@ test("filed as: where the filed column and the reading disagree, the disagreemen
     { code: "QL-04", title: "Master <45m NC", readsAs: "ECDIS generic" }, "the model read another item");
   const same = reading({ certificateTitle: "Helm CONNECT Crew Basic", qualCode: "VS-04" });
   assert.equal(filedAsFor({ filename: "SMITH - VS-04 Helm CONNECT.pdf" }, same, SHEET, FILED_COLS), null, "the model gave the same column: nothing to say");
-  assert.equal(filedAsFor({ qualCode: "QL-01", filename: "X - QL-13 ECDIS.pdf" }, ecdis, SHEET, FILED_COLS), null, "a hand tag is the person's word, not a filing to question");
+  /* A hand tag fills its column whatever the reader says, but a person can
+     pick the wrong column: where the reader is sure or held the document is
+     another column, the disagreement is said (Matthew, 26 Sep 2026). */
+  assert.deepEqual(filedAsFor({ qualCode: "QL-01", filename: "X - QL-13 ECDIS.pdf" }, ecdis, SHEET, FILED_COLS),
+    { code: "QL-01", title: "Master", readsAs: "ECDIS generic" }, "a hand tag the reader is sure is another column is questioned");
+  assert.equal(filedAsFor({ qualCode: "QL-13", filename: "scan.pdf" }, ecdis, SHEET, FILED_COLS), null, "the tag the reader agrees with: nothing to say");
+  assert.equal(filedAsFor({ qualCode: "QL-01", filename: "scan.pdf" }, reading({ certificateTitle: "Some course", qualCode: null }), SHEET, FILED_COLS), null,
+    "a reader with no column to offer questions no tag");
+  const smart = reading({ certificateTitle: "Watchkeeper Deck", qualCode: "QL-13", columns: [{ code: "QL-13", confidence: "high", why: null }, { code: "QL-01", confidence: "low", why: "a guess" }] });
+  assert.deepEqual(filedAsFor({ qualCode: "QL-01", filename: "scan.pdf" }, smart, SHEET, FILED_COLS),
+    { code: "QL-01", title: "Master", readsAs: "Watchkeeper Deck" }, "a low for the tag and a high elsewhere: questioned");
+  assert.equal(filedAsFor({ qualCode: "QL-01", filename: "scan.pdf" }, reading({ certificateTitle: "Master", qualCode: "QL-13", columns: [{ code: "QL-13", confidence: "high", why: null }, { code: "QL-01", confidence: "medium", why: "a level" }] }), SHEET, FILED_COLS), null,
+    "held for the tag by a level: the tag stands unquestioned");
+  assert.equal(codeFor({ qualCode: "QL-01", filename: "scan.pdf" }, smart, SHEET, FILED_COLS), "QL-01", "and the tag still fills its column");
+  assert.equal(tagWarning("QL-01", "Master", "Watchkeeper Deck"), "Filed as QL-01 · Master, but it reads as Watchkeeper Deck - check it.");
+  assert.equal(tagWarning("QL-01", "Master", null), "Filed as QL-01 · Master, but it reads as nothing on the matrix - check it.");
   assert.equal(filedAsFor({ filename: "X - PI-02 Induction.pdf" }, helm, SHEET, FILED_COLS), null, "no live column in the name: no filing");
   assert.equal(filedAsFor({ filename: "SMITH - VS-04 Helm.pdf" }, reading({ readable: false }), SHEET, FILED_COLS), null, "an unreadable document fills nothing and says nothing");
   const untitled = reading({ certificateTitle: null, qualCode: "QL-13" });

@@ -1032,8 +1032,9 @@ function readingSays(reading: Reading, table: Equivalence[]): string | null {
  * files the document under, that column's title, and what the reading called
  * the document - or null where there is nothing to say.
  *
- * Nothing to say where somebody tagged the row by hand (the person's word,
- * not a filing to question), where the name carries no live column or the
+ * A hand tag is questioned only where the reader is sure or held the document
+ * is another column (the person's word still fills the cell). Nothing to say
+ * where the name carries no live column or the
  * portal wrote the name, where the document could not be read (a filename
  * is not evidence that a paper exists, and the unreadable is listed on its
  * own), or where the reading agreed: the reader gave the filed column high
@@ -1054,19 +1055,35 @@ export function filedAsFor(
   table: Equivalence[],
   columns: unknown,
 ): { code: string; title: string; readsAs: string | null } | null {
-  if (row.qualCode || !reading || reading.readable === false) return null;
-  const filed = filedColumnOf(row, columns);
+  if (!reading || reading.readable === false) return null;
+  /* A hand tag is the person's word and always fills its column - but a
+     person can pick the wrong column, and the reader is asked to say so
+     (Matthew, 26 Sep 2026: "if the AI realises the user is putting it in
+     the wrong column, put up a warning"): where the reader is sure or
+     held (high or medium) the document is another column and not this
+     one, the line is said. A reader with no column to offer questions
+     nothing - the tag is then the best word there is. */
+  const tag = String(row.qualCode || "").trim().toUpperCase();
+  const filed = tag || filedColumnOf(row, columns);
   if (!filed) return null;
   let said: string;
   if (Array.isArray(reading.columns)) {
-    const placed = columnsFor(row, reading, table, columns);
-    const own = placed.find((c) => c.code.trim().toUpperCase() === filed);
-    if (!own || own.by !== "filed") return null;
-    said = String((placed.find((c) => c.by !== "filed") || { code: "" }).code).trim().toUpperCase();
+    if (tag) {
+      const sure = reading.columns.filter((c) => c && typeof c.code === "string" && (c.confidence === "high" || c.confidence === "medium"));
+      if (!sure.length || sure.some((c) => c.code.trim().toUpperCase() === tag)) return null;
+      said = sure[0].code.trim().toUpperCase();
+    } else {
+      const placed = columnsFor(row, reading, table, columns);
+      const own = placed.find((c) => c.code.trim().toUpperCase() === filed);
+      if (!own || own.by !== "filed") return null;
+      said = String((placed.find((c) => c.by !== "filed") || { code: "" }).code).trim().toUpperCase();
+    }
   } else {
     said = String(readingSays(reading, table) || "").trim().toUpperCase();
     const guessed = String(reading.qualCode || "").trim().toUpperCase();
     if (said === filed || guessed === filed) return null;
+    // A tag is questioned only on a positive other answer.
+    if (tag && !said) return null;
   }
   const cols = (Array.isArray(columns) ? columns : []) as unknown[][];
   const titleOf = (code: string) => {
