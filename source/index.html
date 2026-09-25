@@ -5451,7 +5451,15 @@ function Portal({ role, onSignOut }) {
         person: known(f.person).toUpperCase(), certificate: f.certificate || "", printed: f.printed || "",
         line: f.line === "check" ? "check" : "add", url: f.fileId ? `/api/files/${f.fileId}` : null,
       }));
-      setCertDates({ at: r.at || new Date().toISOString(), map, covers, filedAs, notOnMatrix, placed, readAs });
+      /* The documents read but not placed, and why - a scan the reader could
+         not read, one in another man's name, one with no date read off it -
+         so an empty cell after an upload has its reason on Needs attention. */
+      const notPlaced = (r.notPlaced || []).map((f) => ({
+        person: known(f.person), filename: f.filename || "", why: f.why, reason: f.reason || null,
+        printed: f.printed || null, code: f.code ? String(f.code).toUpperCase() : null,
+        url: f.fileId ? `/api/files/${f.fileId}` : null,
+      }));
+      setCertDates({ at: r.at || new Date().toISOString(), map, covers, filedAs, notOnMatrix, placed, readAs, notPlaced });
       if (v) {
         setValidityPeriods({
           at: new Date().toISOString(),

@@ -129,6 +129,25 @@ function notOnMatrixLines(dates) {
     .map((f) => ({ person: f.person, text: `${f.person} — ${f.title}`, url: f.url }));
 }
 
+/* Not placed: the documents the server read but could not put on the
+   matrix (certificateStanding's notPlaced), one line each with the reason -
+   the scan could not be read, it is printed in another man's name, or no
+   date could be read off it for a dated column - by person and then file.
+   Matthew, 26 Sep 2026, on cells still empty after a night's uploads: the
+   reason was nowhere he looked. Pure, so the rule tests can hold it. */
+function notPlacedLines(dates) {
+  const listed = dates && Array.isArray(dates.notPlaced) ? dates.notPlaced : [];
+  const said = (f) => f.why === "name"
+    ? `in the name of ${f.printed || "somebody else"}`
+    : f.why === "no-date"
+      ? `no date could be read off it${f.code ? ` for ${f.code}` : ""}`
+      : `could not be read${f.reason ? ` (${f.reason})` : ""}`;
+  return listed
+    .map((f) => ({ person: String(f.person || ""), filename: String(f.filename || ""), url: f.url || null, why: f.why, line: said(f) }))
+    .sort((a, b) => a.person.localeCompare(b.person) || a.filename.localeCompare(b.filename))
+    .map((f) => ({ person: f.person, text: `${f.person} — ${f.filename}: ${f.line}`, url: f.url }));
+}
+
 function CertChecker({ query }) {
   const { quals: QUALS, certDates, certificates, renewalMarks, people, skillsRequirements } = usePortal();
   const validityFor = useValidityLookup();
@@ -247,6 +266,7 @@ function CertChecker({ query }) {
 
   // The documents no column places, narrowed by the same box.
   const onFile = useMemo(() => notOnMatrixLines(certDates), [certDates]).filter((l) => hits(l.person));
+  const notPlaced = useMemo(() => notPlacedLines(certDates), [certDates]).filter((l) => hits(l.person));
 
   // Every item whose certificate was issued by an authority that doesn't read
   // as Australian — valid or not, because the flag is about who issued it,
@@ -397,6 +417,23 @@ function CertChecker({ query }) {
                   {l.url && <OpenLink url={l.url} />}
                 </div>
               ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* The documents read but not placed, each with its reason: the
+          heading and the lines, nothing else. */}
+      {notPlaced.length > 0 && (
+        <div id="not-placed" style={{ marginBottom: 26 }}>
+          <div style={{ borderTop: `2px solid ${T.bRed}`, paddingTop: 9, marginBottom: 11 }}>
+            <Eyebrow color={T.text}>Not placed — {notPlaced.length}</Eyebrow>
+          </div>
+          {notPlaced.map((l, i) => (
+            <div key={(l.url || "") + i} style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap",
+              padding: "4px 0 4px 4px", borderBottom: `1px solid ${T.rule}` }}>
+              <span style={{ fontFamily: T.body, fontSize: 13, color: T.text, flex: 1, minWidth: 240 }}>{l.text}</span>
+              {l.url && <OpenLink url={l.url} />}
             </div>
           ))}
         </div>

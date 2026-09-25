@@ -542,8 +542,13 @@ on any line that still names this one.
     to carry it (MO70 s 36(2)(a)), so QL-16 takes the **earlier** of the
     endorsement's own printed end and the certificate's expiry, and only the
     certificate in force for its own column covers another - a ticket the round
-    decided was superseded is the one it replaced. A column that carries no
-    expiry is never covered: it is held or it isn't. The round and the page's
+    decided was superseded is the one it replaced. **Where neither of two
+    documents runs the longer** - two induction forms, which print no expiry,
+    or two cards to the same day - **the one issued last is in force** (26
+    Sep 2026: nineteen renewed induction forms lost their cells to the 2024
+    forms they renewed, because a tie went to whichever was filed first, and
+    the cells stayed expired). A column that carries no expiry is never
+    covered by a date: it is held or it isn't. The round and the page's
     cells (`compareMatrix` in `worker/src/routes/analyse.ts`,
     `certificateStanding` in `worker/src/lib/analysis.ts`) decide every cell the
     same way, on the same dates, keyed on the register's name and refusing a
@@ -609,8 +614,16 @@ on any line that still names this one.
     not on the matrix — n**, one line each, "<person> — <title or filename>",
     by person (`notOnMatrix` from `certificateStanding`, `notOnMatrixLines`
     on the page). Whether any of them becomes a column is the office's
-    decision; the portal adds no column of its own. The preview shows both
-    under `?filedas=1`.
+    decision; the portal adds no column of its own. And the documents read
+    but **not placed** - a scan the reader could not read, one printed in
+    another man's name, one on a dated column with no date read off it at
+    all - are listed under Needs attention as **Not placed — n**, one line
+    each with the reason in plain words ("<person> — <file>: in the name of
+    <printed>" / "could not be read (<reason>)" / "no date could be read
+    off it for <code>"; `notPlaced` from `certificateStanding`,
+    `notPlacedLines` on the page) - 26 Sep 2026, after a night's uploads
+    left cells empty with the reason nowhere Matthew looked. The preview
+    shows all three under `?filedas=1`.
   - **The reader says what a certificate is for and whose it is** (Matthew,
     25 Sep 2026: "less picky ... the AI reads the certificate to determine
     what it is for"). The question asks for every column the document is
@@ -648,7 +661,11 @@ on any line that still names this one.
     or is not printed at all - "JITENDER" alone);
     never with somebody else in mind (`others`, however written, or
     another register man named in its reasons); never takes a certificate
-    whose printed name fits the man it is filed under, and moves one out of
+    whose printed name fits the man it is filed under (a word of his a
+    letter or two out - "REETHAM KUMA" off a stylised scan, filed under
+    KUMAR, Preetham - fits: `nameIsSomebodyElse` counts a word of four
+    letters or more within `lettersApart`'s allowance as his, 26 Sep 2026;
+    initials and short forms stay the reader's to weigh), and moves one out of
     a register man's folder only on a printed word in common; where it
     places one on a name his register entry lacks, Needs attention asks for
     the name to be added to Crew Details (`readAsLine`). **A register page

@@ -1130,6 +1130,55 @@ test("a hand tag fills its column whatever the reader says, and the reader's dis
   assert.equal(evansCell(agreed.portal, "QL-08"), "2031-05-26", "the tag fills the column the reader could not name");
 });
 
+test("two documents neither running the longer: the one issued last holds the cell, on the page and in the round", async () => {
+  /* Nineteen induction forms uploaded on 26 Sep 2026, each renewing a 2024
+     form on file: neither prints an expiry, so the contest was a tie and
+     the first-filed - the old one - kept the cell, expired. The later
+     issued is the one in force. */
+  const { portal, env } = await smartPortal([
+    { id: "old", filename: "old.pdf", reading: { certificateTitle: "Vessel Induction - New Crew", qualCode: "QL-04", codeConfidence: "high",
+      issuedOn: "2024-04-19", expiresOn: null, columns: [{ code: "QL-04", confidence: "high", why: null }] } },
+    { id: "new", filename: "new.pdf", reading: { certificateTitle: "Vessel Induction - New Crew", qualCode: "QL-04", codeConfidence: "high",
+      issuedOn: "2026-09-18", expiresOn: null, columns: [{ code: "QL-04", confidence: "high", why: null }] } },
+  ]);
+  await worker.scheduled({} as never, env as never);
+  // The refile has renamed both by now, so the note is held to its words.
+  const said = await roundNotes(portal, "superseded");
+  assert.equal(said.length, 1);
+  assert.match(said[0], /^Two certificates on file for QL-04\. Neither runs the longer, and .+ was issued last, so .+ is treated as the one it replaced\.$/);
+  const page = await certificateStanding();
+  assert.deepEqual(page.dates.filter((d) => d.code === "QL-04").map((d) => [d.fileId, d.issued]), [["new", "2026-09-18"]], "the page's cells open the new one");
+  // Filed the other way round, the same answer.
+  const swapped = await smartPortal([
+    { id: "new", filename: "new.pdf", reading: { qualCode: "QL-04", codeConfidence: "high", issuedOn: "2026-09-18", expiresOn: null, columns: [{ code: "QL-04", confidence: "high", why: null }] } },
+    { id: "old", filename: "old.pdf", reading: { qualCode: "QL-04", codeConfidence: "high", issuedOn: "2024-04-19", expiresOn: null, columns: [{ code: "QL-04", confidence: "high", why: null }] } },
+  ]);
+  await worker.scheduled({} as never, swapped.env as never);
+  assert.deepEqual((await certificateStanding()).dates.filter((d) => d.code === "QL-04").map((d) => d.fileId), ["new"]);
+  // A printed expiry still decides where there is one.
+  const dated = await smartPortal([
+    { id: "long", filename: "long.pdf", reading: { qualCode: "QL-04", codeConfidence: "high", issuedOn: "2024-04-19", expiresOn: "2031-05-26", columns: [{ code: "QL-04", confidence: "high", why: null }] } },
+    { id: "short", filename: "short.pdf", reading: { qualCode: "QL-04", codeConfidence: "high", issuedOn: "2026-09-18", expiresOn: "2028-09-18", columns: [{ code: "QL-04", confidence: "high", why: null }] } },
+  ]);
+  await worker.scheduled({} as never, dated.env as never);
+  assert.equal(evansCell(dated.portal, "QL-04"), "2031-05-26", "the longer runs");
+});
+
+test("not placed: a document read but not put on the matrix says why on the page's list", async () => {
+  const { env } = await smartPortal([
+    { id: "blur", filename: "blur.pdf", reading: { readable: false, reason: "Too blurred to read.", columns: [] } },
+    { id: "his", filename: "his.pdf", reading: { holderName: "Rohin JITENDER", qualCode: "QL-04", codeConfidence: "high", columns: [{ code: "QL-04", confidence: "high", why: null }] } },
+    { id: "nodate", filename: "card.pdf", qualCode: "QL-08", reading: { certificateTitle: "Maritime Security Identification Card", qualCode: "QL-08", codeConfidence: "high", issuedOn: null, expiresOn: null, columns: [{ code: "QL-08", confidence: "high", why: null }] } },
+  ]);
+  await worker.scheduled({} as never, env as never);
+  const page = await certificateStanding();
+  assert.deepEqual(page.notPlaced.map((n) => [n.fileId, n.why, n.printed, n.code, n.reason]).sort(), [
+    ["blur", "unreadable", null, null, "Too blurred to read."],
+    ["his", "name", "Rohin JITENDER", null, null],
+    ["nodate", "no-date", null, "QL-08", null],
+  ]);
+});
+
 test("a register page counts only for the columns the office keeps in a register", async () => {
   /* The office records the cargo-system approvals in a register, not on a
      certificate (the vessel file's registerEvidenced: CS-03 and CS-04). A

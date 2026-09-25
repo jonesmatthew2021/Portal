@@ -107,8 +107,27 @@ export function nameIsSomebodyElse(printed, filedUnder, known) {
   const on = holderWords(printed);
   if (!on.length) return false;
   const filed = [...holderWords(filedUnder), ...holderWords(known)];
-  return !filed.some((w) => on.includes(w));
+  if (filed.some((w) => on.includes(w))) return false;
+  /* A word the scan garbled - "AMPLE Sa" off a stylised certificate filed
+     under SAMPLE, Sam (26 Sep 2026: a Helm CONNECT certificate lost both
+     end letters of its holder's name and was refused as another man's) -
+     is his word a letter or two out, not another man's: a word of four
+     letters or more within lettersApart's allowance of one of his counts as
+     in common. Initials and short forms do not: those are the reader's to
+     weigh (readerPick), not this rule's. */
+  return !on.some((w) => w.length >= 4 && filed.some((f) => f.length >= 4 && nearlySame(w, f)));
 }
+
+/** Two words a letter apart, or two apart where both run six letters or
+ *  more - a scan's slip, not a different name.
+ * @param {string} a
+ * @param {string} b
+ */
+const nearlySame = (a, b) => {
+  const shorter = Math.min(a.length, b.length);
+  if (Math.abs(a.length - b.length) > 2) return false;
+  return lettersApart(a, b) <= (shorter >= 6 ? 2 : 1);
+};
 
 /** Every piece of a printed name, initials and all, accents folded away the
  *  same way holderWords folds them. A piece with no letter in it (a number

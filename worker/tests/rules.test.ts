@@ -1767,7 +1767,10 @@ test("the reader's pick of a person: a guess, two people or nobody on the regist
   const people = [{ name: "SITTIYOS, Kachin", aliases: ["bILLY"] }, { name: "JITENDER, Rohin", aliases: [] }];
   const pick = (printed: string, person: string | null, confidence: string, others: string[] = []) =>
     readerPick(printed, { person, confidence, others }, people);
-  assert.deepEqual(pick("Bill", "SITTIYOS, Kachin", "high"), { person: "SITTIYOS, Kachin", line: "add" }, "sure, and nothing in common: his, and the name is to be added");
+  // "Bill" is a letter from his alias "Billy": in common, so placed and checked rather than asked to be added (26 Sep 2026).
+  assert.deepEqual(pick("Bill", "SITTIYOS, Kachin", "high"), { person: "SITTIYOS, Kachin", line: "check" }, "sure, a letter from one of his spellings: his, to be checked");
+  assert.deepEqual(readerPick("Bill", { person: "SITTIYOS, Kachin", confidence: "high", others: [] }, [{ name: "SITTIYOS, Kachin", aliases: [] }, people[1]]),
+    { person: "SITTIYOS, Kachin", line: "add" }, "sure, and nothing in common: his, and the name is to be added");
   assert.deepEqual(pick("K SITTIYOS", "SITTIYOS, Kachin", "high"), { person: "SITTIYOS, Kachin", line: "check" }, "sure, his surname and his initial: his, to be checked - an initial is not his name");  assert.deepEqual(pick("K SITTIYOS", "SITTIYOS, Kachin", "medium"), { person: "SITTIYOS, Kachin", line: "check" }, "a maybe with his surname: his, to be checked");
   assert.equal(pick("Rohin Jitender", "SITTIYOS, Kachin", "medium"), null, "a maybe with nothing in common is refused");
   assert.equal(pick("Bill", "SITTIYOS, Kachin", "low"), null, "a guess is no pick");
@@ -1780,7 +1783,7 @@ test("the reader's pick of a person: a guess, two people or nobody on the regist
   // Whose it is: the register's spelling first, and a pick never takes a
   // document from the man whose name it fits.
   assert.deepEqual(whoseCertificate("bILLY", null, "SITTIYOS, Kachin", "SITTIYOS, Kachin", people), { his: true, line: null }, "an alias is his");
-  assert.deepEqual(whoseCertificate("Bill", { person: "SITTIYOS, Kachin", confidence: "high", others: [] }, "SITTIYOS, Kachin", "SITTIYOS, Kachin", people), { his: true, line: "add" });
+  assert.deepEqual(whoseCertificate("Bill", { person: "SITTIYOS, Kachin", confidence: "high", others: [] }, "SITTIYOS, Kachin", "SITTIYOS, Kachin", people), { his: true, line: "check" }, "a letter from his alias: his, checked");
   assert.deepEqual(whoseCertificate("Kachin Sittiyos", { person: "JITENDER, Rohin", confidence: "high", others: [] }, "SITTIYOS, Kachin", "SITTIYOS, Kachin", people), { his: true, line: null }, "the printed name is his; the pick is not asked");
   assert.deepEqual(whoseCertificate("Bill", { person: "JITENDER, Rohin", confidence: "high", others: [] }, "SITTIYOS, Kachin", "SITTIYOS, Kachin", people), { his: false, line: null }, "a pick of another man, on a name that fits neither: not his");
 });
@@ -1953,6 +1956,22 @@ test("the reader's pick: a printed name that fits another man on Crew Details as
   assert.deepEqual(readerPick("Bill S", sure("SITTIYOS, Kachin"), people), { person: "SITTIYOS, Kachin", line: "add" });
   assert.deepEqual(readerPick("R. JITENDER", sure("JITENDER, Rohin"), people), { person: "JITENDER, Rohin", line: "check" });
   assert.deepEqual(readerPick("Kachin SITTIYSO", sure("SITTIYOS, Kachin"), people), { person: "SITTIYOS, Kachin", line: "check" }, "his own name with two letters swapped is his, checked");
+});
+
+test("a printed word a letter or two out from the filed man's own is his, not somebody else's", () => {
+  /* "REETHAM KUMA" off a stylised Helm CONNECT certificate filed under
+     KUMAR, Preetham (26 Sep 2026): the scan slipped a letter at each end
+     and the certificate was refused as another man's. A word of four
+     letters or more within a letter or two of his counts as in common;
+     initials and short forms are the reader's to weigh, not this rule's. */
+  assert.equal(nameIsSomebodyElse("REETHAM KUMA", "KUMAR, Preetham", "KUMAR, Preetham"), false, "a scan's slip is still his name");
+  assert.equal(nameIsSomebodyElse("Jane SMITH", "KUMAR, Preetham", "KUMAR, Preetham"), true, "another name altogether");
+  assert.equal(nameIsSomebodyElse("KUMARI Ravi", "KUMAR, Preetham", "KUMAR, Preetham"), false, "KUMARI is a letter from KUMAR: not refused here - the register's own checks weigh it");
+  assert.equal(nameIsSomebodyElse("P. K.", "KUMAR, Preetham", "KUMAR, Preetham"), false, "initials alone say nothing either way, as before");
+  assert.equal(nameIsSomebodyElse("KUMA", "LI, Wei", "LI, Wei"), true, "a short word is never fuzzed against a shorter");
+  const people = [{ name: "KUMAR, Preetham", aliases: [] }, { name: "EVANS, Brenton", aliases: [] }];
+  assert.deepEqual(whoseCertificate("REETHAM KUMA", null, "KUMAR, Preetham", "KUMAR, Preetham", people), { his: true, line: null }, "the round places it");
+  assert.equal(whoseCertificate("REETHAM KUMA", null, "EVANS, Brenton", "EVANS, Brenton", people).his, false, "and not on another man");
 });
 
 test("the reader's pick: a given name his only by a letter or two, an initial or a short form is checked, never placed quietly", () => {

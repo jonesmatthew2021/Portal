@@ -1425,9 +1425,17 @@ export async function compareMatrix(
       const other = mineIsRec ? his : mine;
       return !rec || !other || rec >= other;
     };
+    /* Neither printing a later expiry than the other - two induction forms,
+       which print none, or two cards to the same day - the one issued last
+       is the one in force: a renewal is the newer paper. Decided by order
+       of filing before 26 Sep 2026, so a form signed this month lost the
+       cell to the one it renewed and the cell stayed expired. The page's
+       cells settle it the same way (certificateStanding). */
+    const tie = (mine || "") === (his || "");
+    const byLater = tie && (reading.issuedOn || "") !== (sitting.reading.issuedOn || "");
     const mineWins = mineIsRec !== sittingIsRec
       ? (mineIsRec ? recognitionHolds() : !recognitionHolds())
-      : byIssue
+      : byIssue || byLater
         ? (reading.issuedOn || "") > (sitting.reading.issuedOn || "")
         : (mine || "") > (his || "");
     const inForce = mineWins ? { row, reading } : sitting;
@@ -1441,7 +1449,9 @@ export async function compareMatrix(
         ? `Two certificates on file for ${code}. ${inForce.row.filename} is AMSA's certificate of recognition, which is the document that counts here, so ${replaced.row.filename} is the foreign certificate behind it.`
         : byIssue
           ? `Two certificates on file for ${code}. ${inForce.row.filename} was issued last, so ${replaced.row.filename} expired the day it was signed.`
-          : `Two certificates on file for ${code}. ${inForce.row.filename} runs the longer, so ${replaced.row.filename} is treated as the one it replaced.`,
+          : byLater
+            ? `Two certificates on file for ${code}. Neither runs the longer, and ${inForce.row.filename} was issued last, so ${replaced.row.filename} is treated as the one it replaced.`
+            : `Two certificates on file for ${code}. ${inForce.row.filename} runs the longer, so ${replaced.row.filename} is treated as the one it replaced.`,
       certificate: { id: replaced.row.id, filename: replaced.row.filename, url: `/api/files/${replaced.row.id}` },
     });
   }

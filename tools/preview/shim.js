@@ -248,6 +248,7 @@
        no column places. */
     const filedAs = [];
     const notOnMatrix = [];
+    const notPlaced = [];
     if (ordersFlag.filedAs) {
       const scans = mem.rows.filter((r) => r.category === "certificate" && !r.removedAt);
       dates.push(entry("QL-03", { expires: dayOff(700), issued: dayOff(-1100), fileId: scans[0] ? scans[0].id : null }));
@@ -256,6 +257,13 @@
       notOnMatrix.push(
         { person, title: "MRN Marine Contractor H&S", filename: "contractor-hs.pdf", fileId: scans[1] ? scans[1].id : null },
         { person: other ? other.name : person, title: "Psychosocial Hazards awareness", filename: "psychosocial.pdf", fileId: scans[2] ? scans[2].id : null },
+      );
+      /* And three read but not placed: a scan too poor to read, one in
+         another man's name, one with no date read off it for a dated column. */
+      notPlaced.push(
+        { person, filename: "blurred-card.pdf", why: "unreadable", reason: "Too blurred to read.", printed: null, code: null, fileId: scans[3] ? scans[3].id : null },
+        { person, filename: "helm-connect.pdf", why: "name", reason: null, printed: "REETHAM KUMA", code: null, fileId: scans[4] ? scans[4].id : null },
+        { person: other ? other.name : person, filename: "msic-card.pdf", why: "no-date", reason: null, printed: null, code: "VS-01", fileId: scans[5] ? scans[5].id : null },
       );
     }
     const placed = [];
@@ -269,7 +277,7 @@
         { person, certificate: "Provide First Aid", printed: "B. Sittyos", line: "check", fileId: scans[2] ? scans[2].id : null },
       );
     }
-    return { at: new Date().toISOString(), dates, covers, filedAs, notOnMatrix, placed, readAs };
+    return { at: new Date().toISOString(), dates, covers, filedAs, notOnMatrix, placed, readAs, notPlaced };
   };
   const OUT_OF_CREDIT = "Out of credit — top it up at console.anthropic.com";
   /* ?offline=1: the four answers the service worker keeps come back the

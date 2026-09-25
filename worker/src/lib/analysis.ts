@@ -1166,10 +1166,21 @@ export async function certificateStanding() {
   /* The documents that are no one column and cover on their own account. */
   const coverOnly: { row: Row; reading: Reading; person: string }[] = [];
 
+  /* The documents read but not placed, and why, for Needs attention: a
+     scan the reader could not read, one printed in another man's name, and
+     one placed on a dated column with no date read off it at all. Matthew,
+     26 Sep 2026, on cells that stayed empty after a night's uploads: the
+     reason was in the round's notes and nowhere he looked. */
+  const notPlaced: { person: string; filename: string; fileId: string; why: "unreadable" | "name" | "no-date"; reason: string | null; printed: string | null; code: string | null }[] = [];
   for (const { row, reading } of readings) {
+    if (!reading || !row.person || !row.person.trim()) continue;
     // A hand tag stands over the reader's "no" where the tag is the whole
     // answer (tagStands) - the round lets the same document through.
-    if (!reading || (!reading.readable && !tagStands(row, reading)) || !row.person || !row.person.trim()) continue;
+    if (!reading.readable && !tagStands(row, reading)) {
+      notPlaced.push({ person: register.nameOf(row.person) || row.person, filename: row.filename, fileId: row.id,
+        why: "unreadable", reason: (reading as Reading & { reason?: string }).reason || null, printed: null, code: null });
+      continue;
+    }
     /* A paper that stands in for a certificate is not the certificate. Its
        date is the day the cover runs out, not the day the certificate
        expires, so it never fills a cell, never joins the contest for one and
@@ -1217,7 +1228,11 @@ export async function certificateStanding() {
     // round refuses the same document (the rule is in source/shared/names.js),
     // and weighs the reader's pick of a person off the register the same way.
     const whose = whoseCertificate(reading.holderName, reading.holder, row.person, person, people);
-    if (!whose.his) continue;
+    if (!whose.his) {
+      notPlaced.push({ person, filename: row.filename, fileId: row.id, why: "name", reason: null,
+        printed: String(reading.holderName || "").trim() || null, code: null });
+      continue;
+    }
     if (!placed) {
       /* Nothing places it and it covers nothing: on file, not on the matrix.
          Decided after the paper and the name checks, so a letter is not
@@ -1252,6 +1267,11 @@ export async function certificateStanding() {
       const key = `${person.trim().toUpperCase()}::${at}`;
       if (!isRecognitionReading(reading) && expires && expires > (foreignAt.get(key) || "")) foreignAt.set(key, expires);
       standing.push({ row, reading, code: at, key, expires, issued, issuer });
+      // A dated column with nothing read off the scan - no expiry, no issue
+      // date - fills nothing, and says so rather than leaving a cell empty.
+      if (!neverLapses(at) && !expires && !issued) {
+        notPlaced.push({ person, filename: row.filename, fileId: row.id, why: "no-date", reason: null, printed: null, code: at });
+      }
       /* Placed by the reader by a level, an equivalence or an endorsement:
          one line on Needs attention, so a quick look confirms it. */
       if (c.by === "read" && c.confidence === "medium") {
@@ -1292,9 +1312,12 @@ export async function certificateStanding() {
         const other = mineIsRec ? sitting.expires : expires;
         return !rec || !other || rec >= other;
       };
+      /* Neither running the longer - two induction forms print no expiry -
+         the one issued last is in force, as the round decides it. */
+      const byLater = (expires || "") === (sitting.expires || "") && (issued || "") !== (sitting.issued || "");
       const beats = mineIsRec !== !!sitting.recognition
         ? (mineIsRec ? recognitionHolds() : !recognitionHolds())
-        : byIssue ? (issued || "") > (sitting.issued || "")
+        : byIssue || byLater ? (issued || "") > (sitting.issued || "")
           : (expires || "") > (sitting.expires || "");
       if (!beats) {
         // An issue date or issuer is still worth carrying over where the one
@@ -1389,6 +1412,8 @@ export async function certificateStanding() {
     readAs,
     /* The columns the reader filled on a medium, for a quick look. */
     placed: placedByReading,
+    /* The documents read but not placed, and why. */
+    notPlaced,
     // `fileId` names the scan each line's dates were read from, so the
     // certification screens can put a link to the certificate itself on the line.
     dates: [...claim.entries()].map(([key, v]) => {
