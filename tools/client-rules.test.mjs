@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, recognisedUntil, recognitionFills, foreignExpiryOn, isRecognitionReading, certCoverFor, coverLine, bandWithCover, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, paperKind, EVIDENCE_KINDS, EVIDENCE_LABELS, marineOrderLines, filedAsLines, notOnMatrixLines, filedCodeIn, filedAsLine };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, recognisedUntil, recognitionFills, foreignExpiryOn, isRecognitionReading, certCoverFor, coverLine, bandWithCover, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, paperKind, EVIDENCE_KINDS, EVIDENCE_LABELS, marineOrderLines, filedAsLines, notOnMatrixLines, filedCodeIn, filedAsLine, readingLines, placedLine, readAsLine };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -2885,6 +2885,40 @@ const is = (got, want, what) => {
   is(notOnMatrixLines(listed)[0].url, "/api/files/p", "each line opens its file");
   is(notOnMatrixLines({ map: {} }), [], "nothing listed, nothing said");
   is(notOnMatrixLines(null), [], "no dates yet, nothing said");
+
+  /* The reader's own work on Needs attention: a column it filled on a
+     "medium", with its reason, and a certificate it placed on a man whose
+     names on Crew Details do not carry the printed name - these exact
+     sentences, and no others, each on its own man's row. */
+  const reader = { map: {},
+    placed: [
+      { person: "EVANS, BRENTON", code: "VS-04", why: "Crew Intermediate satisfies Crew Basic", url: "/api/files/h" },
+      { person: "SITTIYOS, KACHIN", code: "CS-04", why: "listed on the approvals register", url: null },
+    ],
+    readAs: [
+      { person: "EVANS, BRENTON", certificate: "GMDSS", printed: "Bill", line: "add", url: "/api/files/g" },
+      { person: "EVANS, BRENTON", certificate: "Provide First Aid", printed: "B. Evens", line: "check", url: null },
+    ] };
+  is(lib.readingLines(row(on(900)), reader).map((l) => l.text), [
+    "EVANS, Brenton — VS-04: placed by the reading (Crew Intermediate satisfies Crew Basic)",
+    `GMDSS read as EVANS, Brenton's — add "Bill" to their names on Crew Details`,
+    `Provide First Aid read as EVANS, Brenton's — check, and add "B. Evens" to their names on Crew Details`,
+  ], "the three sentences, his only");
+  is(lib.readingLines(row(on(900)), reader)[0].url, "/api/files/h", "each opens its file");
+  is(lib.readingLines(row(on(900)), { map: {} }), [], "nothing placed, nothing said");
+  is(lib.readingLines(row(on(900)), null), [], "no dates yet, nothing said");
+  is(lib.placedLine("EVANS, Brenton", "VS-04", null), "EVANS, Brenton — VS-04: placed by the reading", "no reason given: no brackets");
+  const sharedFiled = await import(pathToFileURL(join(ROOT, "source", "shared", "filed-as.js")).href);
+  const sharedNames = await import(pathToFileURL(join(ROOT, "source", "shared", "names.js")).href);
+  is(sharedFiled.placedLine("A", "B", "c"), lib.placedLine("A", "B", "c"), "the worker's module says the placed line the same");
+  is(sharedNames.readAsLine("A", "B", "c", "check"), lib.readAsLine("A", "B", "c", "check"), "and the read-as line");
+  // Management only: the lines live in the gaps list, which the Crew
+  // Matrix opens under Needs attention for management and nobody else.
+  const area = readFileSync(join(ROOT, "source", "areas", "certification-checker.jsx"), "utf8");
+  const matrixPage = readFileSync(join(ROOT, "source", "parts", "crew-matrix.jsx"), "utf8");
+  is(/readingLines\(/.test(area) && /id="placed-by-reading"/.test(area), true, "the lines are the gaps list's");
+  is(/\{admin && only === "attention" && \(\s*<div[^>]*><CertChecker /.test(matrixPage), true, "and the gaps list is shown to management only");
+  is((matrixPage.match(/<CertChecker/g) || []).length, 1, "nowhere else");
 }
 
 if (failed) {

@@ -34,6 +34,7 @@ import importSingle from "../src/routes/import-single.js";
 import worker, { hourWaits, hourDeadline, syncLastAnswer } from "../src/index.js";
 import { graphBudget } from "../src/files/store.js";
 import { writeZip, readZip, partOf, partText, datedWorkbookName } from "../../source/shared/workbook.js";
+import { placedLine } from "../../source/shared/filed-as.js";
 import { asKnownPerson, crewRegister, readAsLine, readerPick, whoseCertificate } from "../../source/shared/names.js";
 import { backupDue, backupName, namesToDrop, folderAllowed, nightlyBackup } from "../src/lib/backup.js";
 import { REMINDER_USERS_SQL, NO_EMAIL, UNFINISHED, OUT_OF_TIME, reminderLimits, reminderWaits, weeklyReminders } from "../src/lib/reminders.js";
@@ -985,6 +986,112 @@ test("whose it is: the reader is shown the register numbered, and its number com
   const stored = JSON.parse(portal.blobs.get("certificate-readings|r1/unread-1.json")!);
   assert.deepEqual(stored.holder, { person: "SITTIYOS, Kachin", confidence: "high", why: "Bill is Kachin", others: ["EVANS, Brenton"] },
     "the number is the register's name; a number off the list is nobody");
+});
+
+/* ------------------------------------------------------------------------ *
+ * What a certificate is for: every column the reader gives, on its word.
+ * ------------------------------------------------------------------------ */
+
+/** Evans's portal with more columns on the matrix and his own ticket gone,
+ *  and the documents given - each with the filename the office gave it and
+ *  a reading that lists its columns. */
+const smartPortal = async (docs: { id: string; filename: string; reading: Record<string, unknown>; qualCode?: string }[]) => {
+  const made = await oneManPortal({ qualCode: null });
+  made.portal.rows.splice(made.portal.rows.findIndex((r) => r.id === "c2"), 1);
+  await made.bucket.delete("opms/Brenton - OPMS/master.pdf");
+  const doc = made.portal.doc();
+  const more: [string, string, string][] = [
+    ["VS-04", "Helm CONNECT - Crew Basic + Jobs", "Vessel Specific"],
+    ["QL-04", "Master <45m NC", "Qualification"],
+    ["QL-08", "Master <24m NC", "Qualification"],
+    ["PT-02", "Enter and Work in Confined Spaces - RIIWHS202E", "Permit to Work"],
+    ["PT-03", "Work Safely at Heights - RIIWHS204E", "Permit to Work"],
+  ];
+  doc.quals.cols.push(...more);
+  doc.quals.rows[0][3].push(...more.map(() => ""));
+  made.portal.state.data = JSON.stringify(doc);
+  for (const d of docs) {
+    const key = `opms/Brenton - OPMS/${d.filename}`;
+    await made.bucket.put(key, bytesOf("a scan"));
+    made.portal.rows.push({ ...billysTicket, id: d.id, person: "EVANS, Brenton", folder: "brenton", checksum: d.id, blobKey: key, filename: d.filename, sizeBytes: 6, qualCode: d.qualCode ?? null });
+    made.portal.blobs.set(`certificate-readings|r1/${d.id}.json`, JSON.stringify({ ...reading, holderName: "Brenton Evans", expiresOn: "2031-05-26", ...d.reading }));
+  }
+  made.bucket.made.length = 0;
+  const env = { DB: made.portal.db, FILES: made.bucket, FILE_STORE: "r2", ANTHROPIC_API_KEY: "k" };
+  return { ...made, env };
+};
+const evansCell = (portal: { doc: () => { quals: { cols: string[][]; rows: [string, string, string, string[]][] } } }, code: string) => {
+  const doc = portal.doc();
+  return doc.quals.rows[0][3][doc.quals.cols.findIndex((c) => c[0] === code)];
+};
+const roundNotes = async (portal: { doc: () => { quals: Parameters<typeof compareMatrix>[0]; people: { name: string; aliases: string[] }[] } }, kind: string) => {
+  const doc = portal.doc();
+  const out = await compareMatrix(doc.quals, null, asKnownPerson(doc.people));
+  return out.notes.filter((n) => n.kind === kind).map((n) => n.detail);
+};
+
+test("what it is for: a course a level above the one the office filed it for fills the filed column, and says so for a quick look", async () => {
+  const { portal, env } = await smartPortal([{ id: "helm", filename: "EVANS, Brenton - VS-04 Helm CONNECT - Crew Basic + Jobs.pdf",
+    reading: { certificateTitle: "Crew Intermediate - Helm CONNECT", qualCode: "VS-04", codeConfidence: "medium",
+      columns: [{ code: "VS-04", confidence: "medium", why: "Crew Intermediate satisfies Crew Basic" }] } }]);
+  await worker.scheduled({} as never, env as never);
+  assert.equal(evansCell(portal, "VS-04"), "Y", "filled - VS-04 never lapses on this vessel, so held");
+  const line = "EVANS, Brenton — VS-04: placed by the reading (Crew Intermediate satisfies Crew Basic)";
+  assert.deepEqual(await roundNotes(portal, "placed"), [line], "the round says it in the one line");
+  assert.deepEqual(await roundNotes(portal, "filed-as"), [], "and the office's filing is not questioned: the reader agrees by a level");
+  const page = await certificateStanding();
+  assert.deepEqual(page.placed.map((p) => placedLine("EVANS, Brenton", p.code, p.why)), [line], "the page's cells say the same");
+  assert.deepEqual(page.filedAs, []);
+
+  // Tagged on its card: the person's word, and the line goes.
+  portal.rows.find((r) => r.id === "helm")!.qualCode = "VS-04";
+  assert.deepEqual((await certificateStanding()).placed, [], "a hand tag clears it");
+  assert.deepEqual(await roundNotes(portal, "placed"), []);
+  // A surer reading replaces it: the line goes too.
+  portal.rows.find((r) => r.id === "helm")!.qualCode = null;
+  portal.blobs.set("certificate-readings|r1/helm.json", JSON.stringify({ ...reading, holderName: "Brenton Evans", expiresOn: "2031-05-26",
+    certificateTitle: "Helm CONNECT - Crew Basic + Jobs", columns: [{ code: "VS-04", confidence: "high", why: null }] }));
+  assert.deepEqual((await certificateStanding()).placed, [], "a high reading clears it");
+});
+
+test("what it is for: a ticket the reader is sure is another column fills both, and the office's filing is said to disagree", async () => {
+  const { portal, env } = await smartPortal([{ id: "wk", filename: "EVANS, Brenton - QL-04 Master _45m NC.pdf",
+    reading: { certificateTitle: "Watchkeeper Deck", qualCode: "QL-08", codeConfidence: "high",
+      columns: [{ code: "QL-08", confidence: "high", why: "Watchkeeper Deck corresponds to Master <24m NC" }, { code: "QL-04", confidence: "low", why: "not a Master <45m NC certificate" }] } }]);
+  await worker.scheduled({} as never, env as never);
+  assert.equal(evansCell(portal, "QL-08"), "2031-05-26", "the reader's sure column");
+  assert.equal(evansCell(portal, "QL-04"), "2031-05-26", "and the office's filed column, by the filed-as rule");
+  assert.deepEqual(await roundNotes(portal, "filed-as"), ["EVANS, Brenton — QL-04: filed as Master <45m NC, reads as Watchkeeper Deck"], "the disagreement is visible");
+  assert.deepEqual(await roundNotes(portal, "placed"), [], "a sure column needs no look");
+  const wk = portal.rows.find((r) => r.id === "wk")!;
+  assert.equal(wk.filename, "EVANS, Brenton - QL-04 Master _45m NC.pdf", "the office's name is left as the office's: the refile does not rename it for the reader's column");
+  assert.ok(!wk.namedByPortal, "and it stays the office's word");
+  const page = await certificateStanding();
+  assert.deepEqual(page.dates.map((d) => d.code).sort(), ["QL-04", "QL-08"], "the page's cells fill the same two");
+  assert.deepEqual(page.filedAs.map((f) => f.code), ["QL-04"]);
+});
+
+test("what it is for: a statement with two units fills both columns, with nothing to look at", async () => {
+  const { portal, env } = await smartPortal([{ id: "units", filename: "statement.pdf",
+    reading: { certificateTitle: "Statement of Attainment", units: ["RIIWHS202E", "RIIWHS204E"], qualCode: "PT-02", codeConfidence: "high",
+      columns: [{ code: "PT-02", confidence: "high", why: "RIIWHS202E printed" }, { code: "PT-03", confidence: "high", why: "RIIWHS204E printed" }] } }]);
+  await worker.scheduled({} as never, env as never);
+  assert.equal(evansCell(portal, "PT-02"), "2031-05-26");
+  assert.equal(evansCell(portal, "PT-03"), "2031-05-26", "both columns, the reader and the covers rule agreeing, counted once");
+  assert.deepEqual(await roundNotes(portal, "placed"), []);
+  assert.deepEqual((await certificateStanding()).dates.map((d) => d.code).sort(), ["PT-02", "PT-03"]);
+});
+
+test("what it is for: a guess fills nothing, and a reading made before the new question is placed as it always was", async () => {
+  const { portal, env } = await smartPortal([
+    { id: "guess", filename: "scan.pdf", reading: { certificateTitle: "Some course", qualCode: null, codeConfidence: null, columns: [{ code: "QL-08", confidence: "low", why: "a guess" }] } },
+    // The old shape: one code, sure, no columns key.
+    { id: "old", filename: "old.pdf", reading: { certificateTitle: "Master <45m NC", qualCode: "QL-04", codeConfidence: "high" } },
+  ]);
+  await worker.scheduled({} as never, env as never);
+  assert.equal(evansCell(portal, "QL-08"), "", "a guess fills nothing");
+  assert.equal(evansCell(portal, "QL-04"), "2031-05-26", "the old reading's one code, as before");
+  assert.deepEqual((await certificateStanding()).notOnMatrix, [], "a guess is still the reader's answer that the paper is the matrix's business");
 });
 
 test("on file, not on the matrix: a readable document with no column anywhere is listed, and nothing else is", async () => {

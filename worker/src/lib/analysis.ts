@@ -846,57 +846,147 @@ export function equivalentCode(title: string | null | undefined, table: Equivale
   return best ? best.code : null;
 }
 
-/** The one answer to "which column does this certificate speak to": the
- * uploader's own tagging first, then the column the filename files it under
- * (source/shared/filed-as.js - the office's word, where the caller hands in
- * the live matrix's columns), then the equivalence page's say over the
- * model's guess — that guess is exactly what the page corrects. Every caller
- * that can hand the columns in does, so the round and the page's cells
- * place a document the same way.
+/** One column a document fills with its own date, and on whose word:
+ *  "tag" - somebody picked the column on the upload page; "read" - the
+ *  reader, sure ("high") or by a level, an equivalence or an endorsement
+ *  ("medium", with its reason); "sheet" - the office's Equivalence sheet;
+ *  "filed" - the column the office filed it under, where the reader gave
+ *  that column less than medium. */
+export type PlacedColumn = {
+  code: string;
+  by: "tag" | "read" | "sheet" | "filed";
+  confidence?: "high" | "medium";
+  why?: string | null;
+};
+
+/** The columns a register page may stand as evidence for (the vessel
+ *  file's registerEvidenced): the office records some approvals in a
+ *  register, not on a certificate. Nothing else takes one. */
+export function registerColumns(): string[] {
+  const listed = (vessel as { registerEvidenced?: { codes?: unknown } }).registerEvidenced;
+  const codes = listed && Array.isArray(listed.codes) ? listed.codes : [];
+  return codes.map((c) => String(c).trim().toUpperCase()).filter(Boolean);
+}
+
+/**
+ * The one answer to "which columns does this certificate fill with its own
+ * date", and on whose word. The round (compareMatrix in routes/analyse.ts)
+ * and the page's cells (certificateStanding below) both go through here -
+ * as they go through coveredCells for the covered columns - so the grid and
+ * the round cannot place a document differently.
+ *
+ *   - A hand tag is the person's word: that one column, and nothing the
+ *     reader says moves it.
+ *   - Otherwise every column the reader was sure of (high), the column the
+ *     office's Equivalence sheet gives the printed title, every column the
+ *     reader holds it satisfies by a level, an equivalence or an endorsement
+ *     (medium, which Needs attention says so a quick look confirms it), and
+ *     the column the office filed it under where the reader gave that one
+ *     less (the filed-as rule, with its own line): nothing the office filed
+ *     disappears. A guess (low) fills nothing on its own. A column two of
+ *     them name is counted once. A register page counts only for the
+ *     vessel file's register columns.
+ *   - A reading made before the question asked for every column has one
+ *     code, and is placed as it always was: the filed column, then the
+ *     sheet, then the model's code where it was not a guess.
+ *
+ * The first column is the document's own - what the refile names it for
+ * and what its row records - so the office's filed column comes first where
+ * it has one: renaming the office's file for another column would mark the
+ * name as the portal's and throw the office's word away after one hour.
  *
  * A name the portal wrote itself (namedByPortal, set by the refile and the
  * upload's read when they rename a file "<PERSON> - <CODE> <Title>") is not
- * the office's word: its code is the model's guess written down, and read
- * back as a filing it would outrank the sheet whose job is to correct that
- * guess. Such a name is skipped; the sheet and the model decide as before. */
+ * the office's word: its code is the model's guess written down. Such a
+ * name files the document under nothing. `columns` is the live matrix's;
+ * where it is handed in, only its columns are placed.
+ */
+export function columnsFor(
+  row: { qualCode?: string | null; filename?: string | null; namedByPortal?: number | null },
+  reading: Reading | null,
+  table: Equivalence[],
+  columns?: unknown,
+): PlacedColumn[] {
+  if (row.qualCode) return [{ code: row.qualCode, by: "tag" }];
+  const filed = filedColumnOf(row, columns);
+  if (!reading) return filed ? [{ code: filed, by: "filed" }] : [];
+  if (!Array.isArray(reading.columns)) {
+    if (filed) return [{ code: filed, by: "filed" }];
+    const sheet = sheetSays(reading, table);
+    if (sheet) return [{ code: sheet, by: "sheet" }];
+    return reading.codeConfidence !== "low" && reading.qualCode ? [{ code: reading.qualCode, by: "read" }] : [];
+  }
+
+  const live = Array.isArray(columns) && columns.length
+    ? new Set((columns as unknown[]).map((c) => String(Array.isArray(c) ? c[0] : "").trim().toUpperCase()).filter(Boolean))
+    : null;
+  const register = reading.registerPage ? new Set(registerColumns()) : null;
+  const may = (code: string) => {
+    const at = code.trim().toUpperCase();
+    return !!at && (!live || live.has(at)) && (!register || register.has(at));
+  };
+  const out: PlacedColumn[] = [];
+  const has = (code: string) => out.some((c) => c.code.trim().toUpperCase() === code.trim().toUpperCase());
+  const add = (c: PlacedColumn) => { if (may(c.code) && !has(c.code)) out.push(c); };
+  const said = reading.columns.filter((c) => c && typeof c.code === "string");
+  const readerOn = (code: string) => said.find((c) => c.code.trim().toUpperCase() === code.trim().toUpperCase());
+
+  const sheet = register ? null : sheetSays(reading, table);
+  // The office's filed column first, on whichever word fills it.
+  if (filed) {
+    const r = readerOn(filed);
+    if (r && r.confidence === "high") add({ code: filed, by: "read", confidence: "high" });
+    else if (sheet && sheet.toUpperCase() === filed.toUpperCase()) add({ code: filed, by: "sheet" });
+    else if (r && r.confidence === "medium") add({ code: filed, by: "read", confidence: "medium", why: r.why ?? null });
+    else add({ code: filed, by: "filed" });
+  }
+  said.filter((c) => c.confidence === "high").forEach((c) => add({ code: c.code, by: "read", confidence: "high" }));
+  if (sheet) add({ code: sheet, by: "sheet" });
+  said.filter((c) => c.confidence === "medium").forEach((c) => add({ code: c.code, by: "read", confidence: "medium", why: c.why ?? null }));
+  return out;
+}
+
+/** The first column columnsFor places: the document's own - what the refile
+ *  names the file for and what its row records - or null. */
 export function codeFor(
   row: { qualCode?: string | null; filename?: string | null; namedByPortal?: number | null },
   reading: Reading | null,
   table: Equivalence[],
   columns?: unknown,
 ): string | null {
-  if (row.qualCode) return row.qualCode;
-  const filed = filedColumnOf(row, columns);
-  if (filed) return filed;
-  if (!reading) return null;
-  return readingSays(reading, table);
+  const first = columnsFor(row, reading, table, columns)[0];
+  return first ? first.code : null;
 }
 
 /** The column the office filed a document under by its name, or null: the
  *  filename's code where the office wrote the name, never where the portal
- *  did. The one test, so codeFor and filedAsFor cannot disagree about it. */
+ *  did. The one test, so columnsFor and filedAsFor cannot disagree about it. */
 function filedColumnOf(row: { filename?: string | null; namedByPortal?: number | null }, columns: unknown): string | null {
   if (!columns || row.namedByPortal) return null;
   return filedCodeIn(row.filename, columns);
 }
 
-/** What the reading alone makes of a document: the equivalence page's say,
- *  then the model's confident guess. The two steps of codeFor that are the
- *  document's own words rather than anybody's filing of it. */
-function readingSays(reading: Reading, table: Equivalence[]): string | null {
+/** The column the office's Equivalence sheet gives the printed title - or,
+ *  where the title names nothing, the title with the reader's notes, since
+ *  some tickets print a bare "Certificate of Competency" and put the
+ *  capacity elsewhere on the page. */
+function sheetSays(reading: Reading, table: Equivalence[]): string | null {
   return (
     equivalentCode(reading.certificateTitle, table) ||
-    // Some tickets print a bare "Certificate of Competency" and put the
-    // capacity elsewhere on the page - the reader keeps that in its notes,
-    // so the notes get a say when the title alone names nothing.
     equivalentCode(
       reading.certificateTitle && reading.notes
         ? `${reading.certificateTitle} ${reading.notes}`
         : reading.notes,
       table,
-    ) ||
-    (reading.codeConfidence !== "low" ? reading.qualCode || null : null)
+    )
   );
+}
+
+/** What the reading alone makes of a document, for a reading made before
+ *  the question asked for every column: the sheet's say, then the model's
+ *  code where it was not a guess. */
+function readingSays(reading: Reading, table: Equivalence[]): string | null {
+  return sheetSays(reading, table) || (reading.codeConfidence !== "low" ? reading.qualCode || null : null);
 }
 
 /**
@@ -906,14 +996,16 @@ function readingSays(reading: Reading, table: Equivalence[]): string | null {
  *
  * Nothing to say where somebody tagged the row by hand (the person's word,
  * not a filing to question), where the name carries no live column or the
- * portal wrote the name (codeFor), where the document could not be read (a
- * filename is not evidence that a paper exists, and the unreadable is
- * listed on its own), or where the reading agreed: the sheet or the model
- * gave the same column - the model's own code counts as agreement however
- * sure it was, since the line is for a document read as something ELSE -
- * or the title printed on the document is the column's own title.
- * `readsAs` is the title printed on the document, or the title of the
- * column the reading named where it printed none.
+ * portal wrote the name, where the document could not be read (a filename
+ * is not evidence that a paper exists, and the unreadable is listed on its
+ * own), or where the reading agreed: the reader gave the filed column high
+ * or medium (a medium says so in its own line), or the sheet gave the same
+ * column, or the title printed on the document is the column's own title.
+ * A reading made before the question asked for every column agrees where
+ * its one code is the filed column, however sure it was - the line is for a
+ * document read as something ELSE. `readsAs` is the title printed on the
+ * document, or the title of the column the reading named where it printed
+ * none.
  *
  * Said once here so the round's note and the page's line (Needs attention)
  * are the one sentence, through filedAsLine in source/shared/filed-as.js.
@@ -927,9 +1019,17 @@ export function filedAsFor(
   if (row.qualCode || !reading || reading.readable === false) return null;
   const filed = filedColumnOf(row, columns);
   if (!filed) return null;
-  const said = String(readingSays(reading, table) || "").trim().toUpperCase();
-  const guessed = String(reading.qualCode || "").trim().toUpperCase();
-  if (said === filed || guessed === filed) return null;
+  let said: string;
+  if (Array.isArray(reading.columns)) {
+    const placed = columnsFor(row, reading, table, columns);
+    const own = placed.find((c) => c.code.trim().toUpperCase() === filed);
+    if (!own || own.by !== "filed") return null;
+    said = String((placed.find((c) => c.by !== "filed") || { code: "" }).code).trim().toUpperCase();
+  } else {
+    said = String(readingSays(reading, table) || "").trim().toUpperCase();
+    const guessed = String(reading.qualCode || "").trim().toUpperCase();
+    if (said === filed || guessed === filed) return null;
+  }
   const cols = (Array.isArray(columns) ? columns : []) as unknown[][];
   const titleOf = (code: string) => {
     const col = cols.find((c) => Array.isArray(c) && String(c[0] || "").trim().toUpperCase() === code);
@@ -981,6 +1081,9 @@ export async function certificateStanding() {
   /* The certificates the reader placed on a man whose names do not yet
      include the name printed on them (whoseCertificate's line). */
   const readAs: { person: string; certificate: string; printed: string; line: "add" | "check"; fileId: string }[] = [];
+  /* The columns the reader filled on a "medium" - by a level, an equivalence
+     or an endorsement - each with its reason (placedLine). */
+  const placedByReading: { person: string; code: string; why: string | null; fileId: string }[] = [];
 
   const claim = new Map<
     string,
@@ -1020,7 +1123,9 @@ export async function certificateStanding() {
        it is, if any, is the one question paperKind answers: the kind the
        person picked, else a hand tag making it the certificate, else the
        reading's word (compareMatrix says why). */
-    const named = codeFor(row, reading, eqTable, cols);
+    // Every column the document fills with its own date - the one rule the
+    // round goes by too (columnsFor).
+    const placedCols = columnsFor(row, reading, eqTable, cols);
     // A date typed against the certificate on the portal beats the model's
     // reading of the scan, same as in the comparison.
     const typed = isDate(row.expiresOn) ? row.expiresOn!.trim().slice(0, 10) : null;
@@ -1031,19 +1136,23 @@ export async function certificateStanding() {
        pass, as it does in the round (compareMatrix in routes/analyse.ts),
        dated as its own column would be: the typed date first (the round's
        typedOver). */
-    const code = named && named.trim() ? named : null;
+    const code = placedCols.length ? placedCols[0].code : null;
     const asDated = typed ? { ...reading, expiresOn: typed } : reading;
     // Whether anything on the matrix places it: a column of its own, a
     // column it covers, or a code the reader gave at all - a low-confidence
     // code fills no cell, but it is still the reader's answer that the paper
     // is one of the matrix's items, so it is the round's business and not a
     // document the matrix lacks a column for.
-    const placed = !!code || !!String(reading.qualCode || "").trim()
+    const placed = !!code || !!String(reading.qualCode || "").trim() || (reading.columns || []).length > 0
       || coveredCells(asDated, vessel.covers, vessel.qualColumns, null).some((c) => !!c.until);
     if (paperKind(row, reading)) continue;
     // AMSA recognises only the classes MO70 s 7(2)(b) lists, which leave out
     // the certificate of safety training and the marine cook certificate.
-    if (code && isRecognitionReading(reading) && !recognitionFills(code, vessel.neverRecognised.codes)) continue;
+    // A recognition placed only in such columns fills nothing at all.
+    const own = isRecognitionReading(reading)
+      ? placedCols.filter((c) => recognitionFills(c.code, vessel.neverRecognised.codes))
+      : placedCols;
+    if (placedCols.length && !own.length) continue;
 
     // Whose certificate this is, as the register names him.
     const person = register.nameOf(row.person) || row.person;
@@ -1071,20 +1180,27 @@ export async function certificateStanding() {
       readAs.push({ person: person.trim().toUpperCase(), certificate: (reading.certificateTitle || "").trim() || row.filename,
         printed: String(reading.holderName || "").trim(), line: whose.line, fileId: row.id });
     }
-    if (!code) { coverOnly.push({ row, reading: asDated, person: person.trim().toUpperCase() }); continue; }
+    if (!own.length) { coverOnly.push({ row, reading: asDated, person: person.trim().toUpperCase() }); continue; }
     const disagreed = filedAsFor(row, reading, eqTable, cols);
     if (disagreed) filedAs.push({ person: person.trim().toUpperCase(), ...disagreed, fileId: row.id });
 
-    // An item recorded as carrying no expiry has none to show either way.
-    const expires = neverLapses(code) ? null : typed || reading.expiresOn || null;
     const issued = reading.issuedOn || null;
     // The issuing authority as read off the scan, for the not-Australian flag
     // on the certification checker.
     const issuer = (reading.issuer || "").trim() || null;
-
-    const key = `${person.trim().toUpperCase()}::${code.trim().toUpperCase()}`;
-    if (!isRecognitionReading(reading) && expires && expires > (foreignAt.get(key) || "")) foreignAt.set(key, expires);
-    standing.push({ row, reading, code: code.trim().toUpperCase(), key, expires, issued, issuer });
+    for (const c of own) {
+      const at = c.code.trim().toUpperCase();
+      // An item recorded as carrying no expiry has none to show either way.
+      const expires = neverLapses(at) ? null : typed || reading.expiresOn || null;
+      const key = `${person.trim().toUpperCase()}::${at}`;
+      if (!isRecognitionReading(reading) && expires && expires > (foreignAt.get(key) || "")) foreignAt.set(key, expires);
+      standing.push({ row, reading, code: at, key, expires, issued, issuer });
+      /* Placed by the reader by a level, an equivalence or an endorsement:
+         one line on Needs attention, so a quick look confirms it. */
+      if (c.by === "read" && c.confidence === "medium") {
+        placedByReading.push({ person: person.trim().toUpperCase(), code: at, why: c.why ?? null, fileId: row.id });
+      }
+    }
   }
 
   /** The date a document gives a column, with the recognition rule applied.
@@ -1203,6 +1319,8 @@ export async function certificateStanding() {
     notOnMatrix,
     /* The names the reader matched that Crew Details does not carry yet. */
     readAs,
+    /* The columns the reader filled on a medium, for a quick look. */
+    placed: placedByReading,
     // `fileId` names the scan each line's dates were read from, so the
     // certification screens can put a link to the certificate itself on the line.
     dates: [...claim.entries()].map(([key, v]) => {

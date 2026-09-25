@@ -5367,7 +5367,20 @@ function Portal({ role, onSignOut }) {
         person: known(f.person), title: f.title || f.filename || "",
         url: f.fileId ? `/api/files/${f.fileId}` : null,
       }));
-      setCertDates({ at: r.at || new Date().toISOString(), map, covers, filedAs, notOnMatrix });
+      /* The reader's own work, for a quick look: the columns it filled on a
+         "medium" (by a level, an equivalence or an endorsement) with its
+         reason, and the certificates it placed on a man whose names on Crew
+         Details do not yet carry the printed name. Keyed under the
+         register's name in capitals, as the dates are. */
+      const placed = (r.placed || []).map((f) => ({
+        person: known(f.person).toUpperCase(), code: String(f.code || "").toUpperCase(), why: f.why || null,
+        url: f.fileId ? `/api/files/${f.fileId}` : null,
+      }));
+      const readAs = (r.readAs || []).map((f) => ({
+        person: known(f.person).toUpperCase(), certificate: f.certificate || "", printed: f.printed || "",
+        line: f.line === "check" ? "check" : "add", url: f.fileId ? `/api/files/${f.fileId}` : null,
+      }));
+      setCertDates({ at: r.at || new Date().toISOString(), map, covers, filedAs, notOnMatrix, placed, readAs });
       if (v) {
         setValidityPeriods({
           at: new Date().toISOString(),

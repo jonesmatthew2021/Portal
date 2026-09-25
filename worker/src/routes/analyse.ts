@@ -13,7 +13,7 @@ import { asKnownPerson, crewRegister, nameIsSomebodyElse, readAsLine, readerPlac
 import { isMsicCard, msicAsWritten, msicCodeIn, newestCard, openToCertificates, particularsFor, particularsKeyOf, ticketCodesIn } from "../../../source/shared/particulars.js";
 import { coveredCells, unitColumnsIn } from "../../../source/shared/covers.js";
 import { paperKind } from "../../../source/shared/evidence.js";
-import { filedAsLine, filedCodeIn } from "../../../source/shared/filed-as.js";
+import { filedAsLine, filedCodeIn, placedLine } from "../../../source/shared/filed-as.js";
 import { isRecognitionReading, recognisedUntil, recognitionFills } from "../../../source/shared/recognition.js";
 import { vessel } from "../vessel.js";
 import { getEnv } from "../env.js";
@@ -26,6 +26,8 @@ import {
   equivalences,
   certificateStanding,
   codeFor,
+  columnsFor,
+  registerColumns,
   filedAsFor,
   contentFor,
   date,
@@ -283,15 +285,6 @@ export function holderFrom(v: unknown, crew: ReadingAsk["crew"]): ReadingHolder 
   const why = whyFrom(said.why);
   const others = [...new Set((Array.isArray(said.others) ? said.others : []).map(at).filter((n): n is string => !!n && n !== person))];
   return { person, confidence, why, others };
-}
-
-/** The columns a register page may stand as evidence for (the vessel
- *  file's registerEvidenced): the office records some approvals in a
- *  register rather than on a certificate. Nothing else takes one. */
-export function registerColumns(): string[] {
-  const listed = (vessel as { registerEvidenced?: { codes?: unknown } }).registerEvidenced;
-  const codes = listed && Array.isArray(listed.codes) ? listed.codes : [];
-  return codes.map((c) => String(c).trim().toUpperCase()).filter(Boolean);
 }
 
 function instructionFor(row: Row, codes: [string, string][], ask: ReadingAsk) {
@@ -1144,6 +1137,9 @@ export async function compareMatrix(
      column its printed endorsements and unit codes cover as well as its own
      (source/shared/covers.js, the table in the vessel file). */
   const standing: { row: Row; reading: Reading; person: string; code: string }[] = [];
+  /* The document's own column - the first it is placed in - by row: what
+     its row records as what it is, never a second column it also fills. */
+  const primaryOf = new Map<string, string>();
   /* The expiry of the foreign certificate itself, where one is on the portal
      for the same column: a recognition can never run longer than the
      certificate it recognises (MO70 s 33(2), s 36(3), s 37(4)). The latest of
@@ -1167,14 +1163,16 @@ export async function compareMatrix(
     // The uploader's own tagging comes first — a person choosing the item off a
     // list beats a model inferring it from a scan - then the column the
     // filename files it under, which is a column of THIS matrix or nothing
-    // (source/shared/filed-as.js). The model's code is only used where
-    // neither said, and only when it was sure.
-    const code = codeFor(row, reading, eqTable, cols);
+    // (source/shared/filed-as.js). The reader's columns come after, every
+    // one it was sure of or held satisfied by a level, and never a guess:
+    // columnsFor in lib/analysis.ts, which the page's cells go through too.
+    const placedAll = columnsFor(row, reading, eqTable, cols);
+    const code = placedAll.length ? placedAll[0].code : null;
 
     // The model's own guess, remembered where the equivalence page overruled
     // it - the cell that guess once filled may still be sitting on the matrix.
     const guess = reading.codeConfidence !== "low" ? (reading.qualCode || "").trim().toUpperCase() : "";
-    if (!row.qualCode && guess && code && guess !== code.trim().toUpperCase() && colAt.has(guess)) {
+    if (!row.qualCode && guess && code && !placedAll.some((c) => c.code.trim().toUpperCase() === guess) && colAt.has(guess)) {
       const typedOld = isDate(row.expiresOn) ? normDate(row.expiresOn!) : null;
       rehomed.push({ person: row.person, old: guess, expiry: typedOld || reading.expiresOn || null });
     }
@@ -1186,7 +1184,8 @@ export async function compareMatrix(
        a document goes through every check below as a certificate would
        and joins only the covering pass; only one that covers nothing
        either is nothing on the matrix. */
-    const ownColumn = !!code && colAt.has(code.trim().toUpperCase());
+    let placed = placedAll.filter((c) => colAt.has(c.code.trim().toUpperCase()));
+    const ownColumn = placed.length > 0;
     if (!ownColumn && !coveredCells(typedOver(row, reading), vessel.covers, vessel.qualColumns, null)
       .some((cell) => !!cell.until && colAt.has(cell.code.trim().toUpperCase()))) {
       notes.push({
@@ -1267,15 +1266,19 @@ export async function compareMatrix(
        recognition of the competency, rating, cook-adjacent and GMDSS classes
        only, and neither the certificate of safety training nor the marine
        cook certificate is among them. A recognition claiming either proves
-       nothing about that column and fills nothing. */
-    if (ownColumn && isRecognitionReading(reading) && !recognitionFills(code!, vessel.neverRecognised.codes)) {
-      notes.push({
-        kind: "no-code",
-        person: row.person,
-        detail: `Read as a certificate of recognition for ${code}, which is not a class AMSA recognises, so it fills nothing.`,
-        certificate: link,
-      });
-      continue;
+       nothing about that column and fills nothing - and a recognition
+       placed only in such columns fills nothing at all. */
+    if (ownColumn && isRecognitionReading(reading)) {
+      for (const c of placed.filter((p) => !recognitionFills(p.code, vessel.neverRecognised.codes))) {
+        notes.push({
+          kind: "no-code",
+          person: row.person,
+          detail: `Read as a certificate of recognition for ${c.code}, which is not a class AMSA recognises, so it fills nothing.`,
+          certificate: link,
+        });
+      }
+      placed = placed.filter((p) => recognitionFills(p.code, vessel.neverRecognised.codes));
+      if (!placed.length) continue;
     }
 
     /* Where the filed column and the reading disagree the filed column still
@@ -1309,7 +1312,22 @@ export async function compareMatrix(
     }
 
     // An empty code is a document with no column of its own: it covers only.
-    standing.push({ row, reading, person, code: ownColumn ? code!.trim().toUpperCase() : "" });
+    if (!placed.length) standing.push({ row, reading, person, code: "" });
+    else primaryOf.set(row.id, placed[0].code.trim().toUpperCase());
+    for (const c of placed) {
+      standing.push({ row, reading, person, code: c.code.trim().toUpperCase() });
+      /* A column the reader holds the document satisfies by a level, an
+         equivalence or an endorsement: filled, and said in the one line so a
+         quick look confirms it (placedLine) - management only, on the page. */
+      if (c.by === "read" && c.confidence === "medium") {
+        notes.push({
+          kind: "placed",
+          person: row.person,
+          detail: placedLine(person, c.code.trim().toUpperCase(), c.why ?? null),
+          certificate: link,
+        });
+      }
+    }
   }
 
   const keyFor = (person: string, code: string) =>
@@ -1558,7 +1576,7 @@ export async function compareMatrix(
     /* Never for a covered column: the row's own read code is what the
        certificate IS, and writing a column it merely covers over the top
        would lose which certificate this document is. */
-    if (!same && !coveredUntil) noted.push(note);
+    if (!same && !coveredUntil && primaryOf.get(row.id) === code.trim().toUpperCase()) noted.push(note);
 
     const base = {
       id: `cert:${row.id}:${code}`,

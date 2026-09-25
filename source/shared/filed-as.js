@@ -85,3 +85,18 @@ export function filedAsLine(person, code, title, readsAs) {
   const read = String(readsAs == null ? "" : readsAs).trim();
   return `${String(person == null ? "" : person)} — ${String(code == null ? "" : code)}: filed as ${String(title == null ? "" : title)}, reads as ${read || "nothing on the matrix"}`;
 }
+
+/**
+ * The one line Needs attention says where the reader placed a document in a
+ * column by a level, an equivalence or an endorsement rather than because
+ * it plainly is that item ("medium"): whose, which column, and the reader's
+ * own reason, so a quick look confirms it. The line goes when somebody tags
+ * the document on its card or a surer reading replaces it. Nothing more.
+ * @param {unknown} person as the matrix row names him
+ * @param {unknown} code the column
+ * @param {unknown} why the reader's reason, at most fifteen words, or null
+ */
+export function placedLine(person, code, why) {
+  const said = String(why == null ? "" : why).trim();
+  return `${String(person == null ? "" : person)} — ${String(code == null ? "" : code)}: placed by the reading${said ? ` (${said})` : ""}`;
+}

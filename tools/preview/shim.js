@@ -131,6 +131,11 @@
        Needs attention says the two disagree), and two documents on file that
        no column places at all. */
     filedAs: flag("filedas") === "1",
+    /* ?reading=smart: what the reader leaves for a quick look - a column it
+       filled on a "medium" with its reason, and a certificate it placed on
+       a man whose names on Crew Details do not carry the printed name, one
+       sure and one to check. */
+    smart: flag("reading") === "smart",
   };
   const anyOrdersFlag = Object.values(ordersFlag).some(Boolean);
   const dayOff = (days) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
@@ -228,7 +233,18 @@
         { person: other ? other.name : person, title: "Psychosocial Hazards awareness", filename: "psychosocial.pdf", fileId: scans[2] ? scans[2].id : null },
       );
     }
-    return { at: new Date().toISOString(), dates, covers, filedAs, notOnMatrix };
+    const placed = [];
+    const readAs = [];
+    if (ordersFlag.smart) {
+      const scans = mem.rows.filter((r) => r.category === "certificate" && !r.removedAt);
+      dates.push(entry("VS-04", { expires: null, issued: dayOff(-300), fileId: scans[0] ? scans[0].id : null }));
+      placed.push({ person, code: "VS-04", why: "Crew Intermediate satisfies Crew Basic", fileId: scans[0] ? scans[0].id : null });
+      readAs.push(
+        { person, certificate: "GMDSS General Operator's Certificate", printed: "Bill", line: "add", fileId: scans[1] ? scans[1].id : null },
+        { person, certificate: "Provide First Aid", printed: "B. Sittyos", line: "check", fileId: scans[2] ? scans[2].id : null },
+      );
+    }
+    return { at: new Date().toISOString(), dates, covers, filedAs, notOnMatrix, placed, readAs };
   };
   const OUT_OF_CREDIT = "Out of credit — top it up at console.anthropic.com";
   /* ?offline=1: the four answers the service worker keeps come back the
