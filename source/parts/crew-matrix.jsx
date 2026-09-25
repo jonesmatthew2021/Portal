@@ -311,14 +311,22 @@ function DownloadPDF({ build, label = "Download PDF", variant = "solid" }) {
   );
 }
 
-function CrewReport({ onClose }) {
+function CrewReport({ only = null, missingItemsFor, onClose }) {
   const { quals: QUALS, certDates } = usePortal();
   const validityFor = useValidityLookup();
   // The whole matrix, spelled out: every crew member and everything held
   // against them - not just what falls due soon. itemsFor puts each person's
   // soonest date first, so what needs attention still leads their list.
+  // Asked for one band ("red", "orange", "green") the report keeps only the
+  // crew with an item in it, and only those items; asked for the missing it
+  // lists the cells the grid marks Missing, by the same rule as the grid.
   const crew = QUALS.rows
-    .map((r) => ({ row: r, items: itemsFor(r, QUALS) }))
+    .map((r) => ({
+      row: r,
+      items: only === "missing"
+        ? missingItemsFor(r)
+        : itemsFor(r, QUALS).filter((x) => !only || x.band.key === only),
+    }))
     .filter((x) => x.items.length > 0);
 
   const soonOf = (items) => items.filter((x) => x.band.date && daysTo(x.band.date) <= RED_DAYS);
@@ -326,8 +334,15 @@ function CrewReport({ onClose }) {
   const due = crew.reduce((n, a) => n + soonOf(a.items).length, 0);
   const expired = crew.reduce((n, a) => n + a.items.filter((i) => i.band.date && hasExpired(i.band.date, TODAY)).length, 0);
 
-  const heading = "Crew Report - every item on the matrix";
-  const standfirst = `${VESSEL.name} ${VESSEL.nameAccent} · as at ${fmtDate(TODAY)} · ${crew.length} crew · ${total} items · ${due} due within ${RED_DAYS} days${expired ? ` · ${expired} already expired` : ""}`;
+  const said = {
+    red: `expired or within ${RED_DAYS} days`,
+    orange: `${RED_DAYS} to ${AMBER_DAYS} days`,
+    green: `more than ${AMBER_DAYS} days`,
+    missing: "missing",
+  };
+  const heading = only ? `Crew Report - ${said[only]}` : "Crew Report - every item on the matrix";
+  const standfirst = `${VESSEL.name} ${VESSEL.nameAccent} · as at ${fmtDate(TODAY)} · ${crew.length} crew · ${total} item${total === 1 ? "" : "s"}`
+    + (only ? "" : ` · ${due} due within ${RED_DAYS} days${expired ? ` · ${expired} already expired` : ""}`);
 
   // Each person's line on the report says the same as their line on the table:
   // how much they hold, how much of it is a problem today, and — because the
@@ -344,8 +359,8 @@ function CrewReport({ onClose }) {
   const asPDF = () => ({
     title: heading,
     subtitle: standfirst,
-    filename: `crew-report-${TODAY}.pdf`,
-    empty: "Nothing is held on the matrix.",
+    filename: `crew-report-${only ? slugOf(said[only]) + "-" : ""}${TODAY}.pdf`,
+    empty: only ? "Nobody on the matrix has one." : "Nothing is held on the matrix.",
     groups: crew.map(({ row, items }) => ({
       heading: row[0],
       meta: metaOf(row, items),
@@ -369,7 +384,7 @@ function CrewReport({ onClose }) {
         </div>
       </div>
 
-      {crew.length === 0 ? <Empty>Nothing is held on the matrix.</Empty> : crew.map(({ row, items }) => (
+      {crew.length === 0 ? <Empty>{only ? "Nobody on the matrix has one." : "Nothing is held on the matrix."}</Empty> : crew.map(({ row, items }) => (
         <div key={row[0] + row[2]} style={{ marginBottom: 16, breakInside: "avoid" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline",
             gap: 12, flexWrap: "wrap", background: T.raised, padding: "5px 9px", borderRadius: 2 }}>
@@ -868,7 +883,18 @@ function TrainingMatrix() {
     </button>
   );
 
-  if (report === "crew") return <CrewReport onClose={() => setReport(null)} />;
+  // A missing cell as a report line: the code and title, marked Missing —
+  // the same rule as the grid's cell and the Missing button (missingAt).
+  const missingItemsFor = (row) => QUALS.cols
+    .map((c, i) => (missingAt(row, i)
+      ? { code: c[0], title: c[1], group: c[2], band: { key: "not", fg: T.bRed, bg: T.bRedBg, text: "Missing" } }
+      : null))
+    .filter(Boolean);
+
+  if (report && report.startsWith("crew")) {
+    return <CrewReport only={report === "crew" ? null : report.slice(5)}
+      missingItemsFor={missingItemsFor} onClose={() => setReport(null)} />;
+  }
   if (report === "individual") return <IndividualReport onClose={() => setReport(null)} />;
 
   return (
@@ -1140,8 +1166,12 @@ function TrainingMatrix() {
         <Button onClick={() => setReportMenu(!reportMenu)}>{reportMenu ? "Report ▴" : "Report ▾"}</Button>
         {reportMenu && (
           <>
-            <Button variant="quiet" onClick={() => { setReportMenu(false); setReport("crew"); }}>Crew report</Button>
-            <Button variant="quiet" onClick={() => { setReportMenu(false); setReport("individual"); }}>Individual report</Button>
+            <Button variant="quiet" onClick={() => { setReportMenu(false); setReport("individual"); }}>Individual</Button>
+            <Button variant="quiet" onClick={() => { setReportMenu(false); setReport("crew"); }}>All crew</Button>
+            <Button variant="quiet" onClick={() => { setReportMenu(false); setReport("crew-red"); }}>Expired or within {RED_DAYS} days</Button>
+            <Button variant="quiet" onClick={() => { setReportMenu(false); setReport("crew-orange"); }}>{RED_DAYS}-{AMBER_DAYS} days</Button>
+            <Button variant="quiet" onClick={() => { setReportMenu(false); setReport("crew-green"); }}>Beyond {AMBER_DAYS} days</Button>
+            <Button variant="quiet" onClick={() => { setReportMenu(false); setReport("crew-missing"); }}>Missing</Button>
           </>
         )}
         {admin && <UpdateMatrixButton variant="quiet" />}

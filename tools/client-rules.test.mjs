@@ -2297,7 +2297,7 @@ const is = (got, want, what) => {
   const bands = await import(pathToFileURL(join(ROOT, "source", "shared", "bands.js")).href);
   is([RED_DAYS, AMBER_DAYS], [90, 180], "red is expired or within 90 days, amber within 180");
   is([bands.RED_DAYS, bands.AMBER_DAYS], [RED_DAYS, AMBER_DAYS], "the page and the worker read the same two numbers");
-  is([/within 90\b/.test(portalJsx()), (portalJsx().match(/within \$\{RED_DAYS\} days/g) || []).length], [false, 5],
+  is([/within 90\b/.test(portalJsx()), (portalJsx().match(/within \$\{RED_DAYS\} days/g) || []).length], [false, 6],
     "the reports' headings say the red band's days from RED_DAYS, never a 90 written in by hand");
   is(daysUntil("2026-10-12", "2026-09-24"), 18, "18 days from 24 Sep to 12 Oct");
   is(daysUntil("2026-09-21", "2026-09-24"), -3, "three days gone is -3");
