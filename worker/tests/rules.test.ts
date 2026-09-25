@@ -1909,6 +1909,37 @@ test("the register: a spelling two people both list is neither's", () => {
   assert.equal(crewRegister([{ name: "BILL, Adam", aliases: [] }, ...people]).nameOf("BILL, Adam"), "BILL, Adam", "somebody's own name is never taken over");
 });
 
+test("whose it is: a printed name that is the pick's and none of the folder man's is not the folder man's for a surname they share", () => {
+  const two = [{ name: "EVANS, Brenton", aliases: [] }, { name: "EVANS, Gareth", aliases: [] }, { name: "SITTIYOS, Kachin", aliases: [] }];
+  const sure = (person: string) => ({ person, confidence: "high", others: [] });
+  // "G. EVANS" in Brenton's folder, the reader sure it is Gareth: not Brenton's.
+  assert.deepEqual(whoseCertificate("G. EVANS", sure("EVANS, Gareth"), "EVANS, Brenton", "EVANS, Brenton", two), { his: false, line: null });
+  // The refile labels it Gareth's, and the round then places it on him, checked.
+  assert.deepEqual(readerPlaces("G. EVANS", sure("EVANS, Gareth"), "EVANS, Brenton", two), { person: "EVANS, Gareth", line: "check" });
+  assert.deepEqual(whoseCertificate("G. EVANS", sure("EVANS, Gareth"), "EVANS, Gareth", "EVANS, Gareth", two), { his: true, line: "check" });
+  // The reader wrong about Brenton's own "B. EVANS": his folder still stands.
+  assert.deepEqual(whoseCertificate("B. EVANS", sure("EVANS, Gareth"), "EVANS, Brenton", "EVANS, Brenton", two), { his: true, line: null });
+  assert.equal(readerPlaces("B. EVANS", sure("EVANS, Gareth"), "EVANS, Brenton", two), null);
+  // A bare surname both men have says nothing against either: the folder stands.
+  assert.deepEqual(whoseCertificate("EVANS", sure("EVANS, Gareth"), "EVANS, Brenton", "EVANS, Brenton", two), { his: true, line: null });
+  assert.equal(readerPlaces("EVANS", sure("EVANS, Gareth"), "EVANS, Brenton", two), null);
+  // A maybe never moves it.
+  assert.equal(readerPlaces("G. EVANS", { ...sure("EVANS, Gareth"), confidence: "medium" }, "EVANS, Brenton", two), null);
+});
+
+test("the reader's pick: a printed name that fits another man on Crew Details as well, with no word of the pick's, is no pick", () => {
+  const people = [{ name: "EVANS, Brenton", aliases: [] }, { name: "SITTIYOS, Kachin", aliases: [] }, { name: "JITENDER, Rohin", aliases: [] }, { name: "REYES, Jose", aliases: [] }, { name: "BROWN, Chris", aliases: [] }];
+  const sure = (person: string) => ({ person, confidence: "high", others: [] });
+  assert.equal(readerPick("R. J.", sure("REYES, Jose"), people), null, "Rohin Jitender's initials are Jose Reyes's too: two people");
+  assert.equal(readerPlaces("R. J.", sure("REYES, Jose"), "Loose", people), null);
+  assert.equal(readerPick("B. EVNAS", sure("BROWN, Chris"), people), null, "two letters swapped is a letter out: Brenton's name, not Chris's");
+  assert.equal(readerPick("Kachin SITTIYSO", sure("EVANS, Brenton"), people), null);
+  // What the reader may still do.
+  assert.deepEqual(readerPick("Bill S", sure("SITTIYOS, Kachin"), people), { person: "SITTIYOS, Kachin", line: "add" });
+  assert.deepEqual(readerPick("R. JITENDER", sure("JITENDER, Rohin"), people), { person: "JITENDER, Rohin", line: "check" });
+  assert.deepEqual(readerPick("Kachin SITTIYSO", sure("SITTIYOS, Kachin"), people), { person: "SITTIYOS, Kachin", line: "check" }, "his own name with two letters swapped is his, checked");
+});
+
 test("the reader's pick: a given name his only by a letter or two, an initial or a short form is checked, never placed quietly", () => {
   const people = [{ name: "SMITH, John", aliases: [] }, { name: "EVANS, Brenton", aliases: [] }, { name: "SITTIYOS, Kachin", aliases: [] }];
   const john = (printed: string, confidence = "high") => readerPick(printed, { person: "SMITH, John", confidence, others: [] }, people);

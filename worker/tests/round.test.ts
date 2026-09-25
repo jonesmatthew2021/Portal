@@ -1356,6 +1356,25 @@ test("whose it is: a certificate in Brenton's folder printed in the name of the 
   assert.deepEqual((await certificateStanding()).dates, [], "and the page's cells agree");
 });
 
+test("whose it is: \"G. EVANS\" in Brenton's folder, the reader sure it is Gareth, goes to Gareth checked and never quietly to Brenton", async () => {
+  const { portal, env, bucket } = await crewPortal([]);
+  const doc = portal.doc();
+  doc.people.push({ name: "EVANS, Gareth", aliases: [] });
+  doc.quals.rows.push(["EVANS, Gareth", "GPH", "", ["", ""]]);
+  portal.state.data = JSON.stringify(doc);
+  const key = "opms/Brenton - OPMS/g.pdf";
+  await bucket.put(key, bytesOf("a scan"));
+  portal.rows.push({ ...billysTicket, id: "g", person: "EVANS, Brenton", folder: "brenton", checksum: "g", blobKey: key, filename: "g.pdf", qualCode: null });
+  portal.blobs.set("certificate-readings|r1/g.json", JSON.stringify({ ...reading, holderName: "G. EVANS", expiresOn: "2031-05-26",
+    columns: [{ code: "QL-01", confidence: "high", why: null }], holder: { person: "EVANS, Gareth", confidence: "high", why: "initial G", others: [] } }));
+  await quiet(() => worker.scheduled({} as never, env as never));
+  assert.equal(cellOf(portal, "EVANS, Brenton"), "", "nothing in Brenton's cell");
+  assert.equal(cellOf(portal, "EVANS, Gareth"), "2031-05-26", "Gareth's");
+  assert.equal(portal.rows.find((r) => r.id === "g")!.person, "EVANS, Gareth", "labelled his");
+  assert.deepEqual(await roundNotes(portal, "read-as"), ["Master <500GT read as EVANS, Gareth's — check, and add \"G. EVANS\" to their names on Crew Details"]);
+  assert.deepEqual((await certificateStanding()).dates.map((d) => d.person), ["EVANS, GARETH"], "and the page's cells agree");
+});
+
 test("a register page filed under another column's name fills only the register column the reader gave", async () => {
   /* The office named the page for QL-01, but a register page is evidence
      only for the register columns: the filename's QL-01 must not take a

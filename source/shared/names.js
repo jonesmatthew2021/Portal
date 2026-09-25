@@ -119,17 +119,20 @@ const holderPieces = (n) =>
   String(n || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toUpperCase().split(/[^A-Z0-9]+/).filter((w) => /[A-Z]/.test(w));
 
 /** How many letters two words are apart: one put in, taken out or changed
- *  counts one.
+ *  counts one, and so do two side by side swapped ("EVNAS" for "EVANS").
  * @param {string} a
  * @param {string} b
  */
 const lettersApart = (a, b) => {
+  let before = /** @type {number[]} */ ([]);
   let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
   for (let i = 1; i <= a.length; i++) {
     const row = [i];
     for (let j = 1; j <= b.length; j++) {
       row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) row[j] = Math.min(row[j], before[j - 2] + 1);
     }
+    before = prev;
     prev = row;
   }
   return prev[b.length];
@@ -157,7 +160,7 @@ const pieceCanBe = (piece, his) => {
  * @param {unknown} printed
  * @param {{ person?: unknown, confidence?: unknown, others?: unknown, why?: unknown } | null | undefined} holder
  * @param {Person[] | null | undefined} people
- * @returns {{ person: string, line: "add" | "check" | null, shares: boolean } | null}
+ * @returns {{ person: string, line: "add" | "check" | null, shares: boolean, against: boolean } | null}
  */
 function pickWeighed(printed, holder, people) {
   if (!holder || !holder.person) return null;
@@ -206,6 +209,19 @@ function pickWeighed(printed, holder, people) {
     || (!hisList.some((h) => pieceCanBe(w, h)) && theirsOnly.some((t) => pieceCanBe(w, t)))));
   if (elsewhere && !shares) return null;
 
+  /* No word of his on it, and another man on Crew Details it fits every
+     piece of as well ("R. J." picked as REYES, Jose, with JITENDER, Rohin
+     on the register): the printed name is two people, and the reader's
+     memory alone does not choose between them. */
+  if (!shares) {
+    const pieces = holderPieces(printed);
+    if (pieces.length && (people || []).some((p) => {
+      if (!p || p === on) return false;
+      const w = [p.name, ...(p.aliases || [])].flatMap(holderWords);
+      return pieces.every((x) => w.some((t) => pieceCanBe(x, t)));
+    })) return null;
+  }
+
   /* Where the word in common does not settle it. Either every word the
      printed name shares with him is somebody else's on the register too
      (two EVANSes, "G. EVANS"), or the printed name carries another piece -
@@ -228,8 +244,29 @@ function pickWeighed(printed, holder, people) {
   const partial = shares && rest.length === 0 && unmatched.length > 0;
   const doubt = everyoneElses || contradicts || elsewhere;
 
-  if (sure) return { person, shares, line: !shares ? "add" : doubt || loose || partial ? "check" : null };
-  return shares && !doubt ? { person, shares, line: "check" } : null;
+  // Something printed on it that can be none of his (whoseCertificate
+  // weighs the man it is filed under with this).
+  const against = elsewhere || contradicts;
+  if (sure) return { person, shares, against, line: !shares ? "add" : doubt || loose || partial ? "check" : null };
+  return shares && !doubt ? { person, shares, against, line: "check" } : null;
+}
+
+/**
+ * Whether the printed name disowns the man a certificate is filed under in
+ * favour of the reader's standing pick of another man: it fits the pick with
+ * nothing on it against him ("G. EVANS" picked as EVANS, Gareth), and carries
+ * a piece that can be none of the filed man's ("G." for EVANS, Brenton). A
+ * word in common with the filed man - a surname both men have - does not
+ * make it his.
+ * @param {unknown} printed
+ * @param {{ person: string, shares: boolean, against: boolean } | null} picked
+ * @param {string} known
+ * @param {Person[] | null | undefined} people
+ */
+function disowns(printed, picked, known, people) {
+  if (!picked || picked.person === known || !picked.shares || picked.against) return false;
+  const filed = pickWeighed(printed, { person: known, confidence: "high", others: [] }, people);
+  return !filed || filed.against;
 }
 
 /**
@@ -314,8 +351,12 @@ export function whoseCertificate(printed, holder, filedUnder, known, people) {
   // the man it is filed under does not make another man's name his
   // ("Gareth EVANS" in Brenton's folder, with Gareth on Crew Details).
   if (byRegister) return { his: byRegister === known, line: null };
-  const picked = readerPick(printed, holder, people);
+  const picked = pickWeighed(printed, holder, people);
   if (picked && picked.person === known) return { his: true, line: picked.line };
+  // The printed name disowns him for the reader's pick of another man
+  // ("G. EVANS" in Brenton's folder, picked as Gareth): not his, whatever
+  // folder it is in.
+  if (fits && disowns(printed, picked, String(known), people)) return { his: false, line: null };
   return { his: fits, line: null };
 }
 
@@ -334,8 +375,12 @@ export function readerPlaces(printed, holder, filedUnder, people) {
   const reg = crewRegister(people);
   if (String(printed || "").trim() && reg.spelled(printed)) return null;
   const known = filedUnder ? reg.nameOf(filedUnder) : null;
-  if (known && !nameIsSomebodyElse(printed, filedUnder, known)) return null;
   const picked = pickWeighed(printed, holder, people);
+  // Where it fits the man it is filed under, his folder stands - unless the
+  // printed name disowns him for the pick (whoseCertificate asks the same).
+  if (known && !nameIsSomebodyElse(printed, filedUnder, known)) {
+    return picked && disowns(printed, picked, known, people) ? { person: picked.person, line: picked.line } : null;
+  }
   if (!picked) return null;
   /* The office's folder is overruled only by the printed name, never by the
      reader's memory alone: a certificate in a register man's folder goes to
