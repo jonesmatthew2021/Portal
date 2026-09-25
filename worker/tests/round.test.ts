@@ -797,6 +797,69 @@ test("a slash in a column's title is a dash in the filing name, never a path to 
   assert.deepEqual(second.moved, [], "named right: the comparison uses the same dashed title, so it is not renamed every hour");
 });
 
+test("a name somebody typed is the office's word: a hand rename takes the portal's mark off, and the refile leaves it", async () => {
+  /* The refile names a certificate from the model's code and marks the row
+     as the portal's naming. Somebody in the office then renamed it by hand,
+     to the column they file it under - and the mark stayed, so the next
+     refile read the name as the portal's guess and renamed it straight back. */
+  const { portal, bucket } = await oneManPortal({ qualCode: null });
+  const env = { DB: portal.db, FILES: bucket, FILE_STORE: "r2", ANTHROPIC_API_KEY: "k" };
+  await worker.scheduled({} as never, env as never);
+  const ticket = portal.rows.find((r) => r.id === "c2")!;
+  assert.equal(ticket.filename, "EVANS, Brenton - QL-01 Master.pdf", "the premise: named from the model's code");
+  assert.equal(ticket.namedByPortal, 1, "and marked as the portal's naming");
+
+  const res = await renameTo("c2", "EVANS, Brenton - QL-17 Medical.pdf");
+  assert.equal(res.status, 200, await res.text());
+  assert.equal(ticket.filename, "EVANS, Brenton - QL-17 Medical.pdf");
+  assert.equal(ticket.namedByPortal ?? null, null, "a name a person typed is not the portal's");
+
+  await worker.scheduled({} as never, env as never);
+  assert.equal(ticket.filename, "EVANS, Brenton - QL-17 Medical.pdf", "the next refile leaves the office's name where it is");
+  assert.ok(bucket.text("opms/Brenton - OPMS/EVANS, Brenton - QL-17 Medical.pdf"), "and the bytes with it");
+  assert.equal(bucket.text("opms/Brenton - OPMS/EVANS, Brenton - QL-01 Master.pdf"), null);
+});
+
+test("a long name keeps the title's closing bracket, and the refile after renames nothing", async () => {
+  /* safeName caps a name at 120 characters. The QL-10 title is 88 of them,
+     so for a longer person name the filing name lost its tail -
+     "…(STCW Reg II-5 &.pdf" - and a cut name reads as a different
+     qualification. The title is shortened instead, from the front of its
+     list of capacities, so the name ends whole. */
+  const long = "WOLLASTONCRAFT-SMYTHE, Brenton";
+  const title = "Integrated Rating, Able Seafarer - Deck, Able Seafarer - Engineer (STCW Reg II/5 & III/5)";
+  assert.equal(long.length, 30, "the premise");
+  const base = filingName(long, "QL-10", title);
+  assert.ok((base + ".pdf").length <= 120, `fits: ${(base + ".pdf").length}`);
+  assert.equal(safeName(base + ".pdf"), base + ".pdf", "nothing is cut off it afterwards");
+  assert.match(base, /^WOLLASTONCRAFT-SMYTHE, Brenton - QL-10 Integrated Rating.* \(STCW Reg II-5 & III-5\)$/, "the name ends whole");
+  assert.equal(filingName("EVANS, Brenton", "QL-10", title), "EVANS, Brenton - QL-10 Integrated Rating, Able Seafarer - Deck, Able Seafarer - Engineer (STCW Reg II-5 & III-5)", "a name that fits is left as it was");
+
+  // The file the cap had cut, put right by the next refile - and then left.
+  const { portal, bucket } = await oneManPortal({ qualCode: null });
+  const ticket = portal.rows.find((r) => r.id === "c2")!;
+  // safeName cut the base, then the extension went on: "…(STCW Reg II-5 &.pdf".
+  const cut = safeName(`${long} - QL-10 ${title.replace(/\//g, "-")}`) + ".pdf";
+  assert.ok(!cut.endsWith(").pdf"), "the premise: the old name was cut - " + cut);
+  ticket.filename = cut; ticket.blobKey = "opms/Brenton - OPMS/" + cut; ticket.namedByPortal = 1;
+  await bucket.put(ticket.blobKey as string, bytesOf("a scan"));
+  await bucket.delete("opms/Brenton - OPMS/master.pdf");
+  portal.blobs.set("certificate-readings|r1/evans-master.json", JSON.stringify({ ...reading, holderName: "Brenton Wollastoncraft-Smythe", certificateTitle: "Integrated Rating", qualCode: "QL-10", codeConfidence: "high" }));
+  const doc = portal.doc();
+  doc.quals.cols.push(["QL-10", title, "Qualifications"]);
+  doc.quals.rows[0][0] = long;
+  doc.quals.rows[0][3].push("");
+  doc.people = [{ name: long, aliases: ["bRENTON"] }];
+  portal.state.data = JSON.stringify(doc);
+
+  await refile([long]);
+  assert.equal(ticket.filename, base + ".pdf", "renamed to the whole name");
+  assert.ok(bucket.text("opms/Brenton - OPMS/" + base + ".pdf"));
+  assert.equal(bucket.text("opms/Brenton - OPMS/" + cut), null, "and the cut name is not left behind");
+  const again = (await (await refile([long])).json()) as { moved: unknown[] };
+  assert.deepEqual(again.moved, [], "the next refile renames nothing");
+});
+
 test("on file, not on the matrix: a readable document with no column anywhere is listed, and nothing else is", async () => {
   /* 214 documents on the live portal name no column at all - MRN contractor
      inductions, psychosocial hazards, MHE quizzes - and the matrix has no

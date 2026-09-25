@@ -682,7 +682,7 @@ export async function refile(names: string[], limit = Infinity) {
     const targetExt = ext === ".pdf" || [".jpg", ".jpeg", ".png"].includes(ext) ? ".pdf" : ext;
     // The one filing name (filingName dashes a slash in the title, so
     // "STCW Reg IV/2" is not cut down to "2" by safeName's path stripping).
-    const wantBase = filingName(personName, code, title);
+    const wantBase = filingName(personName, code, title, targetExt);
     if (row.filename === safeName(wantBase) + targetExt) continue;
     if (done >= limit) { remaining++; continue; }
     // Whether the code is the office's own: codeFor took it off the office's

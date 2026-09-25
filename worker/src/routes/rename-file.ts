@@ -95,12 +95,15 @@ export default async (req: Request, actor: PortalUser): Promise<Response> => {
     const cut = row.blob_key.lastIndexOf("/");
     const folder = cut < 0 ? "" : row.blob_key.slice(0, cut + 1);
     const nextKey = folder + to;
+    // Both writes take the portal's mark off the row: a name a person typed
+    // is the office's word, and a row left marked would have its name read
+    // as the model's guess and renamed straight back by the next refile.
     // Both writes land only on a row that is still live: a removal does not
     // take the lease, and a name written onto a parked row would give the
     // parked copy a name its file does not carry.
     if (nextKey === row.blob_key) {
       const { meta } = await db
-        .prepare("UPDATE documents SET filename = ?2 WHERE id = ?1 AND removed_at IS NULL")
+        .prepare("UPDATE documents SET filename = ?2, named_by_portal = NULL WHERE id = ?1 AND removed_at IS NULL")
         .bind(id, to)
         .run();
       if (!meta.changes) return changed();
@@ -125,7 +128,7 @@ export default async (req: Request, actor: PortalUser): Promise<Response> => {
 
     await store.set(nextKey, bytes);
     const { meta } = await db
-      .prepare("UPDATE documents SET filename = ?2, blob_key = ?3 WHERE id = ?1 AND removed_at IS NULL")
+      .prepare("UPDATE documents SET filename = ?2, blob_key = ?3, named_by_portal = NULL WHERE id = ?1 AND removed_at IS NULL")
       .bind(id, to, nextKey)
       .run();
     if (!meta.changes) {

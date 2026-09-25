@@ -338,9 +338,46 @@ export function safeName(name: string) {
  * to "2.pdf" and "5).pdf", in SharePoint too, before this. Uploaded names
  * are still cleaned exactly as before; only the title the portal writes is
  * dashed.
+ *
+ * And the whole name fits inside safeName's 120 characters with `ext` on
+ * the end. safeName cuts anything longer, and the QL-10 title is 88
+ * characters on its own, so a longer person's name lost the title's tail -
+ * "…(STCW Reg II-5 &.pdf" - and a cut name reads as another qualification.
+ * So the title gives way instead, and only where it has to: its list of
+ * capacities is shortened from the end, whole items first and then whole
+ * words, and the bracketed regulation at the end is always kept.
  */
-export function filingName(person: string, code: string, title: string) {
-  return `${person} - ${code} ${title.replace(/[\\/]/g, "-")}`;
+export const NAME_MAX = 120;
+export function filingName(person: string, code: string, title: string, ext = ".pdf") {
+  const head = `${person} - ${code} `;
+  const dashed = title.replace(/[\\/]/g, "-");
+  const room = NAME_MAX - ext.length - head.length;
+  return head + (dashed.length <= room ? dashed : shortTitle(dashed, room));
+}
+
+/** A title cut down to `room` characters at a boundary a reader can see:
+ *  whole items off the end of its list, then whole words, with a closing
+ *  "(...)" kept on. Where not even that fits, the plain cut safeName would
+ *  have made anyway. */
+function shortTitle(title: string, room: number) {
+  const m = /^(.*?)\s*(\([^()]*\))$/.exec(title);
+  const tail = m ? " " + m[2] : "";
+  const body = m ? m[1] : title;
+  const fits = (s: string) => (s + tail).length <= room;
+  const tidy = (s: string) => s.replace(/[\s,&+-]+$/, "");
+  // Whole items: "Integrated Rating, Able Seafarer - Deck, Able Seafarer - Engineer".
+  const items = body.split(/,\s*/);
+  for (let n = items.length - 1; n >= 1; n--) {
+    const s = tidy(items.slice(0, n).join(", "));
+    if (s && fits(s)) return s + tail;
+  }
+  // Then whole words.
+  const words = body.split(/\s+/);
+  for (let n = words.length - 1; n >= 1; n--) {
+    const s = tidy(words.slice(0, n).join(" "));
+    if (s && fits(s)) return s + tail;
+  }
+  return title.slice(0, Math.max(0, room));
 }
 
 export function withSuffix(name: string, n: number) {

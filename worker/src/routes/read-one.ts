@@ -98,7 +98,10 @@ export default async (req: Request): Promise<Response> => {
     // taken off the office's own name leaves the row unmarked, so the filed
     // column still counts next hour (routes/analyse.ts, refile).
     const filed = current.namedByPortal ? null : filedCodeIn(current.filename, cols);
-    const renamed = await canonicaliseCertificate(current, filingName(personName, code, title), imageToPdf, !!filed && code === filed);
+    // The extension the file will carry, so the whole name fits (filingName).
+    const ext = ((current.filename.match(/.[^.]+$/) || [""])[0] || "").toLowerCase();
+    const targetExt = ext === ".pdf" || [".jpg", ".jpeg", ".png"].includes(ext) ? ".pdf" : ext;
+    const renamed = await canonicaliseCertificate(current, filingName(personName, code, title, targetExt), imageToPdf, !!filed && code === filed);
     if (renamed) current = renamed;
   }
 

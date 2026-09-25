@@ -244,6 +244,24 @@ export function portalDb(doc: Record<string, unknown>, rows: Record<string, unkn
       if (r) r.person = args[1];
       return { changes: r ? 1 : 0 };
     }
+    // The hand rename (routes/rename-file.ts): the row, whoever holds the
+    // address, and the rename itself - which takes the portal's mark off
+    // only where the statement says so.
+    if (/^SELECT id, filename, blob_key, adopted_from_folder FROM documents WHERE id = \?1 AND removed_at IS NULL/.test(sql)) {
+      return { results: rows.filter((r) => r.id === args[0] && !r.removedAt).map((r) => ({ id: r.id, filename: r.filename, blob_key: r.blobKey, adopted_from_folder: r.adoptedFromFolder ?? null })) };
+    }
+    if (/^SELECT id FROM documents WHERE blob_key = \?1 AND id != \?2/.test(sql)) {
+      return { results: rows.filter((r) => r.blobKey === args[0] && r.id !== args[1]).map((r) => ({ id: r.id })) };
+    }
+    if (/^UPDATE documents SET filename = \?2/.test(sql)) {
+      const r = rows.find((x) => x.id === args[0] && !x.removedAt);
+      if (r) {
+        r.filename = args[1];
+        if (/blob_key = \?3/.test(sql)) r.blobKey = args[2];
+        if (/named_by_portal = NULL/.test(sql)) r.namedByPortal = null;
+      }
+      return { changes: r ? 1 : 0 };
+    }
     // The restore's rows, bound and batched.
     if (/^INSERT OR REPLACE INTO blobs/.test(sql)) {
       blobs.set(args[0] + "|" + args[1], String(args[2])); etags.set(args[0] + "|" + args[1], String(args[4]));
