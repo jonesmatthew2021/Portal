@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, recognisedUntil, recognitionFills, foreignExpiryOn, isRecognitionReading, certCoverFor, coverLine, bandWithCover, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, paperKind, EVIDENCE_KINDS, EVIDENCE_LABELS, marineOrderLines, filedAsLines, notOnMatrixLines, filedCodeIn, filedAsLine, readingLines, placedLine, readAsLine, matrixHeadOffset, headPixels, scrollPair };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, recognisedUntil, recognitionFills, foreignExpiryOn, isRecognitionReading, certCoverFor, coverLine, bandWithCover, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, paperKind, EVIDENCE_KINDS, EVIDENCE_LABELS, marineOrderLines, filedAsLines, notOnMatrixLines, filedCodeIn, filedAsLine, readingLines, placedLine, readAsLine, matrixHeadOffset, headPixels, scrollPair, rosterSwing, rosterPeopleFor, swingAt };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -773,6 +773,42 @@ const is = (got, want, what) => {
   is(lib.roundBusyTitle("Update portal"), "Update portal is writing the workbook", "…or the press that holds it");
 
   /* When a certificate last moved a date: the round's stamp; the workbook's day only where there is no stamp. */
+  /* A coming swing is the Roster page's (rosterSwing): the roster swing
+     sharing the most days with the pattern's, whose it is, who is on it and
+     for which days. Matthew, 26 Sep 2026: the roster is filled in for the
+     year, so the swing cards derive from it rather than waiting on a button. */
+  {
+    const k = lib.swingAt(3);
+    const people = [
+      { id: "p1", name: "SMITH, Alan", active: true },
+      { id: "p2", name: "JONES, Bob", active: true },
+      { id: "p3", name: "REYES, Jose", active: true },
+      { id: "p4", name: "GONE, Away", active: false },
+    ];
+    const personFor = (who) => people.find((p) => p.name.toUpperCase().startsWith(String(who).toUpperCase())) || null;
+    // The roster's swing sits two days off the pattern's, and the one before it overlaps a little.
+    const on = (iso, n) => new Date(new Date(iso + "T00:00:00Z").getTime() + n * 86400000).toISOString().slice(0, 10);
+    const spine = [
+      { on: on(k.flyOut, -28), off: on(k.flyOut, 2), crew: "BRAVO" },
+      { on: on(k.flyOut, 2), off: on(k.flyHome, 2), crew: "ALPHA" },
+    ];
+    const rows = [
+      { name: "SMITH", on: spine[1].on, off: spine[1].off },                       // the whole swing
+      { name: "JONES", on: on(spine[1].on, 7), off: spine[1].off },                 // joins a week late
+      { name: "REYES", on: spine[0].on, off: spine[0].off },                        // the swing before: not on this one
+      { name: "NOBODY", on: spine[1].on, off: spine[1].off },                       // not on the crew list
+    ];
+    const r = lib.rosterSwing(3, { spine, rows }, people, personFor);
+    is(r.dates, { flyOut: spine[1].on, flyHome: spine[1].off, crew: "A" }, "the roster swing sharing the most days, and whose it is");
+    is(r.side, { p1: "on", p2: "on", p3: "off" }, "the overlapping stints are on, the rest off, and nobody inactive");
+    is(r.window, { p2: { from: on(spine[1].on, 7), to: spine[1].off } }, "a part-swing stint keeps its own days; the whole swing needs none");
+    is(r.strangers, ["NOBODY"], "a roster name the crew list cannot place is named, not guessed");
+    is(lib.rosterSwing(3, { spine: [], rows }, people, personFor), null, "no roster: the pattern stands");
+    is(lib.rosterSwing(9, { spine, rows }, people, personFor), null, "no roster swing near it: the pattern stands");
+    const named = lib.rosterPeopleFor([{ id: "x", name: "SMITH, Alan" }], ["SMITH, Alan", "JONES, Bob"]);
+    is((named("Alan") || {}).id, "x", "a roster shorthand reaches the crew list's person through the matrix");
+    is(named("Zed"), null, "and a name the matrix cannot place is nobody");
+  }
   is(lib.matrixLastMoved("2026-08-01", { uploaded: "2026-09-20T03:00:00.000Z" }), "2026-08-01", "a workbook uploaded by hand since moved no date: the round's stamp stands");
   is(lib.matrixLastMoved("2026-09-22", { uploaded: "2026-09-20T03:00:00.000Z" }), "2026-09-22", "the round's stamp later: its day");
   is(lib.matrixLastMoved("2026-09-22", null), "2026-09-22", "no workbook on file: the round's stamp");

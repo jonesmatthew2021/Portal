@@ -111,6 +111,31 @@
     });
     mem.data = { ...mem.data, people, particularsFromCert: fromCert };
   }
+  /* ?roster=demo: a year of roster as management would keep it on the
+     Roster page - every crew member on every swing of their letter, the
+     roster's dates two days off the four-week pattern's, one person joining
+     the next swing a week late and one not on the crew list - so the swing
+     cards, the swing board and the day grid can be seen reading it. */
+  if (flag("roster") === "demo" && mem.data && Array.isArray(mem.data.people)) {
+    const anchor = new Date("2026-08-12T00:00:00Z");
+    const day = (n) => new Date(anchor.getTime() + n * 86400000).toISOString().slice(0, 10);
+    const spine = [], rows = [];
+    const crew = mem.data.people.filter((p) => p && p.active !== false && (p.crew === "A" || p.crew === "B"));
+    let late = null;
+    for (let k = 0; k < 14; k++) {
+      const on = day(k * 28 + 2), off = day((k + 1) * 28 + 2);
+      const letter = k % 2 === 0 ? "B" : "A";
+      spine.push({ on, off, crew: letter === "A" ? "ALPHA" : "BRAVO" });
+      crew.filter((p) => p.crew === letter).forEach((p, i) => {
+        const joinsLate = k === 2 && i === 0;
+        if (joinsLate) late = p.name;
+        rows.push({ id: "d" + k + "-" + i, source: "portal", crew: letter === "A" ? "ALPHA" : "BRAVO", rank: p.rank || "",
+          name: p.name, on: joinsLate ? day(k * 28 + 9) : on, off, days: 28, note: "", swing: on + "|" + off });
+      });
+    }
+    rows.push({ id: "dx", source: "portal", crew: "ALPHA", rank: "", name: "NOBODY, Known", on: spine[1].on, off: spine[1].off, days: 28, note: "", swing: spine[1].on + "|" + spine[1].off });
+    mem.data = { ...mem.data, rosterPlan: { at: "2026-09-26", filename: "demo roster", rows, spine, relief: [], edited: false, lateJoiner: late } };
+  }
   /* ?recognition=1, ?medical=long, ?blocked=1, ?covered=1: the four things
      the Marine Orders decide about a cell that nothing on the grid could say
      for itself - a recognition whose foreign certificate nobody holds, a

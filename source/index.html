@@ -1353,6 +1353,65 @@ function swingWithDates(k, dates) {
   };
 }
 
+/**
+ * A coming swing as the Roster page has it.
+ *
+ * Management keeps the roster on the Roster page - a year of stints, changed
+ * as people fall sick or swap - and everything about a coming swing is
+ * derived from it (Matthew, 26 Sep 2026): the swing's own dates, who is on
+ * it, and who is on for part of it only. It used to wait on a button
+ * ("Update swings from roster") and a swing nobody had pressed it for read
+ * "0 rostered" however full the roster was; now the cards, the swing's
+ * board and the day grid all read this, every time they are drawn.
+ *
+ * The roster swing sharing the most days with the pattern's swing k is the
+ * one; its crew name says whose swing it is; every stint overlapping it puts
+ * its person on, for their own days where those are not the whole swing.
+ * Null where the roster has no swing near k - the pattern then stands, as it
+ * always did. `personFor` turns a roster name into the crew list's person
+ * (rosterPeopleFor); a name it cannot place is listed as a stranger.
+ */
+function rosterSwing(k, plan, people, personFor) {
+  const spine = (plan && plan.spine) || [];
+  const rows = (plan && plan.rows) || [];
+  if (!spine.length) return null;
+  const base = swingAt(k);
+  let best = null;
+  for (const sp of spine) {
+    const from = sp.on > base.flyOut ? sp.on : base.flyOut;
+    const to = sp.off < base.flyHome ? sp.off : base.flyHome;
+    if (to <= from) continue;
+    const shared = Math.round((new Date(to) - new Date(from)) / 86400000);
+    if (!best || shared > best.shared) best = { sp, shared };
+  }
+  if (!best) return null;
+  const sp = best.sp;
+  const letter = /ALPHA/i.test(sp.crew || "") ? "A" : /BRAVO/i.test(sp.crew || "") ? "B" : null;
+  const side = {}, window = {}, strangers = [];
+  const aboard = new Set();
+  for (const r of rows) {
+    if (!(r.on < sp.off && r.off > sp.on)) continue;
+    const who = personFor(r.name);
+    if (!who) { if (!strangers.includes(r.name)) strangers.push(r.name); continue; }
+    side[who.id] = "on";
+    aboard.add(who.id);
+    // On for part of the swing only - joined late, home early, filling in.
+    if (r.on > sp.on || r.off < sp.off) window[who.id] = { from: r.on, to: r.off };
+  }
+  (people || []).forEach((p) => { if (p && p.active && !aboard.has(p.id)) side[p.id] = "off"; });
+  return { dates: { flyOut: sp.on, flyHome: sp.off, ...(letter ? { crew: letter } : {}) }, side, window, strangers };
+}
+
+/* The roster names a person the way the office writes them ("Arthur") and
+   the crew list its own way; both are matched against the crew matrix, the
+   one list they are both trying to be. Anybody the matrix cannot place is
+   nobody, rather than a guess. */
+function rosterPeopleFor(people, names) {
+  const byMatrix = new Map();
+  (people || []).forEach((p) => { const m = matchRoster(p.name, names); if (m) byMatrix.set(m, p); });
+  return (who) => { const m = matchRoster(who, names); return m ? byMatrix.get(m) || null : null; };
+}
+
 // Whether someone is onboard for swing k: their crew's turn, unless the roster
 // has been changed for that one swing. Shared, so the roster grid and the swing
 // compliance check can't drift apart on who is actually onboard.

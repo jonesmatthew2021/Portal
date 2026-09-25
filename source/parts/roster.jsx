@@ -24,11 +24,11 @@ const SHIFTS = [{ id: "day", label: "Day" }, { id: "night", label: "Night" }];
  *
  * It used to fall back on the pattern - the crew whose turn the calendar said
  * it was got shown onboard - so a portal nobody had set up still opened
- * looking right. That was before Update swings from roster existed. Now the
- * allocations are read off the roster when management asks for it, and a board
- * that has not been generated is a board with nothing on it, not a guess: the
- * pattern quietly moving people on and off as the weeks roll over is exactly
- * what the allocations are supposed to stop doing.
+ * looking right. Now a coming swing is read off the Roster page every time it
+ * is drawn (rosterSwing in the shell), and a board the roster has no swing for
+ * is a board with nothing on it, not a guess: the pattern quietly moving
+ * people on and off as the weeks roll over is exactly what the roster is
+ * there to stop.
  */
 const boardSide = (p, board) => {
   if (!p.active) return "off";
@@ -294,7 +294,7 @@ function CrewRosters({ people, setPeople, board, setBoard, log, currentUser, vie
   // Swing Compliance shows the board to read it against the certificates, not
   // to work on it - the crew are moved on the Roster page.
   const admin = isAdmin(currentUser) && !readOnly;
-  const { swingLists, setSwingLists, swingDates, swingBoards, setSwingBoards, quals: MATRIX, setQuals } = usePortal();
+  const { swingLists, setSwingLists, swingDates, swingBoards, setSwingBoards, quals: MATRIX, setQuals, rosterPlan } = usePortal();
 
   // The roster is typed in shorthand — "Arthur", "Ruwan" — but the crew have
   // one full name each on the matrix, so that is the name shown: whoever a
@@ -356,8 +356,22 @@ function CrewRosters({ people, setPeople, board, setBoard, log, currentUser, vie
      (the swing that is on, or one gone stale while the page sat open) is the
      board itself. */
   const looking = viewSwing != null && viewSwing > currentSwingIndex();
-  const ahead = looking ? swingWithDates(viewSwing, swingDates) : null;
-  const aheadHeld = looking ? (swingBoards || {})[viewSwing] || { side: {}, shift: {} } : null;
+  /* Who is on a coming swing is the Roster page's answer (rosterSwing), read
+     here the same way the cards read it; only the watches are this board's.
+     Where the roster has no swing near it, the board kept for it stands. */
+  const aheadPlan = looking
+    ? rosterSwing(viewSwing, rosterPlan, people, rosterPeopleFor(people, MATRIX.rows.map((r) => r[0])))
+    : null;
+  const ahead = looking
+    ? (aheadPlan && !(((swingDates || {})[viewSwing] || {}).flyOut && ((swingDates || {})[viewSwing] || {}).flyHome)
+      ? swingWithDates(viewSwing, { [viewSwing]: aheadPlan.dates })
+      : swingWithDates(viewSwing, swingDates))
+    : null;
+  const aheadHeld = looking
+    ? (aheadPlan
+      ? { side: aheadPlan.side, window: aheadPlan.window, shift: ((swingBoards || {})[viewSwing] || {}).shift || {} }
+      : (swingBoards || {})[viewSwing] || { side: {}, shift: {} })
+    : null;
   const aheadSide = (p) => {
     if (!p.active) return "off";
     const held = (aheadHeld.side || {})[p.id];
@@ -579,7 +593,9 @@ function CrewRosters({ people, setPeople, board, setBoard, log, currentUser, vie
         </div>
       )}
 
-      {admin && (
+      {/* On a coming swing the roster says who is on it, so the move is
+          made on the Roster page; here only the watch is set. */}
+      {admin && !(looking && aheadPlan) && (
         <button className="um-btn" onClick={() => move(p, side === "on" ? "off" : "on")}
           title={side === "on" ? `Send ${p.name} to the off swing` : `Bring ${p.name} onboard`}
           style={{ background: "transparent", color: T.muted, border: `1px solid ${T.rule}`,
@@ -655,10 +671,10 @@ function CrewRosters({ people, setPeople, board, setBoard, log, currentUser, vie
               <span style={{ fontFamily: T.body, fontSize: 13.5, color: T.text, lineHeight: 1.6,
                 flex: "1 1 260px" }}>
                 Working on <strong style={{ fontWeight: 700 }}>Crew {ahead.crew} ·{" "}
-                {swingLabel(ahead)}</strong> — picked on the cards above. Watches set here, crew
-                moved on or off, and anyone added belong to this swing only; the live board — who
-                is on the vessel today — is untouched. Anyone not moved by hand follows the
-                rotation.
+                {swingLabel(ahead)}</strong> — picked on the cards above.
+                {aheadPlan
+                  ? " Who is on it is the Roster page's say; the watches set here belong to this swing only. The live board — who is on the vessel today — is untouched."
+                  : " Watches set here, crew moved on or off, and anyone added belong to this swing only; the live board — who is on the vessel today — is untouched. Anyone not moved by hand follows the rotation."}
               </span>
               <Button variant="quiet" onClick={onShowNow}>Back to the swing that is on</Button>
             </div>
@@ -804,19 +820,38 @@ function FoldSection({ title, meta, tone = T.accent, children, boxRef, right }) 
 function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, cardsOnly, compact, rosterOpen }) {
   const [rosterShown, setRosterShown] = useState(!!rosterOpen);
   const { shiftAnalysis: heldShift } = usePortal();
-  const { quals: QUALS, swingDates, setSwingDates, log, certDates, swingBoard, swingBoards } = usePortal();
+  const { quals: QUALS, swingDates, setSwingDates, log, certDates, swingBoard, swingBoards, rosterPlan } = usePortal();
   const validityFor = useValidityLookup();
   const k0 = currentSwingIndex();
-  // The swing onboard now and the five coming, each carrying the office's dates
-  // where somebody has given them and the four-week pattern's where nobody has.
-  const swings = useMemo(
-    () => Array.from({ length: SWING_LOOKAHEAD + 1 }, (_, i) => swingWithDates(k0 + i, swingDates)),
-    [k0, swingDates],
-  );
-
   const today = todayISO();
   const names = useMemo(() => QUALS.rows.map((r) => r[0]), [QUALS]);
   const rowByName = useMemo(() => Object.fromEntries(QUALS.rows.map((r) => [r[0], r])), [QUALS]);
+
+  /* Each coming swing as the Roster page has it (rosterSwing): its dates, who
+     is on it and for which days. The roster is the truth for a coming swing -
+     management keeps it there - so the cards read it every time they are
+     drawn rather than waiting on a button. The swing that is on is the live
+     board's, as always. */
+  const fromRoster = useMemo(() => {
+    const personFor = rosterPeopleFor(people, names);
+    const out = {};
+    for (let i = 1; i <= SWING_LOOKAHEAD; i++) out[k0 + i] = rosterSwing(k0 + i, rosterPlan, people, personFor);
+    return out;
+  }, [k0, rosterPlan, people, names]);
+
+  // The swing onboard now and the five coming, each carrying the dates
+  // somebody typed where they did, else the roster's, else the four-week
+  // pattern's.
+  const swings = useMemo(
+    () => Array.from({ length: SWING_LOOKAHEAD + 1 }, (_, i) => {
+      const k = k0 + i;
+      const d = (swingDates || {})[k];
+      const typedIn = !!(d && d.flyOut && d.flyHome);
+      const r = fromRoster[k];
+      return !typedIn && r ? { ...swingWithDates(k, { [k]: r.dates }), fromRoster: true } : swingWithDates(k, swingDates);
+    }),
+    [k0, swingDates, fromRoster],
+  );
 
   // Who on the roster is who on the matrix. Worked out once for the roster
   // rather than once per swing, because it is the same answer every time.
@@ -829,11 +864,16 @@ function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, ca
     /* The swing that is on is read off the live board — the same answer the
        roster below gives — so a crew change made with Switch swings, or anyone
        moved on or off by hand, is what this page checks the moment it happens.
-       A coming swing is read off its own allocation and nothing else: one
-       that has not been generated has nobody on it, which is what the page
-       then says, rather than filling it in from the rotation. */
+       A coming swing is read off the Roster page (fromRoster): who the
+       roster has on it, for their own days, with the watches set on the
+       swing's own board. Where the roster has no swing near it, the board
+       kept for it stands, and one nobody has filled has nobody on it - said
+       as such, rather than filled in from the rotation. */
     const live = s.k <= k0;
-    const held = live ? null : (swingBoards || {})[s.k];
+    const planned = live ? null : fromRoster[s.k];
+    const held = live ? null : planned
+      ? { side: planned.side, window: planned.window, shift: ((swingBoards || {})[s.k] || {}).shift || {} }
+      : (swingBoards || {})[s.k];
     const sideFor = (p) => {
       if (live) return boardSide(p, swingBoard);
       const h = held && held.side ? held.side[p.id] : null;
@@ -887,7 +927,7 @@ function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, ca
     };
   };
 
-  const results = useMemo(() => swings.map(checkSwing), [swings, people, overrides, QUALS, matched, swingBoard, swingBoards]);
+  const results = useMemo(() => swings.map(checkSwing), [swings, people, overrides, QUALS, matched, swingBoard, swingBoards, fromRoster]);
   const here = results.find((r) => r.swing.k === at) || results[0];
 
   /* ---- The dates the swings are read against -------------------------- */
@@ -1042,7 +1082,9 @@ function SwingCompliance({ people, overrides, at, setAt, roster, onOpenSwing, ca
                 ? "Both dates are needed. Until then this swing is read against the pattern."
                 : given
                   ? `Onboard ${fmtDate(r.swing.start)} to ${fmtDate(r.swing.end)}.`
-                  : "From the four-week pattern. Type the office's dates over it."}
+                  : r.swing.fromRoster
+                    ? `From the roster. Onboard ${fmtDate(r.swing.start)} to ${fmtDate(r.swing.end)}.`
+                    : "From the four-week pattern. Type the office's dates over it."}
           </span>
           <span style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {(given || half || bust) && <Button writes variant="quiet" onClick={() => usePattern(k)}>Use the pattern</Button>}
@@ -1189,11 +1231,25 @@ function swingSnapshot(k, people, board, swingDates, quals) {
 }
 
 function SwingDayGrid({ k, people, board, setBoard, overrides, log, onClose, snapshot }) {
-  const { swingDates, swingBoards, setSwingBoards, quals: MATRIX } = usePortal();
+  const { swingDates, swingBoards, setSwingBoards, quals: MATRIX, rosterPlan } = usePortal();
   const readOnly = !!snapshot;
-  const swing = snapshot ? { ...swingAt(snapshot.k), crew: snapshot.crew, flyOut: snapshot.flyOut, flyHome: snapshot.flyHome } : swingWithDates(k, swingDates);
   const looking = !readOnly && k > currentSwingIndex();
-  const held = readOnly ? {} : looking ? (swingBoards || {})[k] || { side: {}, shift: {}, window: {} } : (board || {});
+  /* A coming swing is the Roster page's: its dates, who is on it and for
+     which days (rosterSwing) - the watches alone are this board's. Where the
+     roster has no swing near it, the board kept for it stands. */
+  const planned = looking
+    ? rosterSwing(k, rosterPlan, people, rosterPeopleFor(people, MATRIX.rows.map((r) => r[0])))
+    : null;
+  const typedDates = !!(((swingDates || {})[k] || {}).flyOut && ((swingDates || {})[k] || {}).flyHome);
+  const swing = snapshot
+    ? { ...swingAt(snapshot.k), crew: snapshot.crew, flyOut: snapshot.flyOut, flyHome: snapshot.flyHome }
+    : planned && !typedDates ? swingWithDates(k, { [k]: planned.dates }) : swingWithDates(k, swingDates);
+  const held = readOnly ? {}
+    : looking
+      ? (planned
+        ? { side: planned.side, window: planned.window, shift: ((swingBoards || {})[k] || {}).shift || {} }
+        : (swingBoards || {})[k] || { side: {}, shift: {}, window: {} })
+      : (board || {});
   const today = todayISO();
   const days = [];
   for (let d = swing.flyOut; d < swing.flyHome; d = isoShift(d, 1)) days.push(d);
@@ -1216,7 +1272,7 @@ function SwingDayGrid({ k, people, board, setBoard, overrides, log, onClose, sna
     const h = (held.side || {})[p.id];
     return h === "on" || h === "off" ? h : "off";
   };
-  const generated = boardGenerated(looking ? held : board);
+  const generated = !!planned || boardGenerated(looking ? held : board);
   const shiftOf = (p) => (held.shift || {})[p.id] || "";
   const windowOf = (p) => (held.window || {})[p.id] || null;
   const outOf = (p) => (windowOf(p) || {}).from || swing.flyOut;
@@ -1299,7 +1355,7 @@ function SwingDayGrid({ k, people, board, setBoard, overrides, log, onClose, sna
             </div>
             <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted, marginTop: 4 }}>
               {rows.length} onboard · {partial === 0 ? "everyone the whole swing" : `${partial} for part of it`}
-              {readOnly ? " · as it stood when the swing ended" : " · type a person's own joining and fly-home days to change them"}
+              {readOnly ? " · as it stood when the swing ended" : planned ? " · from the Roster page" : " · type a person's own joining and fly-home days to change them"}
             </div>
           </div>
           <a onClick={onClose} style={{ cursor: "pointer", fontFamily: T.display, fontSize: 22, color: T.muted, lineHeight: 1, padding: "2px 6px" }}>×</a>
@@ -1324,7 +1380,7 @@ function SwingDayGrid({ k, people, board, setBoard, overrides, log, onClose, sna
             <tbody>
               {rows.map((r) => (
                 <GridRow key={r.key} row={r} days={days} today={today} swing={swing} lastDay={lastDay}
-                  colour={colourOf(r.shift)} readOnly={readOnly}
+                  colour={colourOf(r.shift)} readOnly={readOnly || !!planned}
                   offSwing={offSwing} fullName={fullName} positionOf={positionOf}
                   others={rows.filter((x) => x.key !== r.key && (x.from !== swing.flyOut || x.to !== swing.flyHome))}
                   onCover={bringOn}
@@ -1347,7 +1403,7 @@ function SwingDayGrid({ k, people, board, setBoard, overrides, log, onClose, sna
           <span style={{ width: 14, height: 11, background: GRID_NONE, display: "inline-block", borderRadius: 2 }} /> onboard, no watch set · blank is ashore
         </div>
 
-        {!readOnly && (
+        {!readOnly && !planned && (
           <PartSwing swing={swing} lastDay={lastDay} offSwing={offSwing} fullName={fullName} positionOf={positionOf} onBring={bringOn} />
         )}
       </div>
@@ -3163,158 +3219,6 @@ function RosterListPage() {
           </div>
         );
       })()}
-    </>
-  );
-}
-
-/* The Roster on a page of its own: the same board Swing Compliance carries,
-   for when the job is moving crew rather than checking them. The picker holds
-   the same six swings the compliance cards do — the live board for the swing
-   on now, a coming swing's own board for any other, so ad hoc changes land on
-   that swing only. */
-/* The swing cards, filled in from the roster when somebody asks for it.
- *
- * Nothing here happens by itself. The roster is the office's working document
- * and moves all day; the allocations are what the compliance checks are read
- * against, so they follow the roster only when management says so, and say so
- * knowing it will overwrite what is there.
- */
-function GenerateAllocations({ people, log }) {
-  const { rosterPlan, swingDates, setSwingDates, swingBoards, setSwingBoards,
-    quals: QUALS, admin } = usePortal();
-  const [asking, setAsking] = useState(false);
-  const [work, setWork] = useState(null);
-  const names = useMemo(() => QUALS.rows.map((r) => r[0]), [QUALS]);
-
-  const spine = (rosterPlan && rosterPlan.spine) || [];
-  const ready = admin && spine.length > 0;
-
-  const run = async () => {
-    setAsking(false);
-    const rows = (rosterPlan && rosterPlan.rows) || [];
-    const k0 = currentSwingIndex();
-    const ks = Array.from({ length: SWING_LOOKAHEAD + 1 }, (_, i) => k0 + i);
-
-    /* The roster names a person the way the office writes them; the crew list
-       names them its own way. Both are matched against the crew matrix, which
-       is the one list they are both trying to be, and anybody the matrix
-       cannot place is reported rather than guessed at. */
-    const byMatrix = new Map();
-    people.forEach((p) => { const m = matchRoster(p.name, names); if (m) byMatrix.set(m, p); });
-    const personFor = (who) => { const m = matchRoster(who, names); return m ? byMatrix.get(m) || null : null; };
-
-    const dates = { ...(swingDates || {}) };
-    const boards = { ...(swingBoards || {}) };
-    const strangers = new Set();
-    let placed = 0, matchedSwings = 0;
-
-    for (let i = 0; i < ks.length; i++) {
-      const k = ks[i];
-      setWork({ pct: Math.round((i / (ks.length + 1)) * 100), note: "Swing " + (i + 1) + " of " + ks.length });
-      await new Promise((r) => setTimeout(r, 90));
-
-      // The roster swing sharing the most days with this one.
-      const base = swingAt(k);
-      let best = null;
-      for (const sp of spine) {
-        const from = sp.on > base.flyOut ? sp.on : base.flyOut;
-        const to = sp.off < base.flyHome ? sp.off : base.flyHome;
-        if (to <= from) continue;
-        const shared = daysBetween(from, to);
-        if (!best || shared > best.shared) best = { sp, shared };
-      }
-      if (!best) continue;
-      const sp = best.sp;
-      matchedSwings++;
-
-      const letter = /ALPHA/i.test(sp.crew || "") ? "A" : /BRAVO/i.test(sp.crew || "") ? "B" : null;
-      dates[k] = { flyOut: sp.on, flyHome: sp.off, ...(letter ? { crew: letter } : {}) };
-
-      const side = {}, windows = {};
-      const aboard = new Set();
-      for (const r of rows) {
-        if (!(r.on < sp.off && r.off > sp.on)) continue;
-        const who = personFor(r.name);
-        if (!who) { strangers.add(r.name); continue; }
-        side[who.id] = "on";
-        aboard.add(who.id);
-        // On for part of the swing only - joined late, home early, filling in.
-        if (r.on > sp.on || r.off < sp.off) windows[who.id] = { from: r.on, to: r.off };
-        placed++;
-      }
-      people.forEach((p) => { if (p.active && !aboard.has(p.id)) side[p.id] = "off"; });
-      boards[k] = { ...(boards[k] || {}), side, window: windows, shift: (boards[k] || {}).shift || {} };
-    }
-
-    setWork({ pct: 100, note: "Saving" });
-    await new Promise((r) => setTimeout(r, 140));
-    setSwingDates(dates);
-    setSwingBoards(boards);
-    log("Swings", "Swings updated from the roster",
-      matchedSwings + " swings · " + placed + " placements"
-      + (strangers.size ? " · " + strangers.size + " not on the crew list" : ""));
-    setWork({ done: true, pct: 100, swings: matchedSwings, placed, strangers: [...strangers] });
-  };
-
-  if (!admin) return null;
-  const panel = {
-    position: "fixed", left: "50%", top: 120, transform: "translateX(-50%)", zIndex: 90,
-    background: T.panel, border: "1px solid " + T.rule, borderTop: "4px solid " + T.accent,
-    borderRadius: 3, padding: "16px 20px", boxShadow: "0 6px 24px rgba(18,41,61,0.25)",
-    width: "min(560px, 94vw)",
-  };
-
-  return (
-    <>
-      <Button writes disabled={!ready || !!work} onClick={() => setAsking(true)}>
-        {work && !work.done ? "Working…" : "Update swings from roster"}
-      </Button>
-
-      {asking && (
-        <div style={panel}>
-          <div style={{ fontFamily: T.display, fontSize: 15, fontWeight: 700, color: T.bRed, marginBottom: 8 }}>
-            Warning
-          </div>
-          <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.text, marginBottom: 14, lineHeight: 1.6 }}>
-            This will possibly alter swing allocations. Do you want to proceed?
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <Button writes variant="solid" onClick={run}>Yes</Button>
-            <Button variant="quiet" onClick={() => setAsking(false)}>No</Button>
-          </div>
-        </div>
-      )}
-
-      {work && (
-        <div style={panel}>
-          <div style={{ fontFamily: T.display, fontSize: 15, fontWeight: 700, color: T.text, marginBottom: 10 }}>
-            {work.done ? "Swings updated" : "Updating swings"}
-          </div>
-          {!work.done && (
-            <>
-              <div style={{ fontFamily: T.mono, fontSize: 26, color: T.accent, marginBottom: 6 }}>
-                {work.pct}%
-              </div>
-              <div style={{ height: 6, background: T.raised, borderRadius: 3, overflow: "hidden", marginBottom: 10 }}>
-                <div style={{ width: work.pct + "%", height: "100%", background: T.accent, transition: "width .2s" }} />
-              </div>
-              <div style={{ fontFamily: T.body, fontSize: 13, color: T.muted }}>{work.note}</div>
-            </>
-          )}
-          {work.done && (
-            <>
-              <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.text, lineHeight: 1.7, marginBottom: 12 }}>
-                {work.swings} swing{work.swings === 1 ? "" : "s"} taken from the roster,
-                {" "}{work.placed} place{work.placed === 1 ? "" : "s"} filled.
-                {work.strangers.length > 0 && (
-                  <> Not on the crew list, so left out: {work.strangers.join(", ")}.</>
-                )}
-              </div>
-              <Button onClick={() => setWork(null)}>Close</Button>
-            </>
-          )}
-        </div>
-      )}
     </>
   );
 }

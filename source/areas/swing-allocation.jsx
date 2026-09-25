@@ -23,10 +23,7 @@ function SwingsPage({ currentUser, people, setPeople, overrides, swingBoard, set
   const past = Object.values(swingArchive || {}).filter((a) => a && a.k < k0).sort((a, b) => b.k - a.k);
   return (
     <>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
-        <SectionHead title="Swings" />
-        <GenerateAllocations people={people} log={log} />
-      </div>
+      <SectionHead title="Swings" />
       <ComplianceLegend />
       <SwingCompliance people={people} overrides={overrides} at={at} setAt={setAt} rosterOpen
         roster={

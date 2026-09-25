@@ -329,6 +329,26 @@ on any line that still names this one.
   a change that nothing will send.
 - **The last 200 saves are kept** (`portal_state_history`) and any one of them
   can be put back from `Admin → Access Grants`, under Revisions.
+- **The Roster page is the truth for a coming swing.** Matthew, 26 Sep 2026:
+  "I fill in the roster page ... management sets and modifies the roster as
+  required as there's always changes ... everything is derived from this
+  information." So every coming swing on Admin → Swings is read off the
+  roster plan (`rosterPlan`) every time it is drawn - `rosterSwing` in the
+  shell: the roster swing sharing the most days with the pattern's, whose it
+  is, who is on it and for their own days where those are not the whole
+  swing - by the swing cards and the swing board under them (`CrewRosters`
+  on a picked swing) alike, and by the day grid (`SwingDayGrid`, today
+  opened only for an archived swing) should it ever show a coming one; a
+  swing's own board (`swingBoards[k]`) keeps only the watches. The "Update
+  swings from roster" button (`GenerateAllocations`) is gone with it; a
+  swing the roster has no swing near reads its kept board as before, and
+  the pattern's dates stand only where the roster has none and nobody
+  typed any (typed dates still win). Who is on a coming swing is changed
+  on the Roster page - the swing board's on/off buttons are not shown for
+  a swing the roster covers, and the day grid would show no joining and
+  fly-home boxes, Off swing or part-swing bring-on for one. The swing that
+  is on is the live board's, as always. The preview shows a year of roster
+  under `?roster=demo`.
 - **The portal reads offline from the last good copy the service worker
   kept** (`source/app/sw.js`, the rules in `source/shared/offline-rules.js`):
   the page, the vendor scripts and fonts, `/api/me`, `/api/state`,
