@@ -1106,6 +1106,9 @@ const is = (got, want, what) => {
   is(said(() => checkVessel({ ...example, swings: { ...example.swings, ids: ["ALPHA"] } }, "a vessel file")),
     'a vessel file has no usable "swings.ids" - it must be two ids, the first for swing A and the second for swing B.',
     "the ids are paired with the labels by order, so there are two and no more");
+  is(said(() => checkVessel({ ...example, noExpiryCodes: [...example.noExpiryCodes, "ZZ-99"] }, "a vessel file")),
+    'a vessel file has no usable "noExpiryCodes[' + example.noExpiryCodes.length + ']" - it must be one of the codes in qualColumns.',
+    "an item said never to lapse must be a column of the matrix");
   const establishment = example.shift.establishment.map((e) => ({ ...e }));
   establishment[2] = { ...establishment[2], pool: "purser" };
   is(said(() => checkVessel({ ...example, shift: { ...example.shift, establishment } }, "a vessel file")),

@@ -624,6 +624,30 @@ on any line that still names this one.
     (`filingName`); a name a person types by hand is the office's word
     (`rename-file` clears `named_by_portal`). The preview shows the lines
     under `?reading=smart`.
+  - **The items that never lapse are the office's own list, and a hand tag
+    on one is the whole answer** (Matthew, 25 Sep 2026, on a cargo-system
+    assessment filed by hand for Evan Farmer and still Missing: "I need the
+    certificates issue sorted properly"). `noExpiryCodes` in the vessel file
+    is the thirteen items the office's ATB Skills Matrix (Guidance
+    Information sheet, Expiry column) marks No Expiry - CS-03, CS-04,
+    MS-01 to MS-06, PI-07, QL-15, QL-20, VS-02, VS-04 - with where it comes
+    from beside it (`noExpiryWhy`), each checked to be a column by both
+    `checkVessel`s and held to the sheet's list by a rules test. Such a
+    column is held or it isn't, never a date: a document placed on it is
+    settled as "Y" whether or not it prints an expiry (the office's evidence
+    for CS-03 is an assessment form or an email, and neither prints one),
+    and a unit code or endorsement printed on a document in force holds a
+    never-lapsing column it covers, with no date, where nothing holds it
+    already (both covering passes; QL-20 is the one such column, by its
+    SITXFSA005). And where a person tagged the document by hand for a column
+    that never lapses, or typed a date against the row, the tag stands over
+    the reader's "no" (`tagStands` in `worker/src/lib/analysis.ts`, asked by
+    `compareMatrix` and `certificateStanding` alike): the form the reader
+    would not call a certificate is still the person's word for that cell.
+    A tag on a dated column with no date typed still needs the reader's
+    date, so the reader's "no" stands there and the document is listed as
+    unreadable as before; a register page is evidence only for the register
+    columns whoever tagged it.
 
   A green cell means "not expired" and nothing more: suspension and
   cancellation are invisible on a document and only AMSA can confirm them

@@ -1114,7 +1114,7 @@ test("a register page counts only for the columns the office keeps in a register
     reading: { certificateTitle: "Cargo system approvals register", registerPage: true, qualCode: "CS-04", codeConfidence: "medium",
       columns: [{ code: "CS-04", confidence: "medium", why: "listed as an approved trainer on the register" }] } }]);
   await worker.scheduled({} as never, env as never);
-  assert.equal(evansCell(portal, "CS-04"), "2031-05-26", "filled");
+  assert.equal(evansCell(portal, "CS-04"), "Y", "filled - held, since CS-04 never lapses on this vessel");
   assert.deepEqual(await roundNotes(portal, "placed"), ["EVANS, Brenton — CS-04: placed by the reading (listed as an approved trainer on the register)"]);
 
   // The same page filed for QL-01, read today: not a certificate, so nothing.
@@ -1133,6 +1133,85 @@ test("a register page counts only for the columns the office keeps in a register
   const out = await compareMatrix(doc.quals, null, asKnownPerson(doc.people));
   assert.deepEqual(out.claimed, [], "nothing filled - not even by the column in its name");
   assert.deepEqual(out.notes.filter((n) => n.kind === "unreadable").map((n) => n.detail), ["A register page or listing, not a certificate."]);
+});
+
+test("a hand tag on a column that never lapses stands whatever the reader makes of the document", async () => {
+  /* Evan Farmer's cargo-system practical assessment, filed by hand for the
+     column (Matthew, 25 Sep 2026): the office's evidence for CS-03/CS-04 is
+     an assessment form or an email, no certificate and no expiry, and the
+     man read as Missing what he holds. CS-04 never lapses on this vessel
+     (the office's own sheet), so the person's tag is the whole answer: the
+     cell is held, on the reader's "no" as much as on its reading. */
+  const { portal, env } = await smartPortal([
+    // Read as a form, not a certificate: no column, no date.
+    { id: "form", filename: "assessment.pdf", qualCode: "CS-04",
+      reading: { certificateTitle: "Cargo loading & discharge system - operator - practical assessment", qualCode: null, codeConfidence: null, columns: [], expiresOn: null } },
+  ]);
+  await worker.scheduled({} as never, env as never);
+  assert.equal(evansCell(portal, "CS-04"), "Y", "held on the tag, no date needed");
+  assert.deepEqual((await certificateStanding()).dates.map((d) => [d.code, d.expires]), [["CS-04", null]], "the page's cells agree");
+
+  // The reader would not call it a certificate at all: the tag still stands.
+  const no = await smartPortal([
+    { id: "no", filename: "assessment.pdf", qualCode: "CS-04", reading: { readable: false, reason: "Not a certificate.", expiresOn: null, columns: [] } },
+  ]);
+  await worker.scheduled({} as never, no.env as never);
+  assert.equal(evansCell(no.portal, "CS-04"), "Y", "held on the person's word");
+  assert.deepEqual(await roundNotes(no.portal, "unreadable"), [], "and not listed as unreadable: it stands");
+  assert.deepEqual((await certificateStanding()).dates.map((d) => d.code), ["CS-04"]);
+
+  // A register page tagged for a register column stands the same way.
+  const reg = await smartPortal([
+    { id: "reg", filename: "register.pdf", qualCode: "CS-04",
+      reading: { readable: false, reason: "A register page or listing, not a certificate.", registerPage: true, expiresOn: null, columns: [] } },
+  ]);
+  await worker.scheduled({} as never, reg.env as never);
+  assert.equal(evansCell(reg.portal, "CS-04"), "Y");
+
+  // The same "no" with no tag: unreadable, as it always was.
+  const untagged = await smartPortal([
+    { id: "plain", filename: "EVANS, Brenton - CS-04 Cargo System - Trainer - Practical.pdf", reading: { readable: false, reason: "Not a certificate.", expiresOn: null, columns: [] } },
+  ]);
+  await worker.scheduled({} as never, untagged.env as never);
+  assert.equal(evansCell(untagged.portal, "CS-04"), "", "a filename is not a person's tag");
+  assert.deepEqual(await roundNotes(untagged.portal, "unreadable"), ["Not a certificate."]);
+
+  // A tag on a dated column needs a date: the reader's "no" stands there,
+  // unless a date was typed against the row.
+  const dated = await smartPortal([
+    { id: "d1", filename: "scan1.pdf", qualCode: "QL-04", reading: { readable: false, reason: "Too poor to read.", expiresOn: null, columns: [] } },
+    { id: "d2", filename: "scan2.pdf", qualCode: "QL-08", reading: { readable: false, reason: "Too poor to read.", expiresOn: null, columns: [] } },
+    // A register page is never a Master's ticket, whoever tagged it.
+    { id: "d3", filename: "scan3.pdf", qualCode: "QL-01", reading: { readable: false, reason: "A register page or listing, not a certificate.", registerPage: true, expiresOn: null, columns: [] } },
+  ]);
+  dated.portal.rows.find((r) => r.id === "d2")!.expiresOn = "2029-03-01";
+  dated.portal.rows.find((r) => r.id === "d3")!.expiresOn = "2029-03-01";
+  await worker.scheduled({} as never, dated.env as never);
+  assert.equal(evansCell(dated.portal, "QL-04"), "", "no date to give");
+  assert.equal(evansCell(dated.portal, "QL-08"), "2029-03-01", "the typed date is the person's word");
+  assert.equal(evansCell(dated.portal, "QL-01"), "", "a register page fills no Master's cell");
+  assert.deepEqual(await roundNotes(dated.portal, "unreadable"), ["Too poor to read.", "A register page or listing, not a certificate."]);
+  assert.deepEqual((await certificateStanding()).dates.map((d) => [d.code, d.expires]), [["QL-08", "2029-03-01"]], "the page's cells agree");
+});
+
+test("a unit code covers a column that never lapses: held, with no date, by the round and the page alike", async () => {
+  /* QL-20 (SITXFSA005) never lapses on this vessel and its unit code is
+     printed on a statement read as PT-02. The cover holds QL-20 - "Y", no
+     date - and the page's cells link the cell to the statement. A document
+     that IS the column still wins the cell. */
+  const { portal, env } = await smartPortal([{ id: "units", filename: "statement.pdf",
+    reading: { certificateTitle: "Statement of Attainment", units: ["RIIWHS202E", "SITXFSA005"], qualCode: "PT-02", codeConfidence: "high",
+      columns: [{ code: "PT-02", confidence: "high", why: "RIIWHS202E printed" }] } }]);
+  const doc = portal.doc();
+  doc.quals.cols.push(["QL-20", "Use hygienic practices for food safety - SITXFSA005", "Qualification"]);
+  doc.quals.rows[0][3].push("");
+  portal.state.data = JSON.stringify(doc);
+  await worker.scheduled({} as never, env as never);
+  assert.equal(evansCell(portal, "PT-02"), "2031-05-26", "its own column, dated");
+  assert.equal(evansCell(portal, "QL-20"), "Y", "the covered column, held");
+  assert.deepEqual(await roundNotes(portal, "no-expiry-item"), [], "the statement's own date is not read as one the column has not got");
+  const page = await certificateStanding();
+  assert.deepEqual(page.dates.filter((d) => d.code === "QL-20").map((d) => [d.expires, d.covered, d.fileId]), [[null, true, "units"]], "held by the cover, opening the statement");
 });
 
 test("whose it is: a name with no word to compare is placed only on a sure pick, and the office is asked to add it", async () => {
@@ -1287,7 +1366,7 @@ test("a register page filed under another column's name fills only the register 
     reading: { certificateTitle: "Cargo system approvals register", registerPage: true, qualCode: "CS-04", codeConfidence: "medium",
       columns: [{ code: "CS-04", confidence: "medium", why: "listed as an approved trainer" }, { code: "QL-01", confidence: "medium", why: "listed" }] } }]);
   await worker.scheduled({} as never, env as never);
-  assert.equal(evansCell(portal, "CS-04"), "2031-05-26", "the register column the reader gave");
+  assert.equal(evansCell(portal, "CS-04"), "Y", "the register column the reader gave - held, since CS-04 never lapses");
   assert.notEqual(evansCell(portal, "QL-01"), "2031-05-26", "and never the column in its name");
   assert.deepEqual((await certificateStanding()).dates.map((d) => d.code), ["CS-04"], "the page's cells agree");
 

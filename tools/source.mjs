@@ -77,7 +77,7 @@ const VESSEL_SHAPE = [
   ["shift.groups", "array"], ["shift.sheetWords", "object"],
   ["customerMarks.elearning", "string"], ["customerMarks.auIssuers", "string[]"],
   ["customerMarks.nameStopWords", "string[]"],
-  ["elearningCodes", "string[]"], ["noExpiryCodes", "string[]"], ["elearningGroups", "string[]"],
+  ["elearningCodes", "string[]"], ["noExpiryCodes", "string[]"], ["noExpiryWhy", "string"], ["elearningGroups", "string[]"],
   ["certStated", "object"], ["vesselFacts", "object"], ["covers", "array"],
   ["renewalNeeds", "object"], ["evidenceKinds", "object"], ["neverRecognised.codes", "string[]"],
   ["neverRecognised.why", "string"], ["registerEvidenced.codes", "string[]"], ["registerEvidenced.why", "string"],
@@ -211,6 +211,10 @@ export function checkVessel(vessel, from = "source/vessel.json") {
   /* The columns a register page stands for (the reader's registerPage). */
   vessel.registerEvidenced.codes.forEach((c, i) => {
     if (!columnCodes.has(String(c).trim().toUpperCase())) throw wrong("registerEvidenced.codes[" + i + "]", "one of the codes in qualColumns");
+  });
+  /* The columns that never lapse - the office's sheet's own list. */
+  vessel.noExpiryCodes.forEach((c, i) => {
+    if (!columnCodes.has(String(c).trim().toUpperCase())) throw wrong("noExpiryCodes[" + i + "]", "one of the codes in qualColumns");
   });
   return vessel;
 }

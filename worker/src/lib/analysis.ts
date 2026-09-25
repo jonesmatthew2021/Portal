@@ -874,6 +874,32 @@ export function registerColumns(): string[] {
 }
 
 /**
+ * Whether a person's hand tag stands over the reader's "no".
+ *
+ * The office's evidence for a cargo-system approval is a completed practical
+ * assessment form or an email, and the reader rightly says neither is a
+ * certificate - so a document somebody filed by hand for CS-03 fell out of
+ * the round as unreadable and the man read as Missing what he plainly holds
+ * (Matthew, 25 Sep 2026). A hand tag is the person's own word for the column;
+ * it stands where the tag is the whole answer: the column never lapses (held
+ * or not held, no date to read), or a date was typed against the row. A
+ * dated column with no date typed still needs the reader's date, so the
+ * reader's "no" stands there, and a register page is evidence only for the
+ * register columns whoever tagged it. The round (compareMatrix) and the
+ * page's cells (certificateStanding) ask this one question.
+ */
+export function tagStands(
+  row: { qualCode?: string | null; expiresOn?: string | null },
+  reading: Reading | null,
+): boolean {
+  if (!reading || reading.readable) return false;
+  const code = String(row.qualCode || "").trim().toUpperCase();
+  if (!code) return false;
+  if (reading.registerPage && !registerColumns().includes(code)) return false;
+  return neverLapses(code) || isDate(row.expiresOn);
+}
+
+/**
  * The one answer to "which columns does this certificate fill with its own
  * date", and on whose word. The round (compareMatrix in routes/analyse.ts)
  * and the page's cells (certificateStanding below) both go through here -
@@ -1124,7 +1150,9 @@ export async function certificateStanding() {
   const coverOnly: { row: Row; reading: Reading; person: string }[] = [];
 
   for (const { row, reading } of readings) {
-    if (!reading || !reading.readable || !row.person || !row.person.trim()) continue;
+    // A hand tag stands over the reader's "no" where the tag is the whole
+    // answer (tagStands) - the round lets the same document through.
+    if (!reading || (!reading.readable && !tagStands(row, reading)) || !row.person || !row.person.trim()) continue;
     /* A paper that stands in for a certificate is not the certificate. Its
        date is the day the cover runs out, not the day the certificate
        expires, so it never fills a cell, never joins the contest for one and
@@ -1295,9 +1323,20 @@ export async function certificateStanding() {
   ];
   for (const { row, reading, person, code } of covering) {
     for (const cell of coveredCells(reading, vessel.covers, vessel.qualColumns, code)) {
-      if (!cell.until || neverLapses(cell.code)) continue;
       if (isRecognitionReading(reading) && !recognitionFills(cell.code, vessel.neverRecognised.codes)) continue;
       const key = `${person}::${cell.code.trim().toUpperCase()}`;
+      /* A column that carries no expiry is held or it isn't. A unit code or
+         an endorsement printed on a document in force says it is held, and
+         no date on any line says more - so the cover holds it, with no date,
+         where nothing holds it already (the round's rule, compareMatrix). */
+      if (neverLapses(cell.code)) {
+        if (!claim.has(key)) {
+          claim.set(key, { issued: reading.issuedOn || null, expires: null, issuer: (reading.issuer || "").trim() || null,
+            fileId: row.id, covered: true, recognition: isRecognitionReading(reading) });
+        }
+        continue;
+      }
+      if (!cell.until) continue;
       const { until, foreignUnknown } = dateFor(reading, key, cell.until);
       if (!until) continue;
       const sitting = claim.get(key);

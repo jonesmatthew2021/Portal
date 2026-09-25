@@ -28,6 +28,7 @@ import {
   codeFor,
   columnsFor,
   registerColumns,
+  tagStands,
   filedAsFor,
   contentFor,
   date,
@@ -1152,7 +1153,7 @@ export async function compareMatrix(
   // One certificate per person and code. Two certificates for the same item is
   // a renewal sitting next to the certificate it renews, so the later date is
   // the one held against the spreadsheet and the other is only mentioned.
-  const claim = new Map<string, { row: Row; reading: Reading; coveredUntil?: string }>();
+  const claim = new Map<string, { row: Row; reading: Reading; coveredUntil?: string; heldByCover?: boolean }>();
   /* Every certificate that got past the holder check and onto a column of
      its own, kept for the covering pass below: one certificate fills every
      column its printed endorsements and unit codes cover as well as its own
@@ -1171,7 +1172,11 @@ export async function compareMatrix(
     const link = { id: row.id, filename: row.filename, url: `/api/files/${row.id}` };
 
     if (!reading) continue;
-    if (!reading.readable) {
+    // A document the reader could not read, or would not call a certificate,
+    // fills nothing - unless a person's hand tag is the whole answer (a
+    // column that never lapses, or a date typed against the row: tagStands
+    // in lib/analysis.ts, which the page's cells ask too).
+    if (!reading.readable && !tagStands(row, reading)) {
       notes.push({
         kind: "unreadable",
         person: row.person,
@@ -1470,15 +1475,21 @@ export async function compareMatrix(
   ];
   for (const { row, reading, person, code } of covering) {
     for (const cell of coveredCells(reading, vessel.covers, vessel.qualColumns, code)) {
-      if (!cell.until) continue;
       const at = cell.code.trim().toUpperCase();
-      // A column that carries no expiry is held or it isn't, and a date read
-      // off a line on another document says nothing about that. The page's
-      // cells refuse it the same way (lib/analysis.ts).
-      if (!colAt.has(at) || neverLapses(at)) continue;
+      if (!colAt.has(at)) continue;
       // A recognition reaches no further than it may reach itself.
       if (isRecognitionReading(reading) && !recognitionFills(at, vessel.neverRecognised.codes)) continue;
       const key = `${person}::${at}`;
+      /* A column that carries no expiry is held or it isn't. A unit code or
+         an endorsement printed on a document in force says it is held, and
+         no date on any line says more - so the cover holds it, with no date,
+         where nothing holds it already. The page's cells hold it the same
+         way (lib/analysis.ts). */
+      if (neverLapses(at)) {
+        if (!claim.has(key)) claim.set(key, { row, reading, heldByCover: true });
+        continue;
+      }
+      if (!cell.until) continue;
       /* The endorsement on a recognition runs for the remainder of the
          foreign certificate's endorsement (MO70 s 37(4)), so the covered
          column takes the same cut - and takes it on BOTH sides of the
@@ -1543,7 +1554,7 @@ export async function compareMatrix(
   const noted: { id: string; code: string; expires: string | null; issued: string | null;
     issuer: string | null; title: string | null }[] = [];
 
-  for (const [key, { row, reading, coveredUntil }] of claim) {
+  for (const [key, { row, reading, coveredUntil, heldByCover }] of claim) {
     const code = key.split("::")[1];
     // The key was built from the register's name for him, so it is what
     // finds his row.
@@ -1597,7 +1608,7 @@ export async function compareMatrix(
     /* Never for a covered column: the row's own read code is what the
        certificate IS, and writing a column it merely covers over the top
        would lose which certificate this document is. */
-    if (!same && !coveredUntil && primaryOf.get(row.id) === code.trim().toUpperCase()) noted.push(note);
+    if (!same && !coveredUntil && !heldByCover && primaryOf.get(row.id) === code.trim().toUpperCase()) noted.push(note);
 
     const base = {
       id: `cert:${row.id}:${code}`,
@@ -1619,8 +1630,10 @@ export async function compareMatrix(
     // item doesn't have.
     if (neverLapses(code)) {
       // A column that carries no expiry says nothing about a date a covering
-      // certificate would have given it: it is held or it isn't.
-      if (expiry && !coveredUntil) {
+      // certificate would have given it: it is held or it isn't - and a
+      // document that holds it by a printed unit or endorsement is dated for
+      // its own column, not this one.
+      if (expiry && !coveredUntil && !heldByCover) {
         notes.push({
           kind: "no-expiry-item",
           person: matrixRow[0],

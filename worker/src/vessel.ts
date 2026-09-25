@@ -73,6 +73,9 @@ export type Vessel = {
   customerMarks: { elearning: string; auIssuers: string[]; nameStopWords: string[] };
   elearningCodes: string[];
   noExpiryCodes: string[];
+  /** Where the list comes from: the office's own sheet, so the list can be
+   *  checked against it rather than taken on trust. */
+  noExpiryWhy: string;
   elearningGroups: string[];
   certStated: Record<string, string>;
   /** The figures the Marine Orders turn on, with whose they are and which
@@ -145,7 +148,7 @@ const SHAPE: [string, Kind][] = [
   ["shift.groups", "array"], ["shift.sheetWords", "object"],
   ["customerMarks.elearning", "string"], ["customerMarks.auIssuers", "string[]"],
   ["customerMarks.nameStopWords", "string[]"],
-  ["elearningCodes", "string[]"], ["noExpiryCodes", "string[]"], ["elearningGroups", "string[]"],
+  ["elearningCodes", "string[]"], ["noExpiryCodes", "string[]"], ["noExpiryWhy", "string"], ["elearningGroups", "string[]"],
   ["certStated", "object"], ["vesselFacts", "object"], ["covers", "array"],
   ["renewalNeeds", "object"], ["evidenceKinds", "object"], ["neverRecognised.codes", "string[]"],
   ["neverRecognised.why", "string"], ["registerEvidenced.codes", "string[]"], ["registerEvidenced.why", "string"],
@@ -279,6 +282,11 @@ export function checkVessel(value: unknown, from = "source/vessel.json"): Vessel
      would let a register page count for nothing anybody could see. */
   v.registerEvidenced.codes.forEach((c, i) => {
     if (!columnCodes.has(String(c).trim().toUpperCase())) throw wrong(`registerEvidenced.codes[${i}]`, "one of the codes in qualColumns");
+  });
+  /* The columns that never lapse - the office's sheet's own list. A code
+   * that is not a column would hold nothing, and say nothing about it. */
+  v.noExpiryCodes.forEach((c, i) => {
+    if (!columnCodes.has(String(c).trim().toUpperCase())) throw wrong(`noExpiryCodes[${i}]`, "one of the codes in qualColumns");
   });
   return v;
 }

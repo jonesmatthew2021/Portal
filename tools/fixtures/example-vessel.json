@@ -159,6 +159,7 @@
   },
   "elearningCodes": ["VS-04"],
   "noExpiryCodes": ["VS-04"],
+  "noExpiryWhy": "The operator's skills matrix marks this item No Expiry.",
   "elearningGroups": ["Project Induction", "Vessel Induction", "Project Specific"],
   "vesselFacts": {
     "asGiven": "The example tug herself, measured the MO505 s 5 way",

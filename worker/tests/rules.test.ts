@@ -486,6 +486,22 @@ test("an item the vessel file says never lapses reads as held, whatever date is 
     /crewRowsOnly needs the vessel file's list of items that never lapse \(noExpiryCodes\)\./);
 });
 
+test("the items that never lapse are the office's own list, and each is a column", () => {
+  /* The office's ATB Skills Matrix (Guidance Information sheet, Expiry
+     column) marks thirteen items "No Expiry". A practical assessment filed
+     for CS-03 prints no expiry, and with only VS-04 on the list it filled
+     nothing and the man read as Missing what he holds. The list is the
+     sheet's, written here so a drift from it is caught. */
+  const sheetSays = ["CS-03", "CS-04", "MS-01", "MS-02", "MS-03", "MS-04", "MS-05", "MS-06", "PI-07", "QL-15", "QL-20", "VS-02", "VS-04"];
+  assert.deepEqual([...vessel.noExpiryCodes].sort(), sheetSays, "the thirteen the office's sheet marks No Expiry");
+  assert.match(vessel.noExpiryWhy, /Skills Matrix/, "and the file says where the list comes from");
+  const cols = new Set(vessel.qualColumns.map((c) => c[0]));
+  vessel.noExpiryCodes.forEach((c) => assert.ok(cols.has(c), `${c} is a column of the matrix`));
+  assert.throws(() => checkVessel({ ...vessel, noExpiryCodes: [...vessel.noExpiryCodes, "ZZ-99"] }, "a vessel file"),
+    /"noExpiryCodes\[13\]" - it must be one of the codes in qualColumns\./);
+  assert.throws(() => checkVessel({ ...vessel, noExpiryWhy: "" }, "a vessel file"), /"noExpiryWhy" - it must be a string\./);
+});
+
 test("the ids the page keys on are the file's to carry and not to rename", () => {
   /* A shift group called "dayshift" would reach the page with no rule to
      take its requirements by, and the Swing Compliance page would throw; a
@@ -995,20 +1011,18 @@ test("covers: the survival craft endorsement, printed 'other than fast rescue bo
     "and the rule itself covers nothing on a row whose exclusion will not compile");
 });
 
-test("covers: no column this vessel's table covers is one that carries no expiry", () => {
-  /* A column that carries no expiry (noExpiryCodes) is held or it isn't, and
-     a date read off a line on another document says nothing about that. Both
-     settling passes refuse such a column outright - the round's covering pass
-     in routes/analyse.ts and the page's in lib/analysis.ts - so they can
-     never show a man different things. Nothing on this vessel reaches one
-     today; if a covered column is ever put on that list, this fires and what
-     the cell should then say is a decision, not a silent change. */
+test("covers: a covered column that carries no expiry is held, and the one such column on this vessel is known", () => {
+  /* A column that carries no expiry (noExpiryCodes) is held or it isn't. A
+     unit code or an endorsement printed on a document in force says it is
+     held, and no date on any line says more - so both covering passes hold
+     it with no date (the round's in routes/analyse.ts and the page's in
+     lib/analysis.ts; the round test "a unit code covers a column that never
+     lapses" proves them agreeing). Decided 25 Sep 2026, when the office's
+     No Expiry list reached QL-20, whose title carries SITXFSA005. No covers
+     row of the table reaches such a column; if one ever does, this names it. */
   const noExpiry = new Set(vessel.noExpiryCodes.map((c) => c.trim().toUpperCase()));
-  const covered = [
-    ...vessel.covers.map((c) => c.code.trim().toUpperCase()),
-    ...unitColumnsIn(vessel.qualColumns),
-  ];
-  assert.deepEqual(covered.filter((c) => noExpiry.has(c)), []);
+  assert.deepEqual(vessel.covers.map((c) => c.code.trim().toUpperCase()).filter((c) => noExpiry.has(c)), []);
+  assert.deepEqual(unitColumnsIn(vessel.qualColumns).filter((c) => noExpiry.has(c)), ["QL-20"]);
 });
 
 test("covers: GMDSS is never read off a certificate of competency", () => {

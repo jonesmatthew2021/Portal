@@ -172,7 +172,8 @@
     "nameStopWords": ["united", "marine", "minres", "mrl", "alpha", "bravo"]
   },
   "elearningCodes": ["VS-04"],
-  "noExpiryCodes": ["VS-04"],
+  "noExpiryCodes": ["QL-15", "QL-20", "VS-02", "VS-04", "MS-01", "MS-02", "MS-03", "MS-04", "MS-05", "MS-06", "CS-03", "CS-04", "PI-07"],
+  "noExpiryWhy": "The office's ATB Skills Matrix (29 Jun 2026, revised 17 Jul 2026), Guidance Information sheet, Expiry column: these thirteen read No Expiry. Held or not held, never a date.",
   "elearningGroups": ["Project Induction", "Vessel Induction", "Project Specific"],
   "vesselFacts": {
     "asGiven": "The tug-and-barge unit, Matthew Jones 25 Sep 2026; the tug's own length and gross tonnage are not yet confirmed",
