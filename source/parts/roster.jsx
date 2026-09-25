@@ -1984,67 +1984,11 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
     if (at > 0) el.scrollLeft = Math.max(0, (at - 7) * RT_CELL);
   }, [days.length]);
 
-  // The table ends at the bottom of the window, so the page never scrolls -
-  // the crew scroll inside the table and its slider stays put underneath.
-  const [tallest, setTallest] = React.useState(null);
-  React.useEffect(() => {
-    document.body.classList.add("um-tight");
-    let pending = 0;
-    const fit = () => {
-      const el = frame.current;
-      if (!el) return;
-      const box = el.getBoundingClientRect();
-      // What has to sit under the table - the gap down to the footer, the
-      // footer itself, and the page's own padding beneath it - is measured off
-      // those three pieces. Measuring it off the height of the page instead
-      // looks right and isn't: once the page is shorter than the screen, the
-      // page counts the empty window as part of itself, and the sum comes back
-      // saying the table should be exactly the size it already is. That is why
-      // it sat still through a zoom.
-      let below = 40;
-      const foot = document.querySelector("footer");
-      if (foot) {
-        const fb = foot.getBoundingClientRect();
-        const cont = foot.parentElement;
-        const pad = cont ? cont.getBoundingClientRect().bottom - fb.bottom : 0;
-        below = (fb.top - box.bottom) + fb.height + Math.max(0, pad);
-      }
-      const want = Math.max(150, Math.round(window.innerHeight - (box.top + window.scrollY) - below));
-      setTallest((was) => (was !== null && Math.abs(was - want) <= 1 ? was : want));
-    };
-    // Zoom changes the size of the window in the units the page is laid out in,
-    // so it arrives as a resize; the viewport and the page itself are watched
-    // too, for the zooms and reflows that come by another road.
-    //
-    // The wait is kept on a timer rather than on the next drawn frame. A tab
-    // sitting in the background is never drawn, so a frame booked there is
-    // never called back - and the booking left standing would swallow every
-    // later change. Zoom on a tab you have stepped away from and come back to,
-    // and the table would have sat the whole thing out.
-    let late = 0;
-    const soon = () => {
-      clearTimeout(pending);
-      clearTimeout(late);
-      // Twice: once the moment it settles, and again after, since a zoom can
-      // reflow in stages and the second look costs nothing when it agrees.
-      pending = setTimeout(fit, 60);
-      late = setTimeout(fit, 320);
-    };
-    soon();
-    window.addEventListener("resize", soon);
-    const seen = window.visualViewport;
-    if (seen) { seen.addEventListener("resize", soon); seen.addEventListener("scroll", soon); }
-    const watch = new ResizeObserver(soon);
-    watch.observe(document.documentElement);
-    return () => {
-      document.body.classList.remove("um-tight");
-      window.removeEventListener("resize", soon);
-      if (seen) { seen.removeEventListener("resize", soon); seen.removeEventListener("scroll", soon); }
-      watch.disconnect();
-      clearTimeout(pending);
-      clearTimeout(late);
-    };
-  }, []);
+  // The table runs its full length down the page and the page's own scroll
+  // bar takes it up and down (Matthew, 25 Sep 2026). The sideways slider is
+  // the floating one at the bottom of the screen, so it is always in reach
+  // (his 19 Sep ask), and the date rows stay at the top of the screen -
+  // both FloatingBar's, in the shell, shared with the crew matrix.
 
   const reliefNames = useMemo(
     () => new Set(((plan && plan.relief) || []).map((r) => String(r.name).toUpperCase())),
@@ -2482,7 +2426,7 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
       </div>
 
       <div className={"um-timeline" + (drag ? " um-tl-drag" : "") + (admin ? " um-tl-can" : "")}
-        ref={frame} style={tallest ? { maxHeight: tallest } : undefined}>
+        ref={frame}>
         <table onMouseDown={tableDown} onMouseOver={tableOver}>
           <thead>
             <tr className="um-tl-r1">
@@ -2573,6 +2517,7 @@ function RosterTimeline({ plan, admin, onStint, onBlank, onPerson, onDates, onRa
           </tbody>
         </table>
       </div>
+      <FloatingBar frame={frame} />
     </div>
   );
 }

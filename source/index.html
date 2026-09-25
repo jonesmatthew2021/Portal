@@ -1047,21 +1047,27 @@ ${fontFaces()}
 .um-g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .um-swing3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
 /* The roster timeline: the one other thing beside the crew matrix that
-   scrolls sideways, with the names pinned while the months slide under them. */
-.um-timeline { overflow: auto; min-height: 150px; border: 1px solid ${T.rule}; border-radius: 2px; }
+   scrolls sideways, with the names pinned while the months slide under them.
+   Like the matrix it runs its full length down the page, its own sideways bar
+   hidden for the floating one, and its three date rows (months, day numbers,
+   weekday letters) are moved down together by --mx-head to stay at the top of
+   the screen until the table ends. */
+.um-timeline {
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+  border: 1px solid ${T.rule}; border-radius: 2px;
+}
+.um-timeline::-webkit-scrollbar { display: none; }
 .um-timeline table { border-collapse: collapse; }
-.um-timeline thead th { position: sticky; background: ${T.panel}; z-index: 3; }
-.um-timeline thead .um-tl-r1 th { top: 0; }
-.um-timeline thead .um-tl-r2 th { top: 22px; }
-.um-timeline thead .um-tl-r3 th { top: 34px; }
+.um-timeline thead th {
+  position: relative; background: ${T.panel}; z-index: 3;
+  transform: translateY(var(--mx-head, 0px));
+}
 .um-timeline thead th.um-tl-crew, .um-timeline thead th.um-tl-rank, .um-timeline thead th.um-tl-name { z-index: 4; }
 .um-timeline .um-tl-crew { position: sticky; left: 0; background: ${T.panel}; z-index: 2; }
 .um-timeline .um-tl-rank { position: sticky; left: 52px; background: ${T.panel}; z-index: 2; }
 .um-timeline .um-tl-name { position: sticky; left: 152px; background: ${T.panel}; z-index: 2;
   box-shadow: inset -1px 0 0 ${T.rule}; }
 .um-timeline.um-tl-drag { user-select: none; }
-body.um-tight .um > div { padding-bottom: 10px !important; }
-body.um-tight footer { margin-top: 12px !important; }
 .um-timeline td.um-tl-d { width: 13px; min-width: 13px; height: 22px; padding: 0;
   border-top: 1px solid ${T.rule}; border-left: 1px solid ${T.hatchBg}; }
 .um-timeline td.um-tl-f { border-left-color: rgba(255,255,255,0.5); }
@@ -1126,7 +1132,7 @@ body.um-tight footer { margin-top: 12px !important; }
 /* Reports print clean - no navigation, no buttons. */
 @media print {
   .um-noprint, .um-floatbar, nav, header, footer { display: none !important; }
-  .um-matrix thead th { transform: none !important; }
+  .um-matrix thead th, .um-timeline thead th { transform: none !important; }
   .um-report { color: #000; }
   body, .um { background: #fff !important; }
 }
@@ -6656,6 +6662,110 @@ function Portal({ role, onSignOut }) {
     </div>
     </Ctx.Provider>
   );
+}
+
+/* The two wide grids - the crew matrix and the roster - run their full length
+ * down the page, and the page's own scroll bar takes them up and down. Each
+ * scrolls sideways inside its frame with the frame's own bar hidden; the one
+ * sideways bar floats at the bottom of the screen while any of the grid is on
+ * screen, and the grid's heading rows are moved down (--mx-head, read by the
+ * stylesheet) to stay at the top of the screen until the grid ends. */
+
+// How far the heading rows have to move down. frameTop is where the headings
+// start on screen and frameHeight the height of the table, headHeight the
+// headings' own, pinAt the line they stay under (the bottom of anything fixed
+// at the top of the page, else 0). Nothing while the table's top is still
+// below that line, and never past its end. The top goes negative as it
+// scrolls off the screen - that is the point - but a height or a line that is
+// negative or missing moves nothing.
+function matrixHeadOffset(frameTop, frameHeight, headHeight, pinAt) {
+  const ok = (v) => typeof v === "number" && isFinite(v);
+  if (![frameTop, frameHeight, headHeight, pinAt].every(ok)) return 0;
+  if (frameHeight < 0 || headHeight < 0 || pinAt < 0) return 0;
+  return Math.max(0, Math.min(pinAt - frameTop, frameHeight - headHeight));
+}
+
+// The line the headings stay under: the bottom of the portal's header or tab
+// bar, if either is held at the top of the screen; otherwise the top edge.
+function matrixPinAt() {
+  let pin = 0;
+  document.querySelectorAll("header.um-head, nav.um-nav").forEach((el) => {
+    const at = window.getComputedStyle(el).position;
+    if (at === "fixed" || at === "sticky") pin = Math.max(pin, el.getBoundingClientRect().bottom);
+  });
+  return pin;
+}
+
+// The floating bar for the grid in `frame` (a ref), kept in step with it both
+// ways. It hides itself while the grid is off the screen or narrow enough to
+// need none, and while there is no grid at all.
+function FloatingBar({ frame }) {
+  const bar = useRef(null);
+  const inner = useRef(null);
+  const lock = useRef(false);
+  React.useEffect(() => {
+    const f = frame.current, b = bar.current, i = inner.current;
+    if (!b || !i) return;
+    if (!f) { b.style.display = "none"; return; }
+    let queued = 0, late = 0;
+    const size = () => {
+      cancelAnimationFrame(queued); clearTimeout(late);
+      queued = 0; late = 0;
+      i.style.width = f.scrollWidth + "px";
+      const r = f.getBoundingClientRect();
+      const wide = f.scrollWidth > f.clientWidth + 4;
+      const seen = r.bottom > 0 && r.top < window.innerHeight;
+      const was = b.style.display === "block";
+      b.style.display = wide && seen ? "block" : "none";
+      b.style.left = r.left + "px";
+      b.style.width = r.width + "px";
+      // A hidden bar forgets where it was, so it picks up the grid's place
+      // when it comes back.
+      if (wide && seen && !was) b.scrollLeft = f.scrollLeft;
+      // Measured off the heading rows and the table themselves (their own box
+      // never moves - only their cells do), so a border's rounding at any
+      // zoom cannot leave a sliver between the headings and the line. Set on
+      // the headings, not the frame, so only they are restyled as it changes.
+      const head = f.querySelector("thead"), table = f.querySelector("table");
+      if (head && table) {
+        const h = head.getBoundingClientRect();
+        const down = matrixHeadOffset(h.top, table.getBoundingClientRect().height, h.height, matrixPinAt()) + "px";
+        if (head.style.getPropertyValue("--mx-head") !== down) head.style.setProperty("--mx-head", down);
+      }
+    };
+    // Once a drawn frame, and on a timer too: a tab in the background is not
+    // drawn, and a frame booked there would hold every later change back.
+    const soon = () => {
+      if (queued || late) return;
+      queued = requestAnimationFrame(size);
+      late = setTimeout(size, 120);
+    };
+    const fromTable = () => { if (lock.current) return; lock.current = true; b.scrollLeft = f.scrollLeft; lock.current = false; };
+    const fromBar = () => { if (lock.current) return; lock.current = true; f.scrollLeft = b.scrollLeft; lock.current = false; };
+    size();
+    f.addEventListener("scroll", fromTable);
+    b.addEventListener("scroll", fromBar);
+    window.addEventListener("scroll", soon, { passive: true });
+    window.addEventListener("resize", soon);
+    const grows = typeof ResizeObserver === "function" ? new ResizeObserver(soon) : null;
+    if (grows) {
+      grows.observe(f);
+      const table = f.querySelector("table");
+      if (table) grows.observe(table);
+    }
+    const t = setTimeout(size, 200);
+    return () => {
+      f.removeEventListener("scroll", fromTable);
+      b.removeEventListener("scroll", fromBar);
+      window.removeEventListener("scroll", soon);
+      window.removeEventListener("resize", soon);
+      if (grows) grows.disconnect();
+      cancelAnimationFrame(queued);
+      clearTimeout(late);
+      clearTimeout(t);
+    };
+  });
+  return <div ref={bar} className="um-floatbar"><div ref={inner} style={{ height: 1 }} /></div>;
 }
 
 /* Nothing on the portal runs off the side of the screen.

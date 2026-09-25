@@ -2941,6 +2941,10 @@ const is = (got, want, what) => {
   is(matrixHeadOffset(-200, 1500, -60, 0), 0, "a negative heading height: nothing moved");
   is(matrixHeadOffset(-200, 1500, 60, -10), 0, "a negative line: nothing moved");
   is(matrixHeadOffset(-200, 40, 60, 0), 0, "headings taller than the frame: nothing moved");
+  // The roster's three date rows (22 + 12 + 12, and the rule under them) move
+  // as one block by the same rule.
+  is(matrixHeadOffset(-300, 1200, 47, 0), 300, "the roster's date rows: moved down as far as the table has gone");
+  is(matrixHeadOffset(-3000, 1200, 47, 0), 1153, "and they stop on its last crew row");
 }
 
 if (failed) {
