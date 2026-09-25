@@ -80,7 +80,7 @@ export const registerWords = (n) => String(n || "").toUpperCase().split(/[^A-Z]+
  * @param {unknown} n
  */
 const holderWords = (n) =>
-  String(n || "").normalize("NFKD").toUpperCase().split(/[^A-Z0-9]+/).filter((w) => w.length > 1);
+  String(n || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toUpperCase().split(/[^A-Z0-9]+/).filter((w) => w.length > 1);
 
 /**
  * Whether the name printed on a document says it is somebody else's.
@@ -116,7 +116,7 @@ export function nameIsSomebodyElse(printed, filedUnder, known) {
  * @param {unknown} n
  */
 const holderPieces = (n) =>
-  String(n || "").normalize("NFKD").toUpperCase().split(/[^A-Z0-9]+/).filter((w) => /[A-Z]/.test(w));
+  String(n || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toUpperCase().split(/[^A-Z0-9]+/).filter((w) => /[A-Z]/.test(w));
 
 /** How many letters two words are apart: one put in, taken out or changed
  *  counts one.
@@ -196,8 +196,14 @@ function pickWeighed(printed, holder, people) {
      the printed name points at somebody else. With no word of his beside
      it, the pick is no pick, however sure - and the office is never asked
      to put another man's name on his entry. With one ("Rohin EVANS" picked
-     as EVANS, Brenton) it is a doubt like the two below. */
-  const elsewhere = words.some((w) => theirs.has(w) && !his.has(w));
+     as EVANS, Brenton) it is a doubt like the two below. A piece that is
+     only nearly another man's - misspelt, shortened, his initial ("R.
+     JITINDER", "Brent", "R. J.") - and can be none of the pick's words
+     points at him just the same. */
+  const hisList = [...his];
+  const theirsOnly = [...theirs].filter((t) => !his.has(t));
+  const elsewhere = holderPieces(printed).some((w) => !his.has(w) && (theirs.has(w)
+    || (!hisList.some((h) => pieceCanBe(w, h)) && theirsOnly.some((t) => pieceCanBe(w, t)))));
   if (elsewhere && !shares) return null;
 
   /* Where the word in common does not settle it. Either every word the
@@ -387,14 +393,19 @@ export function crewRegister(people) {
     spellings.push({ name, of: name });
   });
   // Aliases second, so a spelling that is somebody's actual name is never
-  // taken over by another person having listed it as one of theirs.
+  // taken over by another person having listed it as one of theirs. A
+  // spelling two people both list as theirs ("Bill" on two men) is neither's:
+  // the register will not choose, the same as for a word two names share.
+  /** @type {Map<string, string>} */
+  const byAlias = new Map();
   (people || []).forEach((p) => {
     const name = String((p && p.name) || "").trim();
     if (!name) return;
     ((p && p.aliases) || []).forEach((a) => {
       const k = nameLetters(a);
       if (!k) return;
-      if (!exact.has(k)) exact.set(k, name);
+      if (!exact.has(k) && !byAlias.has(k)) { exact.set(k, name); byAlias.set(k, name); }
+      else if (byAlias.has(k) && byAlias.get(k) !== name) exact.delete(k);
       spellings.push({ name: String(a), of: name });
     });
   });

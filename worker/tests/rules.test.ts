@@ -1865,6 +1865,36 @@ test("whose it is: a printed name Crew Details spells as another man is not the 
   assert.deepEqual(whoseCertificate("bRENTON", null, "EVANS, Brenton", "EVANS, Brenton", two), { his: true, line: null });
 });
 
+test("the reader's pick: a printed name that is nearly another man's is no pick of somebody else", () => {
+  const people = [{ name: "EVANS, Brenton", aliases: [] }, { name: "SITTIYOS, Kachin", aliases: [] }, { name: "JITENDER, Rohin", aliases: [] }];
+  const kachin = { person: "SITTIYOS, Kachin", confidence: "high", others: [] };
+  // Misspelt, shortened or reduced to initials, and none of Kachin's words.
+  for (const printed of ["R. JITINDER", "R JITENDRA", "Rohan", "Brent", "EVAN", "B. EVANSS", "R. J.", "ÉVANS", "Jitendér"]) {
+    assert.equal(readerPick(printed, kachin, people), null, `${printed}: not Kachin's, however sure`);
+    assert.equal(readerPlaces(printed, kachin, "Loose", people), null, `${printed}: the refile leaves it loose`);
+    // Initials alone in his folder say nothing either way, as before: the folder stands.
+    if (printed !== "R. J.") assert.equal(whoseCertificate(printed, kachin, "SITTIYOS, Kachin", "SITTIYOS, Kachin", people).his, false, `${printed}: not his in his folder`);
+  }
+  assert.equal(readerPick("K. S.", { person: "EVANS, Brenton", confidence: "high", others: [] }, people), null, "Kachin's initials are not Brenton's");
+  // A word of another man's beside one of his makes a maybe no pick.
+  assert.equal(readerPick("Rohin K. SITTIYOS", { ...kachin, confidence: "medium" }, people), null);
+  assert.equal(readerPick("Rohin Kachn SITTIYOS", { ...kachin, confidence: "medium" }, people), null);
+  // What the reader is right about still stands.
+  assert.deepEqual(readerPick("Rohan JITENDER", { person: "JITENDER, Rohin", confidence: "high", others: [] }, people), { person: "JITENDER, Rohin", line: "check" });
+  assert.deepEqual(readerPick("Bill S", kachin, people), { person: "SITTIYOS, Kachin", line: "add" });
+  // Accents fold away: his own name printed with them is his.
+  const muller = [{ name: "MULLER, Jurgen", aliases: [] }, ...people];
+  assert.equal(nameIsSomebodyElse("Jürgen MÜLLER", "MULLER, Jurgen", "MULLER, Jurgen"), false);
+  assert.deepEqual(readerPick("J. MÜLLER", { person: "MULLER, Jurgen", confidence: "high", others: [] }, muller), { person: "MULLER, Jurgen", line: "check" });
+});
+
+test("the register: a spelling two people both list is neither's", () => {
+  const people = [{ name: "EVANS, Brenton", aliases: ["Bill"] }, { name: "SITTIYOS, Kachin", aliases: ["Bill"] }];
+  assert.equal(crewRegister(people).nameOf("Bill"), null, "the register will not choose");
+  assert.equal(crewRegister([people[0], { name: "SITTIYOS, Kachin", aliases: [] }]).nameOf("Bill"), "EVANS, Brenton", "listed once, it is his");
+  assert.equal(crewRegister([{ name: "BILL, Adam", aliases: [] }, ...people]).nameOf("BILL, Adam"), "BILL, Adam", "somebody's own name is never taken over");
+});
+
 test("the reader's pick: a given name his only by a letter or two, an initial or a short form is checked, never placed quietly", () => {
   const people = [{ name: "SMITH, John", aliases: [] }, { name: "EVANS, Brenton", aliases: [] }, { name: "SITTIYOS, Kachin", aliases: [] }];
   const john = (printed: string, confidence = "high") => readerPick(printed, { person: "SMITH, John", confidence, others: [] }, people);
