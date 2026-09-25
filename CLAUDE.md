@@ -602,10 +602,13 @@ on any line that still names this one.
     his spellings, or two or more of his words - `crewRegister`'s
     `spelled`, never a surname or given name alone) decides without the
     reader; the reader's pick (`readerPick`/`whoseCertificate` in
-    `source/shared/names.js`) stands on high, on medium only where the
-    printed name shares a word with the man and nothing on it says it could
-    be somebody else (two men with that word, or a given name or initial
-    that is none of his - a sure pick like that is placed with "check");
+    `source/shared/names.js`) stands on high - never where the printed name
+    carries a word of another register man's and none of his - on medium
+    only where the printed name shares a word with the man and nothing on
+    it says it could be somebody else (two men with that word, a word of
+    another man's beside it, or a given name or initial that is none of
+    his - a sure pick like that is placed with "check", and so is one whose
+    other name is his only by an initial, a short form or a letter or two);
     never with somebody else in mind (`others`, however written, or
     another register man named in its reasons); never takes a certificate
     whose printed name fits the man it is filed under, and moves one out of

@@ -910,13 +910,16 @@ test("whose it is: the reader's pick stands where the printed name alone does no
   const page = await certificateStanding();
   assert.deepEqual(page.dates.map((d) => [d.person, d.code, d.expires]).sort(),
     [["JITENDER, ROHIN", "QL-01", "2031-05-26"], ["SITTIYOS, KACHIN", "QL-01", "2031-05-26"]], "the page's cells agree with the round");
-  assert.deepEqual(page.readAs.map((r) => readAsLine(r.certificate, "SITTIYOS, Kachin", r.printed, r.line)),
-    [`Master <500GT read as SITTIYOS, Kachin's — add "Bill" to their names on Crew Details`],
-    "one line, for the name the register does not carry: the initials are already his");
   const doc = portal.doc();
+  const lines = [
+    // The initial is his, but not his name letter for letter: checked.
+    `Master <500GT read as JITENDER, Rohin's — check, and add "R. JITENDER" to their names on Crew Details`,
+    `Master <500GT read as SITTIYOS, Kachin's — add "Bill" to their names on Crew Details`,
+  ];
+  assert.deepEqual(page.readAs.map((r) => readAsLine(r.certificate, doc.people.find((p: { name: string }) => p.name.toUpperCase() === r.person)!.name, r.printed, r.line)).sort(),
+    lines, "a line each, for the names the register does not carry");
   const out = await compareMatrix(doc.quals, null, asKnownPerson(doc.people));
-  assert.deepEqual(out.notes.filter((n) => n.kind === "read-as").map((n) => n.detail),
-    [`Master <500GT read as SITTIYOS, Kachin's — add "Bill" to their names on Crew Details`], "the round says the same sentence");
+  assert.deepEqual(out.notes.filter((n) => n.kind === "read-as").map((n) => n.detail).sort(), lines, "the round says the same sentences");
 });
 
 test("whose it is: a spelling on Crew Details places the certificate without the reader", async () => {
@@ -1217,6 +1220,63 @@ test("whose it is: a certificate in a crew member's folder is not moved to anoth
   assert.deepEqual(await roundNotes(portal, "name-mismatch"), ["Filed under SITTIYOS, Kachin, but the certificate is in the name of Bill."]);
 });
 
+/* A sure pick of Kachin on a certificate printed with another crew member's
+   name - Rohin's or Evans's, whole or in part - loose or in Kachin's own
+   folder. Nothing lands in Kachin's cell, the loose ones stay loose, and the
+   office is never asked to add another man's name to Kachin's. */
+for (const [printed, where] of [
+  ["R. JITENDER", "loose"],
+  ["JITENDER", "loose"],
+  ["Rohin", "loose"],
+  ["R. JITENDER", "Kachin's folder"],
+  ["EVANS", "Kachin's folder"],
+  ["Rohin JITENDER", "Kachin's folder"],
+] as const) {
+  test(`whose it is: "${printed}" ${where}, and the reader sure it is Kachin - nothing lands on Kachin`, async () => {
+    const said = { holderName: printed, holder: { person: "SITTIYOS, Kachin", confidence: "high", why: "the reader thinks so", others: [] } };
+    const { portal, env, bucket } = await crewPortal(where === "loose" ? [{ id: "w", reading: said }] : []);
+    if (where !== "loose") {
+      const key = "opms/Billy - OPMS/w.pdf";
+      await bucket.put(key, bytesOf("a scan"));
+      portal.rows.push({ ...billysTicket, id: "w", person: "SITTIYOS, Kachin", checksum: "w", blobKey: key, filename: "w.pdf", qualCode: null });
+      portal.blobs.set("certificate-readings|r1/w.json", JSON.stringify({ ...reading, expiresOn: "2031-05-26", columns: [{ code: "QL-01", confidence: "high", why: null }], ...said }));
+    }
+    await worker.scheduled({} as never, env as never);
+    assert.equal(cellOf(portal, "SITTIYOS, Kachin"), "", "nothing in Kachin's cell");
+    const row = portal.rows.find((r) => r.id === "w")!;
+    if (where === "loose") assert.equal(row.person, "Loose", "left where it is, labelled for nobody");
+    else if (printed === "Rohin JITENDER") assert.equal(row.person, "JITENDER, Rohin", "Crew Details spells it as Rohin's: it goes to him");
+    else {
+      assert.equal(row.person, "SITTIYOS, Kachin", "left in his folder");
+      assert.deepEqual(await roundNotes(portal, "name-mismatch"), [`Filed under SITTIYOS, Kachin, but the certificate is in the name of ${printed}.`]);
+    }
+    const page = await certificateStanding();
+    assert.deepEqual(page.dates.filter((d) => d.person === "SITTIYOS, KACHIN"), [], "and the page's cells agree");
+    assert.deepEqual(page.readAs, [], "and nobody is asked to add the name to his");
+    assert.deepEqual(await roundNotes(portal, "read-as"), []);
+  });
+}
+
+test("whose it is: a certificate in Brenton's folder printed in the name of the other EVANS on Crew Details is not Brenton's", async () => {
+  /* Two EVANSes on Crew Details, Gareth not on the matrix. "Gareth EVANS"
+     is Gareth's as the register spells it: EVANS being Brenton's word too
+     does not put it in Brenton's cell, and the existing note says so. */
+  const { portal, env, bucket } = await crewPortal([]);
+  const doc = portal.doc();
+  doc.people.push({ name: "EVANS, Gareth", aliases: [] });
+  portal.state.data = JSON.stringify(doc);
+  const key = "opms/Brenton - OPMS/gareth.pdf";
+  await bucket.put(key, bytesOf("a scan"));
+  portal.rows.push({ ...billysTicket, id: "gareth", person: "EVANS, Brenton", folder: "brenton", checksum: "gareth", blobKey: key, filename: "gareth.pdf", qualCode: null });
+  portal.blobs.set("certificate-readings|r1/gareth.json", JSON.stringify({ ...reading, holderName: "Gareth EVANS", expiresOn: "2031-05-26",
+    columns: [{ code: "QL-01", confidence: "high", why: null }], holder: { person: "EVANS, Gareth", confidence: "high", why: "his full name", others: [] } }));
+  await worker.scheduled({} as never, env as never);
+  assert.equal(cellOf(portal, "EVANS, Brenton"), "", "nothing in Brenton's cell");
+  assert.equal(portal.rows.find((r) => r.id === "gareth")!.person, "EVANS, Brenton", "left in his folder: Gareth has no row to take it");
+  assert.deepEqual(await roundNotes(portal, "name-mismatch"), ["Filed under EVANS, Brenton, but the certificate is in the name of Gareth EVANS."]);
+  assert.deepEqual((await certificateStanding()).dates, [], "and the page's cells agree");
+});
+
 test("a register page filed under another column's name fills only the register column the reader gave", async () => {
   /* The office named the page for QL-01, but a register page is evidence
      only for the register columns: the filename's QL-01 must not take a
@@ -1278,7 +1338,8 @@ test("the reader's doubt that somebody else could be the holder is kept, however
   for (const others of [[], null, "", [2], ["SITTIYOS, Kachin"]] as unknown[]) {
     const holder = holderFrom({ person: 2, confidence: "high", why: "Kachin", others }, crew);
     assert.deepEqual(holder!.others, [], `no doubt: ${JSON.stringify(others)}`);
-    assert.deepEqual(readerPick("K. SITTIYOS", holder, people), { person: "SITTIYOS, Kachin", line: null });
+    // The pick stands - checked, K being his only by an initial.
+    assert.deepEqual(readerPick("K. SITTIYOS", holder, people), { person: "SITTIYOS, Kachin", line: "check" });
   }
 });
 

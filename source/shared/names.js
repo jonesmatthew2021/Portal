@@ -191,21 +191,35 @@ function pickWeighed(printed, holder, people) {
   const words = holderWords(printed);
   const shares = words.length > 0 && !nameIsSomebodyElse(printed, person, (on.aliases || []).join(" "));
 
+  /* A word printed on it that is another man's on Crew Details and none of
+     his ("R. JITENDER", "Rohin" or "EVANS" picked as SITTIYOS, Kachin):
+     the printed name points at somebody else. With no word of his beside
+     it, the pick is no pick, however sure - and the office is never asked
+     to put another man's name on his entry. With one ("Rohin EVANS" picked
+     as EVANS, Brenton) it is a doubt like the two below. */
+  const elsewhere = words.some((w) => theirs.has(w) && !his.has(w));
+  if (elsewhere && !shares) return null;
+
   /* Where the word in common does not settle it. Either every word the
      printed name shares with him is somebody else's on the register too
      (two EVANSes, "G. EVANS"), or the printed name carries another piece -
      a given name, an initial - that can be none of his words not already
      matched ("Gareth EVANS" or "D. EVANS" picked as EVANS, Brenton, with
      Gareth or David nowhere on the register). A misspelt given name, a
-     short form or his initial is his. */
+     short form or his initial can be his, but is not his letter for letter
+     ("Joan SMITH" is a letter from "SMITH, John"): a sure pick on one is
+     placed and checked, never placed quietly. */
   const hit = words.filter((w) => his.has(w));
   const everyoneElses = hit.length > 0 && hit.every((w) => theirs.has(w));
   const unmatched = [...his].filter((w) => !hit.includes(w));
   const rest = holderPieces(printed).filter((w) => !hit.includes(w));
-  const contradicts = shares && unmatched.length > 0 && rest.length > 0 && !rest.some((w) => unmatched.some((u) => pieceCanBe(w, u)));
-  const doubt = everyoneElses || contradicts;
+  // The pieces that can be one of his other words, and are not that word.
+  const near = unmatched.length ? rest.filter((w) => unmatched.some((u) => pieceCanBe(w, u))) : [];
+  const contradicts = shares && unmatched.length > 0 && rest.length > 0 && !near.length;
+  const loose = shares && near.length > 0;
+  const doubt = everyoneElses || contradicts || elsewhere;
 
-  if (sure) return { person, shares, line: !shares ? "add" : doubt ? "check" : null };
+  if (sure) return { person, shares, line: !shares ? "add" : doubt || loose ? "check" : null };
   return shares && !doubt ? { person, shares, line: "check" } : null;
 }
 
@@ -230,9 +244,14 @@ function pickWeighed(printed, holder, people) {
  *     any of his spellings, it still stands - the reader may know "Bill"
  *     is Kachin - and the office is asked to add the printed name to his
  *     names ("add"), so the register stays the one place names live and the
- *     next certificate does not need the reader's memory. Where the word in
- *     common does not settle it - two EVANSes, or a given name or initial
- *     that is none of his - it stands and the office is asked to check it;
+ *     next certificate does not need the reader's memory. But never where
+ *     that printed name carries a word of another man's on the register
+ *     ("R. JITENDER" picked as Kachin): that is no pick. Where the word in
+ *     common does not settle it - two EVANSes, a word of another man's
+ *     beside it, or a given name or initial that is none of his - or where
+ *     the rest of the name is his only by an initial, a short form or a
+ *     letter or two ("Joan SMITH" for John), it stands and the office is
+ *     asked to check it;
  *   - "medium" stands only where the printed name shares a word with him and
  *     nothing on it says it could be somebody else, and the office is asked
  *     to check it ("check"). Anything less is refused: the reader may not
@@ -282,8 +301,10 @@ export function whoseCertificate(printed, holder, filedUnder, known, people) {
   const fits = !nameIsSomebodyElse(printed, filed, known);
   const byRegister = String(printed || "").trim() ? reg.spelled(printed) : null;
   // A printed name the register itself reads: one of his spellings, or
-  // somebody else's - the reader is not asked.
-  if (byRegister) return { his: byRegister === known || fits, line: null };
+  // somebody else's - the reader is not asked, and a word in common with
+  // the man it is filed under does not make another man's name his
+  // ("Gareth EVANS" in Brenton's folder, with Gareth on Crew Details).
+  if (byRegister) return { his: byRegister === known, line: null };
   const picked = readerPick(printed, holder, people);
   if (picked && picked.person === known) return { his: true, line: picked.line };
   return { his: fits, line: null };
