@@ -60,13 +60,17 @@ export function crewFingerprint(crew: unknown) {
   return h.toString(36);
 }
 
-/** Is the shift allocation sheet on the portal at all? Asked before a job is started. */
+/** The guideline the shift check runs against: the skills matrix filed on
+ *  Admin → Documents, whose one workbook carries the shift allocations
+ *  (Matthew, 26 Sep 2026 - no second copy kept on the Swings page). A shift
+ *  sheet filed before is read only where no skills matrix is. The page reads
+ *  them in the same order (SwingShiftAllocation). */
 export async function shiftSheetRow() {
-  return liveSingleFileRow("shift-allocation");
+  return (await liveSingleFileRow("skills-matrix")) || liveSingleFileRow("shift-allocation");
 }
 
 export const NO_SHIFT_SHEET =
-  "No shift allocation sheet is on the portal. Upload it on the Swings page and the comparison runs against it.";
+  "No skills matrix is on the portal. File it on Admin → Documents and the comparison runs against it.";
 
 /** Raised where there is nothing to run against, rather than nothing that worked. */
 export class ShiftMissing extends Error {

@@ -3456,11 +3456,17 @@ function ShiftMeter({ required, have }) {
  * with nothing changed costs nothing.
  */
 function SwingShiftAllocation({ here }) {
-  const { shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis,
+  const { skillsMatrix, shiftAllocation: shiftSheetOnly, shiftAnalysis, setShiftAnalysis,
     quals: QUALS, certificates, certDates, swingBoard, swingBoards, log, role } = usePortal();
   // How long each item stays valid, off the skills matrix — the same
   // lookup the certification screens carry, so the column reads alike here.
   const validityFor = useValidityLookup();
+  /* The guideline is the skills matrix filed on Admin → Documents - the
+     office's one workbook carries the shift allocations - so there is no
+     second copy to keep here (Matthew, 26 Sep 2026). A shift sheet filed
+     before is read only where no skills matrix is (the worker's
+     shiftSheetRow reads them in the same order). */
+  const shiftAllocation = skillsMatrix || shiftSheetOnly || null;
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   // The run is watched from a window over the page, like every other analysis:
@@ -3917,44 +3923,6 @@ function SwingShiftAllocation({ here }) {
 
   return (
     <div>
-      {/* The sheet the comparison runs against, and the spot a newer one goes. */}
-      <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderLeft: `4px solid ${T.teal}`,
-        borderRadius: 2, padding: "13px 15px", marginBottom: 10 }}>
-        <Eyebrow color={T.teal}>The sheet on file</Eyebrow>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
-          gap: 10, flexWrap: "wrap", marginTop: 8 }}>
-          <div style={{ minWidth: 0, flex: "1 1 200px" }}>
-            <div style={{ fontFamily: T.body, fontSize: 13, wordBreak: "break-word",
-              color: shiftAllocation ? T.text : T.muted }}>
-              {shiftAllocation ? shiftAllocation.filename : "No shift allocation sheet has been filed yet."}
-            </div>
-            {shiftAllocation && (
-              <div style={{ fontFamily: T.mono, fontSize: 11, color: T.muted, marginTop: 2 }}>
-                {shiftAllocation.uploaded ? `${fmtDate(shiftAllocation.uploaded)} · ` : ""}{shiftAllocation.size}
-              </div>
-            )}
-          </div>
-          <span style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            {shiftAllocation && shiftAllocation.url && <OpenLink url={shiftAllocation.url} />}
-            <SingleDocumentUpload
-              category="shift-allocation"
-              noun="shift allocation sheet"
-              eyebrow="Shift allocation sheet"
-              blurb="One sheet is kept on the portal — the latest the office sent. It is a guideline rather than a crew list: how many holders of certain certificates each shift must carry, for this swing and the ones after it. The comparison on the Swings page runs against whichever is on file."
-              current={shiftAllocation || null}
-              onFiled={(record) => {
-                setShiftAllocation(record);
-                // A new sheet makes the old answer about a document that is no
-                // longer on the portal, so it goes with it.
-                setShiftAnalysis(null);
-              }}
-              logAction="Shift allocation sheet uploaded"
-              label={shiftAllocation ? "Upload a newer sheet" : "Upload the sheet"}
-            />
-          </span>
-        </div>
-      </div>
-
       {/* The berth manning now lives inside each shift's own column below,
           so the page reads shift by shift rather than as a second wide table.
           The counts worth shouting stay here, one line. */}
@@ -4024,7 +3992,7 @@ function SwingShiftAllocation({ here }) {
         <Empty>
           {shiftAllocation
             ? "Not compared yet. The AI reads the guideline on file — how many holders of each certificate every shift must carry — against what this swing's crew hold: the training matrix, overlaid with the certificates on file."
-            : "Upload the office's shift allocation sheet and the AI checks each shift of this swing carries the certificates it requires."}
+            : "File the skills matrix on Admin → Documents and the AI checks each shift of this swing carries the certificates it requires."}
         </Empty>
       ) : check.readable === false ? (
         <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderLeft: `3px solid ${T.bRed}`,

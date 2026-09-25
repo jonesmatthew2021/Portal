@@ -1155,14 +1155,12 @@ function TrainingMatrix() {
       </div>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18, marginBottom: 30, alignItems: "center" }}>
-        {/* Report ▾ · Update matrix · Matrix spreadsheet. Update matrix is
-            the one button here that changes a date: it brings the matrix up
-            to date with the certificates that have gone up since it was last
-            read, and it is called the same wherever it sits. Everything else
-            writes the matrix out as it stands — the crew report, one person's
-            report, or the spreadsheet itself, downloaded and opened, or filed
-            on the portal in place of the one there — nothing read, no date
-            moved. */}
+        {/* Report ▾ alone. Update matrix and the matrix spreadsheet came off
+            this page on 26 Sep 2026 at Matthew's word: Update matrix sits on
+            Admin → Documents, where the certificates go up, and the office's
+            workbook is opened or replaced there (the Training matrix card) and
+            written by the hour. The reports write the matrix out as it stands
+            — nothing read, no date moved. */}
         <Button onClick={() => setReportMenu(!reportMenu)}>{reportMenu ? "Report ▴" : "Report ▾"}</Button>
         {reportMenu && (
           <>
@@ -1174,8 +1172,6 @@ function TrainingMatrix() {
             <Button variant="quiet" onClick={() => { setReportMenu(false); setReport("crew-missing"); }}>Missing</Button>
           </>
         )}
-        {admin && <UpdateMatrixButton variant="quiet" />}
-        <MatrixSpreadsheet variant="quiet" />
       </div>
 
       {/* floats above everything, pinned to the bottom of the screen */}

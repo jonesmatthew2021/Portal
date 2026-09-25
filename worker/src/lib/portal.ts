@@ -1009,7 +1009,7 @@ async function toolAnalysisAnswers(input: Record<string, unknown>): Promise<Tool
     const sheet = await shiftSheetRow();
     if (!sheet) {
       return {
-        text: "No shift allocation sheet is on the portal, so there is no check to read.",
+        text: "No skills matrix is on the portal, so there is no shift check to read.",
       };
     }
     const held = (await shiftStore().get(shiftKeyFor(sheet.id), { type: "json" })) as ShiftHeld | null;

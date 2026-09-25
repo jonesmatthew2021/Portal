@@ -255,7 +255,14 @@ on any line that still names this one.
   (`UpdateMatrixButton`, the default label, wherever it sits); the matrix
   spreadsheet is a report built from the matrix as it stands
   (`MatrixSpreadsheet`: Matrix spreadsheet to download it, File the matrix
-  spreadsheet to file it), never a reading.
+  spreadsheet to file it), never a reading. Since 26 Sep 2026 (Matthew's
+  word) the Crew Matrix page carries only Report: Update matrix sits on
+  Admin → Documents and E-Learning Status, the office's workbook is opened
+  or replaced on Documents' Training matrix card and written by the hour,
+  and `MatrixSpreadsheet` is shown nowhere. The shift check on Admin →
+  Swings reads the skills matrix filed on Documents (`shiftSheetRow`, the
+  old separate shift sheet only where no skills matrix is), so it keeps no
+  sheet of its own and shows no upload.
 - **The round on the hour is the worker's.** `worker/src/lib/round.ts` puts
   the certificates' dates on the crew matrix and writes the office's CREW
   QUALIFICATION EXPIRY workbook by itself, every hour, with no browser open
