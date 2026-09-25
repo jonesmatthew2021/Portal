@@ -297,6 +297,29 @@ function CrewDetails() {
         .filter(Boolean).join(" · "));
   };
 
+  /* Somebody brand new, typed in before any paperwork has mentioned him.
+     The same entry takeOn writes for a stray, without the stray: the name,
+     the rank (which gives the department) and the swing. Update from
+     register then puts him on the matrix and in the office's workbooks. */
+  const [newName, setNewName] = useState("");
+  const [newRank, setNewRank] = useState("");
+  const [newSwing, setNewSwing] = useState("");
+  const newKnown = !!(canonicalName(newName) && reg.nameOf(canonicalName(newName)));
+  const addNew = () => {
+    const name = canonicalName(newName);
+    if (!name || reg.nameOf(name)) return;
+    setPeople((list) => [...(list || []), {
+      id: nextId(), name, aliases: [], active: true,
+      rank: newRank || "",
+      dept: newRank ? deptForRank(newRank) : "GPH",
+      crew: newSwing === "A" || newSwing === "B" ? newSwing : "",
+    }]);
+    log("Admin", name + " added to the crew register",
+      [newRank || null, newSwing ? "Swing " + newSwing : null, "typed in on Crew Details"]
+        .filter(Boolean).join(" · "));
+    setNewName(""); setNewRank(""); setNewSwing("");
+  };
+
   const drop = (id, alias) => setPeople((list) => (list || []).map((p) => (p.id === id
     ? { ...p, aliases: (p.aliases || []).filter((a) => a !== alias) } : p)));
 
@@ -430,6 +453,23 @@ function CrewDetails() {
         <Eyebrow color={T.accent}>The crew</Eyebrow>
         <div style={{ fontFamily: T.body, fontSize: 13.5, color: T.muted, margin: "8px 0 4px", lineHeight: 1.6 }}>
           {crew.length} on the register. Everything else on the portal reads its names from here.
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap",
+          margin: "10px 0 6px", paddingBottom: 12, borderBottom: "1px solid " + T.rule }}>
+          <span style={{ fontFamily: T.mono, fontSize: 10, color: T.muted,
+            textTransform: "uppercase", letterSpacing: "0.08em", flex: "0 0 74px" }}>Add crew</span>
+          <input
+            value={newName}
+            placeholder="LASTNAME, First"
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") addNew(); }}
+            style={{ flex: "0 1 190px", fontFamily: T.mono, fontSize: 12.5, padding: "5px 8px",
+              borderRadius: 2, border: "1px solid " + (newKnown ? T.bRed : T.rule), background: T.raised, color: T.text }} />
+          {rankPicker(newRank, setNewRank, 195)}
+          {swingPicker(newSwing, setNewSwing, 125)}
+          <Button writes variant="quiet" disabled={!canonicalName(newName) || newKnown}
+            title={newKnown ? canonicalName(newName) + " is already on the register" : undefined}
+            onClick={addNew}>Add to the crew</Button>
         </div>
         {groups.map((g) => (
           <div key={g.title}>
