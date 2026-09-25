@@ -5360,7 +5360,14 @@ function Portal({ role, onSignOut }) {
   // an admin can add or reword one and every device reads the same list; the
   // built-in notes seed it until somebody edits.
   // A list, whatever an older save left here — the notes panel maps over it.
-  const certNotes = Array.isArray(store.certNotes) ? store.certNotes : CERT_PAGE_NOTES;
+  /* The vessel file's own notes always show - a note added there (the MSIC
+     card's "FEB 30", 26 Sep 2026) reaches a portal whose office has edited
+     the list - and the office's own notes stand beside them, theirs first
+     where they already carry the same words. */
+  const certNotes = (() => {
+    const own = Array.isArray(store.certNotes) ? store.certNotes : [];
+    return [...CERT_PAGE_NOTES.filter((n) => !own.includes(n)), ...own];
+  })();
   const setCertNotes = put("certNotes");
   // What has been done about each OPMS disagreement, keyed by the finding —
   // "sent" (reported to OPMS, with the date) or "fixed" (corrected on our
