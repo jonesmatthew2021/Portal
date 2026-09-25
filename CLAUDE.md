@@ -575,6 +575,40 @@ on any line that still names this one.
     on the page). Whether any of them becomes a column is the office's
     decision; the portal adds no column of its own. The preview shows both
     under `?filedas=1`.
+  - **The reader says what a certificate is for and whose it is** (Matthew,
+    25 Sep 2026: "less picky ... the AI reads the certificate to determine
+    what it is for"). The question asks for every column the document is
+    evidence for (`columns`, each high / medium / low with a reason of at
+    most 15 words), weighing the column the office filed it under, with the
+    Equivalence sheet given as "<held> counts as <code>" (the covers rows are
+    not given - they are applied by rule after); and which person on the
+    numbered crew register it is for (`holder`). One rule places a document
+    for the round and the page's cells alike, `columnsFor` in
+    `worker/src/lib/analysis.ts` (`codeFor` is its first column): a hand tag
+    alone; otherwise **high fills, medium fills and is said on Needs
+    attention** ("<person> — <code>: placed by the reading (<why>)",
+    `placedLine`, management only, gone on a hand tag or a high reading),
+    **low never fills**; the sheet's column fills; **the filed column is the
+    office's word only where the reader gave it less than medium** - it still
+    fills, with its "filed as, reads as" line, so nothing the office filed
+    disappears; covers add on top, a column counted once. The file keeps the
+    office's filed code in its name. A reading without `columns` (made
+    before) is placed the old way until the hour's top-up asks it once, 20 an
+    hour, no-code first. **The register stays the one place names live**:
+    a printed name the register reads decides without the reader; the
+    reader's pick (`readerPick`/`whoseCertificate` in
+    `source/shared/names.js`) stands on high, on medium only where the
+    printed name shares a word with the man, never with somebody else in
+    mind, and never takes a certificate whose printed name fits the man it is
+    filed under; where it places one on a name his register entry lacks,
+    Needs attention asks for the name to be added to Crew Details
+    (`readAsLine`). **A register page is evidence only for the columns the
+    vessel file names** (`registerEvidenced`: CS-03, CS-04); for anything
+    else it is unreadable. **A slash in a column title never reaches a
+    filename again**, and a long name keeps the title's closing bracket
+    (`filingName`); a name a person types by hand is the office's word
+    (`rename-file` clears `named_by_portal`). The preview shows the lines
+    under `?reading=smart`.
 
   A green cell means "not expired" and nothing more: suspension and
   cancellation are invisible on a document and only AMSA can confirm them
