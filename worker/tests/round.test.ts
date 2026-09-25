@@ -2004,6 +2004,52 @@ test("Update portal takes the lease for its turn and gives it back; while somebo
   assert.equal(theirsSaid.by, "matthew", "the person named, as the lease has them");
 });
 
+test("an upload for a column the person already holds a certificate for is asked about first, and Replace takes the old one off the books", async () => {
+  /* Matthew, 26 Sep 2026: "if there is an old one in the folder in
+     SharePoint, pop up a window warning the user, and give the option to
+     delete the old one". Evans's folder holds master.pdf, tagged QL-01. */
+  const { portal, bucket } = await oneManPortal();
+  // His ticket sits in his own folder (the fixture's row keeps Billy's token).
+  portal.rows.find((r) => r.id === "c2")!.folder = "brenton";
+  const upload = (over: Record<string, string>, name = "EVANS, Brenton - QL-01 Master.pdf") => {
+    const form = new FormData();
+    // Each upload its own bytes, so only the column can be the clash.
+    form.append("file", new File([bytesOf("the renewed ticket: " + name)], name, { type: "application/pdf" }));
+    form.append("category", "certificate");
+    form.append("person", "bRENTON");
+    form.append("uploadedBy", "Matthew");
+    Object.entries(over).forEach(([k, v]) => form.append(k, v));
+    return files(new Request("http://portal/api/files", { method: "POST", body: form }));
+  };
+  // Tagged for the column the old one holds: asked, nothing written.
+  const asked = await upload({ qualCode: "QL-01" });
+  assert.equal(asked.status, 409);
+  const said = (await asked.json()) as { duplicate: boolean; reason: string; column: { code: string; title: string } | null; existing: { filename: string; code: string | null; sameBytes: boolean }[] };
+  assert.equal(said.duplicate, true, JSON.stringify(said));
+  assert.equal(said.reason, "column", "not the same bytes, not the same name: the same column");
+  assert.deepEqual(said.column, { code: "QL-01", title: "Master" });
+  assert.deepEqual(said.existing.map((e) => [e.filename, e.code, e.sameBytes]), [["master.pdf", "QL-01", false]], "the old one, named");
+  assert.equal(portal.rows.filter((r) => r.category === "certificate" && !r.removedAt).length, 1, "nothing filed yet");
+  // The code in the file's name is a filing too, where nothing was picked.
+  const byName = await upload({});
+  assert.equal(byName.status, 409);
+  assert.equal(((await byName.json()) as { reason: string }).reason, "column");
+  // Another column, or a paper standing in for a certificate: no clash.
+  const other = await upload({ qualCode: "QL-17" }, "medical.pdf");
+  assert.equal(other.status, 201, await other.text());
+  const paper = await upload({ qualCode: "QL-01", evidenceKind: "extension" }, "letter.pdf");
+  assert.equal(paper.status, 201, await paper.text());
+  // Replace: the old one comes off the books - kept, not destroyed - and the new one is filed.
+  const replaced = await upload({ qualCode: "QL-01", onDuplicate: "replace" });
+  assert.equal(replaced.status, 201, await replaced.text());
+  const old = portal.rows.find((r) => r.id === "c2")!;
+  assert.ok(old.removedAt, "the old certificate is taken off the books");
+  assert.ok(String(old.blobKey).startsWith("removed/"), "its bytes are parked, not destroyed");
+  const fresh = portal.rows.find((r) => r.category === "certificate" && !r.removedAt && r.qualCode === "QL-01" && String(r.filename).startsWith("EVANS, Brenton - QL-01"));
+  assert.ok(fresh, "the renewed ticket is on the books under the column");
+  assert.equal(bucket.text(String(fresh!.blobKey)), "the renewed ticket: EVANS, Brenton - QL-01 Master.pdf");
+});
+
 test("the workbook upload takes the lease too, and is refused while somebody holds it", async () => {
   const { portal, bucket } = await oneManPortal();
   const upload = () => {

@@ -630,7 +630,19 @@ on any line that still names this one.
     off it for <code>"; `notPlaced` from `certificateStanding`,
     `notPlacedLines` on the page) - 26 Sep 2026, after a night's uploads
     left cells empty with the reason nowhere Matthew looked. The preview
-    shows all three under `?filedas=1`.
+    shows all three under `?filedas=1`. **An upload for a column the
+    person already holds a certificate for is asked about before anything
+    is written** (Matthew, 26 Sep 2026: "if there is an old one in the
+    folder in SharePoint, pop up a window warning the user, and give the
+    option to delete the old one"): the same clash the same bytes or the
+    same name raise (`POST /api/files`, 409 with `duplicate`, reason
+    `column` beside `content` and `name`, the column named), the upload's
+    column being the one picked on the page or the code in its name, a
+    row's its tag, what the reader made of it, or the code in its name -
+    never a paper standing in for a certificate. The queue says so on the
+    file before it is sent (`clashFor`), and the window offers Replace it
+    (the old one off the books, parked under `removed/`, kept), Keep both,
+    or Skip.
   - **The reader says what a certificate is for and whose it is** (Matthew,
     25 Sep 2026: "less picky ... the AI reads the certificate to determine
     what it is for"). The question asks for every column the document is

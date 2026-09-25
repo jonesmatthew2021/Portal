@@ -449,7 +449,13 @@ function UploadCertificates() {
     const bytes = item.checksum && already.find((c) => c.checksum === item.checksum);
     if (bytes) return { kind: "content", with: bytes };
     const name = already.find((c) => c.filename.toLowerCase() === item.file.name.toLowerCase());
-    return name ? { kind: "name", with: name } : null;
+    if (name) return { kind: "name", with: name };
+    // An older certificate for the same column - the one picked here, or
+    // the code in the file's name - which the server asks about the same way.
+    const codeOf = (tag, read, filename) => String(tag || read || filedCodeIn(filename, QUALS.cols) || "").trim().toUpperCase();
+    const code = item.evidenceKind ? "" : codeOf(item.qualCode, null, item.file.name);
+    const older = code && already.find((c) => !c.evidenceKind && codeOf(c.qualCode, c.readCode, c.filename) === code);
+    return older ? { kind: "column", with: older, code, title: (QUALS.cols.find((c) => c[0] === code) || [])[1] || code } : null;
   };
 
   /**
@@ -1078,7 +1084,9 @@ function UploadCertificates() {
                             <div style={{ fontFamily: T.body, fontSize: 12.5, color: T.bOrange, marginTop: 5, lineHeight: 1.5 }}>
                               {clash.kind === "content"
                                 ? `Already filed for this person as "${clash.with.filename}".`
-                                : "A certificate with this name is already in this person's folder."}
+                                : clash.kind === "column"
+                                  ? `An older ${clash.title} is already in this person's folder: "${clash.with.filename}".`
+                                  : "A certificate with this name is already in this person's folder."}
                               {" "}You'll be asked what to do with it.
                             </div>
                           )}
@@ -1771,7 +1779,9 @@ function UploadCertificates() {
               <b style={{ wordBreak: "break-word" }}>{dup.item.file.name}</b><br />
               {dup.info.reason === "content"
                 ? `This exact file is already in ${dup.info.person}'s folder.`
-                : `A certificate with this name is already in ${dup.info.person}'s folder.`}
+                : dup.info.reason === "column"
+                  ? `${dup.info.person} already has ${(dup.info.column && dup.info.column.title) || "a certificate for this column"} on file. Replace it takes the old one off the books.`
+                  : `A certificate with this name is already in ${dup.info.person}'s folder.`}
               {" "}Nothing has been uploaded.
             </div>
 

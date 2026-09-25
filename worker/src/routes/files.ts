@@ -7,6 +7,19 @@ import { vessel } from "../vessel.js";
 import { imageToPdf, imagesToPdf } from "../lib/pdf-wrap.js";
 import { certHome } from "../db/cert-home.js";
 import { EVIDENCE_KINDS } from "../../../source/shared/evidence.js";
+import { filedCodeIn } from "../../../source/shared/filed-as.js";
+
+/** The live matrix's columns, for the code in a filename to be a column of
+ *  it (filedCodeIn) and for a column's title. Empty where no document is. */
+async function liveColumns(): Promise<string[][]> {
+  try {
+    const state = await getEnv().DB.prepare("SELECT data FROM portal_state LIMIT 1").first<{ data: string }>();
+    const cols = JSON.parse(state?.data || "{}")?.quals?.cols;
+    return Array.isArray(cols) ? cols : [];
+  } catch {
+    return [];
+  }
+}
 import {
   CERT_ROOT,
   SINGLE_FILE_CATEGORIES,
@@ -201,8 +214,20 @@ async function uploadCertificate(form: FormData, file: File) {
     )
     .orderBy(desc(documents.createdAt));
 
+  /* The same certificate already here: the identical file, the same name -
+     or an older certificate for the same column (Matthew, 26 Sep 2026: "if
+     there is an old one in the folder, pop up a window warning the user,
+     and give the option to delete the old one"). The column this upload is
+     for is the one picked on the page or the code in its name; a row's is
+     its tag, what the reader made of it, or the code in its name. A paper
+     standing in for a certificate is no clash either way. */
+  const cols = await liveColumns();
+  const codeOf = (tag: string | null | undefined, read: string | null | undefined, name: string) =>
+    String(tag || read || filedCodeIn(name, cols) || "").trim().toUpperCase();
+  const wantCode = evidenceKind ? "" : codeOf(field(form, "qualCode"), null, filename);
   const matches = filed.filter(
-    (r) => r.checksum === checksum || r.filename.toLowerCase() === filename.toLowerCase(),
+    (r) => r.checksum === checksum || r.filename.toLowerCase() === filename.toLowerCase()
+      || (!!wantCode && !r.evidenceKind && codeOf(r.qualCode, r.readCode, r.filename) === wantCode),
   );
 
   // "ask" is the default: the uploader hasn't seen the clash yet, so nothing is
@@ -217,8 +242,11 @@ async function uploadCertificate(form: FormData, file: File) {
         folder,
         filename,
         // Same bytes is a certain duplicate; same name only might be a newer
-        // renewal saved under the name the old one had.
-        reason: matches.some((r) => r.checksum === checksum) ? "content" : "name",
+        // renewal saved under the name the old one had; the same column
+        // only is an older certificate the new one renews.
+        reason: matches.some((r) => r.checksum === checksum) ? "content"
+          : matches.some((r) => r.filename.toLowerCase() === filename.toLowerCase()) ? "name" : "column",
+        column: wantCode ? { code: wantCode, title: (cols.find((c) => String(c[0]).trim().toUpperCase() === wantCode) || [])[1] || "" } : null,
         existing: matches.map((r) => ({
           id: r.id,
           filename: r.filename,
@@ -227,6 +255,7 @@ async function uploadCertificate(form: FormData, file: File) {
           by: r.uploadedBy,
           url: `/api/files/${r.id}`,
           sameBytes: r.checksum === checksum,
+          code: codeOf(r.qualCode, r.readCode, r.filename) || null,
         })),
       },
       { status: 409 },
