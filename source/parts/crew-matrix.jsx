@@ -743,6 +743,12 @@ function TrainingMatrix() {
     const at = colAt.get(alt);
     return at !== undefined && String((row[3] || [])[at] || "").trim() !== "";
   });
+  // The cell the grid marks Missing: required for the position, nothing on
+  // file, and nothing the office accepts in its place. The cell, the Missing
+  // button's count and its filter all ask this one question.
+  const missingAt = (row, i) => !String((row[3] || [])[i] || "").trim()
+    && (needByPosition.get(row[1] || "") || new Set()).has(QUALS.cols[i][0])
+    && !standsIn(row, String(QUALS.cols[i][0]).trim().toUpperCase());
   const [report, setReport] = useState(null);
   // The three ways of writing the matrix out, behind one Report button.
   const [reportMenu, setReportMenu] = useState(false);
@@ -818,6 +824,7 @@ function TrainingMatrix() {
     if (only === "all") return true;
     // Not a band, so it can't be asked of the cells - it is asked of the person.
     if (only === "ticket") return standings.has(keyOf(r));
+    if (only === "missing") return colIdxAll.some((i) => missingAt(r, i));
     return colIdxAll.some((i) => {
       const b = bandFor(r[3][i]);
       return b && (only === "attention"
@@ -834,10 +841,11 @@ function TrainingMatrix() {
   // panel rather than leaving a name on screen that the table no longer shows.
   const pickedRow = rows.find((r) => keyOf(r) === picked) || null;
 
-  const tally = { red: 0, orange: 0, green: 0 };
-  QUALS.rows.forEach((r) => r[3].forEach((v) => {
+  const tally = { red: 0, orange: 0, green: 0, missing: 0 };
+  QUALS.rows.forEach((r) => r[3].forEach((v, i) => {
     const b = bandFor(v);
     if (b && tally[b.key] !== undefined) tally[b.key]++;
+    if (missingAt(r, i)) tally.missing++;
   }));
 
   const chip = (label, colour, n, key) => (
@@ -926,6 +934,7 @@ function TrainingMatrix() {
         {chip("expired or within " + RED_DAYS + " days", T.bRed, tally.red, "red")}
         {chip(RED_DAYS + "-" + AMBER_DAYS + " days", T.bOrange, tally.orange, "orange")}
         {chip("beyond " + AMBER_DAYS + " days", T.bGreen, tally.green, "green")}
+        {chip("missing", T.bRed, tally.missing, "missing")}
       </div>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 20 }}>
@@ -1069,9 +1078,7 @@ function TrainingMatrix() {
                       background: isPicked ? T.raised : "transparent" }}>
                       <Cell value={r[3][i]}
                         cover={certCoverFor(certDates, r[0], QUALS.cols[i][0])}
-                        missing={!String(r[3][i] || "").trim()
-                          && (needByPosition.get(r[1] || "") || new Set()).has(QUALS.cols[i][0])
-                          && !standsIn(r, String(QUALS.cols[i][0]).trim().toUpperCase())}
+                        missing={missingAt(r, i)}
                         onOpen={url ? () => setCellScan({ url, person: r[0], code: QUALS.cols[i][0], title: QUALS.cols[i][1] }) : undefined} />
                     </td>
                     );
