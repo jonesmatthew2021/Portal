@@ -15,6 +15,9 @@ export type PortalEnv = {
   // Cloudflare's own email sending: the sign-in codes, the security alarm,
   // and the fauna log emailed on with the workbook attached.
   EMAIL?: SendEmail;
+  // Cloudflare's own speech-to-text (Workers AI), for the safety meeting
+  // recorder (routes/meeting.ts). Absent, and the page is told so.
+  AI?: Ai;
   BOOTSTRAP_IT_EMAIL?: string;
   FIT_TO_SAIL_URL?: string;
   ANTHROPIC_API_KEY?: string;

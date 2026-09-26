@@ -586,9 +586,11 @@ const humanSize = (bytes) =>
     : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 
 // Uploads the file and returns the record the portal should show for it.
-async function uploadFile(file, fields) {
-  if (file.size > MAX_UPLOAD_BYTES) {
-    throw new Error(`${file.name} is ${humanSize(file.size)}. The limit is ${humanSize(MAX_UPLOAD_BYTES)}.`);
+// `limit` is the one exception to the size limit: a safety meeting's
+// recording (RECORDING_MAX_BYTES), which the server allows past it too.
+async function uploadFile(file, fields, { limit = MAX_UPLOAD_BYTES } = {}) {
+  if (file.size > limit) {
+    throw new Error(`${file.name} is ${humanSize(file.size)}. The limit is ${humanSize(limit)}.`);
   }
   const body = new FormData();
   body.append("file", file);
@@ -1065,6 +1067,7 @@ const stylesNow = () => `
 ${fontFaces()}
 
 .um * { box-sizing: border-box; }
+@keyframes um-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 .um-btn { cursor: pointer; border: none; font-family: ${T.display}; text-transform: uppercase;
   letter-spacing: 0.09em; transition: background 140ms ease, color 140ms ease, border-color 140ms ease; }
 .um-btn:focus-visible, .um-in:focus-visible { outline: 2px solid ${T.accent}; outline-offset: 2px; }
@@ -2203,10 +2206,15 @@ function PartnershipHub({ data, setData, currentUser, log, docs, addDoc, removeD
 
       {sub === "correspondence" && <Correspondence data={data} setData={setData} currentUser={currentUser} log={log} bucket="correspondence" />}
       {sub === "vessel" && (
-        <DocLibrary title={VESSEL.labels.vesselSafetyPage} docs={docs.vesselSafety} currentUser={currentUser} tagHint="Monthly" bucket="vesselSafety"
-          onAdd={(d) => addDoc("vesselSafety", d, VESSEL.labels.vesselSafety)}
-          onRemove={(d) => removeDoc("vesselSafety", d, VESSEL.labels.vesselSafety)}
-          note="Monthly onboard safety meetings. All crew are entitled to raise an item." />
+        <div>
+          {/* The meeting recorded and written out (source/parts/safety-meeting.jsx);
+              what it posts lands in the library under it. */}
+          <MeetingRecorder onPosted={(d) => addDoc("vesselSafety", d, VESSEL.labels.vesselSafety)} />
+          <DocLibrary title={VESSEL.labels.vesselSafetyPage} docs={docs.vesselSafety} currentUser={currentUser} tagHint="Monthly" bucket="vesselSafety"
+            onAdd={(d) => addDoc("vesselSafety", d, VESSEL.labels.vesselSafety)}
+            onRemove={(d) => removeDoc("vesselSafety", d, VESSEL.labels.vesselSafety)}
+            note="Monthly onboard safety meetings. All crew are entitled to raise an item." />
+        </div>
       )}
       {sub === "portways" && (
         <Correspondence data={pwData} setData={setPwData} currentUser={currentUser} log={log} bucket="pwCorrespondence"
@@ -2294,7 +2302,9 @@ function DocLibrary({ title, docs, note, onAdd, onRemove, currentUser, tagHint, 
       <div style={{ marginBottom: 15 }}>
         <input className="um-in" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by title or source" />
       </div>
-      {shown.length === 0 ? <Empty>Nothing matches that search.</Empty> : shown.map((d) => (
+      {/* A recorded meeting's transcript and recording sit on its minutes'
+          line (meetingRows, source/shared/meeting.js). */}
+      {shown.length === 0 ? <Empty>Nothing matches that search.</Empty> : meetingRows(shown).map((d) => (
         <div key={d.id} className="um-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, flexWrap: "wrap", padding: "11px 14px", borderBottom: `1px solid ${T.rule}` }}>
           <div style={{ minWidth: 240, flex: 1 }}>
             <div style={{ fontFamily: T.body, fontSize: 15, fontWeight: 600, color: T.text, marginBottom: 5 }}>{d.title}</div>
@@ -2303,6 +2313,7 @@ function DocLibrary({ title, docs, note, onAdd, onRemove, currentUser, tagHint, 
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <Chip fg={T.muted} bg={T.raised}>{d.tag}</Chip>
             <OpenLink url={d.url} />
+            {(d.also || []).map((a) => <AlsoLink key={a.doc.id} label={a.label} url={a.doc.url} />)}
             {onRemove && <DeleteBtn item={d} onDelete={() => onRemove(d)} />}
           </div>
         </div>
@@ -5950,8 +5961,11 @@ function Portal({ role, onSignOut }) {
   const removeDoc = (key, doc, label) => {
     // A section added after the state was first saved has no list yet, so an
     // absent one reads as empty rather than breaking the page.
-    setDocs((d) => ({ ...d, [key]: (d[key] || []).filter((x) => x.id !== doc.id) }));
-    deleteStoredFile(doc, currentUser);
+    // A recorded meeting's transcript and recording go with its minutes
+    // (`also`, meetingRows): the three are one meeting.
+    const gone = [doc, ...(doc.also || []).map((a) => a.doc)];
+    setDocs((d) => ({ ...d, [key]: (d[key] || []).filter((x) => !gone.some((g) => g.id === x.id)) }));
+    gone.forEach((g) => deleteStoredFile(g, currentUser));
     log(label, `Removed "${doc.title}"`, `${doc.from} · restore it under Removed files on Documents`);
   };
 

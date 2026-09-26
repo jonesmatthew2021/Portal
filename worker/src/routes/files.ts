@@ -33,6 +33,7 @@ import {
 } from "../db/documents.js";
 import { replaceSingleFile } from "../db/single-file.js";
 import { takeLease, dropLease, leaseHolder, writingTheWorkbook } from "../lib/round.js";
+import { RECORDING_MAX_BYTES } from "../../../source/shared/meeting.js";
 
 // A function request body is capped at 6 MB once multipart overhead is counted,
 // so files are held a little under that. The portal enforces the same number.
@@ -571,9 +572,15 @@ export default async (req: Request) => {
   if (!(file instanceof File) || file.size === 0) {
     return Response.json({ error: "No file was included in the upload." }, { status: 400 });
   }
-  if (file.size > MAX_BYTES * (pages.length ? 4 : 1)) {
+  // A safety meeting's recording (source/parts/safety-meeting.jsx, sent
+  // with `recording`) is the one document allowed past the limit: an hour
+  // of sound is more than five megabytes however it is kept.
+  const cap = field(form, "recording") === "1" && (field(form, "category") ?? "document") === "document"
+    ? RECORDING_MAX_BYTES
+    : MAX_BYTES * (pages.length ? 4 : 1);
+  if (file.size > cap) {
     return Response.json(
-      { error: `${file.name} is ${humanSize(file.size)}. The limit is ${humanSize(MAX_BYTES)}.` },
+      { error: `${file.name} is ${humanSize(file.size)}. The limit is ${humanSize(cap)}.` },
       { status: 413 },
     );
   }

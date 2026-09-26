@@ -77,6 +77,25 @@
      source/shared/reading-lines.js, written here again because this shim
      runs outside the page's own script; a check holds the two the same. */
   const flag = (name) => { try { return new URLSearchParams(location.search).get(name); } catch (e) { return null; } };
+  /* What the preview's speech-to-text "hears" in each piece of a recording,
+     and the minutes it "writes" - samples, said to be. */
+  const SAMPLE_HEARD = [
+    "Right, let's make a start. First up, the netting on the port gangway has a tear in it near the top step.",
+    "We'll get a new net ordered this week and rig the spare in the meantime. Anyone else seen anything on deck?",
+    "The fire drill on Tuesday went well, muster was under three minutes. Next meeting is the last Sunday of the month.",
+  ];
+  const dayWords = (day) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+    return m ? `${Number(m[3])} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(m[2]) - 1]} ${m[1]}` : day;
+  };
+  const sampleMinutes = (day, chair) =>
+    `Vessel safety meeting - ${dayWords(day)}\nChaired by ${chair}\n\nPresent\n- ${chair} (Master)\n- (preview sample: the crew as heard)\n\n`
+    + "Items raised\n1. Port gangway netting\nA tear was reported near the top step of the port gangway net.\n"
+    + "Decided: rig the spare net until a new one arrives.\nAction: Order a new gangway net - the Chief Officer, by the end of the week\n\n"
+    + "2. Fire drill\nTuesday's drill went well; muster was under three minutes.\n\n"
+    + "Actions\n- Order a new gangway net - the Chief Officer, by the end of the week\n\n"
+    + "Next meeting\nThe last Sunday of the month.\n\n"
+    + "To check\n- These minutes are the preview's sample: on the live portal they are written from what was said.\n";
   /* ?reminders=sent (or =failed, or =unanswered): the weekly reminder
      emails switched on and their last week's record, sent this Monday at
      07:10 - or with one address refused, or one send given up on unanswered
@@ -540,6 +559,22 @@
       if (p === "/api/round/progress") return json({ pct: 0, word: "No round has run yet", done: true, running: false, holder: null });
       if (p === "/api/round/prepare") return json({ equivalences: 0, validity: false, problem: null });
       if (p === "/api/round") return json({ error: "The round only runs on the live portal." }, 503);
+      /* The safety meeting recorder (source/parts/safety-meeting.jsx). The
+         preview has no speech-to-text and no model behind it, so each piece
+         of sound is answered with a sample line and the minutes with a
+         sample set, both saying so - enough for the Record, Stop, Write it
+         out, correct and Post steps to be walked through. */
+      if (p === "/api/meeting/transcribe") {
+        const piece = Number(url.searchParams.get("piece") || 1);
+        await new Promise((r) => setTimeout(r, 400));
+        return json({ text: `(Preview sample, piece ${piece}.) ${SAMPLE_HEARD[(piece - 1) % SAMPLE_HEARD.length]}` });
+      }
+      if (p === "/api/meeting/minutes") {
+        const body = await req.clone().json().catch(() => ({}));
+        await new Promise((r) => setTimeout(r, 600));
+        const day = /^\d{4}-\d{2}-\d{2}$/.test(String(body.date || "")) ? body.date : new Date().toISOString().slice(0, 10);
+        return json({ text: sampleMinutes(day, body.chair || VESSEL.it.name), truncated: false });
+      }
       /* The undo list. The preview keeps no history, so the one version it
          holds is the whole list, and putting a version back is a live-portal
          job. */

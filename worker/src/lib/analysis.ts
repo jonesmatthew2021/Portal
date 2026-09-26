@@ -690,6 +690,9 @@ export async function askJson(opts: {
    *  rather than throwing it away. Off by default: a certificate reading
    *  cut by a refusal is no reading. */
   keepPartial?: boolean;
+  /** The model asked, where it is not the readings' (MODEL): the safety
+   *  meeting's minutes are written by the larger one. */
+  model?: string;
 }): Promise<{ json: Record<string, unknown>; truncated: boolean }> {
   const key = getEnv().ANTHROPIC_API_KEY;
   const base = getEnv().ANTHROPIC_BASE_URL;
@@ -714,7 +717,7 @@ export async function askJson(opts: {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: MODEL,
+        model: opts.model || MODEL,
         // The model thinks before it answers whether it is asked to or not, and
         // max_tokens covers the thinking and the answer together — hence the
         // room well past what the JSON itself needs.

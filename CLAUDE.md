@@ -39,6 +39,7 @@ a check confirms each arrived):
 | `crew-matrix.jsx` | Crew Matrix — the round's rules, the grid and its reports, the workbook and the round window, the items held against the office's list, the swing compliance report |
 | `roster.jsx` | Roster — the swing board and its editor, the swing compliance and day grid, the crew-roster workbook, the timeline and the roster page, the shift matrix |
 | `upload-certificates.jsx` | Upload Crew Certificates — the folder and name helpers, the upload page, who SharePoint says is on the strength, the tab's turn at the round, the crew's camera upload |
+| `safety-meeting.jsx` | the Record card at the top of Vessel Safety Meeting Minutes — the meeting recorded on the device (or a recording chosen), kept in the browser's store as it is made, cut into pieces and sent to be written out, the minutes corrected and posted |
 
 `runMatrixRound`, the swing dates (`swingAt`, `swingWithDates`) and the upload
 transports stay in the shell: they are the state's, and the areas read them.
@@ -108,12 +109,50 @@ its own row, a removal blanks it and an entry moved to another month is
 blanked in the file it left. Rows anyone typed by hand are never touched. The
 folder is Matthew's to make — the portal makes the files, never the folder.
 
+**The safety meeting is recorded and written out** (Matthew, 26 Sep 2026: "I
+want claude to record and transcript our safety meeting"; the recording is
+kept - "I will save it"). The Record card sits at the top of Partnership
+Correspondence → Vessel Safety Meeting Minutes (`MeetingRecorder` in
+`source/parts/safety-meeting.jsx`, management and IT logins only - the same
+people who can post a document there). Record uses the device's microphone;
+Choose a recording takes a file made on the phone's own recorder (today's
+meeting, recorded before the button existed). Either way the sound is cut
+into pieces of about a minute, each ended at a quiet moment so no word is
+split (`pieceEnd` in `source/shared/meeting.js`), sent as 16 kHz mono WAV to
+`POST /api/meeting/transcribe` (`worker/src/routes/meeting.ts`) and heard by
+Cloudflare's own speech-to-text (Workers AI, `@cf/openai/whisper-large-v3-turbo`,
+the `[ai]` binding in wrangler.toml - the same account, no other key; the
+crew register's names are given as its prompt so they come out spelt the
+register's way). The transcript (`joinPieces`: a paragraph a piece, under
+the minute it began at) goes to `POST /api/meeting/minutes`, where the larger
+model (`MINUTES_MODEL`, through `askJson`'s `model` option) writes the minutes
+as JSON - present, items with what was decided and the actions under each,
+next meeting, and what the transcript left unclear under **To check** rather
+than guessed - laid out as plain text (`minutesText`) that the person
+corrects in a box on the page. **Post** files three documents in the
+`vesselSafety` library, all under the one title (`meetingTitle`): the minutes
+as a Word document (`minutesDocument`, a zip of three XML parts written with
+`workbook.js`'s zip writer), the transcript as text, and the recording itself
+(the one document allowed past the 5 MB upload limit: `recording=1` on the
+form, `RECORDING_MAX_BYTES`). The library shows them as one line
+(`meetingRows`: the transcript and recording ride on the minutes' line as
+Transcript and Recording links) and Delete takes all three. Everything
+recorded is kept in the browser's own store (IndexedDB, `portal-meetings`) as
+it is made - a piece a minute, and the recording a minute at a time - so a
+tab that closes or a link that drops loses nothing: the card offers to write
+out what was kept, and a meeting leaves the store only when posted or
+discarded. Recording works offline; only writing out and posting need the
+link. The preview answers both routes with samples that say they are
+samples. Tests: `worker/tests/meeting.test.ts`.
+
 `source/shared/` holds the code the page and the worker both run: the workbook
 writer (`workbook.js`), the matrix rules (`matrix-rules.js`), the names
 register (`names.js`), the offline rules (`offline-rules.js`), the three
 sentences said when the model's account stops a reading
 (`reading-lines.js`), the red and amber bands' day counts (`bands.js`), the
-weekly expiry reminders' rules (`reminders.js`), a man's MSIC number and
+weekly expiry reminders' rules (`reminders.js`), the safety meeting
+recorder's rules (`meeting.js`: the pieces, the WAV, the transcript, the
+minutes as text and as a Word document), a man's MSIC number and
 date of birth off his certificates (`particulars.js`), and the five Marine
 Orders rules — the columns one certificate covers (`covers.js`), a
 certificate of recognition against the certificate behind it

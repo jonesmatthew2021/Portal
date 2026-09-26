@@ -1,0 +1,5 @@
+{
+  "type": "module",
+  "private": true,
+  "description": "The code the worker imports from here (source/shared/*.js, source/fauna/fields.js) is ES modules; this tells Node so, since the folder above has no package.json to say it. The page and the build read these files as text and are not affected."
+}

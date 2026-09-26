@@ -25,6 +25,7 @@ import readOne from "./routes/read-one.js";
 import clearR2 from "./routes/clear-r2.js";
 import importSingle from "./routes/import-single.js";
 import fauna, { ensureTable as ensureFaunaTable, settleLog as settleFaunaLog } from "./routes/fauna.js";
+import meeting from "./routes/meeting.js";
 import { runMatrixRound, roundRunning, leaseHolder, takeLease, dropLease, keepEquivalences, SETTLE_MS, type Lease } from "./lib/round.js";
 import { readDocument } from "./lib/shared-state.js";
 import { nightlyBackup } from "./lib/backup.js";
@@ -122,6 +123,9 @@ export default {
       if (path === "/api/ai-checker") return await aiChecker(req);
       // The Marine Fauna Observation Log, spoken into a phone (/fauna/).
       if (path.startsWith("/api/fauna/")) return await fauna(req, user!, path);
+      // The safety meeting recorder: a piece of sound written out, and the
+      // minutes from the transcript (routes/meeting.ts).
+      if (path.startsWith("/api/meeting/")) return await meeting(req, user!, path);
       if (path === "/api/archive") return await archive(req);
       if (path === "/api/sync/progress") {
         return Response.json((await syncProgress()) ?? { pct: 0, word: "No sync has run yet", done: true }, {

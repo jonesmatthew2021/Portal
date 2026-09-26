@@ -37,6 +37,7 @@ fetch isFinite isNaN location navigator parseFloat parseInt requestAnimationFram
 sessionStorage setInterval setTimeout undefined window XLSX localStorage console
 Image Audio alert confirm atob btoa structuredClone AbortController Headers Request
 Symbol BigInt Proxy Reflect WeakMap WeakSet ArrayBuffer Uint16Array Int8Array
+Infinity MediaRecorder indexedDB
 Uint8ClampedArray Float64Array performance queueMicrotask history screen
 TypeError RangeError SyntaxError
 `.trim().split(/\s+/));
@@ -253,9 +254,10 @@ if (!existsSync(rulesTest)) {
   run("The worker's rules answer correctly", () => {
     try {
       // The rules, the shared workbook code as the worker imports it, the
-      // hourly round piece by piece, the SharePoint sync, the fauna log
-      // and the offline reading's public files and headers.
-      const out = execFileSync("npx", ["tsx", "--test", "tests/rules.test.ts", "tests/workbook.test.ts", "tests/round.test.ts", "tests/sync.test.ts", "tests/fauna.test.ts", "tests/offline.test.ts"], {
+      // hourly round piece by piece, the SharePoint sync, the fauna log,
+      // the offline reading's public files and headers, and the safety
+      // meeting recorder.
+      const out = execFileSync("npx", ["tsx", "--test", "tests/rules.test.ts", "tests/workbook.test.ts", "tests/round.test.ts", "tests/sync.test.ts", "tests/fauna.test.ts", "tests/offline.test.ts", "tests/meeting.test.ts"], {
         cwd: join(ROOT, "worker"), stdio: "pipe", shell: true, timeout: 180000, encoding: "utf8",
       });
       const m = /(?:#|ℹ)\s*pass (\d+)/.exec(out);
