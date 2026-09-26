@@ -281,6 +281,15 @@ export function readingStore() {
  * what a request is allowed. They all sit in one table, so they come back
  * together and are looked up in memory after.
  */
+/** A stored reading as it is loaded: a day that has not come yet is no
+ *  issue date (a medical read as issued in 2076, 26 Sep 2026), folded to
+ *  none here so the round, the page's cells and the top-up all read the
+ *  same nothing - a reading made now drops it as it is read (notAfterToday). */
+export function asLoaded(reading: Reading | null): Reading | null {
+  if (reading && reading.issuedOn && reading.issuedOn > todayThere()) reading.issuedOn = null;
+  return reading;
+}
+
 export async function allReadings(): Promise<Map<string, Reading>> {
   const out = new Map<string, Reading>();
   const rows = await getEnv()
@@ -289,7 +298,7 @@ export async function allReadings(): Promise<Map<string, Reading>> {
     .all<{ key: string; value: string }>();
   for (const r of rows.results || []) {
     try {
-      out.set(r.key, JSON.parse(r.value) as Reading);
+      out.set(r.key, asLoaded(JSON.parse(r.value) as Reading) as Reading);
     } catch (e) {
       // A reading that won't parse is no reading; it is read again next run.
     }
@@ -1123,7 +1132,7 @@ export async function certificateStanding() {
   const readings = await Promise.all(
     certs.map(async (row) => ({
       row,
-      reading: (await store.get(readingKey(row), { type: "json" })) as Reading | null,
+      reading: asLoaded((await store.get(readingKey(row), { type: "json" })) as Reading | null),
     })),
   );
 

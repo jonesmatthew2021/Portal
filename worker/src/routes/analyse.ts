@@ -422,6 +422,12 @@ const MAX_WHY_CHARS = 140;
 const CONFIDENCE_RANK = { high: 3, medium: 2, low: 1 } as const;
 
 /** The reader's reason, held to fifteen words and a line's length. */
+/** A date on or before today, or null: a scan's slip that put a certificate
+ *  in the future is no date at all. */
+export function notAfterToday(d: string | null): string | null {
+  return d && d > todayThere() ? null : d;
+}
+
 function whyFrom(v: unknown): string | null {
   const said = str(v);
   if (!said) return null;
@@ -547,7 +553,9 @@ async function askModel(row: Row, bytes: ArrayBuffer, codes: [string, string][],
     holderName: str(parsed.holderName),
     certificateTitle: str(parsed.certificateTitle),
     issuer: str(parsed.issuer),
-    issuedOn: date(parsed.issuedOn),
+    // A day that has not come yet is no issue date: a medical read as issued
+    // "2076-05-04" (26 Sep 2026) would have run its validity out to 2081.
+    issuedOn: notAfterToday(date(parsed.issuedOn)),
     expiresOn: date(parsed.expiresOn),
     neverExpires: parsed.neverExpires === true,
     // Only a code the matrix actually has (columnsFrom). A code the model

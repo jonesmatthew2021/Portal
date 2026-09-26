@@ -1181,6 +1181,36 @@ test("not placed: a document read but not put on the matrix says why on the page
   ]);
 });
 
+test("an issue date that has not come yet is no date: dropped as it is read, and folded to none where it was stored", async () => {
+  /* A medical read as issued "2076-05-04" (26 Sep 2026): the scan's slip
+     would have run a validity period out to 2081, and hid the cell among
+     the dated ones. Read now, the date is dropped; stored before, it is
+     folded to none as the readings load, so the cell is listed as one no
+     date could be read off. */
+  const { portal, env } = await smartPortal([
+    { id: "med", filename: "medical.pdf", qualCode: "QL-17", reading: { certificateTitle: "Certificate of Medical Fitness", qualCode: "QL-17", codeConfidence: "high",
+      issuedOn: "2076-05-04", expiresOn: null, columns: [{ code: "QL-17", confidence: "high", why: null }] } },
+  ]);
+  await worker.scheduled({} as never, env as never);
+  assert.equal(evansCell(portal, "QL-17"), "2030-01-17", "the office's typed date stands: nothing worked from a date in the future");
+  const page = await certificateStanding();
+  assert.deepEqual(page.notPlaced.map((n) => [n.fileId, n.why, n.code]), [["med", "no-date", "QL-17"]], "listed as read with no date");
+  assert.deepEqual(page.dates.filter((d) => d.code === "QL-17").map((d) => d.issued), [null], "and the page's cells carry no issue date for it");
+
+  // Read now: the reader's future date is dropped on the way in.
+  const fresh = await unreadPortal(1);
+  fresh.portal.rows.splice(fresh.portal.rows.findIndex((r) => r.id === "c2"), 1);
+  const model = modelAnswers(() => ({ status: 200, body: readingStream({ ...reading, holderName: "Brenton Evans", issuedOn: "2076-05-04", expiresOn: null,
+    columns: [{ code: "QL-01", confidence: "high", why: null }] }) }));
+  try {
+    await extract([["QL-01", "Master"], ["QL-17", "Medical"]], 4);
+  } finally {
+    model.restore();
+  }
+  const stored = JSON.parse(fresh.portal.blobs.get("certificate-readings|r1/unread-1.json")!);
+  assert.equal(stored.issuedOn, null, "no issue date, rather than one in 2076");
+});
+
 test("a register page counts only for the columns the office keeps in a register", async () => {
   /* The office records the cargo-system approvals in a register, not on a
      certificate (the vessel file's registerEvidenced: CS-03 and CS-04). A

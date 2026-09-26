@@ -634,7 +634,11 @@ on any line that still names this one.
     <printed>" / "could not be read (<reason>)" / "no date could be read
     off it for <code>"; `notPlaced` from `certificateStanding`,
     `notPlacedLines` on the page) - 26 Sep 2026, after a night's uploads
-    left cells empty with the reason nowhere Matthew looked. The preview
+    left cells empty with the reason nowhere Matthew looked. An issue date
+    after today is no date (`notAfterToday` as a reading is made, and
+    `allReadings` folds one already stored to none as the readings load): a
+    medical read as issued in 2076 was a dated document to every rule and
+    an empty cell to Matthew. The preview
     shows all three under `?filedas=1`. **An upload for a column the
     person already holds a certificate for is asked about before anything
     is written** (Matthew, 26 Sep 2026: "if there is an old one in the
