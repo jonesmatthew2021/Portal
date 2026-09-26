@@ -778,10 +778,20 @@ function UploadCertificates() {
   const certKey = useMemo(
     () => certificates.map((c) => [c.id, c.qualCode || "", c.expires || "", c.evidenceKind || ""].join("~")).join("|") + "|" + (matrixUpdated || ""),
     [certificates, matrixUpdated]);
+  /* One ask at a time, and a burst of restores or deletes asks once when it
+     settles: each ask reads every certificate's reading (27 Sep 2026: asked
+     after every file, while the server still asked the database once per
+     certificate, it crowded out loading and saving the portal). */
   const firstDates = useRef(true);
+  const datesBusy = useRef(false);
+  const askDates = async () => {
+    if (datesBusy.current) return;
+    datesBusy.current = true;
+    try { await refreshCertDates(); } finally { datesBusy.current = false; }
+  };
   React.useEffect(() => {
-    if (firstDates.current) { firstDates.current = false; refreshCertDates(); return; }
-    const t = setTimeout(refreshCertDates, 1500);
+    if (firstDates.current) { firstDates.current = false; askDates(); return; }
+    const t = setTimeout(askDates, 4000);
     return () => clearTimeout(t);
   }, [certKey]);
   const deleteAllDoubleUps = async (step) => {

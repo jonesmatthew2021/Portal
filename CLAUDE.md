@@ -734,10 +734,16 @@ on any line that still names this one.
     after its own round, while a Delete, a Restore, an upload, an Edit or
     the hour's round moves who holds what - so Documents asks for the dates
     again on arrival and a moment after the certificates or the matrix
-    stamp change (`certKey`), and Delete all asks once more and removes
+    stamp change (`certKey`, one ask at a time, a burst asking once when it
+    settles), and Delete all asks once more and removes
     what THAT answer lists (`deleteAllDoubleUps`; nothing where the dates
     could not be had). `holds` names live columns only, as the round writes
-    no other. Every Delete on Documents says beside its Confirm what it
+    no other. **The page's cells read every reading in one question**
+    (`allReadings` in `certificateStanding`, as the round does): until
+    27 Sep 2026 they asked the database once per certificate, all at once -
+    1,374 queries an ask - and once Documents asked on arrival and after
+    every change, the queue turned away loading, saving and the file list in
+    bursts (31 server errors in half an hour while Matthew restored files). Every Delete on Documents says beside its Confirm what it
     would do (`deleteWarn`: "Empties QL-01, QL-03 on the matrix", "Behind
     the recognition for QL-01 on the matrix"; `DeleteBtn`'s `warn`).
     **Delete never destroys, and a whole list goes or comes back in one

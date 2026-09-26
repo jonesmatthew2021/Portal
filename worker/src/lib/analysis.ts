@@ -1252,7 +1252,6 @@ export function filedAsFor(
 
 export async function certificateStanding() {
   const certs = await liveCertificates();
-  const store = readingStore();
   const eqTable = await equivalences();
   /* Names through the crew register, the one way the portal compares them.
      Two things turn on it here: a document printed in another man's name
@@ -1280,12 +1279,15 @@ export async function certificateStanding() {
     return c ? String(c[1] || "") : null;
   };
 
-  const readings = await Promise.all(
-    certs.map(async (row) => ({
-      row,
-      reading: asLoaded((await store.get(readingKey(row), { type: "json" })) as Reading | null),
-    })),
-  );
+  /* Every reading in one question to the database (allReadings, asLoaded
+     already applied), as the round loads them. This used to ask for each
+     certificate's reading on its own, all at once: 1,374 queries a time,
+     which the database queued - and while they queued it turned away
+     everything else. On 27 Sep 2026 the Documents page began asking for
+     the dates on arrival and after every change, and loading the portal,
+     saving and the file list failed in bursts while Matthew restored files. */
+  const held = await allReadings();
+  const readings = certs.map((row) => ({ row, reading: held.get(readingKey(row)) || null }));
 
   /* Where the office filed a document under one column and the model read
      it as something else: the filed column takes the date all the same, and

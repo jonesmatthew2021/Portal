@@ -1309,6 +1309,21 @@ test("wrong dates: a reader's 'maybe' never displaces the column's own certifica
     "the second scan is a double up the list may offer");
 });
 
+test("the page's cells ask the database for every reading in one question, never one per certificate", async () => {
+  /* 27 Sep 2026: certificateStanding asked for each certificate's reading on
+     its own, all at once - 1,374 queries a time on the live site - and while
+     the database queued them it turned away loading and saving the portal.
+     It reads them in one question now, as the round does. */
+  const db = coversDb(Array.from({ length: 30 }, (_, i) => ({ row: { id: "c" + i, qualCode: "QL-01" }, reading: { ...evansCoC, expiresOn: "2031-05-" + String(10 + (i % 18)) } })));
+  setEnv({ DB: db, FILE_STORE: "r2" } as never);
+  const page = await certificateStanding();
+  assert.equal(page.dates.filter((d) => d.code === "QL-01").length, 1, "the thirty contest the one cell");
+  const one = db.asked.filter((q) => q.sql.includes("SELECT value FROM blobs WHERE store = ?1 AND key = ?2") && q.args[0] === "certificate-readings");
+  const all = db.asked.filter((q) => /SELECT key, value FROM blobs/.test(q.sql) && q.args[0] === "certificate-readings");
+  assert.equal(one.length, 0, "no reading asked for on its own");
+  assert.equal(all.length, 1, "every reading in one question");
+});
+
 test("wrong dates: an MSIC card runs to the last day of the month it prints, however the reading took the day", async () => {
   /* Every Australian MSIC card prints a month and a two-digit year ("FEB 30")
      and runs to the last day of that month (Matthew, 26 Sep 2026). On
