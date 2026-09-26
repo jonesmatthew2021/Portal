@@ -1708,11 +1708,13 @@ function UploadCertificates() {
         );
       })}
 
-      {doubleUps.length > 0 && (
-        <div style={{ marginTop: 22 }}>
+      {/* Always on the page, count and all, so it can be found when it is
+          empty (Matthew, 26 Sep 2026: "can't find anything called doubleups"). */}
+      <div style={{ marginTop: 22 }}>
           <div style={{ marginBottom: 8 }}>
-            <Eyebrow color={T.bOrange}>Double ups · {doubleUps.length}</Eyebrow>
+            <Eyebrow color={doubleUps.length ? T.bOrange : T.accent}>Double ups · {doubleUps.length}</Eyebrow>
           </div>
+          {doubleUps.length === 0 ? <Empty>None.</Empty> : (
           <div style={{ overflowX: "auto", background: T.panel, border: `1px solid ${T.rule}`,
             borderLeft: `4px solid ${T.bOrange}`, borderRadius: 2 }}>
             <table style={{ borderCollapse: "collapse", width: "100%", fontFamily: T.mono, fontSize: 11 }}>
@@ -1740,8 +1742,8 @@ function UploadCertificates() {
               </tbody>
             </table>
           </div>
+          )}
         </div>
-      )}
 
       {/* Notes — the standing footnotes, editable in place and shared */}
       <NotesPanel />
