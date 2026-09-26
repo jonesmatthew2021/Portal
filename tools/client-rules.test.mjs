@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, recognisedUntil, recognitionFills, foreignExpiryOn, isRecognitionReading, certCoverFor, certFlagFor, flagLine, certTwoFor, twoLine, doubleUpsOf, requiredCodesFor, coverLine, bandWithCover, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, paperKind, EVIDENCE_KINDS, EVIDENCE_LABELS, marineOrderLines, filedAsLines, notOnMatrixLines, filedCodeIn, filedAsLine, tagWarning, readingLines, placedLine, readAsLine, notPlacedLines, nameIsSomebodyElse, matrixHeadOffset, headPixels, scrollPair, rosterSwing, rosterPeopleFor, swingAt };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, recognisedUntil, recognitionFills, foreignExpiryOn, isRecognitionReading, certCoverFor, certFlagFor, flagLine, certTwoFor, twoLine, doubleUpsOf, requiredCodesFor, coverLine, bandWithCover, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, paperKind, EVIDENCE_KINDS, EVIDENCE_LABELS, marineOrderLines, filedAsLines, notOnMatrixLines, filedCodeIn, filedAsLine, tagWarning, readingLines, placedLine, readAsLine, notPlacedLines, nameIsSomebodyElse, matrixHeadOffset, headPixels, scrollPair, rosterSwing, rosterPeopleFor, swingAt, oneByOne, oneByOneLine, AllButton };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -3206,6 +3206,59 @@ const is = (got, want, what) => {
     "print puts both grids' headings back at the top of their tables");
   is(/\.um-floatbar[^{]*\{[^}]*var\(--um-floatbar-lift, 0px\)/.test(page), true, "the bar's lift is 0 unless something sets it");
   is(shim.includes("--um-floatbar-lift"), true, "the test preview sets the lift to clear its ribbon");
+}
+
+/* ---- a Delete all or a Restore all runs the list one at a time ----
+   Matthew, 27 Sep 2026: "Add delete all button, and restore all button".
+   The library is asked once per file, in turn; a failure names the file and
+   its reason and stops nothing else; the sentence left behind says how many
+   went and, where any did not, which and why. The button that runs it is
+   management's, and waits for the count. */
+{
+  const order = [];
+  const steps = [];
+  const items = [{ id: "a", filename: "a.pdf" }, { id: "b", filename: "b.pdf" }, { id: "c", filename: "c.pdf" }];
+  const r = await lib.oneByOne(items, async (it) => {
+    order.push("start " + it.id);
+    await new Promise((res) => setImmediate(res));
+    if (it.id === "b") throw new Error("the folder is not known");
+    order.push("end " + it.id);
+  }, (i, n) => steps.push(i + "/" + n));
+  is(order, ["start a", "end a", "start b", "start c", "end c"], "one finishes before the next starts");
+  is(steps, ["1/3", "2/3", "3/3"], "the step is told where the list is up to");
+  is(r.done.map((x) => x.id), ["a", "c"], "what went through");
+  is(r.failed.map((f) => f.item.id + ": " + f.why), ["b: the folder is not known"], "what did not, with its reason");
+  is(lib.oneByOneLine({ past: "Removed" }, r), "Removed 2 of 3. Not removed: b.pdf (the folder is not known)", "the sentence names the failures");
+  is(lib.oneByOneLine({ past: "Restored" }, { done: items, failed: [] }), "Restored 3", "all through: the count alone");
+  is(lib.oneByOneLine({ past: "Restored" }, { done: [], failed: [{ item: { record: { filename: "x.pdf" } }, why: "no folder" }] },
+    (it) => it.record.filename), "Restored 0 of 1. Not restored: x.pdf (no folder)", "a list names its files its own way");
+  is(lib.oneByOneLine({ past: "Restored" }, { done: [items[0]], failed: [
+    { item: { filename: "old1.xlsx" }, why: "a current one is filed" },
+    { item: { filename: "x.pdf" }, why: "no folder" },
+    { item: { filename: "old2.xlsx" }, why: "a current one is filed" },
+  ] }), "Restored 1 of 4. Not restored: old1.xlsx, old2.xlsx (a current one is filed); x.pdf (no folder)",
+    "the files refused for the one reason are named together");
+  is((await lib.oneByOne([], async () => {}, null)).done, [], "an empty list is nothing to do");
+  const thrown = await lib.oneByOne([{ id: "z" }], async () => { throw "plain"; });
+  is(thrown.failed[0].why, "plain", "a thrown word is still a reason");
+  const src = readFileSync(join(ROOT, "source", "index.html"), "utf8");
+  const btn = src.slice(src.indexOf("function AllButton("), src.indexOf("function Eyebrow("));
+  is(btn.includes("if (!admin || !count) return null;"), true, "the button is management's and shows only with something to run");
+  is(/<Button writes/.test(btn), true, "held down offline like every control that writes");
+  is(/Confirm/.test(btn) && /Keep/.test(btn), true, "asks once before it runs");
+  const upload = readFileSync(join(ROOT, "source", "parts", "upload-certificates.jsx"), "utf8");
+  is(/<AllButton label="Delete all" busy="Deleting" count={doubleUps.length}/.test(upload), true, "Delete all sits on the Double ups list");
+  is(upload.includes("removeCertificates(doubleUps, step)"), true, "and takes the whole list off the books");
+  is(/<AllButton label="Restore all" busy="Restoring"/.test(src), true, "Restore all sits on the removed files list");
+  // The removed list lives on Documents, under the lists Delete works from,
+  // where a management login can reach it - not under the IT-only plumbing.
+  is(upload.includes("<RemovedFiles stamp={certificates.length} />"), true, "the removed files list is on Documents, reloading as the certificates change");
+  const plumbing = src.slice(src.indexOf("{isITSupport(currentUser) && ("), src.indexOf("Saved changes</Eyebrow>"));
+  is(plumbing.includes("<RemovedFiles"), false, "and no longer under the IT Support sign-in alone");
+  is(src.includes("restore it from the Admin tab"), false, "the log says where a removed file is put back from");
+  is(src.includes("oneByOne(state.items, (it) => restoreStoredFile(it.record.id), step)"), true, "and puts every file on it back");
+  const remover = src.slice(src.indexOf("const removeCertificates = async"), src.indexOf("const updateCertificate ="));
+  is(remover.split(/\s+/).join(" ").includes("if (!r.ok) throw new Error(r.why); setStore("), true, "a certificate leaves the page only once the server took it");
 }
 
 if (failed) {

@@ -674,7 +674,26 @@ on any line that still names this one.
     the certificate itself with the one it doubles and why, Open and
     Delete beside it (Matthew: "an actual list like we previously had is
     easier"). Identical copies stay off the person lists; a replaced
-    certificate is a real record and stays on its person's list too. **What a position must hold is read by
+    certificate is a real record and stays on its person's list too.
+    **Delete never destroys, and a whole list goes or comes back in one
+    press** (Matthew, 27 Sep 2026: "Add delete all button, and restore all
+    button. also, at what point is it then deleted from sharepoint"): a
+    Delete moves the SharePoint copy flat under the home's `removed/`
+    (`removeDocument`; a file the office put in its folder is left where it
+    is), and **Removed files** lists what went, on Documents right under
+    the Double ups (`RemovedFiles` in the shell - it sat on Access Grants
+    under the IT Support sign-in alone until then, where a management login
+    could not reach it), Restore on each and Restore all over the lot;
+    Delete all over the Double ups. Both run one file at a time
+    (`oneByOne`, `AllButton`: Confirm / Keep first, the button counting
+    "Deleting 37 of 139…", management only, held down offline), a
+    certificate leaving the page only once the server took it
+    (`removeCertificates`), and leave one line (`oneByOneLine`: "Restored
+    14 of 34. Not restored: <files> (<why>)", the files refused for one
+    reason named together) on the list and in History. Only **Delete for
+    good** on the Removed files list deletes from SharePoint (`purgeDocument`
+    - Graph's delete, which puts the file in the site's recycle bin, where
+    the portal cannot see it), and that asks a second time. **What a position must hold is read by
     the vessel's rank groups**: the office's skills matrix spells its
     positions its way ("ONS-MRN-TSV Second Mate", "Assistant Engineer")
     and the register the vessel's ("SECOND OFFICER", "JUNIOR ENGINEER"), so

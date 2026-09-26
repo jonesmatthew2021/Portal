@@ -722,16 +722,62 @@ const uploadCertificateSheet = (file, fields, decide = "ask") =>
 // both stay — so anything removed by a wrong click is still there to be put back
 // from the Admin tab. Best effort: the record has already gone from the page,
 // and a file left behind is less disruptive than an error the crew can do
-// nothing about.
+// nothing about. It never throws; it answers whether the server took it, so
+// a Delete all can count what went and name what did not.
 async function deleteStoredFile(item, by) {
-  if (!item || !item.stored) return;
+  if (!item || !item.stored) return { ok: true };
   try {
     const params = new URLSearchParams();
     if (by) params.set("by", by);
     params.set("session", SESSION);
     if (isAdmin(by)) params.set("admin", "1");
-    await fetch(`${FILES_API}/${encodeURIComponent(item.id)}?${params.toString()}`, { method: "DELETE" });
-  } catch (e) {}
+    const r = await fetch(`${FILES_API}/${encodeURIComponent(item.id)}?${params.toString()}`, { method: "DELETE" });
+    if (r.ok) return { ok: true };
+    const detail = await r.json().catch(() => null);
+    return { ok: false, why: (detail && detail.error) || `the file store answered ${r.status}` };
+  } catch (e) {
+    return { ok: false, why: (e && e.message) || "the file store could not be reached" };
+  }
+}
+
+/* One thing after another for a whole list - a Delete all, a Restore all.
+   The library is asked once per file, in turn, never all at once: a
+   hundred moves fired together is a flood SharePoint throttles, and one
+   at a time they all land. `step` hears where it is up to before each
+   one. What it answers is what went through and what did not, each
+   failure with its reason, so the person is told the truth about the
+   list rather than a spinner. */
+async function oneByOne(items, doOne, step) {
+  const done = [], failed = [];
+  const list = items || [];
+  for (let i = 0; i < list.length; i++) {
+    if (step) step(i + 1, list.length);
+    try {
+      await doOne(list[i]);
+      done.push(list[i]);
+    } catch (e) {
+      failed.push({ item: list[i], why: (e && e.message) || String(e) });
+    }
+  }
+  return { done, failed };
+}
+
+/* The one sentence a Delete all or a Restore all leaves behind: "Removed
+   139", or "Removed 137 of 139. Not removed: <file>, <file> (<why>); <file>
+   (<why>)" - the files that failed for the one reason named together, so
+   twenty old spreadsheets refused for the same current one read as one
+   clause and not twenty. */
+function oneByOneLine(verb, result, nameOf) {
+  const past = verb.past, total = result.done.length + result.failed.length;
+  if (!result.failed.length) return `${past} ${total}`;
+  const name = nameOf || ((x) => x.filename);
+  const byWhy = new Map();
+  result.failed.forEach((f) => {
+    if (!byWhy.has(f.why)) byWhy.set(f.why, []);
+    byWhy.get(f.why).push(name(f.item));
+  });
+  const named = [...byWhy].map(([why, files]) => `${files.join(", ")} (${why})`).join("; ");
+  return `${past} ${result.done.length} of ${total}. Not ${past.toLowerCase()}: ${named}`;
 }
 
 // Everything that has been removed but not destroyed, newest first.
@@ -1506,6 +1552,52 @@ function DeleteBtn({ item, onDelete, label = "Delete" }) {
       </button>
       <button className="um-btn" onClick={() => setConfirm(false)}
         style={{ background: "transparent", color: T.muted, fontSize: 10, fontWeight: 700, padding: "4px 0" }}>
+        Keep
+      </button>
+    </span>
+  );
+}
+
+/* One button for a whole list - Delete all, Restore all. Asks once (Confirm
+   / Keep, the way DeleteBtn does), then runs the list one at a time and
+   shows where it is up to on the button itself ("Deleting 37 of 139…").
+   Management only, and held down offline like every control that writes.
+   `run(step)` does the work and answers what oneByOne answers; `onDone`
+   is handed that. */
+function AllButton({ label, busy, count, run, onDone }) {
+  const { admin, offlineAt } = usePortal();
+  const [asking, setAsking] = useState(false);
+  const [at, setAt] = useState(null);
+  if (!admin || !count) return null;
+  if (at) {
+    return (
+      <Button writes variant="quiet" disabled>{busy} {at.i} of {at.n}…</Button>
+    );
+  }
+  if (!asking || offlineAt) {
+    return (
+      <Button writes variant="quiet" onClick={() => setAsking(true)}>{label} · {count}</Button>
+    );
+  }
+  const go = async () => {
+    setAsking(false);
+    setAt({ i: 1, n: count });
+    let result;
+    try {
+      result = await run((i, n) => setAt({ i, n }));
+    } finally {
+      setAt(null);
+    }
+    if (onDone) onDone(result);
+  };
+  return (
+    <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+      <button className="um-btn" onClick={go}
+        style={{ background: T.accent, color: "#fff", fontSize: 12, fontWeight: 700, padding: "8px 13px", borderRadius: 2 }}>
+        Confirm
+      </button>
+      <button className="um-btn" onClick={() => setAsking(false)}
+        style={{ background: "transparent", color: T.muted, fontSize: 12, fontWeight: 700, padding: "8px 0" }}>
         Keep
       </button>
     </span>
@@ -4030,7 +4122,7 @@ function EverythingHidden({ admin, onRestoreAll }) {
  * the only place anything can actually be destroyed, and that takes a second,
  * separate confirmation.
  */
-function RemovedFiles() {
+function RemovedFiles({ stamp }) {
   const { log, offlineAt } = usePortal();
   // Deleting for good writes to the server: offline (read only, see
   // offlineLine) both steps of it are held down under the badge's line.
@@ -4049,7 +4141,17 @@ function RemovedFiles() {
     }
   };
 
-  React.useEffect(() => { load(); }, []);
+  // Loaded once on arrival, and again a moment after `stamp` moves - the
+  // Documents page hands it the count of certificates on the page, so a
+  // Delete (all) above is on this list without a press of Refresh. The
+  // moment is for a single Delete, whose request goes without being waited
+  // on: the listing is asked once it has had time to land.
+  const first = useRef(true);
+  React.useEffect(() => {
+    if (first.current) { first.current = false; load(); return; }
+    const t = setTimeout(load, 800);
+    return () => clearTimeout(t);
+  }, [stamp]);
 
   // What this file was, in the words the portal uses for it elsewhere.
   const describe = (it) => {
@@ -4098,16 +4200,30 @@ function RemovedFiles() {
     setBusy(null);
   };
 
+  // Everything on the list back where it was, one file at a time (Matthew,
+  // 27 Sep 2026: "and restore all button"). A file that cannot go back - his
+  // folder unknown, a current copy already filed - stays on the list and is
+  // named with the server's reason; the rest go.
+  const restoreAll = async (step) => {
+    setProblem("");
+    const result = await oneByOne(state.items, (it) => restoreStoredFile(it.record.id), step);
+    if (result.done.length || result.failed.length) {
+      log("Admin", oneByOneLine({ past: "Restored" }, result, (it) => it.record.filename), "");
+    }
+    await load();
+    return result;
+  };
+
   return (
     <>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 10 }}>
-        <Eyebrow color={T.accent}>Removed files</Eyebrow>
-        <Button variant="quiet" onClick={load}>Refresh</Button>
-      </div>
-
-      <div style={{ fontFamily: T.body, fontSize: 14, color: T.muted, lineHeight: 1.6, marginBottom: 12 }}>
-        Removing a file takes it off the portal but doesn't destroy it; deleting for good is the one
-        thing the portal can't undo.
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
+        <Eyebrow color={T.accent}>Removed files{state.status === "ok" ? ` · ${state.items.length}` : ""}</Eyebrow>
+        <span style={{ display: "inline-flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <AllButton label="Restore all" busy="Restoring" count={state.status === "ok" ? state.items.length : 0}
+            run={restoreAll}
+            onDone={(r) => setProblem(r && r.failed.length ? oneByOneLine({ past: "Restored" }, r, (it) => it.record.filename) : "")} />
+          <Button variant="quiet" onClick={load}>Refresh</Button>
+        </span>
       </div>
 
       {state.status === "error" && (
@@ -4130,7 +4246,7 @@ function RemovedFiles() {
       {state.status === "loading" && <Empty>Checking what has been removed…</Empty>}
 
       {state.status === "ok" && state.items.length === 0 && (
-        <Empty>Nothing has been removed. Anything taken off the portal shows up here.</Empty>
+        <Empty>None.</Empty>
       )}
 
       <div style={{ marginBottom: 22 }}>
@@ -4794,7 +4910,6 @@ function Admin({ currentUser, people, setPeople, overrides, setOverrides, swingB
             </div>
           </div>
 
-          <RemovedFiles />
 
           <div style={{ marginBottom: 10 }}><Eyebrow color={T.accent}>Saved changes</Eyebrow></div>
           <div style={{ background: T.panel, border: `1px solid ${sync && sync.state === "error" ? T.bOrange : T.rule}`,
@@ -5822,7 +5937,7 @@ function Portal({ role, onSignOut }) {
     // absent one reads as empty rather than breaking the page.
     setDocs((d) => ({ ...d, [key]: (d[key] || []).filter((x) => x.id !== doc.id) }));
     deleteStoredFile(doc, currentUser);
-    log(label, `Removed "${doc.title}"`, `${doc.from} · restore it from the Admin tab`);
+    log(label, `Removed "${doc.title}"`, `${doc.from} · restore it under Removed files on Documents`);
   };
 
   const addDoc = (key, doc, label) => {
@@ -5844,7 +5959,23 @@ function Portal({ role, onSignOut }) {
   const removeCertificate = (cert) => {
     setStore((s) => ({ ...s, certificates: (s.certificates || []).filter((c) => c.id !== cert.id) }));
     deleteStoredFile(cert, currentUser);
-    log("Admin", `Removed a certificate for ${cert.person}`, `${cert.filename} · restore it from the Admin tab`);
+    log("Admin", `Removed a certificate for ${cert.person}`, `${cert.filename} · restore it under Removed files on Documents`);
+  };
+
+  // A whole list off the books - the Double ups' Delete all. Each is asked
+  // of the server first and leaves the page only once the server took it,
+  // so what the page shows afterwards is what actually went; the ones the
+  // server refused stay, and are named. One log line for the lot.
+  const removeCertificates = async (certs, step) => {
+    const result = await oneByOne(certs, async (cert) => {
+      const r = await deleteStoredFile(cert, currentUser);
+      if (!r.ok) throw new Error(r.why);
+      setStore((s) => ({ ...s, certificates: (s.certificates || []).filter((c) => c.id !== cert.id) }));
+    }, step);
+    if (result.done.length || result.failed.length) {
+      log("Admin", oneByOneLine({ past: "Removed" }, result), "restore them under Removed files on Documents");
+    }
+    return result;
   };
 
   // A certificate whose details were corrected — the code it answers to, the
@@ -6641,7 +6772,7 @@ function Portal({ role, onSignOut }) {
   };
 
   const ctx = { role, admin, session: SESSION, pending, offlineAt, roundRunning, roundHolder, setRoundRunning, removeCrew, renameCrew, setCrewRank, people, setPeople,
-    notPeople, setNotPeople, certRoot, setCertRoot, writeCrewToWorkbooks, lastDocUpdate, setLastDocUpdate, folderNames, setFolderNames, filledFromCert, setFilledFromCert, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, reminders, setReminders, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixRun, runMatrixRound, clearMatrixRun };
+    notPeople, setNotPeople, certRoot, setCertRoot, writeCrewToWorkbooks, lastDocUpdate, setLastDocUpdate, folderNames, setFolderNames, filledFromCert, setFilledFromCert, comments, addComment, removeComment, canDelete, log, quals, setQuals, certificates, addCertificates, removeCertificate, removeCertificates, refileCertificates, updateCertificate, certSheet, setCertSheet, matrixUpdated, setMatrixUpdated, certAnalysis, setCertAnalysis, certDates, refreshCertDates, validityPeriods, certNotes, setCertNotes, opmsMarks, setOpmsMarks, renewalMarks, setRenewalMarks, trainingMatrix, setTrainingMatrix, skillsMatrix, setSkillsMatrix, validityMatrix, matrixAnalysis, setMatrixAnalysis, opmsSheet, setOpmsSheet, opmsAnalysis, setOpmsAnalysis, shiftAllocation, setShiftAllocation, shiftAnalysis, setShiftAnalysis, swingLists, setSwingLists, swingDates, setSwingDates, rosterPattern, setRosterPattern, reminders, setReminders, swingBoard, swingBoards, setSwingBoards, swingArchive, setSwingArchive, skillsRequirements, setSkillsRequirements, crewRoster, setCrewRoster, rosterPlan, setRosterPlan, swingReport, setSwingReport, matrixRun, runMatrixRound, clearMatrixRun };
 
   return (
     <Ctx.Provider value={ctx}>

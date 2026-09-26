@@ -259,7 +259,7 @@ const pickedEntries = (list) =>
 
 function UploadCertificates() {
   const {
-    quals: QUALS, setQuals, certificates, addCertificates, removeCertificate,
+    quals: QUALS, setQuals, certificates, addCertificates, removeCertificate, removeCertificates,
     updateCertificate, setMatrixUpdated, log, role, certDates, validityPeriods,
     matrixRun: auto, runMatrixRound, clearMatrixRun,
     people, renameCrew, setCrewRank,
@@ -777,6 +777,7 @@ function UploadCertificates() {
   // The double ups as one list: the identical copies above, and every
   // certificate the round set aside because a newer one holds its cell.
   const doubleUps = useMemo(() => doubleUpsOf(certificates, certDates), [certificates, certDates]);
+  const [doubleUpsLine, setDoubleUpsLine] = useState(""); // what a Delete all could not remove
 
   const folders = useMemo(() => {
     const byFolder = new Map();
@@ -1711,9 +1712,18 @@ function UploadCertificates() {
       {/* Always on the page, count and all, so it can be found when it is
           empty (Matthew, 26 Sep 2026: "can't find anything called doubleups"). */}
       <div style={{ marginTop: 22 }}>
-          <div style={{ marginBottom: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 8 }}>
             <Eyebrow color={doubleUps.length ? T.bOrange : T.accent}>Double ups · {doubleUps.length}</Eyebrow>
+            {/* The whole list off the books in one go (Matthew, 27 Sep 2026:
+                "add delete all button"), one file at a time, each parked
+                under removed/ like a single Delete and put back the same way. */}
+            <AllButton label="Delete all" busy="Deleting" count={doubleUps.length}
+              run={(step) => removeCertificates(doubleUps, step)}
+              onDone={(r) => setDoubleUpsLine(r && r.failed.length ? oneByOneLine({ past: "Removed" }, r) : "")} />
           </div>
+          {doubleUpsLine && (
+            <div style={{ fontFamily: T.body, fontSize: 13, color: T.bOrange, lineHeight: 1.6, marginBottom: 8 }}>{doubleUpsLine}</div>
+          )}
           {doubleUps.length === 0 ? <Empty>None.</Empty> : (
           <div style={{ overflowX: "auto", background: T.panel, border: `1px solid ${T.rule}`,
             borderLeft: `4px solid ${T.bOrange}`, borderRadius: 2 }}>
@@ -1744,6 +1754,14 @@ function UploadCertificates() {
           </div>
           )}
         </div>
+
+      {/* What Delete took off the books, right under the lists it is deleted
+          from, with Restore on each and Restore all over the lot. It sat on
+          Access Grants under the IT Support sign-in until 27 Sep 2026, where
+          a management login could not reach it. */}
+      <div style={{ marginTop: 22 }}>
+        <RemovedFiles stamp={certificates.length} />
+      </div>
 
       {/* Notes — the standing footnotes, editable in place and shared */}
       <NotesPanel />
