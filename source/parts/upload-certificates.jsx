@@ -774,6 +774,9 @@ function UploadCertificates() {
     return extras;
   }, [certificates]);
   const dupIds = useMemo(() => new Set(dupExtras.map((c) => c.id)), [dupExtras]);
+  // The double ups as one list: the identical copies above, and every
+  // certificate the round set aside because a newer one holds its cell.
+  const doubleUps = useMemo(() => doubleUpsOf(certificates, certDates), [certificates, certDates]);
 
   const folders = useMemo(() => {
     const byFolder = new Map();
@@ -1705,28 +1708,29 @@ function UploadCertificates() {
         );
       })}
 
-      {dupExtras.length > 0 && (
+      {doubleUps.length > 0 && (
         <div style={{ marginTop: 22 }}>
           <div style={{ marginBottom: 8 }}>
-            <Eyebrow color={T.bOrange}>Duplicates · {dupExtras.length}</Eyebrow>
+            <Eyebrow color={T.bOrange}>Double ups · {doubleUps.length}</Eyebrow>
           </div>
           <div style={{ overflowX: "auto", background: T.panel, border: `1px solid ${T.rule}`,
             borderLeft: `4px solid ${T.bOrange}`, borderRadius: 2 }}>
             <table style={{ borderCollapse: "collapse", width: "100%", fontFamily: T.mono, fontSize: 11 }}>
               <thead><tr>
-                {["Crew member", "File", "Code", "Filed", "Size", "", ""].map((h, i) => (
+                {["Crew member", "File", "Code", "Doubles", "Filed", "Size", "", ""].map((h, i) => (
                   <th key={i} style={{ textAlign: "left", padding: "7px 12px", borderBottom: `2px solid ${T.rule}`,
                     fontFamily: T.body, fontSize: 11, color: T.muted, textTransform: "uppercase",
                     letterSpacing: ".06em", whiteSpace: "nowrap" }}>{h}</th>
                 ))}
               </tr></thead>
               <tbody>
-                {dupExtras.map((c) => (
+                {doubleUps.map((c) => (
                   <tr key={c.id} style={{ borderBottom: `1px solid ${T.rule}` }}>
                     <td style={{ padding: "6px 12px", fontFamily: T.body, fontSize: 13, fontWeight: 600,
                       color: T.text, whiteSpace: "nowrap" }}>{c.person}</td>
                     <td style={{ padding: "6px 12px", color: T.text, wordBreak: "break-word", minWidth: 240 }}>{c.filename}</td>
                     <td style={{ padding: "6px 12px", color: T.muted, whiteSpace: "nowrap" }}>{codeOf(c) || "—"}</td>
+                    <td style={{ padding: "6px 12px", color: T.muted, wordBreak: "break-word", minWidth: 200 }}>{c.kept || "—"}<span style={{ color: T.bOrange }}> · {c.why}</span></td>
                     <td style={{ padding: "6px 12px", color: T.muted, whiteSpace: "nowrap" }}>{c.uploaded || "—"}{c.by ? ` · ${c.by}` : ""}</td>
                     <td style={{ padding: "6px 12px", color: T.muted, whiteSpace: "nowrap" }}>{c.size || "—"}</td>
                     <td style={{ padding: "6px 12px" }}><OpenLink url={c.url} /></td>

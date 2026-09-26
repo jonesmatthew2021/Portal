@@ -539,6 +539,42 @@ const certTwoFor = (dates, person, code) => {
     && String(f.code || "").trim().toUpperCase() === C);
   return mine.length ? mine : null;
 };
+/* The double ups, as one list for Admin → Documents (Matthew, 26 Sep 2026:
+   "double ups need to be clearly visible. An actual list is easier"): every
+   certificate on file that is a second copy of another - byte for byte
+   identical to one filed before it, or set aside by the round because a
+   newer one holds the same cell (certificateStanding's superseded). Each
+   row is the certificate itself, with the one it doubles named and why.
+   Pure, so the rule tests can hold it. */
+const doubleUpsOf = (certificates, dates) => {
+  const live = (certificates || []).filter((c) => c && c.id);
+  const out = new Map();
+  // Byte-identical copies filed under the same person: every copy after the first.
+  const byKey = new Map();
+  live.forEach((c) => {
+    if (!c.checksum || !c.folder) return;
+    const k = c.folder + "|" + c.checksum;
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k).push(c);
+  });
+  for (const g of byKey.values()) {
+    if (g.length < 2) continue;
+    const sorted = [...g].sort((a, b) =>
+      String(a.uploaded || "").localeCompare(String(b.uploaded || "")) || String(a.id).localeCompare(String(b.id)));
+    sorted.slice(1).forEach((c) => out.set(c.id, { ...c, kept: sorted[0].filename, why: "identical copy" }));
+  }
+  // Set aside by the round: a newer certificate holds the same cell.
+  const byId = new Map(live.map((c) => [String(c.id), c]));
+  ((dates && dates.superseded) || []).forEach((s) => {
+    const id = String(s.url || "").replace(/^\/api\/files\//, "");
+    const c = id && byId.get(id);
+    if (!c || out.has(c.id)) return;
+    out.set(c.id, { ...c, kept: s.kept || "", why: `replaced for ${s.code}` });
+  });
+  return [...out.values()].sort((a, b) =>
+    String(a.person || "").localeCompare(String(b.person || "")) || String(a.filename || "").localeCompare(String(b.filename || "")));
+};
+
 const twoLine = (two) =>
   `${two.length + 1} on file: ${two[0].kept || "the one in force"} holds the cell; ${two.map((t) => t.filename).join(", ")} ${two.length === 1 ? "is the one it replaced" : "are the ones it replaced"}`;
 

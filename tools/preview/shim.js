@@ -277,9 +277,12 @@
         { person, certificate: "Provide First Aid", printed: "B. Sittyos", line: "check", fileId: scans[2] ? scans[2].id : null },
       );
     }
-    /* And two on file for his QL-17: the newer medical holds the cell. */
+    /* And two on file for his QL-17: the newer medical holds the cell, and
+       the older - a scan on file, so the Double ups list can show it - is
+       the one it replaced. */
+    const older = ordersFlag.filedAs ? mem.rows.filter((r) => r.category === "certificate" && !r.removedAt)[6] : null;
     const superseded = ordersFlag.filedAs
-      ? [{ person, code: "QL-17", filename: "medical-2024.pdf", kept: "medical-2026.pdf", fileId: null }]
+      ? [{ person, code: "QL-17", filename: older ? older.filename : "medical-2024.pdf", kept: "medical-2026.pdf", fileId: older ? older.id : null }]
       : [];
     return { at: new Date().toISOString(), dates, covers, filedAs, notOnMatrix, placed, readAs, notPlaced, superseded };
   };

@@ -667,7 +667,14 @@ on any line that still names this one.
     other> is the one it replaced"), off `certificateStanding`'s
     `superseded` - Matthew, 26 Sep 2026: "if multiple certificates exist, or
     some reason other than a missing certificate, how can we highlight
-    that". **What a position must hold is read by
+    that". The same double ups are one list on Admin → Documents, under
+    the certificate lists - **Double ups — n** (`doubleUpsOf` in
+    `certificate-cells.jsx`, on the upload page): every byte-identical
+    copy after the first, and every certificate a newer one replaced, each
+    the certificate itself with the one it doubles and why, Open and
+    Delete beside it (Matthew: "an actual list like we previously had is
+    easier"). Identical copies stay off the person lists; a replaced
+    certificate is a real record and stays on its person's list too. **What a position must hold is read by
     the vessel's rank groups**: the office's skills matrix spells its
     positions its way ("ONS-MRN-TSV Second Mate", "Assistant Engineer")
     and the register the vessel's ("SECOND OFFICER", "JUNIOR ENGINEER"), so
