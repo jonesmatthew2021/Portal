@@ -46,8 +46,20 @@ function bandFor(v) {
   return { key: "green", fg: T.bGreen, bg: T.bGreenBg, days: d, date: v };
 }
 
-function Cell({ value, onOpen, missing, cover }) {
+function Cell({ value, onOpen, missing, cover, flag }) {
   const b = bandWithCover(bandFor(value), cover, missing);
+  /* A document filed for this cell that reads as something else, with no
+     date in the cell to show: the cell says Check, in orange, and opens
+     the document (certFlagFor). Filled, the cell keeps its date and wears
+     an orange edge, the sentence on its title. */
+  if (!b && flag) return (
+    <div title={flagLine(flag)} onClick={onOpen}
+      style={{ background: T.bOrangeBg, color: T.bOrange, border: `1px solid ${T.bOrange}`, borderRadius: 2,
+        padding: "2px 3px", minWidth: 56, fontFamily: T.mono, fontSize: 9.5, fontWeight: 700,
+        lineHeight: 1.25, cursor: onOpen ? "pointer" : undefined }}>
+      Check
+    </div>
+  );
   if (!b && missing) return (
     <div title="Required for this position — nothing on file" style={{
       background: T.bRedBg, color: T.bRed, border: `1px solid ${T.bRed}`, borderRadius: 2,
@@ -63,15 +75,16 @@ function Cell({ value, onOpen, missing, cover }) {
     }} />
   );
   const openable = !!onOpen;
+  const edge = flag ? { boxShadow: `0 0 0 2px ${T.bOrange}` } : null;
   if (b.date) {
     return (
-      <div title={b.key === "covered"
+      <div title={(flag ? flagLine(flag) + " · " : "") + (b.key === "covered"
         ? b.text
-        : `${b.date} - ${b.days < 0 ? Math.abs(b.days) + " days ago" : "in " + b.days + " days"}${openable ? " · open the certificate" : ""}`}
+        : `${b.date} - ${b.days < 0 ? Math.abs(b.days) + " days ago" : "in " + b.days + " days"}${openable ? " · open the certificate" : ""}`)}
         onClick={openable ? onOpen : undefined}
         style={{ background: b.bg, color: b.fg, borderRadius: 2, padding: "2px 3px", minWidth: 56,
           fontFamily: T.mono, fontSize: 9.5, fontWeight: 600, lineHeight: 1.25,
-          cursor: openable ? "pointer" : undefined,
+          cursor: openable ? "pointer" : undefined, ...edge,
           textDecoration: openable ? "underline" : undefined, textUnderlineOffset: 2 }}>
         {b.date.slice(8, 10)}/{b.date.slice(5, 7)}/{b.date.slice(2, 4)}
       </div>
@@ -81,9 +94,10 @@ function Cell({ value, onOpen, missing, cover }) {
      the cell carries one word and the sentence is on the title: a 56-pixel
      matrix cell is no place for "covered by issue-letter". */
   return (
-    <div onClick={openable ? onOpen : undefined} title={b.key === "covered" ? b.text : undefined}
+    <div onClick={openable ? onOpen : undefined}
+      title={[flag ? flagLine(flag) : "", b.key === "covered" ? b.text : ""].filter(Boolean).join(" · ") || undefined}
       style={{ background: b.bg, color: b.fg, borderRadius: 2, padding: "3px", minWidth: 56,
-        fontFamily: T.mono, fontSize: 9.5, lineHeight: 1.25,
+        fontFamily: T.mono, fontSize: 9.5, lineHeight: 1.25, ...edge,
         cursor: openable ? "pointer" : undefined }}>{b.key === "covered" ? "Covered" : b.text}</div>
   );
 }
@@ -334,12 +348,24 @@ function requiredCodesFor(position, skillsRequirements) {
   const out = new Set();
   const table = skillsRequirements && Array.isArray(skillsRequirements.positions) ? skillsRequirements.positions : [];
   if (!table.length) return out;
-  const crew = new Set(reqTokens(position));
-  if (!crew.size) return out;
-  const hits = table.filter((p) => {
-    const words = reqTokens(p.position);
-    return words.length && words.every((w) => crew.has(w));
-  });
+  /* The same seat under either spelling. The office's sheet writes
+     "Second Mate" and "Assistant Engineer" under its site code; the
+     register writes "SECOND OFFICER" and "JUNIOR ENGINEER"; word for word
+     they never met, and a second officer read as needing nothing - his
+     empty cells hatched, never Missing (26 Sep 2026). The vessel file's rank groups
+     (rankGroupAt) know both spellings of every seat, so the sheet's rows in
+     the position's group are its rows; the words decide only where the
+     groups place neither. */
+  const group = rankGroupAt(position);
+  let hits = group < RANK_GROUPS.length ? table.filter((p) => rankGroupAt(p.position) === group) : [];
+  if (!hits.length) {
+    const crew = new Set(reqTokens(position));
+    if (!crew.size) return out;
+    hits = table.filter((p) => {
+      const words = reqTokens(p.position);
+      return words.length && words.every((w) => crew.has(w));
+    });
+  }
   if (!hits.length) return out;
   let both = null;
   for (const h of hits) {
@@ -475,6 +501,19 @@ const certDateFor = (dates, person, code) => {
 const certCoverFor = (dates, person, code) =>
   (dates && dates.covers
     && dates.covers[`${String(person || "").trim().toUpperCase()}::${String(code || "").trim().toUpperCase()}`]) || null;
+
+/* The document filed for this cell that the reader made something else of
+   (certificateStanding's filedAs, on the dates): the column it was filed
+   under and what it reads as, with the file to open. Matthew, 26 Sep 2026:
+   a wrong certificate under a column must be seen on the matrix, not only
+   on Needs attention. Null where the reader and the filing agree. */
+const certFlagFor = (dates, person, code) => {
+  const P = String(person || "").trim().toUpperCase(), C = String(code || "").trim().toUpperCase();
+  return ((dates && dates.filedAs) || []).find((f) => String(f.person || "").trim().toUpperCase() === P
+    && String(f.code || "").trim().toUpperCase() === C) || null;
+};
+const flagLine = (flag) =>
+  `Filed as ${flag.title || flag.code}, reads as ${flag.readsAs || "nothing on the matrix"} - check it`;
 
 /* The words a covered cell carries, and nothing more: what carries him and
    the day the cover stops counting. An issue letter is the one paper the law

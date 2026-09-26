@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, recognisedUntil, recognitionFills, foreignExpiryOn, isRecognitionReading, certCoverFor, coverLine, bandWithCover, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, paperKind, EVIDENCE_KINDS, EVIDENCE_LABELS, marineOrderLines, filedAsLines, notOnMatrixLines, filedCodeIn, filedAsLine, tagWarning, readingLines, placedLine, readAsLine, notPlacedLines, nameIsSomebodyElse, matrixHeadOffset, headPixels, scrollPair, rosterSwing, rosterPeopleFor, swingAt };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, recognisedUntil, recognitionFills, foreignExpiryOn, isRecognitionReading, certCoverFor, certFlagFor, flagLine, requiredCodesFor, coverLine, bandWithCover, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, paperKind, EVIDENCE_KINDS, EVIDENCE_LABELS, marineOrderLines, filedAsLines, notOnMatrixLines, filedCodeIn, filedAsLine, tagWarning, readingLines, placedLine, readAsLine, notPlacedLines, nameIsSomebodyElse, matrixHeadOffset, headPixels, scrollPair, rosterSwing, rosterPeopleFor, swingAt };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -2820,6 +2820,36 @@ const is = (got, want, what) => {
   const cover = certCoverFor(dates, "evans, brenton", "ql-01");
   is(!!cover, true, "the cover is found however the name and the code were cased");
   is(certCoverFor(dates, "EVANS, Brenton", "QL-02"), null, "and only for the column the paper covers");
+  /* A document filed for a cell that the reader made something else of is
+     seen on the cell itself (Matthew, 26 Sep 2026). */
+  const flagged = { filedAs: [{ person: "COOK, JACK", code: "PI-09", title: "MinRes - Critical Risk Management (CRM) Awareness", readsAs: "MinRes - Safe and Respectful Behaviours", url: "/api/files/c" }] };
+  is(lib.certFlagFor(flagged, "Cook, Jack", "pi-09").url, "/api/files/c", "found however the name and code are cased");
+  is(lib.certFlagFor(flagged, "COOK, Jack", "PI-06"), null, "only the column it was filed under");
+  is(lib.flagLine(flagged.filedAs[0]), "Filed as MinRes - Critical Risk Management (CRM) Awareness, reads as MinRes - Safe and Respectful Behaviours - check it");
+  is(lib.flagLine({ code: "PI-09", title: "", readsAs: null }), "Filed as PI-09, reads as nothing on the matrix - check it");
+  /* What a position must hold is read off the office's skills matrix, whose
+     positions are spelt its way ("ONS-MRN-TSV Second Mate", "Assistant
+     Engineer") while the register spells the vessel's ("SECOND OFFICER",
+     "JUNIOR ENGINEER"): the same seat by the vessel file's rank groups.
+     Jack Cook, a Second Officer, read as needing nothing (26 Sep 2026). */
+  const skills = { positions: [
+    { position: "ONS-MRN-TSV Master", need: ["QL-01", "PI-09"] },
+    { position: "ONS-MRN-TSV Chief Officer (A)", need: ["QL-02", "PI-09", "MS-07"] },
+    { position: "ONS-MRN-TSV Chief Officer (B)", need: ["QL-02", "PI-09"] },
+    { position: "ONS-MRN-TSV Second Mate", need: ["QL-04", "PI-09"] },
+    { position: "ONS-MRN-TSV Assistant Engineer", need: ["QL-07", "PI-09"] },
+    { position: "ONS-MRN-TSV GPH", need: ["QL-10", "PI-09"] },
+    { position: "ONS-MRN-TSV Cook", need: ["QL-11", "PI-09"] },
+  ] };
+  const needs = (pos) => [...lib.requiredCodesFor(pos, skills)].sort();
+  is(needs("SECOND OFFICER"), ["PI-09", "QL-04"], "a Second Officer is the sheet's Second Mate");
+  is(needs("Second Mate"), ["PI-09", "QL-04"], "and the sheet's own spelling still reads");
+  is(needs("JUNIOR ENGINEER"), ["PI-09", "QL-07"], "a Junior Engineer is the sheet's Assistant Engineer");
+  is(needs("CHIEF OFFICER"), ["PI-09", "QL-02"], "a Chief Officer needs what both the sheet's Chief Officer rows agree on");
+  is(needs("MASTER"), ["PI-09", "QL-01"]);
+  is(needs("COOK"), ["PI-09", "QL-11"]);
+  is(needs("Chef"), ["PI-09", "QL-11"], "a chef is a cook");
+  is(needs("Purser"), [], "a seat the sheet has no row for needs nothing it can say");
   is(coverLine(cover), "covered by extension until 08 NOV 2026", "the words on the cell are what carries it and until when");
   is(coverLine({ kind: "issue-letter", until: null }), "covered by issue-letter",
     "an issue letter is the one paper the law gives no end, so it says none");

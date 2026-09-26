@@ -642,7 +642,20 @@ on any line that still names this one.
     never a paper standing in for a certificate. The queue says so on the
     file before it is sent (`clashFor`), and the window offers Replace it
     (the old one off the books, parked under `removed/`, kept), Keep both,
-    or Skip.
+    or Skip. **A filed-as disagreement is seen on the matrix cell itself**
+    (Matthew, 26 Sep 2026: an induction uploaded as a medical must show on
+    the matrix, not only on Needs attention): the grid's `Cell` takes the
+    cell's `filedAs` line off the dates (`certFlagFor`, `flagLine` in
+    `certificate-cells.jsx`) - an empty cell reads **Check** in orange and
+    opens the document, a filled one keeps its date under an orange edge
+    with the sentence on its title. **What a position must hold is read by
+    the vessel's rank groups**: the office's skills matrix spells its
+    positions its way ("ONS-MRN-TSV Second Mate", "Assistant Engineer")
+    and the register the vessel's ("SECOND OFFICER", "JUNIOR ENGINEER"), so
+    `requiredCodesFor` takes the sheet's rows in the same rank group as the
+    position (`rankGroupAt`) before the word match - Jack Cook, a Second
+    Officer, read as needing nothing and his empty PI-09 hatched rather
+    than Missing.
   - **The reader says what a certificate is for and whose it is** (Matthew,
     25 Sep 2026: "less picky ... the AI reads the certificate to determine
     what it is for"). The question asks for every column the document is

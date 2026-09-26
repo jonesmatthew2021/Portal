@@ -1096,14 +1096,18 @@ function TrainingMatrix() {
                     </button>
                   </td>
                   {colIdx.map((i) => {
+                    // A document filed for this cell that reads as something
+                    // else: the cell says so, and opens that document.
+                    const flag = certFlagFor(certDates, r[0], QUALS.cols[i][0]);
                     const url = String(r[3][i] || "").trim()
                       ? certLinkFor(certDates, certificates, r[0], QUALS.cols[i][0])
-                      : null;
+                      : flag ? flag.url : null;
                     return (
                     <td key={i} style={{ padding: "2px", borderBottom: `1px solid ${T.rule}`, textAlign: "center",
                       background: isPicked ? T.raised : "transparent" }}>
                       <Cell value={r[3][i]}
                         cover={certCoverFor(certDates, r[0], QUALS.cols[i][0])}
+                        flag={flag}
                         missing={missingAt(r, i)}
                         onOpen={url ? () => setCellScan({ url, person: r[0], code: QUALS.cols[i][0], title: QUALS.cols[i][1] }) : undefined} />
                     </td>
