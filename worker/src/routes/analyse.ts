@@ -1549,6 +1549,23 @@ export async function compareMatrix(
     }
   }
 
+  /* A superseded note names a document set aside for one column. Where that
+     document still holds other columns once every contest is decided - its
+     own or covered - the note says so: it is not a double up, and deleting
+     it empties those cells (27 Sep 2026: sixteen such documents were deleted
+     off the Double ups list and 28 cells went blank). The page's list is
+     held to the same answer (certificateStanding's `holds`). */
+  const stillHeld = new Map<string, string[]>();
+  for (const [key, v] of claim) {
+    if (!stillHeld.has(v.row.id)) stillHeld.set(v.row.id, []);
+    stillHeld.get(v.row.id)!.push(key.slice(key.indexOf("::") + 2));
+  }
+  for (const n of notes) {
+    if (n.kind !== "superseded" || !n.certificate) continue;
+    const held = stillHeld.get(n.certificate.id) || [];
+    if (held.length) n.detail += ` It still holds ${held.join(", ")}, so it is not a double up.`;
+  }
+
   const covered = new Set<string>();
   let derived = 0;
 

@@ -546,7 +546,50 @@ const certTwoFor = (dates, person, code) => {
    newer one holds the same cell (certificateStanding's superseded). Each
    row is the certificate itself, with the one it doubles named and why.
    Pure, so the rule tests can hold it. */
+/* The cells a document holds on the matrix, by the dates the server settled
+   (certificateStanding): every cell whose Open opens this file, own or
+   covered. What a Delete would empty. */
+const heldBy = (dates, fileId) => {
+  const id = String(fileId || "");
+  if (!id || !dates || !dates.map) return [];
+  const codes = new Set();
+  Object.entries(dates.map).forEach(([k, cell]) => {
+    if (cell && String(cell.url || "").replace(/^\/api\/files\//, "") === id) codes.add(k.slice(k.indexOf("::") + 2));
+  });
+  return [...codes].sort();
+};
+/* Said beside a Delete's Confirm, for a certificate that holds cells. */
+const emptiesLine = (codes) => (codes && codes.length ? `Empties ${codes.join(", ")} on the matrix` : "");
+/* The columns where this file is the foreign certificate behind the
+   recognition that holds the cell (certificateStanding's `behind`): the
+   cell's date is cut to it, so it is no double up and its Delete says so. */
+const behindFor = (dates, fileId) => {
+  const id = String(fileId || "");
+  if (!id || !dates) return [];
+  const codes = new Set();
+  (dates.superseded || []).forEach((s) => {
+    if (s.behind && String(s.url || "").replace(/^\/api\/files\//, "") === id) codes.add(String(s.code || "").toUpperCase());
+  });
+  return [...codes].sort();
+};
+/* The whole warning beside a certificate's Delete: what it empties, and
+   where it is the certificate behind a recognition. */
+const deleteWarn = (dates, fileId) => {
+  const behind = behindFor(dates, fileId);
+  return [emptiesLine(heldBy(dates, fileId)), behind.length ? `Behind the recognition for ${behind.join(", ")} on the matrix` : ""]
+    .filter(Boolean).join("; ");
+};
+
+/* A document that still holds a cell is never a double up, whatever else
+   it lost: on 27 Sep 2026 sixteen Master tickets, ECDIS courses and
+   licences were listed for the one column a newer document had taken
+   while holding others, Delete all took them, and 28 cells went blank. So
+   nothing is listed without the dates, an identical copy is listed only
+   where it holds nothing, and a replaced one only where the server said
+   `holds` is empty - a list made before the server said so is not
+   trusted. */
 const doubleUpsOf = (certificates, dates) => {
+  if (!dates || !dates.map) return [];
   const live = (certificates || []).filter((c) => c && c.id);
   const out = new Map();
   // Byte-identical copies filed under the same person: every copy after the first.
@@ -561,14 +604,19 @@ const doubleUpsOf = (certificates, dates) => {
     if (g.length < 2) continue;
     const sorted = [...g].sort((a, b) =>
       String(a.uploaded || "").localeCompare(String(b.uploaded || "")) || String(a.id).localeCompare(String(b.id)));
-    sorted.slice(1).forEach((c) => out.set(c.id, { ...c, kept: sorted[0].filename, why: "identical copy" }));
+    sorted.slice(1).forEach((c) => {
+      if (heldBy(dates, c.id).length) return;
+      out.set(c.id, { ...c, kept: sorted[0].filename, why: "identical copy" });
+    });
   }
-  // Set aside by the round: a newer certificate holds the same cell.
+  // Set aside by the round: a newer certificate holds the same cell, and
+  // this one holds nothing else.
   const byId = new Map(live.map((c) => [String(c.id), c]));
-  ((dates && dates.superseded) || []).forEach((s) => {
+  (dates.superseded || []).forEach((s) => {
+    if (s.behind || !Array.isArray(s.holds) || s.holds.length) return;
     const id = String(s.url || "").replace(/^\/api\/files\//, "");
     const c = id && byId.get(id);
-    if (!c || out.has(c.id)) return;
+    if (!c || out.has(c.id) || heldBy(dates, c.id).length) return;
     out.set(c.id, { ...c, kept: s.kept || "", why: `replaced for ${s.code}` });
   });
   return [...out.values()].sort((a, b) =>

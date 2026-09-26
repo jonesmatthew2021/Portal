@@ -675,6 +675,37 @@ on any line that still names this one.
     Delete beside it (Matthew: "an actual list like we previously had is
     easier"). Identical copies stay off the person lists; a replaced
     certificate is a real record and stays on its person's list too.
+    **A document that still holds a cell is never a double up.** 27 Sep
+    2026: sixteen Master tickets, ECDIS courses and licences were on the
+    list for the one column a newer document had taken (a Master ticket
+    "replaced for QL-14" by the GMDSS certificate beside it, still holding
+    QL-01, QL-02, QL-03, QL-08 and QL-13; a Furuno course "replaced for
+    QL-13", still holding VS-02), Matthew pressed Delete all, the round
+    cleared the 28 cells they held as orphans, and they read Missing. So
+    every superseded entry from `certificateStanding` carries `holds` (the
+    columns that document still holds once every contest is decided, own
+    and covered), the round's superseded note says the same ("It still
+    holds QL-01, so it is not a double up"), and `doubleUpsOf` lists
+    nothing without the dates, an identical copy only where it holds
+    nothing (`heldBy`, off the dates' map) and a replaced one only where
+    the server said `holds` is empty - an entry with no word on it is not
+    trusted; the copies the person lists set aside are exactly the
+    identical copies that list carries (`dupExtras` off `doubleUps`), so a
+    copy that holds a cell is on the person's list and never on no list.
+    **The foreign certificate behind a recognition is no double up either**:
+    the cell's date is cut to it (MO70 s 33(2), s 37(4)), and with it gone
+    the recognition would run to what it printed - its entry says `behind`
+    and the list leaves it out. **The list is never older than the files it
+    names**: `certDates` is a snapshot the page otherwise refreshes only
+    after its own round, while a Delete, a Restore, an upload, an Edit or
+    the hour's round moves who holds what - so Documents asks for the dates
+    again on arrival and a moment after the certificates or the matrix
+    stamp change (`certKey`), and Delete all asks once more and removes
+    what THAT answer lists (`deleteAllDoubleUps`; nothing where the dates
+    could not be had). `holds` names live columns only, as the round writes
+    no other. Every Delete on Documents says beside its Confirm what it
+    would do (`deleteWarn`: "Empties QL-01, QL-03 on the matrix", "Behind
+    the recognition for QL-01 on the matrix"; `DeleteBtn`'s `warn`).
     **Delete never destroys, and a whole list goes or comes back in one
     press** (Matthew, 27 Sep 2026: "Add delete all button, and restore all
     button. also, at what point is it then deleted from sharepoint"): a

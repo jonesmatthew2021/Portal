@@ -260,7 +260,7 @@ const pickedEntries = (list) =>
 function UploadCertificates() {
   const {
     quals: QUALS, setQuals, certificates, addCertificates, removeCertificate, removeCertificates,
-    updateCertificate, setMatrixUpdated, log, role, certDates, validityPeriods,
+    updateCertificate, setMatrixUpdated, matrixUpdated, log, role, certDates, refreshCertDates, validityPeriods,
     matrixRun: auto, runMatrixRound, clearMatrixRun,
     people, renameCrew, setCrewRank,
   } = usePortal();
@@ -753,31 +753,42 @@ function UploadCertificates() {
     const words = p.split(/\s+/);
     return (words[words.length - 1] || p).toUpperCase();
   };
-  // Byte-identical copies filed under the same person: the first-filed copy
-  // stays in the person's folder, every further copy goes to the one
-  // duplicates table at the bottom.
-  const dupExtras = useMemo(() => {
-    const byKey = new Map();
-    certificates.forEach((c) => {
-      if (!c.checksum || !c.folder) return;
-      const k = c.folder + "|" + c.checksum;
-      if (!byKey.has(k)) byKey.set(k, []);
-      byKey.get(k).push(c);
-    });
-    const extras = [];
-    for (const g of byKey.values()) {
-      if (g.length < 2) continue;
-      const sorted = [...g].sort((a, b) =>
-        String(a.uploaded || "").localeCompare(String(b.uploaded || "")) || String(a.id).localeCompare(String(b.id)));
-      sorted.slice(1).forEach((c) => extras.push(c));
-    }
-    return extras;
-  }, [certificates]);
-  const dupIds = useMemo(() => new Set(dupExtras.map((c) => c.id)), [dupExtras]);
-  // The double ups as one list: the identical copies above, and every
-  // certificate the round set aside because a newer one holds its cell.
+  // The double ups as one list: every byte-identical copy after the first,
+  // and every certificate the round set aside because a newer one holds its
+  // cell - never a document that still holds a cell (doubleUpsOf).
   const doubleUps = useMemo(() => doubleUpsOf(certificates, certDates), [certificates, certDates]);
+  // Byte-identical copies filed under the same person: the first-filed copy
+  // stays in the person's folder, every further copy goes to the Double ups
+  // list at the bottom - exactly the copies that list carries, so a copy
+  // that holds a cell (and so is on no double ups list) stays on the
+  // person's list rather than on no list at all (27 Sep 2026).
+  const dupExtras = useMemo(() => doubleUps.filter((d) => d.why === "identical copy"), [doubleUps]);
+  const dupIds = useMemo(() => new Set(dupExtras.map((c) => c.id)), [dupExtras]);
   const [doubleUpsLine, setDoubleUpsLine] = useState(""); // what a Delete all could not remove
+  /* The double ups and the Delete warnings read certDates, which the page
+     otherwise refreshes only after its own round - while a Delete, a
+     Restore, an upload, an Edit or the hour's round moves who holds what.
+     So the dates are asked for again on arriving here, and a moment after
+     the certificates or the matrix change (27 Sep 2026: a list older than
+     the files it names offered the one document left for a cell as
+     "replaced"). Delete all asks once more before it removes anything, and
+     removes what THAT answer lists. */
+  const certsRef = useRef(certificates);
+  certsRef.current = certificates;
+  const certKey = useMemo(
+    () => certificates.map((c) => [c.id, c.qualCode || "", c.expires || "", c.evidenceKind || ""].join("~")).join("|") + "|" + (matrixUpdated || ""),
+    [certificates, matrixUpdated]);
+  const firstDates = useRef(true);
+  React.useEffect(() => {
+    if (firstDates.current) { firstDates.current = false; refreshCertDates(); return; }
+    const t = setTimeout(refreshCertDates, 1500);
+    return () => clearTimeout(t);
+  }, [certKey]);
+  const deleteAllDoubleUps = async (step) => {
+    const fresh = await refreshCertDates();
+    if (!fresh) return { done: [], failed: [], line: "The certificates could not be checked, so nothing was removed." };
+    return removeCertificates(doubleUpsOf(certsRef.current, fresh), step);
+  };
 
   const folders = useMemo(() => {
     const byFolder = new Map();
@@ -1562,8 +1573,11 @@ function UploadCertificates() {
                       </span>
                       <span style={{ fontFamily: T.mono, fontSize: 11, color: validity ? T.text : T.muted,
                         width: 110, flex: "0 0 110px", lineHeight: 1.5 }}>{validity || "—"}</span>
-                      <div style={{ width: 150, flex: "0 0 150px", display: "flex", gap: 10,
-                        alignItems: "center", justifyContent: "flex-end" }}>
+                      {/* Grows past its 150px when a Delete's warning opens
+                          beside Confirm, and takes the next line if it must,
+                          rather than stacking the words in a column. */}
+                      <div style={{ minWidth: 150, flex: "0 0 auto", maxWidth: "100%", display: "flex", gap: 10,
+                        alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap" }}>
                         <OpenLink url={c.url} />
                         {c.stored && (
                           <button className="um-btn"
@@ -1574,7 +1588,7 @@ function UploadCertificates() {
                             {edit && edit.id === c.id ? "Close" : "Edit"}
                           </button>
                         )}
-                        <DeleteBtn item={c} onDelete={() => removeCertificate(c)} />
+                        <DeleteBtn item={c} onDelete={() => removeCertificate(c)} warn={deleteWarn(certDates, c.id)} />
                       </div>
                     </div>
 
@@ -1718,8 +1732,8 @@ function UploadCertificates() {
                 "add delete all button"), one file at a time, each parked
                 under removed/ like a single Delete and put back the same way. */}
             <AllButton label="Delete all" busy="Deleting" count={doubleUps.length}
-              run={(step) => removeCertificates(doubleUps, step)}
-              onDone={(r) => setDoubleUpsLine(r && r.failed.length ? oneByOneLine({ past: "Removed" }, r) : "")} />
+              run={deleteAllDoubleUps}
+              onDone={(r) => setDoubleUpsLine(r ? (r.line || (r.failed.length ? oneByOneLine({ past: "Removed" }, r) : "")) : "")} />
           </div>
           {doubleUpsLine && (
             <div style={{ fontFamily: T.body, fontSize: 13, color: T.bOrange, lineHeight: 1.6, marginBottom: 8 }}>{doubleUpsLine}</div>
@@ -1746,7 +1760,7 @@ function UploadCertificates() {
                     <td style={{ padding: "6px 12px", color: T.muted, whiteSpace: "nowrap" }}>{c.uploaded || "—"}{c.by ? ` · ${c.by}` : ""}</td>
                     <td style={{ padding: "6px 12px", color: T.muted, whiteSpace: "nowrap" }}>{c.size || "—"}</td>
                     <td style={{ padding: "6px 12px" }}><OpenLink url={c.url} /></td>
-                    <td style={{ padding: "6px 12px" }}><DeleteBtn item={c} onDelete={() => removeCertificate(c)} /></td>
+                    <td style={{ padding: "6px 12px" }}><DeleteBtn item={c} onDelete={() => removeCertificate(c)} warn={deleteWarn(certDates, c.id)} /></td>
                   </tr>
                 ))}
               </tbody>

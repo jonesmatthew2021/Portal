@@ -1530,7 +1530,10 @@ function Comments({ itemId }) {
 
 /* A delete always writes, so offline (read only, see offlineLine) the
    button is held down under the badge's line before it asks anything. */
-function DeleteBtn({ item, onDelete, label = "Delete" }) {
+/* `warn` is what the delete would do beyond taking the file off - the
+   matrix cells a certificate holds ("Empties QL-01, QL-03 on the matrix") -
+   said beside Confirm, at the moment it matters and nowhere else. */
+function DeleteBtn({ item, onDelete, label = "Delete", warn = "" }) {
   const { canDelete, offlineAt } = usePortal();
   const [confirm, setConfirm] = useState(false);
   if (!canDelete(item)) return null;
@@ -1545,7 +1548,8 @@ function DeleteBtn({ item, onDelete, label = "Delete" }) {
     );
   }
   return (
-    <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+    <span style={{ display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      {warn && <span style={{ fontFamily: T.body, fontSize: 12, fontWeight: 600, color: T.bOrange }}>{warn}</span>}
       <button className="um-btn" onClick={onDelete}
         style={{ background: T.accent, color: "#fff", fontSize: 10, fontWeight: 700, padding: "5px 9px", borderRadius: 2 }}>
         Confirm
@@ -5586,8 +5590,15 @@ function Portal({ role, onSignOut }) {
       const superseded = (r.superseded || []).map((f) => ({
         person: known(f.person).toUpperCase(), code: String(f.code || "").toUpperCase(),
         filename: f.filename || "", kept: f.kept || "", url: f.fileId ? `/api/files/${f.fileId}` : null,
+        // What it still holds, own and covered: carried as the server said
+        // it, or left off where an older server said nothing (doubleUpsOf
+        // trusts no entry without it).
+        ...(Array.isArray(f.holds) ? { holds: f.holds.map((c) => String(c).toUpperCase()) } : {}),
+        // The foreign certificate behind the recognition that holds the cell.
+        behind: !!f.behind,
       }));
-      setCertDates({ at: r.at || new Date().toISOString(), map, covers, filedAs, notOnMatrix, placed, readAs, notPlaced, superseded });
+      const next = { at: r.at || new Date().toISOString(), map, covers, filedAs, notOnMatrix, placed, readAs, notPlaced, superseded };
+      setCertDates(next);
       if (v) {
         setValidityPeriods({
           at: new Date().toISOString(),
@@ -5596,8 +5607,12 @@ function Portal({ role, onSignOut }) {
           periods: v.periods || [],
         });
       }
+      // Handed back so a caller that must act on fresh dates - Delete all on
+      // the Double ups - acts on these and not on whatever the page held.
+      return next;
     } catch (e) {
       // The columns keep showing whatever they had; the next run asks again.
+      return null;
     }
   };
   // The two required matrices, the validity periods matrix read alongside them,

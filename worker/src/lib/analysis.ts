@@ -1189,7 +1189,7 @@ export async function certificateStanding() {
      aside, with the one that holds the cell named beside it (resolved once
      the contest is over, since a later document can take the cell again).
      The grid wears it as a small count on the cell (certTwoFor). */
-  const superseded: { key: string; person: string; code: string; filename: string; fileId: string; kept: string }[] = [];
+  const superseded: { key: string; person: string; code: string; filename: string; fileId: string; kept: string; behind: boolean }[] = [];
   const fileNameOf = new Map(certs.map((r) => [r.id, r.filename]));
   for (const { row, reading } of readings) {
     if (!reading || !row.person || !row.person.trim()) continue;
@@ -1348,10 +1348,15 @@ export async function certificateStanding() {
         // one in force.
         if (!sitting.issued && issued) sitting.issued = issued;
         if (!sitting.issuer && issuer) sitting.issuer = issuer;
-        superseded.push({ key, person: key.slice(0, key.indexOf("::")), code, filename: row.filename, fileId: row.id, kept: "" });
+        /* `behind`: the loser is the foreign certificate behind the
+           recognition that holds the cell. It is no double up - the cell's
+           date is cut to its expiry (MO70 s 33(2), s 37(4)), and with it
+           gone the recognition would run to what it printed - so the list on
+           Documents leaves it out (27 Sep 2026). */
+        superseded.push({ key, person: key.slice(0, key.indexOf("::")), code, filename: row.filename, fileId: row.id, kept: "", behind: !mineIsRec && !!sitting.recognition });
         continue;
       }
-      superseded.push({ key, person: key.slice(0, key.indexOf("::")), code, filename: fileNameOf.get(String(sitting.fileId)) || "", fileId: String(sitting.fileId || ""), kept: "" });
+      superseded.push({ key, person: key.slice(0, key.indexOf("::")), code, filename: fileNameOf.get(String(sitting.fileId)) || "", fileId: String(sitting.fileId || ""), kept: "", behind: mineIsRec && !sitting.recognition });
       claim.set(key, {
         issued: issued || sitting.issued, expires, issuer: issuer || sitting.issuer,
         fileId: row.id, recognition: mineIsRec, foreignUnknown,
@@ -1418,6 +1423,29 @@ export async function certificateStanding() {
     }
   }
 
+  /* What each document still holds once every contest is decided, its own
+     columns and the ones it covers alike. A document set aside for ONE
+     column can hold five others: on 27 Sep 2026 sixteen Master tickets,
+     ECDIS courses and licences went on the Double ups list for the one
+     column a newer document had taken (a Master ticket set aside for
+     QL-14 by the GMDSS certificate beside it, still holding QL-01, QL-02,
+     QL-03, QL-08 and QL-13), Matthew pressed Delete all, and 28 cells went
+     blank. So every superseded entry carries `holds`, and the list on
+     Documents offers a document only where it is empty. */
+  const holdsOf = new Map<string, string[]>();
+  // Only the live matrix's columns count as held: the round writes no other
+  // (compareMatrix drops a column the matrix has not got), so neither does
+  // this. With no matrix to read, every column stands.
+  const onMatrix = new Set(cols.map((c) => String((Array.isArray(c) ? c[0] : c) || "").trim().toUpperCase()).filter(Boolean));
+  for (const [key, v] of claim) {
+    const id = String(v.fileId || "");
+    if (!id) continue;
+    const code = key.slice(key.indexOf("::") + 2);
+    if (onMatrix.size && !onMatrix.has(code)) continue;
+    if (!holdsOf.has(id)) holdsOf.set(id, []);
+    holdsOf.get(id)!.push(code);
+  }
+
   return {
     at: new Date().toISOString(),
     /* The papers that lawfully carry a man while a certificate is out - an
@@ -1440,7 +1468,11 @@ export async function certificateStanding() {
     /* The documents read but not placed, and why. */
     notPlaced,
     /* Two on file for one cell: the one set aside, and the one that holds it. */
-    superseded: superseded.map(({ key, ...s }) => ({ ...s, kept: fileNameOf.get(String((claim.get(key) || { fileId: "" }).fileId)) || "" })),
+    superseded: superseded.map(({ key, ...s }) => ({
+      ...s,
+      kept: fileNameOf.get(String((claim.get(key) || { fileId: "" }).fileId)) || "",
+      holds: holdsOf.get(String(s.fileId)) || [],
+    })),
     // `fileId` names the scan each line's dates were read from, so the
     // certification screens can put a link to the certificate itself on the line.
     dates: [...claim.entries()].map(([key, v]) => {

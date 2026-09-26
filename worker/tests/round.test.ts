@@ -1153,6 +1153,7 @@ test("two documents neither running the longer: the one issued last holds the ce
   // Two on file: the old one is set aside, named beside the one that holds the cell.
   assert.deepEqual(page.superseded.map((s) => [s.fileId, s.code, s.person]), [["old", "QL-04", "EVANS, BRENTON"]]);
   assert.match(page.superseded[0].kept, /QL-04/, "the one in force, by name");
+  assert.deepEqual(page.superseded[0].holds, [], "and it holds nothing else: a double up the list may offer");
   // Filed the other way round, the same answer.
   const swapped = await smartPortal([
     { id: "new", filename: "new.pdf", reading: { qualCode: "QL-04", codeConfidence: "high", issuedOn: "2026-09-18", expiresOn: null, columns: [{ code: "QL-04", confidence: "high", why: null }] } },
@@ -1167,6 +1168,48 @@ test("two documents neither running the longer: the one issued last holds the ce
   ]);
   await worker.scheduled({} as never, dated.env as never);
   assert.equal(evansCell(dated.portal, "QL-04"), "2031-05-26", "the longer runs");
+});
+
+test("double ups: a certificate set aside for one column but holding others is no double up, and both sides say so", async () => {
+  /* 27 Sep 2026. A Master ticket reads as evidence for QL-01 (its own) and,
+     on a medium, for QL-14 - and the GMDSS certificate beside it runs the
+     longer for QL-14. The ticket lost that one contest and went on the
+     Double ups list as "replaced for QL-14", still holding QL-01, QL-02,
+     QL-03, QL-08 and QL-13; sixteen such documents were deleted off the
+     list in one press and 28 cells went blank. So: the page's superseded
+     entry carries what the document still holds, the round's note says the
+     same, and the list on Documents leaves it out. */
+  const { portal, env } = await smartPortal([
+    { id: "master", filename: "master.pdf", reading: { certificateTitle: "Certificate of Competency - Master", qualCode: "QL-01", codeConfidence: "high",
+      issuedOn: "2022-09-27", expiresOn: "2027-09-26",
+      columns: [{ code: "QL-01", confidence: "high", why: null }, { code: "QL-14", confidence: "medium", why: "lists IV/2 among its regulations" }] } },
+    { id: "gmdss", filename: "gmdss.pdf", reading: { certificateTitle: "GMDSS General Operator's Certificate", qualCode: "QL-14", codeConfidence: "high",
+      issuedOn: "2026-03-10", expiresOn: "2031-03-09", columns: [{ code: "QL-14", confidence: "high", why: null }] } },
+  ]);
+  const doc = portal.doc();
+  doc.quals.cols.push(["QL-14", "GMDSS - STCW Reg IV/2", "Qualification"]);
+  doc.quals.rows[0][3].push("");
+  portal.state.data = JSON.stringify(doc);
+  await worker.scheduled({} as never, env as never);
+  assert.equal(evansCell(portal, "QL-01"), "2027-09-26", "the ticket holds its own column");
+  assert.equal(evansCell(portal, "QL-14"), "2031-03-09", "the GMDSS certificate holds QL-14");
+  const said = await roundNotes(portal, "superseded");
+  assert.equal(said.length, 1);
+  // The refile has renamed both by now ("EVANS, Brenton - QL-14 GMDSS ..."), so the note is held to its words.
+  assert.match(said[0], /^Two certificates on file for QL-14\. .*GMDSS.* runs the longer, so .*Master.* is treated as the one it replaced\. It still holds QL-01, so it is not a double up\.$/);
+  const page = await certificateStanding();
+  assert.deepEqual(page.dates.filter((d) => d.code === "QL-01" || d.code === "QL-14").map((d) => [d.code, d.fileId]).sort(), [["QL-01", "master"], ["QL-14", "gmdss"]],
+    "the page's cells open the same documents");
+  assert.deepEqual(page.superseded.map((s) => [s.fileId, s.code, s.holds]), [["master", "QL-14", ["QL-01"]]],
+    "set aside for QL-14, and what it still holds is said");
+  // Two plain copies of the one certificate: the one set aside holds nothing.
+  const twice = await smartPortal([
+    { id: "old", filename: "old.pdf", reading: { qualCode: "QL-04", codeConfidence: "high", issuedOn: "2024-04-19", expiresOn: "2029-04-18", columns: [{ code: "QL-04", confidence: "high", why: null }] } },
+    { id: "new", filename: "new.pdf", reading: { qualCode: "QL-04", codeConfidence: "high", issuedOn: "2026-09-18", expiresOn: "2031-09-17", columns: [{ code: "QL-04", confidence: "high", why: null }] } },
+  ]);
+  await worker.scheduled({} as never, twice.env as never);
+  assert.deepEqual((await certificateStanding()).superseded.map((s) => [s.fileId, s.holds]), [["old", []]], "a true double up holds nothing");
+  assert.doesNotMatch((await roundNotes(twice.portal, "superseded"))[0], /still holds/, "and the round's note adds nothing");
 });
 
 test("not placed: a document read but not put on the matrix says why on the page's list", async () => {
@@ -6019,6 +6062,24 @@ test("recognition: the foreign certificate on file beats what the recognition pr
     "the certificate in hand runs shorter than what the recognition printed, so it governs");
   assert.equal(out.items.find((i) => i.code === "QL-01")!.certificate!.id, "rec",
     "the recognition is the document that counts, whichever of the two runs the longer");
+  /* The foreign certificate is no double up: the cell's date is cut to it,
+     and with it gone the recognition would run to what it printed. So the
+     page's entry says it is the one behind the recognition, and the list on
+     Documents leaves it out (27 Sep 2026). */
+  setEnv({ DB: coversDb([
+    { row: { id: "foreign", qualCode: "QL-01" }, reading: foreign },
+    { row: { id: "rec", qualCode: "QL-01" }, reading: recognitionOf() },
+  ]), FILE_STORE: "r2" } as never);
+  const page = await certificateStanding();
+  assert.deepEqual(page.dates.map((d) => [d.code, d.expires, d.fileId]), [["QL-01", "2027-05-05", "rec"]], "the page's cell: the recognition, cut to the foreign ticket");
+  assert.deepEqual(page.superseded.map((s) => [s.fileId, s.code, s.behind, s.holds]), [["foreign", "QL-01", true, []]],
+    "set aside as the certificate behind the recognition, holding nothing itself");
+  // Filed the other way round, the same answer.
+  setEnv({ DB: coversDb([
+    { row: { id: "rec", qualCode: "QL-01" }, reading: recognitionOf() },
+    { row: { id: "foreign", qualCode: "QL-01" }, reading: foreign },
+  ]), FILE_STORE: "r2" } as never);
+  assert.deepEqual((await certificateStanding()).superseded.map((s) => [s.fileId, s.behind]), [["foreign", true]]);
 });
 
 test("recognition: nothing is ever recognised into the safety training or the cook column", async () => {

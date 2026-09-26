@@ -281,9 +281,22 @@
        the older - a scan on file, so the Double ups list can show it - is
        the one it replaced. */
     const older = ordersFlag.filedAs ? mem.rows.filter((r) => r.category === "certificate" && !r.removedAt)[6] : null;
+    /* And a Master ticket set aside for QL-14 by the GMDSS certificate
+       while still holding QL-01: two on file for that cell, but no double
+       up - the list must leave it out (27 Sep 2026). */
+    const ticket = ordersFlag.filedAs ? mem.rows.filter((r) => r.category === "certificate" && !r.removedAt)[7] : null;
+    /* And a foreign ticket behind the recognition that holds QL-08: the
+       cell's date is cut to it, so it is no double up either. */
+    const foreign = ordersFlag.filedAs ? mem.rows.filter((r) => r.category === "certificate" && !r.removedAt)[8] : null;
     const superseded = ordersFlag.filedAs
-      ? [{ person, code: "QL-17", filename: older ? older.filename : "medical-2024.pdf", kept: "medical-2026.pdf", fileId: older ? older.id : null }]
+      ? [
+        { person, code: "QL-17", filename: older ? older.filename : "medical-2024.pdf", kept: "medical-2026.pdf", fileId: older ? older.id : null, holds: [], behind: false },
+        { person, code: "QL-14", filename: ticket ? ticket.filename : "master.pdf", kept: "gmdss.pdf", fileId: ticket ? ticket.id : null, holds: ["QL-04"], behind: false },
+        { person, code: "QL-08", filename: foreign ? foreign.filename : "mca-master.pdf", kept: "recognition.pdf", fileId: foreign ? foreign.id : null, holds: [], behind: true },
+      ]
       : [];
+    // QL-04: a column no other flag dates, so two flags never date one cell twice.
+    if (ordersFlag.filedAs && ticket) dates.push(entry("QL-04", { expires: dayOff(600), issued: dayOff(-1200), fileId: ticket.id }));
     return { at: new Date().toISOString(), dates, covers, filedAs, notOnMatrix, placed, readAs, notPlaced, superseded };
   };
   const OUT_OF_CREDIT = "Out of credit — top it up at console.anthropic.com";

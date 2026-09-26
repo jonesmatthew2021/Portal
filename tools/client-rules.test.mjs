@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, recognisedUntil, recognitionFills, foreignExpiryOn, isRecognitionReading, certCoverFor, certFlagFor, flagLine, certTwoFor, twoLine, doubleUpsOf, requiredCodesFor, coverLine, bandWithCover, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, paperKind, EVIDENCE_KINDS, EVIDENCE_LABELS, marineOrderLines, filedAsLines, notOnMatrixLines, filedCodeIn, filedAsLine, tagWarning, readingLines, placedLine, readAsLine, notPlacedLines, nameIsSomebodyElse, matrixHeadOffset, headPixels, scrollPair, rosterSwing, rosterPeopleFor, swingAt, oneByOne, oneByOneLine, AllButton };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, recognisedUntil, recognitionFills, foreignExpiryOn, isRecognitionReading, certCoverFor, certFlagFor, flagLine, certTwoFor, twoLine, doubleUpsOf, heldBy, emptiesLine, behindFor, deleteWarn, requiredCodesFor, coverLine, bandWithCover, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, paperKind, EVIDENCE_KINDS, EVIDENCE_LABELS, marineOrderLines, filedAsLines, notOnMatrixLines, filedCodeIn, filedAsLine, tagWarning, readingLines, placedLine, readAsLine, notPlacedLines, nameIsSomebodyElse, matrixHeadOffset, headPixels, scrollPair, rosterSwing, rosterPeopleFor, swingAt, oneByOne, oneByOneLine, AllButton };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -2862,10 +2862,64 @@ const is = (got, want, what) => {
     { id: "n", person: "EVANS, Brenton", folder: "evans", filename: "new.pdf", checksum: "x2", uploaded: "2026-09-18" },
     { id: "k", person: "COOK, Jack", folder: "cook", filename: "medical.pdf", checksum: "x3", uploaded: "2026-01-01" },
   ];
-  const listed = lib.doubleUpsOf(certs, { superseded: [{ person: "EVANS, BRENTON", code: "QL-04", filename: "old.pdf", kept: "new.pdf", url: "/api/files/o" }] });
+  const listed = lib.doubleUpsOf(certs, { map: {}, superseded: [{ person: "EVANS, BRENTON", code: "QL-04", filename: "old.pdf", kept: "new.pdf", url: "/api/files/o", holds: [] }] });
   is(listed.map((d) => [d.id, d.kept, d.why]), [["a2", "master.pdf", "identical copy"], ["o", "new.pdf", "replaced for QL-04"]], "the second identical copy and the replaced one, not the first copy, the new one or Cook's");
-  is(lib.doubleUpsOf(certs, null).map((d) => d.id), ["a2"], "no dates yet: the identical copies alone");
-  is(lib.doubleUpsOf([], { superseded: [{ url: "/api/files/gone" }] }), [], "a replaced file no longer on the books is not listed");
+  is(lib.doubleUpsOf(certs, null), [], "no dates yet: nothing is listed, because nothing says what a file holds");
+  is(lib.doubleUpsOf([], { map: {}, superseded: [{ url: "/api/files/gone", holds: [] }] }), [], "a replaced file no longer on the books is not listed");
+  /* A document that still holds a cell is never a double up (27 Sep 2026:
+     sixteen were listed for the one column a newer document had taken while
+     holding others, Delete all took them, and 28 cells went blank). The
+     server says what each replaced one still holds; an entry made before it
+     said so is not trusted; and an identical copy that holds a cell stays. */
+  const more = [
+    ...certs,
+    { id: "m", person: "EVANS, Brenton", folder: "evans", filename: "master-old.pdf", checksum: "x4", uploaded: "2022-09-27" },
+    { id: "p", person: "EVANS, Brenton", folder: "evans", filename: "before.pdf", checksum: "x5", uploaded: "2021-01-01" },
+  ];
+  const holding = {
+    map: { "EVANS, BRENTON::QL-03": { url: "/api/files/a2" }, "EVANS, BRENTON::QL-01": { url: "/api/files/m" } },
+    superseded: [
+      { person: "EVANS, BRENTON", code: "QL-04", filename: "old.pdf", kept: "new.pdf", url: "/api/files/o", holds: [] },
+      { person: "EVANS, BRENTON", code: "QL-14", filename: "master-old.pdf", kept: "gmdss.pdf", url: "/api/files/m", holds: ["QL-01"] },
+      { person: "EVANS, BRENTON", code: "QL-08", filename: "before.pdf", kept: "after.pdf", url: "/api/files/p" },
+    ],
+  };
+  is(lib.doubleUpsOf(more, holding).map((d) => d.id), ["o"], "the Master ticket holding QL-01 and the entry with no word on what it holds stay off; the identical copy holding QL-03 too");
+  is(lib.heldBy(holding, "m"), ["QL-01"], "what a file holds, off the dates");
+  is(lib.heldBy(holding, "a2"), ["QL-03"]);
+  is(lib.heldBy(holding, "o"), [], "holds nothing");
+  is(lib.heldBy(null, "m"), [], "no dates: nothing known");
+  is(lib.emptiesLine(["QL-01", "QL-03"]), "Empties QL-01, QL-03 on the matrix", "said beside a Delete's Confirm");
+  is(lib.emptiesLine([]), "", "and nothing where it holds nothing");
+  /* The foreign certificate behind the recognition that holds the cell is
+     no double up either: the cell's date is cut to it. Its entry says
+     `behind`; the list leaves it out; its Delete says so. */
+  const withForeign = {
+    map: { "EVANS, BRENTON::QL-01": { url: "/api/files/rec" }, "EVANS, BRENTON::QL-03": { url: "/api/files/f" } },
+    superseded: [
+      { person: "EVANS, BRENTON", code: "QL-01", filename: "mca.pdf", kept: "rec.pdf", url: "/api/files/f", holds: [], behind: true },
+      { person: "EVANS, BRENTON", code: "QL-04", filename: "old.pdf", kept: "new.pdf", url: "/api/files/o", holds: [], behind: false },
+    ],
+  };
+  const foreignCerts = [...certs, { id: "f", person: "EVANS, Brenton", folder: "evans", filename: "mca.pdf", checksum: "x9", uploaded: "2020-01-01" }];
+  is(lib.doubleUpsOf(foreignCerts, withForeign).map((d) => d.id), ["a2", "o"], "the foreign certificate behind the recognition is not listed");
+  is(lib.behindFor(withForeign, "f"), ["QL-01"], "where it is the one behind the recognition");
+  is(lib.deleteWarn(withForeign, "f"), "Empties QL-03 on the matrix; Behind the recognition for QL-01 on the matrix", "its Delete says both");
+  is(lib.deleteWarn(withForeign, "o"), "", "a true double up: nothing to say");
+  is(lib.deleteWarn(holding, "m"), "Empties QL-01 on the matrix");
+  {
+    const upload = readFileSync(join(ROOT, "source", "parts", "upload-certificates.jsx"), "utf8");
+    is((upload.match(/warn=\{deleteWarn\(certDates, c\.id\)\}/g) || []).length, 2, "both Delete buttons on Documents say what they would do");
+    // Delete all asks for fresh dates first and removes what that answer lists - never the list on screen.
+    is(upload.includes("const fresh = await refreshCertDates();"), true, "Delete all asks for the dates again first");
+    is(upload.includes("return removeCertificates(doubleUpsOf(certsRef.current, fresh), step);"), true, "and removes what the fresh answer lists");
+    is(upload.includes('return { done: [], failed: [], line: "The certificates could not be checked, so nothing was removed." };'), true, "and nothing where the dates could not be had");
+    is(/React\.useEffect\(\(\) => \{\s*if \(firstDates\.current\)/.test(upload), true, "the dates are asked for on arriving at Documents and after the certificates change");
+    // The copies kept off the person lists are exactly the identical copies the Double ups list carries,
+    // so a copy that holds a cell is on the person's list and not on no list at all.
+    is(upload.includes('const dupExtras = useMemo(() => doubleUps.filter((d) => d.why === "identical copy"), [doubleUps]);'), true,
+      "the person lists set aside exactly the identical copies the Double ups list shows");
+  }
   /* What a position must hold is read off the office's skills matrix, whose
      positions are spelt its way ("ONS-MRN-TSV Second Mate", "Assistant
      Engineer") while the register spells the vessel's ("SECOND OFFICER",
@@ -3248,7 +3302,7 @@ const is = (got, want, what) => {
   is(/Confirm/.test(btn) && /Keep/.test(btn), true, "asks once before it runs");
   const upload = readFileSync(join(ROOT, "source", "parts", "upload-certificates.jsx"), "utf8");
   is(/<AllButton label="Delete all" busy="Deleting" count={doubleUps.length}/.test(upload), true, "Delete all sits on the Double ups list");
-  is(upload.includes("removeCertificates(doubleUps, step)"), true, "and takes the whole list off the books");
+  is(upload.includes("run={deleteAllDoubleUps}"), true, "and takes the whole list off the books, as freshly listed");
   is(/<AllButton label="Restore all" busy="Restoring"/.test(src), true, "Restore all sits on the removed files list");
   // The removed list lives on Documents, under the lists Delete works from,
   // where a management login can reach it - not under the IT-only plumbing.
