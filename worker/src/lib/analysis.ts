@@ -19,13 +19,14 @@ import { vessel } from "../vessel.js";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { documents } from "../db/schema.js";
-import { fileStore } from "../db/documents.js";
+import { fileStore, liveSingleFileRow } from "../db/documents.js";
 import { OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM } from "../../../source/shared/reading-lines.js";
 import { coveredCells } from "../../../source/shared/covers.js";
 import { isRecognitionReading, recognisedUntil, recognitionFills } from "../../../source/shared/recognition.js";
 import { coveredBy, paperKind } from "../../../source/shared/evidence.js";
 import { filedCodeIn } from "../../../source/shared/filed-as.js";
 import { crewRegister, nameIsSomebodyElse, whoseCertificate } from "../../../source/shared/names.js";
+import { isMsicCard, msicCodeIn, msicExpiry } from "../../../source/shared/particulars.js";
 import { readDocument } from "./shared-state.js";
 
 // Certificates are read with a vision model — most of them are scans rather than
@@ -287,7 +288,130 @@ export function readingStore() {
  *  same nothing - a reading made now drops it as it is read (notAfterToday). */
 export function asLoaded(reading: Reading | null): Reading | null {
   if (reading && reading.issuedOn && reading.issuedOn > todayThere()) reading.issuedOn = null;
+  /* An MSIC card runs to the last day of the month it prints (msicExpiry):
+     a reading that took the 1st is folded to the month's end here, so the
+     round, the page's cells and the office's workbook all carry the day the
+     card actually runs to. */
+  if (reading && reading.expiresOn && isMsicCard(reading, MSIC_CODE)) {
+    reading.expiresOn = msicExpiry(reading.expiresOn) as string;
+  }
   return reading;
+}
+/** Whether AMSA issued this document. An AMSA ticket is a certificate in
+ *  its own right and never the foreign certificate behind a recognition. */
+export function issuedByAmsa(reading: Reading | null | undefined): boolean {
+  return /australian maritime safety authority|\bamsa\b/i.test(String((reading && reading.issuer) || ""));
+}
+
+/** The MSIC column, found by its title in the vessel file (msicCodeIn). */
+const MSIC_CODE = msicCodeIn(vessel.qualColumns);
+
+// "2 years", "24 months", "every 5 years" — the shapes a validity period is
+// written in where the reading couldn't give it as a plain number of months.
+export function monthsFrom(text: string | null | undefined): number | null {
+  const m = /(\d+(?:\.\d+)?)\s*(years?|yrs?|months?|mths?|mos?)\b/i.exec(text || "");
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return /^y/i.test(m[2]) ? Math.round(n * 12) : Math.round(n);
+}
+
+// An issue date plus a validity period, with the day clamped so 31 January plus
+// one month is 28 February rather than the 3rd of March.
+export function addMonths(iso: string, months: number): string {
+  const [y, mo, d] = iso.split("-").map(Number);
+  const total = mo - 1 + months;
+  const ny = y + Math.floor(total / 12);
+  const nm = (total % 12) + 1;
+  const last = new Date(Date.UTC(ny, nm, 0)).getUTCDate();
+  return `${ny}-${String(nm).padStart(2, "0")}-${String(Math.min(d, last)).padStart(2, "0")}`;
+}
+
+export type Period = { months: number | null; neverExpires: boolean };
+
+/**
+ * The validity periods matrix, as a lookup by matrix code and by item title.
+ *
+ * The reading is the one the matrix analysis keeps — made when the document was
+ * filed, or by the run that is asking now — so the comparison pays nothing to
+ * use it. Null where no validity periods matrix is filed, or where the one that
+ * is hasn't been read yet: the comparison then runs as it always did, on the
+ * dates printed on the certificates alone.
+ */
+export async function validityPeriods() {
+  // The validity periods are read off the skills matrix — the office folded
+  // the old separate validity spreadsheet into it, so the latest skills
+  // matrix is always the source.
+  const row = await liveSingleFileRow("skills-matrix");
+  if (!row) return null;
+
+  const held = (await matrixStore().get(matrixReadingKey("validity", row.id), {
+    type: "json",
+  })) as MatrixReading | null;
+  if (!held || !held.reading || held.reading.readable === false) return null;
+
+  const listed = Array.isArray(held.reading.periods) ? held.reading.periods : [];
+  const byCode = new Map<string, Period>();
+  const byTitle = new Map<string, Period>();
+
+  for (const p of listed as Record<string, unknown>[]) {
+    if (!p || typeof p !== "object") continue;
+    const months =
+      typeof p.months === "number" && p.months > 0
+        ? Math.round(p.months)
+        : monthsFrom(str(p.validFor));
+    const entry: Period = { months, neverExpires: p.neverExpires === true };
+    if (entry.months == null && !entry.neverExpires) continue;
+    const code = str(p.code);
+    const item = str(p.item);
+    if (code) byCode.set(code.toUpperCase(), entry);
+    if (item) byTitle.set(periodTitleKey(item), entry);
+  }
+
+  if (!byCode.size && !byTitle.size) return null;
+  return { filename: row.filename, byCode, byTitle };
+}
+
+/** How a validity period's item title is keyed: its words, lower case, one
+ *  space apart - so "Adv Resuscitation and Oxygen Therapy - HLTAID015" finds
+ *  the period whichever way the column's title is punctuated. */
+function periodTitleKey(s: string | null | undefined) {
+  return (s || "")
+    .normalize("NFKD")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length > 1)
+    .join(" ");
+}
+
+export type Validity = Awaited<ReturnType<typeof validityPeriods>>;
+
+/** The office's validity period for one column - by its code, then by its
+ *  title - or null where the validity periods matrix gives none. */
+export function periodFor(validity: Validity, code: string, title?: string | null): Period | null {
+  if (!validity) return null;
+  return validity.byCode.get(String(code || "").trim().toUpperCase())
+    || (title ? validity.byTitle.get(periodTitleKey(title)) : undefined)
+    || null;
+}
+
+/** The latest day a document can carry a column it covers: the office's
+ *  period for THAT column, counted from the document's own issue date
+ *  (addMonths). A first-aid statement prints three years and lists the
+ *  advanced resuscitation unit as well, and that unit is good for one year on
+ *  the office's own sheet - so the column it covers runs one year from the
+ *  statement, not three (27 Sep 2026: Dylan Evans's QL-19 read 2029 off his
+ *  first aid while his own QL-19 ran out in 2027). Null where there is no
+ *  period, no issue date, or the column never lapses: nothing to cap by. */
+export function termEnd(validity: Validity, code: string, title: string | null | undefined, issued: string | null | undefined): string | null {
+  const period = periodFor(validity, code, title);
+  if (!period || period.neverExpires || !period.months) return null;
+  const day = String(issued || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  // Counted exactly as the round counts a certificate's own column from its
+  // issue date, so a covered cell and the certificate that is the column
+  // are compared on the same footing.
+  return addMonths(day, period.months);
 }
 
 export async function allReadings(): Promise<Map<string, Reading>> {
@@ -970,6 +1094,24 @@ export function columnsFor(
     const at = code.trim().toUpperCase();
     return !!at && (!live || live.has(at)) && (!register || register.has(at));
   };
+  /* A column the vessel file reads only off a certificate's printed
+     capacities - GMDSS, QL-14: a class of its own (MO70 s 7(1)(ca)), so "IV/2"
+     in a ticket's regulation list fills nothing, and a ticket that itself
+     certifies the radio operator capacity fills it through the covers table.
+     The reader's word fills such a column only where the document IS that
+     certificate: its own column, the one the reading names first. Anything
+     else is the rule's to decide, never the reader's. 27 Sep 2026: two AMSA
+     Master tickets were placed on QL-14 on "GMDSS endorsement IV/2 listed" and
+     cut the men's GMDSS cells back to the Master tickets' expiry. */
+  const capacityOnly = new Set(vessel.covers
+    .filter((r) => r && r.from === "capacities")
+    .map((r) => String(r.code || "").trim().toUpperCase()));
+  const ownOf = String(reading.qualCode || "").trim().toUpperCase()
+    || String((reading.columns.find((c) => c && typeof c.code === "string") || { code: "" }).code).trim().toUpperCase();
+  const readerMay = (code: string) => {
+    const at = code.trim().toUpperCase();
+    return !capacityOnly.has(at) || at === ownOf;
+  };
   const out: PlacedColumn[] = [];
   const has = (code: string) => out.some((c) => c.code.trim().toUpperCase() === code.trim().toUpperCase());
   const add = (c: PlacedColumn) => { if (may(c.code) && !has(c.code)) out.push(c); };
@@ -991,9 +1133,9 @@ export function columnsFor(
     // line for a look: the office's filing alone never makes one evidence.
     else if (!register) add({ code: filed, by: "filed" });
   }
-  said.filter((c) => c.confidence === "high").forEach((c) => add({ code: c.code, by: "read", confidence: "high" }));
+  said.filter((c) => c.confidence === "high" && readerMay(c.code)).forEach((c) => add({ code: c.code, by: "read", confidence: "high" }));
   if (sheet) add({ code: sheet, by: "sheet" });
-  said.filter((c) => c.confidence === "medium").forEach((c) => add({ code: c.code, by: "read", confidence: "medium", why: c.why ?? null }));
+  said.filter((c) => c.confidence === "medium" && readerMay(c.code)).forEach((c) => add({ code: c.code, by: "read", confidence: "medium", why: c.why ?? null }));
   return out;
 }
 
@@ -1128,6 +1270,15 @@ export async function certificateStanding() {
      the round reads the same columns (compareMatrix is handed the matrix). */
   const liveCols = (cur?.doc.quals as { cols?: unknown } | null | undefined)?.cols;
   const cols = Array.isArray(liveCols) ? liveCols : [];
+  /* The office's validity periods, for the columns a document covers by a
+     printed unit code (termEnd) - the same periods the round works a cell
+     out by. None filed or none read: no cap, as before. */
+  const validity = await validityPeriods().catch(() => null);
+  const titleOf = (code: string) => {
+    const at = code.trim().toUpperCase();
+    const c = (vessel.qualColumns as unknown[][]).find((x) => String(x[0] || "").trim().toUpperCase() === at);
+    return c ? String(c[1] || "") : null;
+  };
 
   const readings = await Promise.all(
     certs.map(async (row) => ({
@@ -1159,6 +1310,8 @@ export async function certificateStanding() {
       issued: string | null; expires: string | null; issuer: string | null; fileId: string | null;
       covered?: boolean; recognition?: boolean; foreignUnknown?: boolean;
       assessedOn?: string | null; conditions?: string | null;
+      /** Placed only by the reader, on a medium (a level, an equivalence). */
+      weak?: boolean;
     }
   >();
   /* Every certificate that reached a column of its own, kept for the covering
@@ -1170,6 +1323,7 @@ export async function certificateStanding() {
   const standing: {
     row: Row; reading: Reading; code: string; key: string;
     expires: string | null; issued: string | null; issuer: string | null;
+    weak: boolean;
   }[] = [];
   /* The expiry of the foreign certificate itself, where one is on the portal
      for the same column. A recognition can never run longer than what it
@@ -1189,7 +1343,7 @@ export async function certificateStanding() {
      aside, with the one that holds the cell named beside it (resolved once
      the contest is over, since a later document can take the cell again).
      The grid wears it as a small count on the cell (certTwoFor). */
-  const superseded: { key: string; person: string; code: string; filename: string; fileId: string; kept: string; behind: boolean }[] = [];
+  const superseded: { key: string; person: string; code: string; filename: string; fileId: string; kept: string; behind: boolean; placedOnly: boolean }[] = [];
   const fileNameOf = new Map(certs.map((r) => [r.id, r.filename]));
   for (const { row, reading } of readings) {
     if (!reading || !row.person || !row.person.trim()) continue;
@@ -1288,8 +1442,14 @@ export async function certificateStanding() {
       // An item recorded as carrying no expiry has none to show either way.
       const expires = neverLapses(at) ? null : typed || reading.expiresOn || null;
       const key = `${person.trim().toUpperCase()}::${at}`;
-      if (!isRecognitionReading(reading) && expires && expires > (foreignAt.get(key) || "")) foreignAt.set(key, expires);
-      standing.push({ row, reading, code: at, key, expires, issued, issuer });
+      /* Only a document that can be the foreign certificate is taken as the
+         one behind a recognition: never another recognition, and never one
+         AMSA issued (issuedByAmsa) - an AMSA ticket in the same column is a
+         certificate in its own right, not the foreign one, and cutting the
+         recognition to it put two men's GMDSS cells back years
+         (27 Sep 2026). The round decides it the same way. */
+      if (!isRecognitionReading(reading) && !issuedByAmsa(reading) && expires && expires > (foreignAt.get(key) || "")) foreignAt.set(key, expires);
+      standing.push({ row, reading, code: at, key, expires, issued, issuer, weak: c.by === "read" && c.confidence === "medium" });
       // A dated column with nothing read off the scan - no expiry, no issue
       // date - fills nothing, and says so rather than leaving a cell empty.
       if (!neverLapses(at) && !expires && !issued) {
@@ -1312,7 +1472,7 @@ export async function certificateStanding() {
    *  force for its own column covers another column. */
   const inForce = new Map<string, { row: Row; reading: Reading }>();
 
-  for (const { row, reading, code, key, expires: ownExpiry, issued, issuer } of standing) {
+  for (const { row, reading, code, key, expires: ownExpiry, issued, issuer, weak } of standing) {
     const { until: expires, foreignUnknown } = dateFor(reading, key, ownExpiry);
     const mineIsRec = isRecognitionReading(reading);
     const sitting = claim.get(key);
@@ -1338,10 +1498,24 @@ export async function certificateStanding() {
       /* Neither running the longer - two induction forms print no expiry -
          the one issued last is in force, as the round decides it. */
       const byLater = (expires || "") === (sitting.expires || "") && (issued || "") !== (sitting.issued || "");
-      const beats = mineIsRec !== !!sitting.recognition
-        ? (mineIsRec ? recognitionHolds() : !recognitionHolds())
-        : byIssue || byLater ? (issued || "") > (sitting.issued || "")
-          : (expires || "") > (sitting.expires || "");
+      /* A document the reader only placed here on a medium - by a level, an
+         equivalence, "includes CPR" - never displaces the column's own
+         certificate (a hand tag, the office's filed code, the equivalence
+         sheet, a sure reading), whatever the dates. 27 Sep 2026: Evgeny
+         Evdokimov's advanced resuscitation statement was placed on QL-18 on
+         "includes HLTAID009 CPR", was issued a fortnight after his First Aid
+         certificate, took the cell on the later issue date, and the Double
+         ups list then offered his First Aid certificate for deletion. Two
+         documents of the same standing fall to the dates as before. The
+         round decides it the same way (compareMatrix). */
+      const byRank = mineIsRec === !!sitting.recognition && weak !== !!sitting.weak;
+      const sameDates = (issued || "") === (sitting.issued || "") && (expires || "") === (sitting.expires || "");
+      const beats = byRank
+        ? !weak
+        : mineIsRec !== !!sitting.recognition
+          ? (mineIsRec ? recognitionHolds() : !recognitionHolds())
+          : byIssue || byLater ? (issued || "") > (sitting.issued || "")
+            : (expires || "") > (sitting.expires || "");
       if (!beats) {
         // An issue date or issuer is still worth carrying over where the one
         // in force didn't print one. The file the line links to stays the
@@ -1353,14 +1527,20 @@ export async function certificateStanding() {
            date is cut to its expiry (MO70 s 33(2), s 37(4)), and with it
            gone the recognition would run to what it printed - so the list on
            Documents leaves it out (27 Sep 2026). */
-        superseded.push({ key, person: key.slice(0, key.indexOf("::")), code, filename: row.filename, fileId: row.id, kept: "", behind: !mineIsRec && !!sitting.recognition });
+        /* `placedOnly`: the loser was only the reader's "maybe" for this
+           column, beaten by the column's own certificate, and is another
+           document - not a second copy of it, so no double up and no "2 on
+           file" on the cell. A "maybe" printing the very dates of the one
+           that beat it is a copy of it, and stays a double up (sameDates). */
+        superseded.push({ key, person: key.slice(0, key.indexOf("::")), code, filename: row.filename, fileId: row.id, kept: "", behind: !mineIsRec && !!sitting.recognition, placedOnly: byRank && weak && !sameDates });
         continue;
       }
-      superseded.push({ key, person: key.slice(0, key.indexOf("::")), code, filename: fileNameOf.get(String(sitting.fileId)) || "", fileId: String(sitting.fileId || ""), kept: "", behind: mineIsRec && !sitting.recognition });
+      superseded.push({ key, person: key.slice(0, key.indexOf("::")), code, filename: fileNameOf.get(String(sitting.fileId)) || "", fileId: String(sitting.fileId || ""), kept: "", behind: mineIsRec && !sitting.recognition, placedOnly: byRank && !!sitting.weak && !sameDates });
       claim.set(key, {
         issued: issued || sitting.issued, expires, issuer: issuer || sitting.issuer,
         fileId: row.id, recognition: mineIsRec, foreignUnknown,
         assessedOn: reading.assessedOn || null, conditions: (reading.conditions || "").trim() || null,
+        weak,
       });
       inForce.set(key, { row, reading });
       continue;
@@ -1368,6 +1548,7 @@ export async function certificateStanding() {
     claim.set(key, {
       issued, expires, issuer, fileId: row.id, recognition: mineIsRec, foreignUnknown,
       assessedOn: reading.assessedOn || null, conditions: (reading.conditions || "").trim() || null,
+      weak,
     });
     inForce.set(key, { row, reading });
   }
@@ -1407,10 +1588,24 @@ export async function certificateStanding() {
         continue;
       }
       if (!cell.until) continue;
-      const { until, foreignUnknown } = dateFor(reading, key, cell.until);
+      /* A column reached by a printed unit code runs no longer than the
+         office's period for it from the document's issue date (termEnd): the
+         statement's own expiry is the statement's, not that unit's. */
+      const title = titleOf(cell.code);
+      const term = cell.unit ? termEnd(validity, cell.code, title, reading.issuedOn) : null;
+      const { until, foreignUnknown } = dateFor(reading, key, term && term < cell.until ? term : cell.until);
       if (!until) continue;
       const sitting = claim.get(key);
-      if (sitting && (sitting.expires || "") >= until) continue;
+      /* The column's own certificate on the date it actually runs to: where
+         it prints no expiry, its issue date and the office's period for the
+         column, as the round works its cell out - or a cover with a date
+         would beat a current certificate only for printing nothing. */
+      const held = sitting ? sitting.expires || (sitting.covered ? null : termEnd(validity, cell.code, title, sitting.issued)) : null;
+      if (sitting && (held || "") >= until) continue;
+      if (sitting && !sitting.covered && sitting.fileId) {
+        superseded.push({ key, person, code: cell.code.trim().toUpperCase(), filename: fileNameOf.get(String(sitting.fileId)) || "",
+          fileId: String(sitting.fileId), kept: "", behind: false, placedOnly: false });
+      }
       claim.set(key, {
         issued: reading.issuedOn || null,
         expires: until,

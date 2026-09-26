@@ -5596,6 +5596,8 @@ function Portal({ role, onSignOut }) {
         ...(Array.isArray(f.holds) ? { holds: f.holds.map((c) => String(c).toUpperCase()) } : {}),
         // The foreign certificate behind the recognition that holds the cell.
         behind: !!f.behind,
+        // Only the reader's "maybe" for the column, beaten by its own certificate.
+        placedOnly: !!f.placedOnly,
       }));
       const next = { at: r.at || new Date().toISOString(), map, covers, filedAs, notOnMatrix, placed, readAs, notPlaced, superseded };
       setCertDates(next);

@@ -193,6 +193,11 @@ on any line that still names this one.
   MSIC card read with no expiry is looked at once more by the hour's top-up
   (`expiryAsked`), first in its queue, its expiry taken from the second
   look where the first read none - the one date a second look may add.
+  And any day read off a card is the last day of its month
+  (`msicExpiry` in `source/shared/particulars.js`, folded as every
+  reading loads - `asLoaded` - so the round, the page's cells and the
+  office's workbook agree): on 27 Sep 2026 ten cards read the 1st and a
+  leap-year February read the 28th.
   Crew are never handed either: a crew login's `GET /api/state` (and a
   save's 409) is the crew's copy of the document (`crewStateView` in
   `authz.ts` - no `msic`, no `dob`, no `particularsFromCert`), a crew
@@ -465,7 +470,17 @@ on any line that still names this one.
     classes ("C6, DG, LF, RB, WP") are listed as units too and read as whole
     tokens by a row saying `from: "units"` (DG to HR-01, CV to HR-02, the
     licence's own date), and a document that is no one column still covers
-    the columns its reading names. **GMDSS is never read off a certificate
+    the columns its reading names. **A column reached by a printed unit code
+    runs no longer than the office's validity period for it**, counted from
+    the document's issue date (`termEnd` in `worker/src/lib/analysis.ts`;
+    `coveredCells` marks such a cell `unit`): a statement's own expiry is
+    the statement's, not the unit's (27 Sep 2026: Dylan Evans's three-year
+    first-aid statement listed HLTAID015 and carried his one-year QL-19 to
+    2029 over his own QL-19 running to 2027). An endorsement is dated by the
+    orders and never capped. In the contest for a covered cell the column's
+    own certificate is counted on the date its cell would carry - where it
+    prints none, its issue date and the office's period - and a certificate
+    a cover displaces is on the page's `superseded` as the round says it. **GMDSS is never read off a certificate
     of competency as an endorsement** - it is a class of its own with its own
     term (s 7(1)(ca), s 21B), so "IV/2" printed in a ticket's regulation list
     fills nothing. The one exception: AMSA prints some tickets with two
@@ -473,7 +488,15 @@ on any line that still names this one.
     Radio Operator), and a document that itself certifies the holder may
     serve in the GMDSS radio operator *capacity* is that certificate - the
     reading lists the printed `capacities` and a row saying
-    `from: "capacities"` reads them into QL-14, never an endorsement. A row's
+    `from: "capacities"` reads them into QL-14, never an endorsement - and
+    never the reader's word either: a column the covers table reads only off
+    capacities is filled on the reader's word only where it is the
+    document's own column, the reading's `qualCode` or first column
+    (`columnsFor`; 27 Sep 2026: two Master tickets were placed on QL-14 on
+    "GMDSS endorsement IV/2 listed"). And an AMSA-issued document is never
+    taken as the foreign certificate behind a recognition (`issuedByAmsa`,
+    both sides): those Master tickets, standing in the GMDSS column, cut the
+    men's GMDSS recognitions back to 2027 against a certificate printing 2031. A row's
     `unless` is an exclusion that wins over its pattern: the survival craft
     endorsement is printed "other than fast rescue boats" (s 37(3) item 1)
     and fills no QL-16, and a type-specific Furuno course is VS-02, not the
@@ -559,7 +582,18 @@ on any line that still names this one.
     or two cards to the same day - **the one issued last is in force** (26
     Sep 2026: nineteen renewed induction forms lost their cells to the 2024
     forms they renewed, because a tie went to whichever was filed first, and
-    the cells stayed expired). A column that carries no expiry is never
+    the cells stayed expired). **A document the reader only placed on a
+    medium never displaces the column's own certificate** - a hand tag, the
+    office's filed code, the equivalence sheet or a sure reading - whatever
+    the dates (`byRank` in both contests; 27 Sep 2026: an advanced
+    resuscitation statement placed on QL-18 on "includes HLTAID009 CPR" took
+    Evgeny Evdokimov's First Aid cell on a later issue date, and an Advanced
+    Fire Fighting course placed on QL-12 held Matthew Kingdon's COST cell to
+    2030 over the COST itself, expiring 2028). The loser is `placedOnly` on
+    the page's `superseded`: not a second copy of anything, so no double up
+    and no "2 on file" - unless it prints the very dates of the one that
+    beat it (`sameDates`), which makes it a copy and a double up again. Two
+    documents of the same standing fall to the dates as before. A column that carries no expiry is never
     covered by a date: it is held or it isn't. The round and the page's
     cells (`compareMatrix` in `worker/src/routes/analyse.ts`,
     `certificateStanding` in `worker/src/lib/analysis.ts`) decide every cell the

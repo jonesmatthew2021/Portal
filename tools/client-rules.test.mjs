@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, recognisedUntil, recognitionFills, foreignExpiryOn, isRecognitionReading, certCoverFor, certFlagFor, flagLine, certTwoFor, twoLine, doubleUpsOf, heldBy, emptiesLine, behindFor, deleteWarn, requiredCodesFor, coverLine, bandWithCover, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, paperKind, EVIDENCE_KINDS, EVIDENCE_LABELS, marineOrderLines, filedAsLines, notOnMatrixLines, filedCodeIn, filedAsLine, tagWarning, readingLines, placedLine, readAsLine, notPlacedLines, nameIsSomebodyElse, matrixHeadOffset, headPixels, scrollPair, rosterSwing, rosterPeopleFor, swingAt, oneByOne, oneByOneLine, AllButton };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, msicExpiry, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, recognisedUntil, recognitionFills, foreignExpiryOn, isRecognitionReading, certCoverFor, certFlagFor, flagLine, certTwoFor, twoLine, doubleUpsOf, heldBy, emptiesLine, behindFor, deleteWarn, requiredCodesFor, coverLine, bandWithCover, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, paperKind, EVIDENCE_KINDS, EVIDENCE_LABELS, marineOrderLines, filedAsLines, notOnMatrixLines, filedCodeIn, filedAsLine, tagWarning, readingLines, placedLine, readAsLine, notPlacedLines, nameIsSomebodyElse, matrixHeadOffset, headPixels, scrollPair, rosterSwing, rosterPeopleFor, swingAt, oneByOne, oneByOneLine, AllButton };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -2907,6 +2907,25 @@ const is = (got, want, what) => {
   is(lib.deleteWarn(withForeign, "f"), "Empties QL-03 on the matrix; Behind the recognition for QL-01 on the matrix", "its Delete says both");
   is(lib.deleteWarn(withForeign, "o"), "", "a true double up: nothing to say");
   is(lib.deleteWarn(holding, "m"), "Empties QL-01 on the matrix");
+  /* A reader's "maybe" beaten by the column's own certificate (placedOnly,
+     27 Sep 2026: an advanced resuscitation statement set aside for QL-18 by
+     the First Aid certificate) is not a second copy of anything: no double
+     up, no "2 on file" on the cell. */
+  const maybe = {
+    map: {},
+    superseded: [
+      { person: "EVANS, BRENTON", code: "QL-18", filename: "resus.pdf", kept: "firstaid.pdf", url: "/api/files/o", holds: [], behind: false, placedOnly: true },
+    ],
+  };
+  is(lib.doubleUpsOf(certs, maybe).map((d) => d.id), ["a2"], "the 'maybe' is not offered for deletion");
+  is(lib.certTwoFor(maybe, "EVANS, BRENTON", "QL-18"), null, "and the cell wears no '2 on file'");
+  /* An MSIC card runs to the last day of the month it prints ("FEB 30"). */
+  is(lib.msicExpiry("2029-10-01"), "2029-10-31", "the 1st of the month is the month's end");
+  is(lib.msicExpiry("2028-02-28"), "2028-02-29", "a leap-year February runs to the 29th");
+  is(lib.msicExpiry("2027-02-01"), "2027-02-28", "and an ordinary one to the 28th");
+  is(lib.msicExpiry("2030-12-31"), "2030-12-31", "the last day stays");
+  is(lib.msicExpiry(null), null, "nothing read is nothing");
+  is(lib.msicExpiry("FEB 30"), "FEB 30", "anything that is not a date comes back as it was");
   {
     const upload = readFileSync(join(ROOT, "source", "parts", "upload-certificates.jsx"), "utf8");
     is((upload.match(/warn=\{deleteWarn\(certDates, c\.id\)\}/g) || []).length, 2, "both Delete buttons on Documents say what they would do");

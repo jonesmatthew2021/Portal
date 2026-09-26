@@ -1080,7 +1080,8 @@ test("covers: a unit code printed on a training statement fills every column who
      the same certificate: HLTAID011 is its own column and HLTAID015 another,
      both running to the statement's own expiry. */
   const statement = { expiresOn: "2029-03-01", units: ["HLTAID011", "HLTAID015"] };
-  assert.deepEqual(cellsCovered(statement, "QL-18"), [{ code: "QL-19", until: "2029-03-01" }],
+  // Marked `unit`: reached by a unit code, so the caller holds it to the office's period for QL-19.
+  assert.deepEqual(cellsCovered(statement, "QL-18"), [{ code: "QL-19", until: "2029-03-01", unit: true }],
     "the column it fills itself is not covered again");
   assert.deepEqual(codesCovered(statement, null), ["QL-18", "QL-19"], "filed against nothing, it covers both");
   assert.deepEqual(codesCovered({ units: ["HLTAID009"] }, "QL-18"), [], "a unit no column names fills nothing");

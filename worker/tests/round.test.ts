@@ -18,7 +18,7 @@ import analyse, { compareMatrix, conditionsFrom, extract, holderFrom, refile, to
 import readOne from "../src/routes/read-one.js";
 import restoreFile from "../src/routes/restore-file.js";
 import { MAX_BYTES } from "../src/lib/shared-state.js";
-import { OUT_OF_CREDIT, READING_UNAVAILABLE, READING_VERSION, certificateStanding, codeFor } from "../src/lib/analysis.js";
+import { OUT_OF_CREDIT, READING_UNAVAILABLE, READING_VERSION, certificateStanding, codeFor, columnsFor } from "../src/lib/analysis.js";
 import { KeptInPlace, ensureDocumentColumns, filingName, forgetDocumentColumns, purgeDocument, relocateToRemovedBlob, removeDocument, restoreDocument, safeName } from "../src/db/documents.js";
 import { replaceSingleFile } from "../src/db/single-file.js";
 import { saveDocument } from "../src/lib/shared-state.js";
@@ -1171,37 +1171,33 @@ test("two documents neither running the longer: the one issued last holds the ce
 });
 
 test("double ups: a certificate set aside for one column but holding others is no double up, and both sides say so", async () => {
-  /* 27 Sep 2026. A Master ticket reads as evidence for QL-01 (its own) and,
-     on a medium, for QL-14 - and the GMDSS certificate beside it runs the
-     longer for QL-14. The ticket lost that one contest and went on the
-     Double ups list as "replaced for QL-14", still holding QL-01, QL-02,
-     QL-03, QL-08 and QL-13; sixteen such documents were deleted off the
-     list in one press and 28 cells went blank. So: the page's superseded
-     entry carries what the document still holds, the round's note says the
-     same, and the list on Documents leaves it out. */
+  /* 27 Sep 2026. Sixteen documents were on the Double ups list for the one
+     column a newer document had taken while they still held others - a
+     Master ticket "replaced" for one column and still holding QL-01, QL-02,
+     QL-03, QL-08 and QL-13 - and deleting them blanked 28 cells. Here a
+     Master ticket the reader is sure answers for QL-04 as well loses QL-04
+     to the QL-04 certificate that runs the longer, and still holds its own
+     QL-01: the page's superseded entry says what it holds, the round's note
+     says the same, and the list on Documents leaves it out. */
   const { portal, env } = await smartPortal([
     { id: "master", filename: "master.pdf", reading: { certificateTitle: "Certificate of Competency - Master", qualCode: "QL-01", codeConfidence: "high",
       issuedOn: "2022-09-27", expiresOn: "2027-09-26",
-      columns: [{ code: "QL-01", confidence: "high", why: null }, { code: "QL-14", confidence: "medium", why: "lists IV/2 among its regulations" }] } },
-    { id: "gmdss", filename: "gmdss.pdf", reading: { certificateTitle: "GMDSS General Operator's Certificate", qualCode: "QL-14", codeConfidence: "high",
-      issuedOn: "2026-03-10", expiresOn: "2031-03-09", columns: [{ code: "QL-14", confidence: "high", why: null }] } },
+      columns: [{ code: "QL-01", confidence: "high", why: null }, { code: "QL-04", confidence: "high", why: null }] } },
+    { id: "nc", filename: "nc.pdf", reading: { certificateTitle: "Certificate of Competency - Master <45m Near Coastal", qualCode: "QL-04", codeConfidence: "high",
+      issuedOn: "2026-03-10", expiresOn: "2031-03-09", columns: [{ code: "QL-04", confidence: "high", why: null }] } },
   ]);
-  const doc = portal.doc();
-  doc.quals.cols.push(["QL-14", "GMDSS - STCW Reg IV/2", "Qualification"]);
-  doc.quals.rows[0][3].push("");
-  portal.state.data = JSON.stringify(doc);
   await worker.scheduled({} as never, env as never);
   assert.equal(evansCell(portal, "QL-01"), "2027-09-26", "the ticket holds its own column");
-  assert.equal(evansCell(portal, "QL-14"), "2031-03-09", "the GMDSS certificate holds QL-14");
+  assert.equal(evansCell(portal, "QL-04"), "2031-03-09", "the QL-04 certificate holds QL-04");
   const said = await roundNotes(portal, "superseded");
   assert.equal(said.length, 1);
-  // The refile has renamed both by now ("EVANS, Brenton - QL-14 GMDSS ..."), so the note is held to its words.
-  assert.match(said[0], /^Two certificates on file for QL-14\. .*GMDSS.* runs the longer, so .*Master.* is treated as the one it replaced\. It still holds QL-01, so it is not a double up\.$/);
+  // The refile has renamed both by now, so the note is held to its words.
+  assert.match(said[0], /^Two certificates on file for QL-04\. .* runs the longer, so .* is treated as the one it replaced\. It still holds QL-01, so it is not a double up\.$/);
   const page = await certificateStanding();
-  assert.deepEqual(page.dates.filter((d) => d.code === "QL-01" || d.code === "QL-14").map((d) => [d.code, d.fileId]).sort(), [["QL-01", "master"], ["QL-14", "gmdss"]],
+  assert.deepEqual(page.dates.filter((d) => d.code === "QL-01" || d.code === "QL-04").map((d) => [d.code, d.fileId]).sort(), [["QL-01", "master"], ["QL-04", "nc"]],
     "the page's cells open the same documents");
-  assert.deepEqual(page.superseded.map((s) => [s.fileId, s.code, s.holds]), [["master", "QL-14", ["QL-01"]]],
-    "set aside for QL-14, and what it still holds is said");
+  assert.deepEqual(page.superseded.map((s) => [s.fileId, s.code, s.holds]), [["master", "QL-04", ["QL-01"]]],
+    "set aside for QL-04, and what it still holds is said");
   // Two plain copies of the one certificate: the one set aside holds nothing.
   const twice = await smartPortal([
     { id: "old", filename: "old.pdf", reading: { qualCode: "QL-04", codeConfidence: "high", issuedOn: "2024-04-19", expiresOn: "2029-04-18", columns: [{ code: "QL-04", confidence: "high", why: null }] } },
@@ -1210,6 +1206,164 @@ test("double ups: a certificate set aside for one column but holding others is n
   await worker.scheduled({} as never, twice.env as never);
   assert.deepEqual((await certificateStanding()).superseded.map((s) => [s.fileId, s.holds]), [["old", []]], "a true double up holds nothing");
   assert.doesNotMatch((await roundNotes(twice.portal, "superseded"))[0], /still holds/, "and the round's note adds nothing");
+});
+
+test("wrong dates: a Master ticket listing IV/2 never stands for GMDSS, and never cuts the GMDSS recognition back", async () => {
+  /* 27 Sep 2026. Two AMSA Master tickets were placed on QL-14 by the reader
+     on "GMDSS endorsement IV/2 listed" - the one door the vessel file's rule
+     ("IV/2 in a ticket's regulation list fills nothing") left open - and
+     then, standing in the same column as the men's GMDSS certificates of
+     recognition, were taken for the foreign certificate behind them and cut
+     the GMDSS cells back to the Master tickets' expiry: 2027 against a
+     GMDSS certificate printing 2031. */
+  const { portal, env } = await smartPortal([
+    { id: "master", filename: "master.pdf", reading: { certificateTitle: "Certificate of Competency - Master", qualCode: "QL-01", codeConfidence: "high",
+      issuer: "Australian Maritime Safety Authority", issuedOn: "2022-09-27", expiresOn: "2027-09-26",
+      columns: [{ code: "QL-01", confidence: "high", why: null }, { code: "QL-14", confidence: "medium", why: "GMDSS endorsement IV/2 listed on certificate" }] } },
+    { id: "gmdss", filename: "gmdss.pdf", reading: { certificateTitle: "Certificate of Recognition - GMDSS General Operator", qualCode: "QL-14", codeConfidence: "high",
+      issuer: "Australian Maritime Safety Authority", isRecognition: true, recognises: { authority: "MCA", country: "United Kingdom", number: "UK-1", expiresOn: null },
+      issuedOn: "2026-03-10", expiresOn: "2031-03-09", columns: [{ code: "QL-14", confidence: "high", why: null }] } },
+  ]);
+  const doc = portal.doc();
+  doc.quals.cols.push(["QL-14", "GMDSS - STCW Reg IV/2", "Qualification"]);
+  doc.quals.rows[0][3].push("");
+  portal.state.data = JSON.stringify(doc);
+  await worker.scheduled({} as never, env as never);
+  assert.equal(evansCell(portal, "QL-14"), "2031-03-09", "the GMDSS cell runs as the GMDSS certificate prints");
+  assert.equal(evansCell(portal, "QL-01"), "2027-09-26", "and the ticket still holds its own column");
+  assert.deepEqual(await roundNotes(portal, "superseded"), [], "the ticket never stood for QL-14, so nothing was set aside");
+  assert.deepEqual(await roundNotes(portal, "placed"), [], "and no 'placed by the reading' line for it either");
+  const page = await certificateStanding();
+  assert.deepEqual(page.dates.filter((d) => d.code === "QL-14").map((d) => [d.expires, d.fileId]), [["2031-03-09", "gmdss"]], "the page's cell agrees");
+  // A GMDSS certificate is still its own column on the reader's word.
+  assert.deepEqual(columnsFor({ qualCode: null, filename: "x.pdf" }, { qualCode: "QL-14", columns: [{ code: "QL-14", confidence: "medium", why: null }] } as never, [], [["QL-14", "GMDSS"]]).map((c) => c.code),
+    ["QL-14"], "the document that IS the GMDSS certificate");
+  assert.deepEqual(columnsFor({ qualCode: null, filename: "x.pdf" }, { qualCode: "QL-01", columns: [{ code: "QL-01", confidence: "high", why: null }, { code: "QL-14", confidence: "high", why: "IV/2" }] } as never, [], [["QL-01", "Master"], ["QL-14", "GMDSS"]]).map((c) => c.code),
+    ["QL-01"], "never the reader's word for another document, however sure");
+  // And an AMSA ticket that does stand in a recognition's column (a hand tag here) is never the foreign one behind it.
+  setEnv({ DB: coversDb([
+    { row: { id: "amsa", qualCode: "QL-01" }, reading: { ...evansCoC, issuer: "Australian Maritime Safety Authority", expiresOn: "2027-01-01", endorsements: [] } },
+    { row: { id: "rec", qualCode: "QL-01" }, reading: recognitionOf({ issuer: "Australian Maritime Safety Authority", recognises: { authority: "MCA", country: "United Kingdom", number: "UK-9921", expiresOn: null } }) },
+  ]), FILE_STORE: "r2" } as never);
+  const out = await compareMatrix(coversMatrix, null, evansOnly);
+  assert.deepEqual(out.settled.filter((x) => x.code === "QL-01"), [{ person: "EVANS, Brenton", code: "QL-01", value: "2030-06-30" }],
+    "the recognition runs to its own date, not cut to the AMSA ticket's 2027");
+  setEnv({ DB: coversDb([
+    { row: { id: "amsa", qualCode: "QL-01" }, reading: { ...evansCoC, issuer: "Australian Maritime Safety Authority", expiresOn: "2027-01-01", endorsements: [] } },
+    { row: { id: "rec", qualCode: "QL-01" }, reading: recognitionOf({ issuer: "Australian Maritime Safety Authority", recognises: { authority: "MCA", country: "United Kingdom", number: "UK-9921", expiresOn: null } }) },
+  ]), FILE_STORE: "r2" } as never);
+  assert.deepEqual((await certificateStanding()).dates.map((d) => [d.code, d.expires, d.fileId]), [["QL-01", "2030-06-30", "rec"]], "and the page's cell agrees");
+});
+
+test("wrong dates: a reader's 'maybe' never displaces the column's own certificate, and is no double up", async () => {
+  /* 27 Sep 2026. Evgeny Evdokimov's advanced resuscitation statement was
+     placed on QL-18 on a medium ("includes HLTAID009 CPR"), was issued a
+     fortnight after his First Aid certificate, and took the First Aid cell
+     on the later issue date - and the Double ups list then offered his First
+     Aid certificate for deletion. The column's own certificate holds it. */
+  const { portal, env } = await smartPortal([
+    { id: "firstaid", filename: "EVANS, Brenton - QL-04 Master _45m NC.pdf", reading: { certificateTitle: "Master <45m NC", qualCode: "QL-04", codeConfidence: "high",
+      issuedOn: "2026-09-10", expiresOn: null, columns: [{ code: "QL-04", confidence: "high", why: null }] } },
+    { id: "resus", filename: "resus.pdf", reading: { certificateTitle: "Statement of Attainment - advanced course", qualCode: "QL-08", codeConfidence: "high",
+      issuedOn: "2026-09-24", expiresOn: null,
+      columns: [{ code: "QL-08", confidence: "high", why: null }, { code: "QL-04", confidence: "medium", why: "includes the lower grade" }] } },
+  ]);
+  await worker.scheduled({} as never, env as never);
+  const said = await roundNotes(portal, "superseded");
+  assert.equal(said.length, 1);
+  assert.match(said[0], /^.* was only placed on QL-04 by the reading, and .* is the QL-04 certificate itself, so it holds the cell.( It still holds QL-08, so it is not a double up.)?$/);
+  const page = await certificateStanding();
+  assert.deepEqual(page.dates.filter((d) => d.code === "QL-04").map((d) => [d.fileId, d.issued]), [["firstaid", "2026-09-10"]],
+    "the page's cell opens the certificate itself, not the later 'maybe'");
+  assert.deepEqual(page.superseded.map((s) => [s.fileId, s.code, s.placedOnly]), [["resus", "QL-04", true]],
+    "the 'maybe' is set aside as only placed there - no double up, no '2 on file'");
+  // Filed the other way round, the same answer.
+  const swapped = await smartPortal([
+    { id: "resus", filename: "resus.pdf", reading: { certificateTitle: "Statement of Attainment - advanced course", qualCode: "QL-08", codeConfidence: "high",
+      issuedOn: "2026-09-24", expiresOn: null,
+      columns: [{ code: "QL-08", confidence: "high", why: null }, { code: "QL-04", confidence: "medium", why: "includes the lower grade" }] } },
+    { id: "firstaid", filename: "EVANS, Brenton - QL-04 Master _45m NC.pdf", reading: { certificateTitle: "Master <45m NC", qualCode: "QL-04", codeConfidence: "high",
+      issuedOn: "2026-09-10", expiresOn: null, columns: [{ code: "QL-04", confidence: "high", why: null }] } },
+  ]);
+  await worker.scheduled({} as never, swapped.env as never);
+  assert.deepEqual((await certificateStanding()).dates.filter((d) => d.code === "QL-04").map((d) => d.fileId), ["firstaid"]);
+  // Two 'maybes' fall to the dates as before: the later one holds the cell.
+  const both = await smartPortal([
+    { id: "a", filename: "a.pdf", reading: { qualCode: "QL-08", codeConfidence: "high", issuedOn: "2025-01-01", expiresOn: null,
+      columns: [{ code: "QL-08", confidence: "high", why: null }, { code: "QL-04", confidence: "medium", why: "x" }] } },
+    { id: "b", filename: "b.pdf", reading: { qualCode: "QL-01", codeConfidence: "high", issuedOn: "2026-01-01", expiresOn: null,
+      columns: [{ code: "QL-01", confidence: "high", why: null }, { code: "QL-04", confidence: "medium", why: "y" }] } },
+  ]);
+  await worker.scheduled({} as never, both.env as never);
+  assert.deepEqual((await certificateStanding()).superseded.filter((s) => s.code === "QL-04").map((s) => [s.fileId, s.placedOnly]), [["a", false]],
+    "the same standing: the later issued holds it, and the other is a plain set-aside");
+  // A 'maybe' printing the very dates of the certificate that beat it is a copy of it: still a double up.
+  const copy = await smartPortal([
+    { id: "firstaid", filename: "EVANS, Brenton - QL-04 Master _45m NC.pdf", reading: { certificateTitle: "Master <45m NC", qualCode: "QL-04", codeConfidence: "high",
+      issuedOn: "2026-09-10", expiresOn: "2031-09-09", columns: [{ code: "QL-04", confidence: "high", why: null }] } },
+    { id: "again", filename: "scan0001.pdf", reading: { certificateTitle: "Master <45m NC", qualCode: "QL-04", codeConfidence: "medium",
+      issuedOn: "2026-09-10", expiresOn: "2031-09-09", columns: [{ code: "QL-04", confidence: "medium", why: "a second scan of it" }] } },
+  ]);
+  await worker.scheduled({} as never, copy.env as never);
+  assert.deepEqual((await certificateStanding()).superseded.map((s) => [s.fileId, s.code, s.placedOnly]), [["again", "QL-04", false]],
+    "the second scan is a double up the list may offer");
+});
+
+test("wrong dates: an MSIC card runs to the last day of the month it prints, however the reading took the day", async () => {
+  /* Every Australian MSIC card prints a month and a two-digit year ("FEB 30")
+     and runs to the last day of that month (Matthew, 26 Sep 2026). On
+     27 Sep 2026 ten cards on the matrix read the 1st and one leap-year
+     February read the 28th. */
+  const card = (id: string, expiresOn: string) => ({ row: { id, qualCode: "VS-01" },
+    reading: { ...evansCoC, certificateTitle: "Maritime Security Identification Card", qualCode: "VS-01", issuer: "AusCheck", expiresOn, endorsements: [] } });
+  const msicMatrix = { cols: [["VS-01", "Maritime Security Identification Card", "Vessel Specific"]] as [string, string, string][],
+    rows: [["EVANS, Brenton", "Master", "", [""]]] as [string, string, string, string[]][] };
+  setEnv({ DB: coversDb([card("c1", "2029-10-01")]), FILE_STORE: "r2" } as never);
+  assert.deepEqual((await compareMatrix(msicMatrix, null, evansOnly)).settled, [{ person: "EVANS, Brenton", code: "VS-01", value: "2029-10-31" }], "the 1st of October is 31 October");
+  setEnv({ DB: coversDb([card("c1", "2029-10-01")]), FILE_STORE: "r2" } as never);
+  assert.deepEqual((await certificateStanding()).dates.map((d) => [d.code, d.expires]), [["VS-01", "2029-10-31"]], "and the page's cell agrees");
+  setEnv({ DB: coversDb([card("c2", "2028-02-28")]), FILE_STORE: "r2" } as never);
+  assert.deepEqual((await compareMatrix(msicMatrix, null, evansOnly)).settled.map((x) => x.value), ["2028-02-29"], "a leap-year February runs to the 29th");
+  // Only the card itself: a document that merely mentions an MSIC keeps its own day.
+  setEnv({ DB: coversDb([{ row: { id: "m", qualCode: "QL-01" }, reading: { ...evansCoC, expiresOn: "2031-05-01", endorsements: [] } }]), FILE_STORE: "r2" } as never);
+  assert.deepEqual((await compareMatrix(coversMatrix, null, evansOnly)).settled.filter((x) => x.code === "QL-01").map((x) => x.value), ["2031-05-01"], "a Master ticket keeps the day it prints");
+});
+
+test("wrong dates: a column reached by a printed unit code runs no longer than the office's period for it", async () => {
+  /* 27 Sep 2026. Dylan Evans's three-year first-aid statement lists the
+     advanced resuscitation unit too (HLTAID015), and the office's skills
+     matrix gives that column one year. The cover took the statement's own
+     2029 and beat his own QL-19 certificate running to 2027. */
+  const first = { ...evansCoC, certificateTitle: "Statement of Attainment - Provide First Aid", qualCode: "QL-18", issuer: "Allens Training",
+    issuedOn: "2026-04-30", expiresOn: "2029-04-30", endorsements: [], units: ["HLTAID011", "HLTAID015"] };
+  const own = (expiresOn: string | null, issuedOn: string) => ({ ...evansCoC, certificateTitle: "Statement of Attainment - Advanced Resuscitation",
+    qualCode: "QL-19", issuer: "Allens Training", issuedOn, expiresOn, endorsements: [], units: ["HLTAID015"] });
+  const matrix = { cols: [["QL-18", "Provide First Aid - HLTAID011", "Qualification"], ["QL-19", "Adv Resuscitation and Oxygen Therapy - HLTAID015", "Qualification"]] as [string, string, string][],
+    rows: [["EVANS, Brenton", "Master", "", ["", ""]]] as [string, string, string, string[]][] };
+  const periods = [{ code: "QL-18", item: "Provide First Aid - HLTAID011", months: 36 }, { code: "QL-19", item: "Adv Resuscitation and Oxygen Therapy - HLTAID015", months: 12 }];
+  const run = async (certs: { row: Partial<Row>; reading: unknown }[]) => {
+    setEnv({ DB: coversDb(certs, undefined, periods), FILE_STORE: "r2" } as never);
+    const round = Object.fromEntries((await compareMatrix(matrix, null, evansOnly)).settled.map((x) => [x.code, x.value]));
+    setEnv({ DB: coversDb(certs, undefined, periods), FILE_STORE: "r2" } as never);
+    const page = await certificateStanding();
+    return { round, page };
+  };
+  // The statement alone: QL-19 one year from its issue, not the statement's three.
+  const alone = await run([{ row: { id: "fa", qualCode: "QL-18" }, reading: first }]);
+  assert.deepEqual(alone.round, { "QL-18": "2029-04-30", "QL-19": "2027-04-30" }, "QL-19 held to the office's one year");
+  assert.deepEqual(alone.page.dates.filter((d) => d.code === "QL-19").map((d) => [d.expires, d.covered]), [["2027-04-30", true]], "and the page's cell agrees");
+  // His own QL-19 printing its date: it runs as long, so it holds its own cell.
+  const printed = await run([{ row: { id: "fa", qualCode: "QL-18" }, reading: first }, { row: { id: "adv", qualCode: "QL-19" }, reading: own("2027-04-30", "2026-04-30") }]);
+  assert.equal(printed.round["QL-19"], "2027-04-30");
+  assert.deepEqual(printed.page.dates.filter((d) => d.code === "QL-19").map((d) => d.fileId), ["adv"], "the cell opens his own QL-19");
+  // His own QL-19 printing no expiry, issued after the statement: counted on its worked date, it holds the cell.
+  const worked = await run([{ row: { id: "fa", qualCode: "QL-18" }, reading: { ...first, issuedOn: "2024-05-03", expiresOn: "2027-05-03" } },
+    { row: { id: "adv", qualCode: "QL-19" }, reading: own(null, "2026-05-06") }]);
+  assert.equal(worked.round["QL-19"], "2027-05-06", "his own certificate, worked from its issue date and the office's year");
+  assert.deepEqual(worked.page.dates.filter((d) => d.code === "QL-19").map((d) => d.fileId), ["adv"], "and the page's cell opens it");
+  // With no validity periods filed, nothing to cap by: the statement's own date, as before.
+  setEnv({ DB: coversDb([{ row: { id: "fa", qualCode: "QL-18" }, reading: first }]), FILE_STORE: "r2" } as never);
+  assert.deepEqual((await compareMatrix(matrix, null, evansOnly)).settled.map((x) => [x.code, x.value]), [["QL-18", "2029-04-30"], ["QL-19", "2029-04-30"]]);
 });
 
 test("not placed: a document read but not put on the matrix says why on the page's list", async () => {
@@ -5281,7 +5435,8 @@ test("the readings made before are read again once for the particulars, keep eve
   assert.equal(hourly(portal).particularsRead, 2, "the count is on the hour's record");
   const card = JSON.parse(portal.blobs.get("certificate-readings|r1/card.json")!);
   assert.equal(card.documentNumber, "msic 4444");
-  assert.equal(card.expiresOn, "2030-01-01", "the second look moved nothing else: the date the matrix reads is the first reading's");
+  // The first reading's "2030-01-01" as the card runs: the last day of the month it prints (msicExpiry, 27 Sep 2026).
+  assert.equal(card.expiresOn, "2030-01-31", "the second look moved nothing else: the date the matrix reads is the first reading's month, never the second look's 2099");
   assert.equal(card.version, "r1");
   assert.equal(JSON.parse(portal.blobs.get("certificate-readings|r1/evans-master.json")!).holderBirthDate, "1980-03-10");
   assert.equal("holderBirthDate" in JSON.parse(portal.blobs.get("certificate-readings|r1/medical.json")!), false, "the medical was never asked");
@@ -5866,7 +6021,7 @@ const coversMatrix = {
 
 /** A database holding the certificates given, each with its reading, and the
  *  crew register the evidence rule reads names through. */
-const coversDb = (certs: { row: Partial<Row>; reading: unknown }[], people: unknown[] = [{ name: "EVANS, Brenton", aliases: [] }]) => {
+const coversDb = (certs: { row: Partial<Row>; reading: unknown }[], people: unknown[] = [{ name: "EVANS, Brenton", aliases: [] }], periods?: unknown[]) => {
   const rows = certs.map((c, i) => ({
     ...billysTicket, id: "cov" + i, person: "EVANS, Brenton", folder: "evans",
     bucket: "evans", checksum: "sum" + i, filename: "cert" + i + ".pdf",
@@ -5874,11 +6029,19 @@ const coversDb = (certs: { row: Partial<Row>; reading: unknown }[], people: unkn
     ...c.row,
   }));
   const readings = certs.map((c, i) => ({ key: "r1/sum" + i + ".json", value: JSON.stringify(c.reading) }));
+  /* The office's validity periods, where a test gives them: read off the
+     skills matrix filed on the portal, as the round and the page read them. */
+  const skills = periods ? [{ ...billysTicket, id: "sk", category: "skills-matrix", filename: "skills.xlsx", removedAt: null, createdAt: 1 }] : [];
+  const blobs = periods
+    ? [...readings, { key: "m2/validity-sk.json", value: JSON.stringify({ reading: { readable: true, periods } }) }]
+    : readings;
+  const orm = drizzleOn(skills);
   return fakeDb((sql, args) => {
+    if (periods && /from "documents"/i.test(sql) && args.includes("skills-matrix")) return orm(sql, args);
     if (/FROM documents WHERE category = 'certificate'/.test(sql)) return { results: rows };
     if (/SELECT key, value FROM blobs/.test(sql)) return { results: readings };
     // The page's own dates ask for one reading at a time, by its key.
-    if (/SELECT value FROM blobs/.test(sql)) return { results: readings.filter((r) => args.includes(r.key)) };
+    if (/SELECT value FROM blobs/.test(sql)) return { results: blobs.filter((r) => args.includes(r.key)) };
     if (/UPDATE documents/.test(sql)) return { changes: 1 };
     if (/FROM portal_state/.test(sql)) return { results: [{ data: JSON.stringify({ people }), rev: 1 }] };
     return undefined;

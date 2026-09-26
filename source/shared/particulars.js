@@ -125,6 +125,25 @@ export function msicAsWritten(v) {
   return String(v == null ? "" : v).replace(/\s+/g, " ").trim().toUpperCase();
 }
 
+/** An MSIC card's expiry as it counts. Every Australian card prints only a
+ *  month and a two-digit year in large type under the name - "FEB 30" - and
+ *  runs to the last day of that month (Matthew, 26 Sep 2026). Readings made
+ *  before the question said so sometimes took the 1st: on 27 Sep 2026 ten
+ *  cards read the 1st, four of them the last day until a re-read, and one a
+ *  leap-year February as the 28th. So any day read off a card is the last
+ *  day of its month; anything that is not a date comes back as it was.
+ * @param {unknown} v YYYY-MM-DD
+ * @returns {unknown}
+ */
+export function msicExpiry(v) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v == null ? "" : v));
+  if (!m) return v;
+  const y = Number(m[1]), mo = Number(m[2]);
+  if (mo < 1 || mo > 12) return v;
+  const last = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  return `${m[1]}-${m[2]}-${String(last).padStart(2, "0")}`;
+}
+
 /** Whether a YYYY-MM-DD string is a day that exists.
  * @param {unknown} v
  */

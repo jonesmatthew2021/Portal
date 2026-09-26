@@ -83,7 +83,12 @@
  *   the endorsement never expires - in which case the column takes the
  *   certificate's own date whatever the document prints against the
  *   endorsement itself.
- * @typedef {{ code: string, until: string | null }} CoveredCell
+ * @typedef {{ code: string, until: string | null, unit?: true }} CoveredCell
+ *   `unit` marks a column reached only by a unit code printed on the
+ *   document (the last pass of coveredCells): the statement's own expiry is
+ *   the statement's, not that unit's, so the caller holds such a column to the
+ *   office's validity period for it (termEnd in worker/src/lib/analysis.ts).
+ *   An endorsement is dated by the Marine Orders and is never marked.
  */
 
 /** The lists of a reading a covers row may read. A row that names none
@@ -299,11 +304,19 @@ export function coveredCells(reading, covers, columns, ownCode) {
   // A unit code printed on the document fills every column whose title
   // carries it, with the document's own expiry: a statement of attainment
   // covers each unit it lists for as long as the statement itself runs.
+  /** @type {Set<string>} */
+  const byUnit = new Set();
   unitCodesIn(reading.units).forEach((unit) => {
-    cols.forEach((c) => { if (titleCarries(unit, String(c[1] || ""))) keep(asCode(c[0]), certUntil); });
+    cols.forEach((c) => {
+      if (!titleCarries(unit, String(c[1] || ""))) return;
+      const code = asCode(c[0]);
+      const before = found.has(code);
+      keep(code, certUntil);
+      if (!before && found.has(code)) byUnit.add(code);
+    });
   });
 
-  return [...found.entries()].map(([code, until]) => ({ code, until }));
+  return [...found.entries()].map(([code, until]) => (byUnit.has(code) ? { code, until, unit: /** @type {true} */ (true) } : { code, until }));
 }
 
 /** The codes one certificate covers besides its own - the cells without

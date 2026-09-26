@@ -535,7 +535,10 @@ const flagLine = (flag) => {
    cell says so with a small 2, the two names on its title. */
 const certTwoFor = (dates, person, code) => {
   const P = String(person || "").trim().toUpperCase(), C = String(code || "").trim().toUpperCase();
-  const mine = ((dates && dates.superseded) || []).filter((f) => String(f.person || "").trim().toUpperCase() === P
+  // A reader's "maybe" beaten by the column's own certificate is not a
+  // second copy of it (placedOnly), so it is no "2 on file".
+  const mine = ((dates && dates.superseded) || []).filter((f) => !f.placedOnly
+    && String(f.person || "").trim().toUpperCase() === P
     && String(f.code || "").trim().toUpperCase() === C);
   return mine.length ? mine : null;
 };
@@ -613,7 +616,7 @@ const doubleUpsOf = (certificates, dates) => {
   // this one holds nothing else.
   const byId = new Map(live.map((c) => [String(c.id), c]));
   (dates.superseded || []).forEach((s) => {
-    if (s.behind || !Array.isArray(s.holds) || s.holds.length) return;
+    if (s.behind || s.placedOnly || !Array.isArray(s.holds) || s.holds.length) return;
     const id = String(s.url || "").replace(/^\/api\/files\//, "");
     const c = id && byId.get(id);
     if (!c || out.has(c.id) || heldBy(dates, c.id).length) return;

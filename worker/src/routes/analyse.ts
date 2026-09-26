@@ -63,6 +63,12 @@ import {
   type ReadingHolder,
   type Row,
   certStatesOwnExpiry,
+  addMonths,
+  issuedByAmsa,
+  monthsFrom,
+  periodFor,
+  termEnd,
+  validityPeriods,
 } from "../lib/analysis.js";
 import {
   MATRIX_DOCS,
@@ -984,71 +990,6 @@ type Item = {
 
 type Note = { kind: string; person: string | null; detail: string; certificate?: { id: string; filename: string; url: string } };
 
-// "2 years", "24 months", "every 5 years" — the shapes a validity period is
-// written in where the reading couldn't give it as a plain number of months.
-function monthsFrom(text: string | null | undefined): number | null {
-  const m = /(\d+(?:\.\d+)?)\s*(years?|yrs?|months?|mths?|mos?)\b/i.exec(text || "");
-  if (!m) return null;
-  const n = Number(m[1]);
-  if (!Number.isFinite(n) || n <= 0) return null;
-  return /^y/i.test(m[2]) ? Math.round(n * 12) : Math.round(n);
-}
-
-// An issue date plus a validity period, with the day clamped so 31 January plus
-// one month is 28 February rather than the 3rd of March.
-function addMonths(iso: string, months: number): string {
-  const [y, mo, d] = iso.split("-").map(Number);
-  const total = mo - 1 + months;
-  const ny = y + Math.floor(total / 12);
-  const nm = (total % 12) + 1;
-  const last = new Date(Date.UTC(ny, nm, 0)).getUTCDate();
-  return `${ny}-${String(nm).padStart(2, "0")}-${String(Math.min(d, last)).padStart(2, "0")}`;
-}
-
-type Period = { months: number | null; neverExpires: boolean };
-
-/**
- * The validity periods matrix, as a lookup by matrix code and by item title.
- *
- * The reading is the one the matrix analysis keeps — made when the document was
- * filed, or by the run that is asking now — so the comparison pays nothing to
- * use it. Null where no validity periods matrix is filed, or where the one that
- * is hasn't been read yet: the comparison then runs as it always did, on the
- * dates printed on the certificates alone.
- */
-async function validityPeriods() {
-  // The validity periods are read off the skills matrix — the office folded
-  // the old separate validity spreadsheet into it, so the latest skills
-  // matrix is always the source.
-  const row = await liveSingleFileRow("skills-matrix");
-  if (!row) return null;
-
-  const held = (await matrixStore().get(matrixReadingKey("validity", row.id), {
-    type: "json",
-  })) as MatrixReading | null;
-  if (!held || !held.reading || held.reading.readable === false) return null;
-
-  const listed = Array.isArray(held.reading.periods) ? held.reading.periods : [];
-  const byCode = new Map<string, Period>();
-  const byTitle = new Map<string, Period>();
-
-  for (const p of listed as Record<string, unknown>[]) {
-    if (!p || typeof p !== "object") continue;
-    const months =
-      typeof p.months === "number" && p.months > 0
-        ? Math.round(p.months)
-        : monthsFrom(str(p.validFor));
-    const entry: Period = { months, neverExpires: p.neverExpires === true };
-    if (entry.months == null && !entry.neverExpires) continue;
-    const code = str(p.code);
-    const item = str(p.item);
-    if (code) byCode.set(code.toUpperCase(), entry);
-    if (item) byTitle.set(words(item).join(" "), entry);
-  }
-
-  if (!byCode.size && !byTitle.size) return null;
-  return { filename: row.filename, byCode, byTitle };
-}
 
 /**
  * The validity periods matrix as a plain list — what the E-Learning Status
@@ -1165,12 +1106,12 @@ export async function compareMatrix(
   // One certificate per person and code. Two certificates for the same item is
   // a renewal sitting next to the certificate it renews, so the later date is
   // the one held against the spreadsheet and the other is only mentioned.
-  const claim = new Map<string, { row: Row; reading: Reading; coveredUntil?: string; heldByCover?: boolean }>();
+  const claim = new Map<string, { row: Row; reading: Reading; coveredUntil?: string; heldByCover?: boolean; weak?: boolean }>();
   /* Every certificate that got past the holder check and onto a column of
      its own, kept for the covering pass below: one certificate fills every
      column its printed endorsements and unit codes cover as well as its own
      (source/shared/covers.js, the table in the vessel file). */
-  const standing: { row: Row; reading: Reading; person: string; code: string }[] = [];
+  const standing: { row: Row; reading: Reading; person: string; code: string; weak?: boolean }[] = [];
   /* The document's own column - the first it is placed in - by row: what
      its row records as what it is, never a second column it also fills. */
   const primaryOf = new Map<string, string>();
@@ -1353,7 +1294,7 @@ export async function compareMatrix(
     if (!placed.length) standing.push({ row, reading, person, code: "" });
     else primaryOf.set(row.id, placed[0].code.trim().toUpperCase());
     for (const c of placed) {
-      standing.push({ row, reading, person, code: c.code.trim().toUpperCase() });
+      standing.push({ row, reading, person, code: c.code.trim().toUpperCase(), weak: c.by === "read" && c.confidence === "medium" });
       /* A column the reader holds the document satisfies by a level, an
          equivalence or an endorsement: filled, and said in the one line so a
          quick look confirms it (placedLine) - management only, on the page. */
@@ -1377,7 +1318,10 @@ export async function compareMatrix(
      pair of documents differently depending on the order the library
      happened to list the files in. */
   for (const { row, reading, person, code } of standing) {
-    if (!code || isRecognitionReading(reading)) continue;
+    /* Never an AMSA ticket: it is a certificate in its own right, not the
+       foreign one a recognition stands on (issuedByAmsa; the page's cells
+       decide it the same way). */
+    if (!code || isRecognitionReading(reading) || issuedByAmsa(reading)) continue;
     const own = (isDate(row.expiresOn) ? normDate(row.expiresOn!) : null) || reading.expiresOn || "";
     const key = keyFor(person, code);
     if (own && own > (foreignAt.get(key) || "")) foreignAt.set(key, own);
@@ -1399,7 +1343,7 @@ export async function compareMatrix(
   // One certificate per person and code, decided as above. A document with
   // no column of its own has no contest to join here: it covers below.
   const coverOnly: { row: Row; reading: Reading; person: string }[] = [];
-  for (const { row, reading, person, code } of standing) {
+  for (const { row, reading, person, code, weak } of standing) {
     // Keyed as the claims are keyed: the register's name, upper case. A
     // document with no column of its own is dated as its own column would
     // be - the date typed against it first (typedOver).
@@ -1407,7 +1351,7 @@ export async function compareMatrix(
     const key = keyFor(person, code);
     const sitting = claim.get(key);
     if (!sitting) {
-      claim.set(key, { row, reading });
+      claim.set(key, { row, reading, weak });
       continue;
     }
     const mine = dateFrom(row, reading, code, key);
@@ -1445,18 +1389,28 @@ export async function compareMatrix(
        cells settle it the same way (certificateStanding). */
     const tie = (mine || "") === (his || "");
     const byLater = tie && (reading.issuedOn || "") !== (sitting.reading.issuedOn || "");
-    const mineWins = mineIsRec !== sittingIsRec
-      ? (mineIsRec ? recognitionHolds() : !recognitionHolds())
-      : byIssue || byLater
-        ? (reading.issuedOn || "") > (sitting.reading.issuedOn || "")
-        : (mine || "") > (his || "");
-    const inForce = mineWins ? { row, reading } : sitting;
+    /* A document the reader only placed here on a medium never displaces
+       the column's own certificate, whatever the dates (27 Sep 2026: an
+       advanced resuscitation statement "including CPR" took a man's First
+       Aid cell on a later issue date). The page's cells decide it the same
+       way (certificateStanding). */
+    const byRank = mineIsRec === sittingIsRec && !!weak !== !!sitting.weak;
+    const mineWins = byRank
+      ? !weak
+      : mineIsRec !== sittingIsRec
+        ? (mineIsRec ? recognitionHolds() : !recognitionHolds())
+        : byIssue || byLater
+          ? (reading.issuedOn || "") > (sitting.reading.issuedOn || "")
+          : (mine || "") > (his || "");
+    const inForce = mineWins ? { row, reading, weak } : sitting;
     const replaced = mineWins ? sitting : { row, reading };
     claim.set(key, inForce);
     notes.push({
       kind: "superseded",
       person: replaced.row.person,
-      detail: isRecognitionReading(inForce.reading) !== isRecognitionReading(replaced.reading)
+      detail: byRank
+        ? `${replaced.row.filename} was only placed on ${code} by the reading, and ${inForce.row.filename} is the ${code} certificate itself, so it holds the cell.`
+        : isRecognitionReading(inForce.reading) !== isRecognitionReading(replaced.reading)
         && isRecognitionReading(inForce.reading)
         ? `Two certificates on file for ${code}. ${inForce.row.filename} is AMSA's certificate of recognition, which is the document that counts here, so ${replaced.row.filename} is the foreign certificate behind it.`
         : byIssue
@@ -1512,6 +1466,14 @@ export async function compareMatrix(
         continue;
       }
       if (!cell.until) continue;
+      /* A column reached by a printed unit code runs no longer than the
+         office's period for it from the document's issue date (termEnd): the
+         statement's own expiry is the statement's, not that unit's - a
+         three-year first-aid statement listing the one-year advanced
+         resuscitation unit carries that column one year (27 Sep 2026). */
+      const title = cols[colAt.get(at)!][1];
+      const term = cell.unit ? termEnd(validity, at, title, reading.issuedOn) : null;
+      const reach = term && term < cell.until ? term : cell.until;
       /* The endorsement on a recognition runs for the remainder of the
          foreign certificate's endorsement (MO70 s 37(4)), so the covered
          column takes the same cut - and takes it on BOTH sides of the
@@ -1519,14 +1481,20 @@ export async function compareMatrix(
          printed date and then have that date cut back below the document
          that should have held it. */
       const mine = isRecognitionReading(reading)
-        ? recognisedUntil(reading, cell.until, foreignAt.get(key)).until
-        : cell.until;
+        ? recognisedUntil(reading, reach, foreignAt.get(key)).until
+        : reach;
       if (!mine) continue;
       const sitting = claim.get(key);
       if (sitting) {
+        /* The column's own certificate on the date its cell would carry:
+           where it prints no expiry, its issue date and the office's period
+           for the column (the working below) - or a cover with a date would
+           beat a current certificate only for printing nothing. */
         const raw = sitting.coveredUntil
           || (isDate(sitting.row.expiresOn) ? normDate(sitting.row.expiresOn!) : null)
-          || sitting.reading.expiresOn || null;
+          || sitting.reading.expiresOn
+          || (sitting.heldByCover ? null : termEnd(validity, at, title, sitting.reading.issuedOn))
+          || null;
         const held = !sitting.coveredUntil && isRecognitionReading(sitting.reading)
           ? recognisedUntil(sitting.reading, raw, foreignAt.get(key)).until
           : raw;
@@ -1757,9 +1725,7 @@ export async function compareMatrix(
     // that long after it was issued, and an item that never lapses reads as
     // held. Only an issue date actually read off the document is worked from —
     // a period with nothing to add it to decides nothing.
-    const period = validity
-      ? validity.byCode.get(code.toUpperCase()) || validity.byTitle.get(words(title).join(" "))
-      : null;
+    const period = periodFor(validity, code, title);
 
     if (period && period.neverExpires) {
       if (isHeld(cell)) {
