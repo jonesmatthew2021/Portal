@@ -11,6 +11,7 @@ import {
   purgeDocument,
   removeDocument,
   NoFolderForRestore,
+  NothingToRestore,
   restoreDocument,
   singleFileCategory,
   type DocumentRow,
@@ -186,6 +187,12 @@ export default async (req: Request, context: { params: { id: string } }) => {
     try {
       restored = await restoreDocument(row, home);
     } catch (e) {
+      if (e instanceof NothingToRestore) {
+        return Response.json(
+          { error: `${e.filename} is no longer in SharePoint, so there is nothing to put back.`, gone: true },
+          { status: 409 },
+        );
+      }
       if (e instanceof NoFolderForRestore) {
         return Response.json(
           {

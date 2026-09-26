@@ -529,6 +529,17 @@ export async function liveSingleFileRow(category: string) {
 
 /** Nowhere to put a certificate back. Thrown rather than a folder being made
  *  for it - the folders are the office's, and one is set on Crew Details. */
+/** Nothing to put back: the file itself is no longer in the library - the
+ *  sync took the row off because it was gone, or it went since. Restoring
+ *  the row anyway put it back on the books pointing at nothing, and the next
+ *  sync took it straight off again, with nothing said either time (27 Sep
+ *  2026: two of three presses of Restore on a Master ticket did exactly that). */
+export class NothingToRestore extends Error {
+  constructor(readonly filename: string) {
+    super("nothing to restore");
+  }
+}
+
 export class NoFolderForRestore extends Error {
   constructor(readonly person: string) {
     super("no folder");
@@ -538,6 +549,7 @@ export class NoFolderForRestore extends Error {
 /** Put a removed file back where it was, under a name the folder still has free. */
 export async function restoreDocument(row: DocumentRow, fallbackHome?: string) {
   if (!row.removedAt) return row;
+  if (!(await fileStore().getMetadata(row.blobKey))) throw new NothingToRestore(row.filename);
 
   let blobKey = row.blobKey;
   let filename = row.filename;

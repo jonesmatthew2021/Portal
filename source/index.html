@@ -4141,6 +4141,10 @@ function RemovedFiles({ stamp }) {
   const [busy, setBusy] = useState(null);
   const [confirm, setConfirm] = useState(null);
   const [problem, setProblem] = useState("");
+  // What the last Restore or Restore all put back, said above the list
+  // (Matthew, 27 Sep 2026: "when i restored it, it didnt give any
+  // indication it had restored" - so he pressed it three times).
+  const [done, setDone] = useState("");
 
   const load = async () => {
     try {
@@ -4183,13 +4187,19 @@ function RemovedFiles({ stamp }) {
     return isNaN(d) ? "" : d.toLocaleDateString("en-AU", { day: "2-digit", month: "short", year: "numeric" }).toUpperCase();
   };
 
+  /* One file back. The button says it is working, the row leaves the list
+     the moment the server has put it back (not on the next listing, which
+     can be slow on a long list), and the line above the list names it. */
   const restore = async (it) => {
     setBusy(it.record.id);
     setProblem("");
+    setDone("");
     try {
-      await restoreStoredFile(it.record.id);
+      const back = await restoreStoredFile(it.record.id);
       log("Admin", `Restored ${it.record.filename}`, describe(it));
-      await load();
+      setState((s) => ({ ...s, items: s.items.filter((x) => x.record.id !== it.record.id) }));
+      setDone(`Restored ${(back && back.filename) || it.record.filename}${it.person ? ` to ${canonicalName(known(it.person))}` : ""}`);
+      load();
     } catch (e) {
       setProblem(e.message);
     }
@@ -4256,6 +4266,7 @@ function RemovedFiles({ stamp }) {
   // named with the server's reason; the rest go.
   const restoreAll = async (step) => {
     setProblem("");
+    setDone("");
     const result = await oneByOne(shown, (it) => restoreStoredFile(it.record.id), step);
     if (result.done.length || result.failed.length) {
       log("Admin", oneByOneLine({ past: "Restored" }, result, (it) => it.record.filename), "");
@@ -4282,7 +4293,11 @@ function RemovedFiles({ stamp }) {
           )}
           <AllButton label="Restore all" busy="Restoring" count={state.status === "ok" ? shown.length : 0}
             run={restoreAll}
-            onDone={(r) => setProblem(r && r.failed.length ? oneByOneLine({ past: "Restored" }, r, (it) => it.record.filename) : "")} />
+            onDone={(r) => {
+              const line = r ? oneByOneLine({ past: "Restored" }, r, (it) => it.record.filename) : "";
+              setProblem(r && r.failed.length ? line : "");
+              setDone(r && !r.failed.length && r.done.length ? line : "");
+            }} />
           <Button variant="quiet" onClick={load}>Refresh</Button>
         </span>
       </div>
@@ -4301,6 +4316,13 @@ function RemovedFiles({ stamp }) {
         <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderLeft: `4px solid ${T.bOrange}`,
           borderRadius: 2, padding: "13px 15px", marginBottom: 16 }}>
           <div style={{ fontFamily: T.body, fontSize: 14, color: T.text, lineHeight: 1.7 }}>{problem}</div>
+        </div>
+      )}
+
+      {done && (
+        <div style={{ background: T.panel, border: `1px solid ${T.rule}`, borderLeft: `4px solid ${T.teal}`,
+          borderRadius: 2, padding: "13px 15px", marginBottom: 16 }}>
+          <div style={{ fontFamily: T.body, fontSize: 14, color: T.text, lineHeight: 1.7 }}>{done}</div>
         </div>
       )}
 
@@ -4347,7 +4369,7 @@ function RemovedFiles({ stamp }) {
                 ) : (
                   <>
                     <OpenLink url={r.url} />
-                    <Button writes variant="quiet" onClick={() => restore(it)}>Restore</Button>
+                    <Button writes variant="quiet" disabled={!!busy} onClick={() => restore(it)}>{busy === r.id ? "Restoring…" : "Restore"}</Button>
                     {/* The office's own file, kept where the office put it: the
                         portal will not delete it, so it is not offered. */}
                     {!it.keptInPlace && (

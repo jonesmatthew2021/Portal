@@ -3334,6 +3334,11 @@ const is = (got, want, what) => {
   is(src.includes("oneByOne(shown, (it) => restoreStoredFile(it.record.id), step)"), true, "and puts back exactly what the filters show");
   is(src.includes('count={state.status === "ok" ? shown.length : 0}'), true, "its count is what it would put back");
   is(src.includes("{shown.map((it) => {"), true, "the list is what the filters show");
+  // A single Restore says it is working, takes the row off at once and names what came back
+  // (Matthew, 27 Sep 2026: "it didnt give any indication it had restored").
+  is(src.includes('{busy === r.id ? "Restoring…" : "Restore"}'), true, "the button says it is working");
+  is(src.includes("setState((s) => ({ ...s, items: s.items.filter((x) => x.record.id !== it.record.id) }));"), true, "the row leaves the list at once");
+  is(/setDone\(`Restored \$\{/.test(src), true, "and the line above the list names what was restored");
   is(/const sorted = useMemo\(\(\) => \{\s*const nameOf = \(it\) => \(it\.person \? canonicalName\(known\(it\.person\)\) : ""\);/.test(src), true,
     "always by surname, through the register");
   const remover = src.slice(src.indexOf("const removeCertificates = async"), src.indexOf("const updateCertificate ="));

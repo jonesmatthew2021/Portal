@@ -761,7 +761,13 @@ on any line that still names this one.
     choice with its count, and **Restore all puts back only what the filters
     show** - the list holds every file ever taken off (2,112 on 27 Sep 2026,
     most of them the sync's and the twins it retired), so an unfiltered
-    Restore all is never the way to undo one Delete all;
+    Restore all is never the way to undo one Delete all; a Restore says so
+    as it works ("Restoring…"), takes its row off the list at once and names
+    what came back above the list, and a file no longer in SharePoint is
+    refused by name (`NothingToRestore`, a 409) rather than put back on the
+    books pointing at nothing for the next sync to take off again (27 Sep
+    2026: no sign a Restore had worked, so a Master ticket was pressed three
+    times and two dead copies came back and went again);
     Delete all over the Double ups. Both run one file at a time
     (`oneByOne`, `AllButton`: Confirm / Keep first, the button counting
     "Deleting 37 of 139…", management only, held down offline), a

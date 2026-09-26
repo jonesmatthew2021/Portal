@@ -19,7 +19,7 @@ import readOne from "../src/routes/read-one.js";
 import restoreFile from "../src/routes/restore-file.js";
 import { MAX_BYTES } from "../src/lib/shared-state.js";
 import { OUT_OF_CREDIT, READING_UNAVAILABLE, READING_VERSION, certificateStanding, codeFor, columnsFor } from "../src/lib/analysis.js";
-import { KeptInPlace, ensureDocumentColumns, filingName, forgetDocumentColumns, purgeDocument, relocateToRemovedBlob, removeDocument, restoreDocument, safeName } from "../src/db/documents.js";
+import { KeptInPlace, ensureDocumentColumns, filingName, forgetDocumentColumns, NothingToRestore, purgeDocument, relocateToRemovedBlob, removeDocument, restoreDocument, safeName } from "../src/db/documents.js";
 import { replaceSingleFile } from "../src/db/single-file.js";
 import { saveDocument } from "../src/lib/shared-state.js";
 import { runMatrixRound, roundRunning, leaseHolder, takeLease, dropLease, renewLease, keepEquivalences, SETTLE_MS } from "../src/lib/round.js";
@@ -3640,6 +3640,29 @@ test("restoring the office's file kept in place moves nothing", async () => {
   assert.equal(back.keptInPlace, null);
   assert.deepEqual(bucket.keys(), [theirs], "nothing moved");
   assert.deepEqual(bucket.made, [], "no folder was made");
+});
+
+test("restoring a file no longer in SharePoint is refused, and the row stays off the books", async () => {
+  /* 27 Sep 2026: two of three presses of Restore on a Master ticket put back
+     rows whose files had gone from the library; each came back pointing at
+     nothing, with nothing said, and the next sync took it straight off. */
+  const gone = "removed/old - TYMOFEYEV, Arthur - QL-01 Master.pdf";
+  const bucket = fakeBucket({});
+  const rows: Row[] = [{ ...keptRow("old", gone), keptInPlace: null, category: "certificate", folder: null }];
+  setEnv({ DB: officeFileDb(rows), FILES: bucket, FILE_STORE: "r2" } as never);
+  await assert.rejects(restoreDocument(rows[0] as never), (e: unknown) => e instanceof NothingToRestore && e.filename === rows[0].filename);
+  assert.notEqual(rows[0].removedAt, null, "the row is still off the books");
+  assert.equal(rows[0].blobKey, gone, "and points where it did");
+  // Through the route: a 409 that says so, never a silent success.
+  const res = await fileRoute(new Request("http://portal/api/files/old?admin=1", { method: "PATCH" }), { params: { id: "old" } });
+  assert.equal(res.status, 409);
+  const said = (await res.json()) as { error: string; gone?: boolean };
+  assert.equal(said.gone, true);
+  assert.match(said.error, /is no longer in SharePoint, so there is nothing to put back\.$/);
+  // A file that is there still comes back.
+  bucket.put(gone, bytesOf("the scan"));
+  const back = await restoreDocument(rows[0] as never);
+  assert.equal(back.removedAt, null, "back on the books");
 });
 
 test("taking the office's adopted file off the books leaves it where the office put it", async () => {
