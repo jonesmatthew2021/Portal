@@ -57,7 +57,7 @@ const fn = new Function(
   "setTimeout", "clearInterval", "clearTimeout", "requestAnimationFrame", "alert",
   "confirm", "Notification", "Image", "Audio", "ResizeObserver", "FileReader",
   "XMLHttpRequest", "performance", "screen", "history",
-  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, recognisedUntil, recognitionFills, foreignExpiryOn, isRecognitionReading, certCoverFor, certFlagFor, flagLine, requiredCodesFor, coverLine, bandWithCover, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, paperKind, EVIDENCE_KINDS, EVIDENCE_LABELS, marineOrderLines, filedAsLines, notOnMatrixLines, filedCodeIn, filedAsLine, tagWarning, readingLines, placedLine, readAsLine, notPlacedLines, nameIsSomebodyElse, matrixHeadOffset, headPixels, scrollPair, rosterSwing, rosterPeopleFor, swingAt };",
+  js + NL + ";return { crewRegister, applySettled, settleRound, nameLetters, registerWords, canonicalName, rankGroupAt, RANK_GROUPS, ROSTER_RANKS, mergeQuals, filedUnderSuffix, waitForRound, shouldTabRound, mergeSaved, afterMergedSave, mergeHistory, mergeFilled, mergeSeen, mergePending, saveState, loadState, saveTryAgainIn, settledKeys, missesInARow, roundAnswerPhase, progressAccept, pullNowStep, doneEyebrow, doneWindowLines, PULL_LATE_NOTE, freshPull, cutOffSwitch, CUT_OFF, runCleared, queueRound, roundBusyTitle, ROUND_BUSY, matrixLastMoved, fileSpreadsheetSend, fileSpreadsheetStep, fileSpreadsheetAttempt, fileSpreadsheetOutcome, matrixFreshAt, accountLine, badgeShouldClear, crewUploadNote, OUT_OF_CREDIT, READING_UNAVAILABLE, KEY_PROBLEM, crewRowsOnly, VESSEL, swingCrewWord, swingCrewCalled, cacheable, cacheName, keepable, isCachedAnswer, anotherPerson, FETCHED_AT_HEADER, networkWait, NETWORK_WAIT_MS, API_WAIT_MS, forgetsOn, earlierPortalCache, offlineLine, controlsLocked, offlineAfterPull, signInOverAfterPull, showPicker, forgetsBefore, identityUnproven, keepIdentityAfterControl, keepIdentityOnceControlled, reloadToBeControlled, SIGNED_IN_MESSAGE, bandFor, daysTo, daysUntil, RED_DAYS, AMBER_DAYS, TODAY, REMINDER_DEFAULTS, reminderSetting, expiringWithin, byPerson, recipientsFor, reminderDue, reminderOwed, reminderItemLine, reminderText, summaryText, ReminderSwitch, MatrixPerson, DownloadPDF, particularsFor, fillParticulars, mergeParticulars, msicCodeIn, newestCard, isMsicCard, ticketCodesIn, openToCertificates, reminderLineFor, coveredCells, coveredCodes, unitCodesIn, unitColumnsIn, recognisedUntil, recognitionFills, foreignExpiryOn, isRecognitionReading, certCoverFor, certFlagFor, flagLine, certTwoFor, twoLine, requiredCodesFor, coverLine, bandWithCover, medicalCodesIn, medicalOnFile, medicalTooLong, medicalNote, renewalBlockers, renewalNeedsProblem, coveredBy, evidenceKindsProblem, paperKind, EVIDENCE_KINDS, EVIDENCE_LABELS, marineOrderLines, filedAsLines, notOnMatrixLines, filedCodeIn, filedAsLine, tagWarning, readingLines, placedLine, readAsLine, notPlacedLines, nameIsSomebodyElse, matrixHeadOffset, headPixels, scrollPair, rosterSwing, rosterPeopleFor, swingAt };",
 );
 const lib = fn(
   ReactStub, { createRoot: () => ({ render: () => {} }) }, {}, windowStub, documentStub,
@@ -2827,6 +2827,31 @@ const is = (got, want, what) => {
   is(lib.certFlagFor(flagged, "COOK, Jack", "PI-06"), null, "only the column it was filed under");
   is(lib.flagLine(flagged.filedAs[0]), "Filed as MinRes - Critical Risk Management (CRM) Awareness, reads as MinRes - Safe and Respectful Behaviours - check it");
   is(lib.flagLine({ code: "PI-09", title: "", readsAs: null }), "Filed as PI-09, reads as nothing on the matrix - check it");
+  /* A document for the cell the reader could not place at all wears the
+     cell the same way, its reason on the title (Matthew, 26 Sep 2026: a
+     reason other than a missing certificate must be seen on the matrix). */
+  const held = { notPlaced: [
+    { person: "KUMAR, PREETHAM", code: "VS-04", filename: "helm.pdf", why: "name", printed: "REETHAM KUMA", url: "/api/files/k" },
+    { person: "TYMOFEYEV, ARTHUR", code: "VS-01", filename: "card.pdf", why: "no-date", url: "/api/files/t" },
+    { person: "COOK, JACK", code: "PI-09", filename: "blur.pdf", why: "unreadable", reason: "Too blurred to read.", url: "/api/files/b" },
+  ] };
+  is(lib.certFlagFor(held, "Kumar, Preetham", "vs-04").kind, "not-placed");
+  is(lib.flagLine(lib.certFlagFor(held, "KUMAR, Preetham", "VS-04")), "On file, not placed: helm.pdf - in the name of REETHAM KUMA");
+  is(lib.flagLine(lib.certFlagFor(held, "TYMOFEYEV, Arthur", "VS-01")), "On file, not placed: card.pdf - no date could be read off it");
+  is(lib.flagLine(lib.certFlagFor(held, "COOK, Jack", "PI-09")), "On file, not placed: blur.pdf - could not be read (Too blurred to read.)");
+  is(lib.certFlagFor(held, "COOK, Jack", "PI-08"), null, "only its own cell");
+  is(lib.certFlagFor({ ...flagged, ...held }, "COOK, Jack", "PI-09").kind, "filed-as", "a filed-as line comes first where both say something");
+  /* Two on file: the one in force holds the cell, the other is the one it
+     replaced - a small 2 on the cell, the names on its title. */
+  const twice = { superseded: [
+    { person: "EVANS, BRENTON", code: "QL-04", filename: "old.pdf", kept: "new.pdf", url: "/api/files/o" },
+    { person: "EVANS, BRENTON", code: "QL-17", filename: "med-2024.pdf", kept: "med-2026.pdf", url: "/api/files/m" },
+    { person: "EVANS, BRENTON", code: "QL-17", filename: "med-2022.pdf", kept: "med-2026.pdf", url: "/api/files/n" },
+  ] };
+  is(lib.certTwoFor(twice, "evans, brenton", "ql-04").length, 1);
+  is(lib.certTwoFor(twice, "EVANS, Brenton", "QL-01"), null, "one on file: no mark");
+  is(lib.twoLine(lib.certTwoFor(twice, "EVANS, Brenton", "QL-04")), "2 on file: new.pdf holds the cell; old.pdf is the one it replaced");
+  is(lib.twoLine(lib.certTwoFor(twice, "EVANS, Brenton", "QL-17")), "3 on file: med-2026.pdf holds the cell; med-2024.pdf, med-2022.pdf are the ones it replaced");
   /* What a position must hold is read off the office's skills matrix, whose
      positions are spelt its way ("ONS-MRN-TSV Second Mate", "Assistant
      Engineer") while the register spells the vessel's ("SECOND OFFICER",

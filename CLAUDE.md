@@ -657,7 +657,17 @@ on any line that still names this one.
     cell's `filedAs` line off the dates (`certFlagFor`, `flagLine` in
     `certificate-cells.jsx`) - an empty cell reads **Check** in orange and
     opens the document, a filled one keeps its date under an orange edge
-    with the sentence on its title. **What a position must hold is read by
+    with the sentence on its title. The same orange marks a document for
+    the cell the reader could not place at all (`notPlaced`, with the
+    column it was filed for: "On file, not placed: <file> - in the name of
+    …" / "no date could be read off it" / "could not be read (…)"), a
+    filed-as line coming first where both say something; and **two
+    certificates on file for one cell** wear a small count before the date
+    (`certTwoFor`, `twoLine`: "2 on file: <in force> holds the cell; <the
+    other> is the one it replaced"), off `certificateStanding`'s
+    `superseded` - Matthew, 26 Sep 2026: "if multiple certificates exist, or
+    some reason other than a missing certificate, how can we highlight
+    that". **What a position must hold is read by
     the vessel's rank groups**: the office's skills matrix spells its
     positions its way ("ONS-MRN-TSV Second Mate", "Assistant Engineer")
     and the register the vessel's ("SECOND OFFICER", "JUNIOR ENGINEER"), so

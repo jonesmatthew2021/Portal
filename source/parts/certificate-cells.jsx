@@ -46,8 +46,10 @@ function bandFor(v) {
   return { key: "green", fg: T.bGreen, bg: T.bGreenBg, days: d, date: v };
 }
 
-function Cell({ value, onOpen, missing, cover, flag }) {
+function Cell({ value, onOpen, missing, cover, flag, two }) {
   const b = bandWithCover(bandFor(value), cover, missing);
+  // Two on file: a small 2 before the date, the two names on the title.
+  const twoMark = two ? <span title={twoLine(two)} style={{ fontSize: 8, fontWeight: 700, marginRight: 3, verticalAlign: "top" }}>{two.length + 1}</span> : null;
   /* A document filed for this cell that reads as something else, with no
      date in the cell to show: the cell says Check, in orange, and opens
      the document (certFlagFor). Filled, the cell keeps its date and wears
@@ -86,7 +88,7 @@ function Cell({ value, onOpen, missing, cover, flag }) {
           fontFamily: T.mono, fontSize: 9.5, fontWeight: 600, lineHeight: 1.25,
           cursor: openable ? "pointer" : undefined, ...edge,
           textDecoration: openable ? "underline" : undefined, textUnderlineOffset: 2 }}>
-        {b.date.slice(8, 10)}/{b.date.slice(5, 7)}/{b.date.slice(2, 4)}
+        {twoMark}{b.date.slice(8, 10)}/{b.date.slice(5, 7)}/{b.date.slice(2, 4)}
       </div>
     );
   }
@@ -98,7 +100,7 @@ function Cell({ value, onOpen, missing, cover, flag }) {
       title={[flag ? flagLine(flag) : "", b.key === "covered" ? b.text : ""].filter(Boolean).join(" · ") || undefined}
       style={{ background: b.bg, color: b.fg, borderRadius: 2, padding: "3px", minWidth: 56,
         fontFamily: T.mono, fontSize: 9.5, lineHeight: 1.25, ...edge,
-        cursor: openable ? "pointer" : undefined }}>{b.key === "covered" ? "Covered" : b.text}</div>
+        cursor: openable ? "pointer" : undefined }}>{twoMark}{b.key === "covered" ? "Covered" : b.text}</div>
   );
 }
 
@@ -509,11 +511,36 @@ const certCoverFor = (dates, person, code) =>
    on Needs attention. Null where the reader and the filing agree. */
 const certFlagFor = (dates, person, code) => {
   const P = String(person || "").trim().toUpperCase(), C = String(code || "").trim().toUpperCase();
-  return ((dates && dates.filedAs) || []).find((f) => String(f.person || "").trim().toUpperCase() === P
-    && String(f.code || "").trim().toUpperCase() === C) || null;
+  const mine = (f) => String(f.person || "").trim().toUpperCase() === P && String(f.code || "").trim().toUpperCase() === C;
+  const filed = ((dates && dates.filedAs) || []).find(mine);
+  if (filed) return { kind: "filed-as", ...filed };
+  /* Or a document for this cell the reader could not place at all - one
+     it could not read, one in another man's name, one with no date read
+     off it (certificateStanding's notPlaced): the cell wears that too. */
+  const held = ((dates && dates.notPlaced) || []).find(mine);
+  return held ? { kind: "not-placed", ...held } : null;
 };
-const flagLine = (flag) =>
-  `Filed as ${flag.title || flag.code}, reads as ${flag.readsAs || "nothing on the matrix"} - check it`;
+const flagLine = (flag) => {
+  if (flag.kind === "not-placed") {
+    const said = flag.why === "name" ? `in the name of ${flag.printed || "somebody else"}`
+      : flag.why === "no-date" ? "no date could be read off it"
+      : `could not be read${flag.reason ? ` (${flag.reason})` : ""}`;
+    return `On file, not placed: ${flag.filename || "a document"} - ${said}`;
+  }
+  return `Filed as ${flag.title || flag.code}, reads as ${flag.readsAs || "nothing on the matrix"} - check it`;
+};
+
+/* Two certificates on file for one cell (certificateStanding's superseded):
+   the one in force holds the cell; the other is the one it replaced. The
+   cell says so with a small 2, the two names on its title. */
+const certTwoFor = (dates, person, code) => {
+  const P = String(person || "").trim().toUpperCase(), C = String(code || "").trim().toUpperCase();
+  const mine = ((dates && dates.superseded) || []).filter((f) => String(f.person || "").trim().toUpperCase() === P
+    && String(f.code || "").trim().toUpperCase() === C);
+  return mine.length ? mine : null;
+};
+const twoLine = (two) =>
+  `${two.length + 1} on file: ${two[0].kept || "the one in force"} holds the cell; ${two.map((t) => t.filename).join(", ")} ${two.length === 1 ? "is the one it replaced" : "are the ones it replaced"}`;
 
 /* The words a covered cell carries, and nothing more: what carries him and
    the day the cover stops counting. An issue letter is the one paper the law

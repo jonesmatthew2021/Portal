@@ -5466,7 +5466,13 @@ function Portal({ role, onSignOut }) {
         printed: f.printed || null, code: f.code ? String(f.code).toUpperCase() : null,
         url: f.fileId ? `/api/files/${f.fileId}` : null,
       }));
-      setCertDates({ at: r.at || new Date().toISOString(), map, covers, filedAs, notOnMatrix, placed, readAs, notPlaced });
+      /* Two certificates on file for one cell: the one in force holds it and
+         the other is the one it replaced - said on the cell with a small 2. */
+      const superseded = (r.superseded || []).map((f) => ({
+        person: known(f.person).toUpperCase(), code: String(f.code || "").toUpperCase(),
+        filename: f.filename || "", kept: f.kept || "", url: f.fileId ? `/api/files/${f.fileId}` : null,
+      }));
+      setCertDates({ at: r.at || new Date().toISOString(), map, covers, filedAs, notOnMatrix, placed, readAs, notPlaced, superseded });
       if (v) {
         setValidityPeriods({
           at: new Date().toISOString(),

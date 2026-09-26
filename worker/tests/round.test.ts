@@ -1150,6 +1150,9 @@ test("two documents neither running the longer: the one issued last holds the ce
   assert.match(said[0], /^Two certificates on file for QL-04\. Neither runs the longer, and .+ was issued last, so .+ is treated as the one it replaced\.$/);
   const page = await certificateStanding();
   assert.deepEqual(page.dates.filter((d) => d.code === "QL-04").map((d) => [d.fileId, d.issued]), [["new", "2026-09-18"]], "the page's cells open the new one");
+  // Two on file: the old one is set aside, named beside the one that holds the cell.
+  assert.deepEqual(page.superseded.map((s) => [s.fileId, s.code, s.person]), [["old", "QL-04", "EVANS, BRENTON"]]);
+  assert.match(page.superseded[0].kept, /QL-04/, "the one in force, by name");
   // Filed the other way round, the same answer.
   const swapped = await smartPortal([
     { id: "new", filename: "new.pdf", reading: { qualCode: "QL-04", codeConfidence: "high", issuedOn: "2026-09-18", expiresOn: null, columns: [{ code: "QL-04", confidence: "high", why: null }] } },
@@ -1176,7 +1179,7 @@ test("not placed: a document read but not put on the matrix says why on the page
   const page = await certificateStanding();
   assert.deepEqual(page.notPlaced.map((n) => [n.fileId, n.why, n.printed, n.code, n.reason]).sort(), [
     ["blur", "unreadable", null, null, "Too blurred to read."],
-    ["his", "name", "Rohin JITENDER", null, null],
+    ["his", "name", "Rohin JITENDER", "QL-04", null],
     ["nodate", "no-date", null, "QL-08", null],
   ]);
 });

@@ -1185,13 +1185,22 @@ export async function certificateStanding() {
      26 Sep 2026, on cells that stayed empty after a night's uploads: the
      reason was in the round's notes and nowhere he looked. */
   const notPlaced: { person: string; filename: string; fileId: string; why: "unreadable" | "name" | "no-date"; reason: string | null; printed: string | null; code: string | null }[] = [];
+  /* Two certificates on file for one cell: the one the contest below sets
+     aside, with the one that holds the cell named beside it (resolved once
+     the contest is over, since a later document can take the cell again).
+     The grid wears it as a small count on the cell (certTwoFor). */
+  const superseded: { key: string; person: string; code: string; filename: string; fileId: string; kept: string }[] = [];
+  const fileNameOf = new Map(certs.map((r) => [r.id, r.filename]));
   for (const { row, reading } of readings) {
     if (!reading || !row.person || !row.person.trim()) continue;
     // A hand tag stands over the reader's "no" where the tag is the whole
     // answer (tagStands) - the round lets the same document through.
     if (!reading.readable && !tagStands(row, reading)) {
+      // The column it was filed for, where the tag or the name says: the
+      // grid marks that cell (certFlagFor).
       notPlaced.push({ person: register.nameOf(row.person) || row.person, filename: row.filename, fileId: row.id,
-        why: "unreadable", reason: (reading as Reading & { reason?: string }).reason || null, printed: null, code: null });
+        why: "unreadable", reason: (reading as Reading & { reason?: string }).reason || null, printed: null,
+        code: String(row.qualCode || filedColumnOf(row, cols) || "").trim().toUpperCase() || null });
       continue;
     }
     /* A paper that stands in for a certificate is not the certificate. Its
@@ -1243,7 +1252,8 @@ export async function certificateStanding() {
     const whose = whoseCertificate(reading.holderName, reading.holder, row.person, person, people);
     if (!whose.his) {
       notPlaced.push({ person, filename: row.filename, fileId: row.id, why: "name", reason: null,
-        printed: String(reading.holderName || "").trim() || null, code: null });
+        printed: String(reading.holderName || "").trim() || null,
+        code: String(row.qualCode || filedColumnOf(row, cols) || (placedCols[0] && placedCols[0].code) || "").trim().toUpperCase() || null });
       continue;
     }
     if (!placed) {
@@ -1338,8 +1348,10 @@ export async function certificateStanding() {
         // one in force.
         if (!sitting.issued && issued) sitting.issued = issued;
         if (!sitting.issuer && issuer) sitting.issuer = issuer;
+        superseded.push({ key, person: key.slice(0, key.indexOf("::")), code, filename: row.filename, fileId: row.id, kept: "" });
         continue;
       }
+      superseded.push({ key, person: key.slice(0, key.indexOf("::")), code, filename: fileNameOf.get(String(sitting.fileId)) || "", fileId: String(sitting.fileId || ""), kept: "" });
       claim.set(key, {
         issued: issued || sitting.issued, expires, issuer: issuer || sitting.issuer,
         fileId: row.id, recognition: mineIsRec, foreignUnknown,
@@ -1427,6 +1439,8 @@ export async function certificateStanding() {
     placed: placedByReading,
     /* The documents read but not placed, and why. */
     notPlaced,
+    /* Two on file for one cell: the one set aside, and the one that holds it. */
+    superseded: superseded.map(({ key, ...s }) => ({ ...s, kept: fileNameOf.get(String((claim.get(key) || { fileId: "" }).fileId)) || "" })),
     // `fileId` names the scan each line's dates were read from, so the
     // certification screens can put a link to the certificate itself on the line.
     dates: [...claim.entries()].map(([key, v]) => {

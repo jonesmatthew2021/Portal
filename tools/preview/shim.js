@@ -277,7 +277,11 @@
         { person, certificate: "Provide First Aid", printed: "B. Sittyos", line: "check", fileId: scans[2] ? scans[2].id : null },
       );
     }
-    return { at: new Date().toISOString(), dates, covers, filedAs, notOnMatrix, placed, readAs, notPlaced };
+    /* And two on file for his QL-17: the newer medical holds the cell. */
+    const superseded = ordersFlag.filedAs
+      ? [{ person, code: "QL-17", filename: "medical-2024.pdf", kept: "medical-2026.pdf", fileId: null }]
+      : [];
+    return { at: new Date().toISOString(), dates, covers, filedAs, notOnMatrix, placed, readAs, notPlaced, superseded };
   };
   const OUT_OF_CREDIT = "Out of credit — top it up at console.anthropic.com";
   /* ?offline=1: the four answers the service worker keeps come back the

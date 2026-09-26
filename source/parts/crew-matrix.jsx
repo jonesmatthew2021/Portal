@@ -1108,6 +1108,7 @@ function TrainingMatrix() {
                       <Cell value={r[3][i]}
                         cover={certCoverFor(certDates, r[0], QUALS.cols[i][0])}
                         flag={flag}
+                        two={certTwoFor(certDates, r[0], QUALS.cols[i][0])}
                         missing={missingAt(r, i)}
                         onOpen={url ? () => setCellScan({ url, person: r[0], code: QUALS.cols[i][0], title: QUALS.cols[i][1] }) : undefined} />
                     </td>
