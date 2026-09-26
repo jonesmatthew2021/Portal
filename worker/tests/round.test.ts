@@ -1846,16 +1846,20 @@ test("out of time before the workbook is owed the same way", async () => {
   assert.deepEqual(portal.doc().workbookPending, []);
 });
 
-test("a second sighting clears the date, and the workbook follows", async () => {
-  const { portal } = await oneManPortal({
-    filledFromCert: { "EVANS, BRENTON::QL-17": true },
-    orphanSeen: { "EVANS, BRENTON::QL-17": "2026-09-24T02" },
-  });
+test("a certificate gone from the library is cleared on the first round that finds it gone, and the workbook follows", async () => {
+  /* Matthew, 26 Sep 2026: every hour, or when Update matrix is pressed -
+     not the second hour. Evans's QL-17 was filled from a certificate that
+     no longer claims it and was never seen as an orphan before. */
+  const { portal } = await oneManPortal({ filledFromCert: { "EVANS, BRENTON::QL-17": true } });
   const out = await runMatrixRound({ by: "the round on the hour", timeLeft: () => true, mirroredThisHour: 0 });
-  assert.equal(out.cleared, 1);
+  assert.equal(out.cleared, 1, "cleared on the first sighting");
   assert.equal(portal.doc().quals.rows[0][3][1], "", "the orphaned date is off the matrix");
-  assert.deepEqual(portal.doc().orphanSeen, {}, "and out of the sightings");
   assert.equal(out.written, 2, "the workbook took the new date and the blank");
+  // An old sightings note on the document is left as it is and read by nothing.
+  const noted = await oneManPortal({ filledFromCert: { "EVANS, BRENTON::QL-17": true }, orphanSeen: { "EVANS, BRENTON::QL-17": "2026-09-24T02" } });
+  const again = await runMatrixRound({ by: "the round on the hour", timeLeft: () => true, mirroredThisHour: 0 });
+  assert.equal(again.cleared, 1);
+  assert.deepEqual(noted.portal.doc().orphanSeen, { "EVANS, BRENTON::QL-17": "2026-09-24T02" }, "left as it was");
 });
 
 test("a round that finds another running stands down", async () => {

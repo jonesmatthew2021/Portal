@@ -251,16 +251,19 @@ export function applySettled(quals, settled, nameOf = (n) => n) {
  * "Gone from the library" can only be told from "not read yet" once
  * everything on the books has been read, so the clearing waits for that.
  *
- * A cell is only cleared on its second sighting as an orphan. `seenBefore`
- * is the note of orphans the previous round saw (key to the hour it saw
- * them) and `seenNow` comes back as the note for the next round to keep: an
- * orphan seen for the first time is noted and left alone, one that was in
- * `seenBefore` too is cleared, and a key claimed again in between drops
- * out of the note. One round's view of the library can be wrong - a listing
- * that missed a folder, a reading not yet made - and a date taken off the
- * office's record on one bad look is worse than a date left an hour longer.
- * Left out, `seenBefore` means clear on first sighting, which is what the
- * page's button does today.
+ * Given `seenBefore`, a cell is cleared only on its second sighting as an
+ * orphan: `seenBefore` is the note of orphans the previous round saw (key
+ * to the hour it saw them) and `seenNow` comes back as the note for the
+ * next round to keep - an orphan seen for the first time is noted and left
+ * alone, one that was in `seenBefore` too is cleared, and a key claimed
+ * again in between drops out of the note. Left out (null), `seenBefore`
+ * means clear on first sighting - which is what every round does since
+ * 26 Sep 2026 (Matthew: a certificate deleted from SharePoint comes off the
+ * matrix every hour, or when Update matrix is pressed): a listing the
+ * library refuses fails the survey and moves nothing, nothing is cleared
+ * while a scan is unread, and a mass loss is held back, so one bad look
+ * cannot clear a date. The two-sighting rule is kept here for a caller
+ * that wants it.
  *
  * Names are read through `nameOf` before anything is compared, the register's
  * where the caller has one: a note kept under "SAM::QL-01" and a claim

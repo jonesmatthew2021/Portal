@@ -458,12 +458,21 @@ export async function runMatrixRound(opts: {
       const live = doc.quals && Array.isArray(doc.quals.rows) && doc.quals.rows.length ? (doc.quals as Quals) : null;
       if (!live) return null;
 
+      /* A certificate gone from the library takes its date off the matrix
+         on the first round that finds it gone - the hour's and the page's
+         alike (Matthew, 26 Sep 2026: every hour, or when Update matrix is
+         pressed). It used to wait for a second sighting, against one bad
+         look at the library; a listing the library refuses now fails the
+         survey and moves nothing, nothing is cleared while a scan is still
+         unread, and a mass loss is held back (`apply`'s guard), so the
+         second look bought an hour's delay and no safety. `orphanSeen` is
+         left empty from here on. */
       const round = settleRound({
         filledFromCert: doc.filledFromCert,
         claimed: res.claimed,
         unread,
         settled: res.settled,
-        seenBefore: doc.orphanSeen || {},
+        seenBefore: null,
         now: hour,
         nameOf,
       });
@@ -479,9 +488,10 @@ export async function runMatrixRound(opts: {
       // own - worked out on this fresh copy, like the matrix, so a box
       // somebody typed a moment ago is seen as typed.
       const parts = particularsFilled(doc, res.particulars);
+      // The old sightings note (orphanSeen) is neither read nor written any
+      // more: a round that moves nothing else is idle whatever it holds.
       const matrixIdle = !done.applied.length
-        && sameRecord(round.noteNow, doc.filledFromCert)
-        && sameRecord(round.seenNow, doc.orphanSeen);
+        && sameRecord(round.noteNow, doc.filledFromCert);
       // An idle hour writes nothing: no revision bump, no history copy.
       if (matrixIdle && !parts.changed) return null;
       if (parts.changed) {
@@ -494,7 +504,6 @@ export async function runMatrixRound(opts: {
       doc.quals = done.next;
       if (out.applied) doc.matrixUpdated = todayThere();
       doc.filledFromCert = round.noteNow;
-      doc.orphanSeen = round.seenNow;
       doc.lastDocUpdate = new Date().toISOString();
       if (done.applied.length) {
         const entry = historyEntry(

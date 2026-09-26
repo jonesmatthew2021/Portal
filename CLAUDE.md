@@ -277,7 +277,12 @@ on any line that still names this one.
   did). It saves the shared document against the revision it read
   (`lib/shared-state.ts`), replaces the workbook through
   `db/single-file.ts` whose order of work is fixed so the old copy is never
-  lost, clears a date only on its second sighting as an orphan, and writes
+  lost, clears a date on the first round that finds its certificate gone
+  from the library (the hour's or the page's; until 26 Sep 2026 the hour
+  waited for a second sighting - Matthew: "every hour, or when the update
+  portal button is pushed" - a refused listing fails the survey and moves
+  nothing, nothing is cleared while a scan is unread, and a mass loss is
+  held back, so one bad look cannot clear a date), and writes
   only the cells it changed plus blanks — a figure the office typed is left
   as typed. A cell that reaches the matrix but not the workbook is written
   on the document (`workbookPending`) and paid the next hour. Removed copies are parked flat under `removed/` (no folder is
