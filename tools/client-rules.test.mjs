@@ -3329,7 +3329,13 @@ const is = (got, want, what) => {
   const plumbing = src.slice(src.indexOf("{isITSupport(currentUser) && ("), src.indexOf("Saved changes</Eyebrow>"));
   is(plumbing.includes("<RemovedFiles"), false, "and no longer under the IT Support sign-in alone");
   is(src.includes("restore it from the Admin tab"), false, "the log says where a removed file is put back from");
-  is(src.includes("oneByOne(state.items, (it) => restoreStoredFile(it.record.id), step)"), true, "and puts every file on it back");
+  // Only what the filters show (27 Sep 2026: the list held every file ever
+  // removed - 2,112 - and the Delete all to undo was 139 of them).
+  is(src.includes("oneByOne(shown, (it) => restoreStoredFile(it.record.id), step)"), true, "and puts back exactly what the filters show");
+  is(src.includes('count={state.status === "ok" ? shown.length : 0}'), true, "its count is what it would put back");
+  is(src.includes("{shown.map((it) => {"), true, "the list is what the filters show");
+  is(/const sorted = useMemo\(\(\) => \{\s*const nameOf = \(it\) => \(it\.person \? canonicalName\(known\(it\.person\)\) : ""\);/.test(src), true,
+    "always by surname, through the register");
   const remover = src.slice(src.indexOf("const removeCertificates = async"), src.indexOf("const updateCertificate ="));
   is(remover.split(/\s+/).join(" ").includes("if (!r.ok) throw new Error(r.why); setStore("), true, "a certificate leaves the page only once the server took it");
 }

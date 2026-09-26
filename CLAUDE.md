@@ -749,6 +749,13 @@ on any line that still names this one.
     the Double ups (`RemovedFiles` in the shell - it sat on Access Grants
     under the IT Support sign-in alone until then, where a management login
     could not reach it), Restore on each and Restore all over the lot;
+    the list is always by surname (the register's name for whoever a file
+    is for, then the file; the portal's own files after the crew's - Matthew,
+    27 Sep 2026) and filtered by who removed a file and on which day, each
+    choice with its count, and **Restore all puts back only what the filters
+    show** - the list holds every file ever taken off (2,112 on 27 Sep 2026,
+    most of them the sync's and the twins it retired), so an unfiltered
+    Restore all is never the way to undo one Delete all;
     Delete all over the Double ups. Both run one file at a time
     (`oneByOne`, `AllButton`: Confirm / Keep first, the button counting
     "Deleting 37 of 139…", management only, held down offline), a

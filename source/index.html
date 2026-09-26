@@ -4127,7 +4127,13 @@ function EverythingHidden({ admin, onRestoreAll }) {
  * separate confirmation.
  */
 function RemovedFiles({ stamp }) {
-  const { log, offlineAt } = usePortal();
+  const { log, offlineAt, people } = usePortal();
+  // Who removed it and on which day, "" for anyone and any day. Restore all
+  // puts back exactly what these leave on the list (Matthew, 27 Sep 2026: the
+  // list holds every file ever taken off - 2,112 - and yesterday's Delete all
+  // was 139 of them).
+  const [by, setBy] = useState("");
+  const [day, setDay] = useState("");
   // Deleting for good writes to the server: offline (read only, see
   // offlineLine) both steps of it are held down under the badge's line.
   const held = offlineAt ? { disabled: true, title: offlineLine(offlineAt) } : {};
@@ -4204,13 +4210,53 @@ function RemovedFiles({ stamp }) {
     setBusy(null);
   };
 
-  // Everything on the list back where it was, one file at a time (Matthew,
+  /* Always by surname (Matthew, 27 Sep 2026: "sort removed files by surname
+     always"): the register's name for whoever a certificate is for - a
+     folder's word such as "EVGENY" sorts where EVDOKIMOV does - then the
+     file, then the most recently removed; the portal's own files (the
+     spreadsheets, the notes) after the crew's, by what they are. */
+  const known = useMemo(() => asKnownPerson(people || []), [people]);
+  const sorted = useMemo(() => {
+    const nameOf = (it) => (it.person ? canonicalName(known(it.person)) : "");
+    const cmp = (x, y) => String(x || "").localeCompare(String(y || ""), "en", { sensitivity: "base", numeric: true });
+    return state.items
+      .map((it) => ({ it, name: nameOf(it) }))
+      .sort((a, b) => (!a.name !== !b.name ? (a.name ? -1 : 1) : 0)
+        || cmp(a.name, b.name)
+        || cmp(a.name ? "" : describe(a.it), b.name ? "" : describe(b.it))
+        || cmp((a.it.record || {}).filename, (b.it.record || {}).filename)
+        || String(b.it.removedAt || "").localeCompare(String(a.it.removedAt || "")))
+      .map((x) => x.it);
+  }, [state.items, known]);
+  const byWho = sorted.filter((it) => !by || (it.removedBy || "") === by);
+  const shown = byWho.filter((it) => !day || when(it.removedAt) === day);
+  // The choices, each with how many it holds: who, most first; the day, newest first.
+  const tally = (list, keyOf) => {
+    const m = new Map();
+    list.forEach((it) => { const k = keyOf(it); if (k) m.set(k, (m.get(k) || 0) + 1); });
+    return m;
+  };
+  const whoCounts = [...tally(sorted, (it) => it.removedBy || "")].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const dayCounts = [...tally(byWho, (it) => when(it.removedAt))]
+    .sort((a, b) => String(latestOn(b[0])).localeCompare(String(latestOn(a[0]))));
+  function latestOn(d) {
+    const hit = byWho.find((it) => when(it.removedAt) === d);
+    return hit ? hit.removedAt : "";
+  }
+  // A choice a restore has emptied goes back to anyone / any day, rather
+  // than leaving the list showing nothing under a name no longer offered.
+  React.useEffect(() => {
+    if (by && !whoCounts.some(([w]) => w === by)) { setBy(""); setDay(""); }
+    else if (day && !dayCounts.some(([d]) => d === day)) setDay("");
+  }, [state.items]);
+
+  // What the filters show back where it was, one file at a time (Matthew,
   // 27 Sep 2026: "and restore all button"). A file that cannot go back - his
   // folder unknown, a current copy already filed - stays on the list and is
   // named with the server's reason; the rest go.
   const restoreAll = async (step) => {
     setProblem("");
-    const result = await oneByOne(state.items, (it) => restoreStoredFile(it.record.id), step);
+    const result = await oneByOne(shown, (it) => restoreStoredFile(it.record.id), step);
     if (result.done.length || result.failed.length) {
       log("Admin", oneByOneLine({ past: "Restored" }, result, (it) => it.record.filename), "");
     }
@@ -4221,9 +4267,20 @@ function RemovedFiles({ stamp }) {
   return (
     <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
-        <Eyebrow color={T.accent}>Removed files{state.status === "ok" ? ` · ${state.items.length}` : ""}</Eyebrow>
+        <Eyebrow color={T.accent}>Removed files{state.status === "ok"
+          ? ` · ${shown.length}${shown.length !== state.items.length ? ` of ${state.items.length}` : ""}` : ""}</Eyebrow>
         <span style={{ display: "inline-flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <AllButton label="Restore all" busy="Restoring" count={state.status === "ok" ? state.items.length : 0}
+          {state.status === "ok" && state.items.length > 0 && (
+            <>
+              <NameSelect width={250} value={by} onPick={(v) => { setBy(v); setDay(""); }}
+                options={[{ value: "", label: `Removed by anyone · ${sorted.length}` },
+                  ...whoCounts.map(([w, n]) => ({ value: w, label: `${w || "Unknown"} · ${n}` }))]} />
+              <NameSelect width={190} value={day} onPick={setDay}
+                options={[{ value: "", label: `Any day · ${byWho.length}` },
+                  ...dayCounts.map(([d, n]) => ({ value: d, label: `${d} · ${n}` }))]} />
+            </>
+          )}
+          <AllButton label="Restore all" busy="Restoring" count={state.status === "ok" ? shown.length : 0}
             run={restoreAll}
             onDone={(r) => setProblem(r && r.failed.length ? oneByOneLine({ past: "Restored" }, r, (it) => it.record.filename) : "")} />
           <Button variant="quiet" onClick={load}>Refresh</Button>
@@ -4253,8 +4310,10 @@ function RemovedFiles({ stamp }) {
         <Empty>None.</Empty>
       )}
 
+      {state.status === "ok" && state.items.length > 0 && shown.length === 0 && <Empty>None.</Empty>}
+
       <div style={{ marginBottom: 22 }}>
-        {state.items.map((it) => {
+        {shown.map((it) => {
           const r = it.record || {};
           const asking = confirm === r.id;
           return (
